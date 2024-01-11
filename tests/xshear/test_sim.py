@@ -35,4 +35,6 @@ def test_lsst():
     _name = os.path.join(this_dir, "psf_lsst.fits")
     psf_target = fitsio.read(_name)
     np.testing.assert_allclose(psf_array, psf_target, atol=1e-5, rtol=1e-3)
+
+    worker2.clear_all()
     return

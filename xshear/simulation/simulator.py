@@ -17,6 +17,7 @@ import gc
 import glob
 import json
 import os
+import shutil
 from configparser import ConfigParser, ExtendedInterpolation
 from copy import deepcopy
 
@@ -63,6 +64,27 @@ class SimulateBase(object):
 
         # bands used for measurement
         self.bands = cparser.get("simulation", "band")
+        return
+
+    def clear_image(self):
+        if os.path.isdir(self.img_dir):
+            shutil.rmtree(self.img_dir)
+        return
+
+    def clear_catalog(self):
+        if os.path.isdir(self.cat_dir):
+            shutil.rmtree(self.cat_dir)
+        return
+
+    def clear_summary(self):
+        if os.path.isdir(self.sum_dir):
+            shutil.rmtree(self.sum_dir)
+        return
+
+    def clear_all(self):
+        self.clear_image()
+        self.clear_catalog()
+        self.clear_summary()
         return
 
 
