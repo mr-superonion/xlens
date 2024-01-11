@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #
 # LSST Data Management System
 # Copyright 20082014 LSST Corpoalphan.
@@ -27,7 +26,6 @@ from configparser import ConfigParser, ExtendedInterpolation
 
 import astropy.io.fits as pyfits
 import fpfs
-import lsst.geom as afwGeom
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
 from descwl_shear_sims.psfs import make_fixed_psf
@@ -36,21 +34,7 @@ from descwl_shear_sims.stars import StarCatalog
 
 from ..loader import MakeDMExposure
 from ..simulator import SimulateBase
-
-
-def get_psf_array(exposure, ngrid):
-    """This function returns the PSF model at the center of the exposure."""
-    bbox = exposure.getBBox()
-    width, height = bbox.getWidth(), bbox.getHeight()
-    # Calculate the central point
-    centerX, centerY = width // 2, height // 2
-    centroid = afwGeom.Point2I(centerX, centerY)
-    psf_array = np.zeros((ngrid, ngrid), dtype=np.float64)
-    data = exposure.getPsf().computeImage(centroid).getArray()
-    shift = (ngrid - data.shape[0] + 1) // 2
-    dx = data.shape[0]
-    psf_array[shift : shift + dx, shift : shift + dx] = data
-    return psf_array
+from .utils import get_psf_array
 
 
 class FPFSMeasurementTask(SimulateBase):
@@ -67,6 +51,7 @@ class FPFSMeasurementTask(SimulateBase):
         self.sigma_as = cparser.getfloat("FPFS", "sigma_as")
         self.sigma_det = cparser.getfloat("FPFS", "sigma_det")
         self.rcut = cparser.getint("FPFS", "rcut", fallback=32)
+        self.ngrid = 2 * self.rcut
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
         self.psf_rcut = min(psf_rcut, self.rcut)
         self.nnord = cparser.getint("FPFS", "nnord", fallback=4)
@@ -86,19 +71,16 @@ class FPFSMeasurementTask(SimulateBase):
         if len(self.ncov_fname) == 0 or not os.path.isfile(self.ncov_fname):
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
-
-        self.scale = cparser.getfloat("survey", "pixel_scale")
-        self.ngrid = 2 * self.rcut
         return
 
-    def process_image(self, gal_array, psf_array, cov_elem):
+    def process_image(self, gal_array, psf_array, cov_elem, pixel_scale):
         # measurement task
         meas_task = fpfs.image.measure_source(
             psf_array,
             sigma_arcsec=self.sigma_as,
             sigma_detect=self.sigma_det,
             nnord=self.nnord,
-            pix_scale=self.scale,
+            pix_scale=pixel_scale,
         )
 
         std_modes = np.sqrt(np.diagonal(cov_elem))
@@ -107,8 +89,8 @@ class FPFSMeasurementTask(SimulateBase):
         # Temp fix for 4th order estimator
         if self.nnord == 6:
             idv0 += 1
-        thres = 9.5 * std_modes[idm00] * self.scale**2.0
-        thres2 = -1.5 * std_modes[idv0] * self.scale**2.0
+        thres = 9.5 * std_modes[idm00] * pixel_scale**2.0
+        thres2 = -1.5 * std_modes[idv0] * pixel_scale**2.0
 
         npad = (self.image_nx - psf_array.shape[0]) // 2
         coords = meas_task.detect_sources(
@@ -132,6 +114,7 @@ class FPFSMeasurementTask(SimulateBase):
         return out, coords
 
     def measure_exposure(self, exposure):
+        pixel_scale = exposure.getWcs().getPixelScale().asArcseconds()
         masked_image = exposure.getMaskedImage()
         gal_array = masked_image.image.array[:, :]
         variance = np.average(masked_image.variance.array)
@@ -146,7 +129,7 @@ class FPFSMeasurementTask(SimulateBase):
                 sigma_arcsec=self.sigma_as,
                 sigma_detect=self.sigma_det,
                 nnord=self.nnord,
-                pix_scale=self.scale,
+                pix_scale=pixel_scale,
             )
             # By default, we use uncorrelated noise
             # TODO: enable correlated noise here
@@ -158,7 +141,7 @@ class FPFSMeasurementTask(SimulateBase):
         assert np.all(np.diagonal(cov_elem) > 1e-10), "The covariance matrix is incorrect"
 
         start_time = time.time()
-        cat, det = self.process_image(gal_array, psf_array, cov_elem)
+        cat, det = self.process_image(gal_array, psf_array, cov_elem, pixel_scale)
         del gal_array, psf_array, cov_elem
         # Stop the timer
         end_time = time.time()

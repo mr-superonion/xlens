@@ -52,6 +52,7 @@ write_to = "xshear/__version__.py"
 testpaths = [
     "tests",
 ]
+addopts = "-vv -s"
 
 [tool.black]
 line-length = 110

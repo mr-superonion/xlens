@@ -76,11 +76,6 @@ class MakeDMExposure(SimulateBase):
         return
 
     def load_configure(self, cparser):
-        # setup FPFS task
-        self.noise_ratio = cparser.getfloat("survey", "noise_ratio")
-        # self.bands = "griz" #  cparser.get("survey", "band")
-        self.bands = cparser.get("survey", "band")
-
         # number of rotation of galaxies (positions and shapes)
         self.nrot = cparser.getint("simulation", "nrot", fallback=2)
         # whehter rotate single exposure or not
@@ -109,13 +104,6 @@ class MakeDMExposure(SimulateBase):
             fallback="LSST",
         )
         print("Simulating survey: %s" % self.survey_name)
-        if psf_fwhm is None:
-            if self.survey_name == "HSC":
-                psf_fwhm = 0.6  # arcsec
-            elif self.survey_name == "LSST":
-                psf_fwhm = 0.8  # arcsec
-            elif self.survey_name == "Euclid":
-                psf_fwhm = 0.19  # arcsec
         psf_e1 = cparser.getfloat(
             "simulation",
             "psf_e1",
@@ -147,7 +135,7 @@ class MakeDMExposure(SimulateBase):
         out = [
             os.path.join(self.img_dir, "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid))
             for fid in range(min_id, max_id)
-            for gid in range(nshear)
+            for gid in self.shear_mode_list
             for rid in range(self.nrot)
         ]
         return out

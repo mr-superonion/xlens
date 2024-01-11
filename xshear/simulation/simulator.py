@@ -46,6 +46,23 @@ class SimulateBase(object):
         # summary directory
         sum_dir = cparser.get("simulation", "sum_dir")
         self.sum_dir = os.path.join(self.root_dir, sum_dir)
+
+        self.shear_mode_list = json.loads(cparser.get("simulation", "shear_mode_list"))
+        self.nshear = len(self.shear_mode_list)
+        # number of rotations for ring test
+        self.nrot = cparser.getint("simulation", "nrot")
+        # number of redshiftbins
+        self.rot_list = [np.pi / self.nrot * i for i in range(self.nrot)]
+
+        # noise ratio
+        self.noise_ratio = cparser.getfloat(
+            "simulation",
+            "noise_ratio",
+            fallback=None,
+        )
+
+        # bands used for measurement
+        self.bands = cparser.get("simulation", "band")
         return
 
 
@@ -72,18 +89,12 @@ class SimulateImage(SimulateBase):
         self.coadd_dim = cparser.getint("simulation", "coadd_dim")
         # buffer length to avoid galaxies hitting the boundary of the exposure
         self.buff = cparser.getint("simulation", "buff")
-        # number of rotations for ring test
-        self.nrot = cparser.getint("simulation", "nrot")
-        # number of redshiftbins
-        self.rot_list = [np.pi / self.nrot * i for i in range(self.nrot)]
-        self.shear_mode_list = json.loads(cparser.get("simulation", "shear_mode_list"))
         self.shear_component = cparser.get(
             "simulation",
             "shear_component",
             fallback="g1",
         )
         self.z_bounds = json.loads(cparser.get("simulation", "z_bounds"))
-        self.nshear = len(self.shear_mode_list)
         self.shear_value = cparser.getfloat("simulation", "shear_value")
         self.survey_name = cparser.get(
             "simulation",
@@ -95,14 +106,6 @@ class SimulateImage(SimulateBase):
             "psf_fwhm",
             fallback=None,
         )
-        if self.psf_fwhm is None:
-            if self.survey_name == "HSC":
-                self.psf_fwhm = 0.6  # arcsec
-            elif self.survey_name == "LSST":
-                self.psf_fwhm = 0.8  # arcsec
-            elif self.survey_name == "Euclid":
-                # larger than Euclid, make sure over sample
-                self.psf_fwhm = 0.19  # arcsec
         self.psf_e1 = cparser.getfloat(
             "simulation",
             "psf_e1",
@@ -165,10 +168,6 @@ class SimulateImage(SimulateBase):
             psf_type="moffat",
             psf_fwhm=self.psf_fwhm,
         ).shear(e1=self.psf_e1, e2=self.psf_e2)
-        psf_fname = "%s/PSF_%s_32.fits" % (self.root_dir, self.sim_name)
-        if not os.path.isfile(psf_fname):
-            psf_data = psf.shift(0.5 * scale, 0.5 * scale).drawImage(nx=64, ny=64, scale=scale).array
-            fitsio.write(psf_fname, psf_data)
 
         nfiles = len(glob.glob("%s/image-%05d_g1-*" % (self.img_dir, ifield)))
         if nfiles == self.nrot * self.nshear * nband:

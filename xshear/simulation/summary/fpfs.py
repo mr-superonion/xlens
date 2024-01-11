@@ -67,7 +67,6 @@ class SummarySimFPFS(SimulateBase):
         self.shear_value = cparser.getfloat("simulation", "shear_value")
         # survey parameter
         self.magz = cparser.getfloat("survey", "mag_zero")
-        self.band = cparser.get("survey", "band")
         # FPFS parameters
         self.ratio = cparser.getfloat("FPFS", "ratio")
         self.c0 = cparser.getfloat("FPFS", "c0")
@@ -135,12 +134,12 @@ class SummarySimFPFS(SimulateBase):
                 )
                 in_nm1 = os.path.join(
                     self.cat_dir,
-                    "src-%05d_%s-0_rot%d_%s.fits" % (ifield, self.gver, irot, self.band),
+                    "src-%05d_%s-0_rot%d_%s.fits" % (ifield, self.gver, irot, self.bands),
                 )
                 e1_1, r1_1 = self.get_sum_e_r(in_nm1, e1, enoise, res1, rnoise)
                 in_nm2 = os.path.join(
                     self.cat_dir,
-                    "src-%05d_%s-1_rot%d_%s.fits" % (ifield, self.gver, irot, self.band),
+                    "src-%05d_%s-1_rot%d_%s.fits" % (ifield, self.gver, irot, self.bands),
                 )
                 e1_2, r1_2 = self.get_sum_e_r(in_nm2, e1, enoise, res1, rnoise)
                 out[icount, 0] = ifield
