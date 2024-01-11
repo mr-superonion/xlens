@@ -1,0 +1,65 @@
+[project]
+name = "xshear"
+license = {file = "LICENSE"}
+readme = "README.md"
+authors = [
+    { name = "Xiangchong Li", email = "mr.superonion@hotmail.com" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+]
+dynamic = ["version"]
+dependencies = [
+    "ipykernel", # Support for Jupyter notebooks
+]
+
+[project.urls]
+"Source Code" = "https://github.com/mr-superonion/xshear"
+
+# On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov", # Used to report total code coverage
+    "pre-commit", # Used to run checks before finalizing a git commit
+    "sphinx", # Used to automatically generate documentation
+    "sphinx-rtd-theme", # Used to render documentation
+    "sphinx-autoapi", # Used to automatically generate api documentation
+    "pylint", # Used for static linting of files
+    # if you add dependencies here while experimenting in a notebook and you
+    # want that notebook to render in your documentation, please add the
+    # dependencies to ./docs/requirements.txt as well.
+    "nbconvert", # Needed for pre-commit check to clear output from Python notebooks
+    "nbsphinx", # Used to integrate Python notebooks into Sphinx documentation
+    "ipython", # Also used in building notebooks into Sphinx
+]
+
+[build-system]
+requires = [
+    "setuptools>=62", # Used to build and package the Python project
+    "setuptools_scm>=6.2", # Gets release version from git. Makes it available programmatically
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "xshear/__version__.py"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+
+[tool.black]
+line-length = 110
+target-version = ["py38"]
+
+[tool.isort]
+profile = "black"
+line_length = 110
+
+[tool.coverage.run]
+omit=["xshear/__version__.py"]

@@ -1,0 +1,7 @@
+sphinx
+sphinx-rtd-theme
+sphinx-autoapi
+nbsphinx
+ipython
+jupytext
+jupyter

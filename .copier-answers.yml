@@ -1,0 +1,10 @@
+# Changes here will be overwritten by Copier
+_commit: v1.4.6
+_src_path: gh:lincc-frameworks/python-project-template
+author_email: mr.superonion@hotmail.com
+author_name: Xiangchong Li
+custom_install: false
+package_name: xshear
+project_license: none
+project_name: xshear
+project_organization: mr-superonion
