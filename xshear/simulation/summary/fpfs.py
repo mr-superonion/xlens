@@ -66,7 +66,6 @@ class SummarySimFPFS(SimulateBase):
         # shear distortion
         self.shear_value = cparser.getfloat("simulation", "shear_value")
         # survey parameter
-        self.magz = cparser.getfloat("survey", "mag_zero")
         # FPFS parameters
         self.ratio = cparser.getfloat("FPFS", "ratio")
         self.c0 = cparser.getfloat("FPFS", "c0")
@@ -74,12 +73,12 @@ class SummarySimFPFS(SimulateBase):
         self.alpha = cparser.getfloat("FPFS", "alpha")
         self.beta = cparser.getfloat("FPFS", "beta")
         self.upper_mag = cparser.getfloat("FPFS", "magcut", fallback=27.5)
-        self.lower_m00 = 10 ** ((self.magz - self.upper_mag) / 2.5)
+        magz = 30.0
+        self.lower_m00 = 10 ** ((magz - self.upper_mag) / 2.5)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
-        # setup WL distortion parameter
         self.g_comp = cparser.getint("FPFS", "g_component_measure", fallback=1)
         assert self.g_comp in [1, 2], "The g_comp in configure file is not supported"
-        self.gver = cparser.get("distortion", "g_version")
+        self.gver = cparser.get("simulation", "shear_component")
 
         self.ofname = os.path.join(
             self.sum_dir,
