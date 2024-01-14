@@ -25,10 +25,10 @@ import jax
 import numpy as np
 from impt.fpfs.future import prepare_func_e
 
-from ..simulator import SimulateBase
+from ..simulator import SimulateBatchBase
 
 
-class SummarySimFPFS(SimulateBase):
+class SummarySimFPFS(SimulateBatchBase):
     def __init__(
         self,
         config_name,
@@ -38,22 +38,13 @@ class SummarySimFPFS(SimulateBase):
     ):
         cparser = ConfigParser(interpolation=ExtendedInterpolation())
         cparser.read(config_name)
-        super().__init__(cparser)
+        super().__init__(cparser, min_id, max_id, ncores)
         if not os.path.isdir(self.cat_dir):
             raise FileNotFoundError("Cannot find image directory")
         if not os.path.isdir(self.sum_dir):
             os.makedirs(self.sum_dir, exist_ok=True)
 
-        # survey parameter
-        nids = max_id - min_id
-        self.n_per_c = nids // ncores
-        self.mid = nids % ncores
-        self.min_id = min_id
-        self.max_id = max_id
-        self.rest_list = list(np.arange(ncores * self.n_per_c, nids) + min_id)
-        print("number of files per core is: %d" % self.n_per_c)
-
-        # setup processor
+        # FPFS parameters
         self.ncov_fname = cparser.get(
             "FPFS",
             "ncov_fname",
@@ -63,22 +54,24 @@ class SummarySimFPFS(SimulateBase):
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
         self.cov_mat = fitsio.read(self.ncov_fname)
-        # shear distortion
-        self.shear_value = cparser.getfloat("simulation", "shear_value")
-        # survey parameter
-        # FPFS parameters
         self.ratio = cparser.getfloat("FPFS", "ratio")
         self.c0 = cparser.getfloat("FPFS", "c0")
         self.c2 = cparser.getfloat("FPFS", "c2")
         self.alpha = cparser.getfloat("FPFS", "alpha")
         self.beta = cparser.getfloat("FPFS", "beta")
         self.upper_mag = cparser.getfloat("FPFS", "magcut", fallback=27.5)
-        magz = 30.0
-        self.lower_m00 = 10 ** ((magz - self.upper_mag) / 2.5)
+        self.lower_m00 = 10 ** ((self.calib_mag_zero - self.upper_mag) / 2.5)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
+
+        # shear setup
+        self.shear_value = cparser.getfloat("simulation", "shear_value")
+        self.g_comp_sim = cparser.get(
+            "simulation",
+            "shear_component",
+            fallback="g1",
+        )
         self.g_comp = cparser.getint("FPFS", "g_component_measure", fallback=1)
         assert self.g_comp in [1, 2], "The g_comp in configure file is not supported"
-        self.gver = cparser.get("simulation", "shear_component")
 
         self.ofname = os.path.join(
             self.sum_dir,
@@ -89,7 +82,6 @@ class SummarySimFPFS(SimulateBase):
     def get_sum_e_r(self, in_nm, e1, enoise, res1, rnoise):
         assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
         mm = impt.fpfs.read_catalog(in_nm)
-        # noise bias
 
         def fune(carry, ss):
             y = e1._obs_func(ss) - enoise._obs_func(ss)
@@ -104,14 +96,6 @@ class SummarySimFPFS(SimulateBase):
         del mm
         gc.collect()
         return e1_sum, r1_sum
-
-    def get_range(self, icore):
-        ibeg = self.min_id + icore * self.n_per_c
-        iend = min(ibeg + self.n_per_c, self.max_id)
-        id_range = list(range(ibeg, iend))
-        if icore < len(self.rest_list):
-            id_range.append(self.rest_list[icore])
-        return id_range
 
     def run(self, icore):
         start_time = time.time()
@@ -133,12 +117,12 @@ class SummarySimFPFS(SimulateBase):
                 )
                 in_nm1 = os.path.join(
                     self.cat_dir,
-                    "src-%05d_%s-0_rot%d_%s.fits" % (ifield, self.gver, irot, self.bands),
+                    "src-%05d_%s-0_rot%d_%s.fits" % (ifield, self.g_comp_sim, irot, self.bands),
                 )
                 e1_1, r1_1 = self.get_sum_e_r(in_nm1, e1, enoise, res1, rnoise)
                 in_nm2 = os.path.join(
                     self.cat_dir,
-                    "src-%05d_%s-1_rot%d_%s.fits" % (ifield, self.gver, irot, self.bands),
+                    "src-%05d_%s-1_rot%d_%s.fits" % (ifield, self.g_comp_sim, irot, self.bands),
                 )
                 e1_2, r1_2 = self.get_sum_e_r(in_nm2, e1, enoise, res1, rnoise)
                 out[icount, 0] = ifield
@@ -146,8 +130,6 @@ class SummarySimFPFS(SimulateBase):
                 out[icount, 2] = out[icount, 2] + (e1_1 + e1_2) / 2.0
                 out[icount, 3] = out[icount, 3] + (r1_1 + r1_2) / 2.0
                 del e1, enoise, res1, rnoise
-                # jax.clear_backends()
-                # jax.clear_caches()
                 gc.collect()
         end_time = time.time()
         elapsed_time = (end_time - start_time) / 4.0
@@ -175,3 +157,4 @@ class SummarySimFPFS(SimulateBase):
                 "1-sigma error:",
                 np.std(a[:, 2] / a[:, 3]) / np.sqrt(nsim),
             )
+        return

@@ -114,9 +114,12 @@ if __name__ == "__main__":
             max_id=max_id,
             ncores=ncores,
         )
-        outcome = np.vstack(list(pool.map(worker.run, np.arange(ncores))))
+        olist = pool.map(worker.run, np.arange(ncores))
+        outcome = np.vstack(list(olist))
         std = np.std(outcome[:, 0]) / np.average(outcome[:, 1])
         print("std: %s" % std)
+        neff = (0.26 / std) ** 2.0 / worker.area
+        print("neff: %s" % neff)
     else:
         raise ValueError("taskname cannot be set to %s, we only support %s" % (taskname, task_list))
     pool.close()

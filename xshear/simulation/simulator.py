@@ -64,7 +64,27 @@ class SimulateBase(object):
 
         # bands used for measurement
         self.bands = cparser.get("simulation", "band")
+
+        # magnitude zero point
+        self.calib_mag_zero = 30.0
         return
+
+    def get_sim_fname(self, min_id, max_id):
+        """Generate filename for simulations
+        Args:
+            ftype (str):    file type ('src' for source, and 'image' for exposure
+            min_id (int):   minimum id
+            max_id (int):   maximum id
+        Returns:
+            out (list):     a list of file name
+        """
+        out = [
+            os.path.join(self.img_dir, "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid))
+            for fid in range(min_id, max_id)
+            for gid in self.shear_mode_list
+            for rid in range(self.nrot)
+        ]
+        return out
 
     def clear_image(self):
         if os.path.isdir(self.img_dir):
@@ -88,6 +108,34 @@ class SimulateBase(object):
         return
 
 
+class SimulateBatchBase(SimulateBase):
+    def __init__(
+        self,
+        cparser,
+        min_id,
+        max_id,
+        ncores,
+    ):
+        super().__init__(cparser)
+        # simulation parameter
+        nids = max_id - min_id
+        self.n_per_c = nids // ncores
+        self.mid = nids % ncores
+        self.min_id = min_id
+        self.max_id = max_id
+        self.rest_list = list(np.arange(ncores * self.n_per_c, nids) + min_id)
+        print("number of files per core is: %d" % self.n_per_c)
+        return
+
+    def get_range(self, icore):
+        ibeg = self.min_id + icore * self.n_per_c
+        iend = min(ibeg + self.n_per_c, self.max_id)
+        id_range = list(range(ibeg, iend))
+        if icore < len(self.rest_list):
+            id_range.append(self.rest_list[icore])
+        return id_range
+
+
 class SimulateImage(SimulateBase):
     def __init__(self, config_name):
         cparser = ConfigParser(interpolation=ExtendedInterpolation())
@@ -107,11 +155,11 @@ class SimulateImage(SimulateBase):
             "psf_variation",
             fallback=0.0,
         )
-        # length of the exposure
+        # size of the exposure image
         self.coadd_dim = cparser.getint("simulation", "coadd_dim")
         # buffer length to avoid galaxies hitting the boundary of the exposure
         self.buff = cparser.getint("simulation", "buff")
-        self.shear_component = cparser.get(
+        self.shear_component_sim = cparser.get(
             "simulation",
             "shear_component",
             fallback="g1",
@@ -138,7 +186,6 @@ class SimulateImage(SimulateBase):
             "psf_e2",
             fallback=0.0,
         )
-        self.calib_mag_zero = 30.0
 
         # Stars
         self.draw_stars = cparser.getboolean(
@@ -210,7 +257,7 @@ class SimulateImage(SimulateBase):
                 shear_obj = ShearRedshift(
                     z_bounds=self.z_bounds,
                     mode=shear_mode,
-                    g_dist=self.shear_component,
+                    g_dist=self.shear_component_sim,
                     shear_value=self.shear_value,
                 )
                 sim_data = make_sim(

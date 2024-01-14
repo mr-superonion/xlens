@@ -121,25 +121,6 @@ class MakeDMExposure(SimulateBase):
         self.noise_std = deepcopy(_nstd_map[self.survey_name])
         return
 
-    def get_sim_fname(self, min_id, max_id, nshear=2):
-        """Generate filename for simulations
-        Args:
-            ftype (str):    file type ('src' for source, and 'image' for exposure
-            min_id (int):   minimum id
-            max_id (int):   maximum id
-            nshear (int):   number of shear
-            nrot (int):     number of rotations
-        Returns:
-            out (list):     a list of file name
-        """
-        out = [
-            os.path.join(self.img_dir, "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid))
-            for fid in range(min_id, max_id)
-            for gid in self.shear_mode_list
-            for rid in range(self.nrot)
-        ]
-        return out
-
     def get_seed_from_fname(self, fname, band):
         """This function returns the random seed for simulation.
         It makes sure that different sheared versions have the same seed
