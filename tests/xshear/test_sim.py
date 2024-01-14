@@ -4,8 +4,10 @@ import fitsio
 import numpy as np
 
 from xshear.simulation.loader import MakeDMExposure
-from xshear.simulation.measure import utils
+from xshear.simulation.measure import ProcessSimFPFS, utils
+from xshear.simulation.neff import NeffSimFPFS
 from xshear.simulation.simulator import SimulateImage
+from xshear.simulation.summary import SummarySimFPFS
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -36,5 +38,26 @@ def test_lsst():
     psf_target = fitsio.read(_name)
     np.testing.assert_allclose(psf_array, psf_target, atol=1e-5, rtol=1e-3)
 
-    worker2.clear_all()
+    # FPFS measurement
+    worker3 = ProcessSimFPFS(config_fname)
+    input_list = worker3.get_sim_fname(min_id=0, max_id=1)
+    for _ in input_list:
+        worker3.run(_)
+
+    worker4 = SummarySimFPFS(
+        config_fname,
+        min_id=0,
+        max_id=1,
+        ncores=1,
+    )
+    olist = worker4.run(0)
+
+    worker5 = NeffSimFPFS(
+        config_fname,
+        min_id=0,
+        max_id=1,
+        ncores=1,
+    )
+    worker5.run(0)
+    worker5.clear_all()
     return

@@ -103,7 +103,7 @@ class SummarySimFPFS(SimulateBatchBase):
         out = np.zeros((len(id_range), 4))
         print("start core: %d, with id: %s" % (icore, id_range))
         for icount, ifield in enumerate(id_range):
-            for irot in range(2):
+            for irot in range(self.nrot):
                 e1, enoise, res1, rnoise = prepare_func_e(
                     cov_mat=self.cov_mat,
                     snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
