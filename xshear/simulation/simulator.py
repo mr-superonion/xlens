@@ -69,7 +69,7 @@ class SimulateBase(object):
         self.calib_mag_zero = 30.0
         return
 
-    def get_sim_fname(self, min_id, max_id):
+    def get_sim_fnames(self, min_id, max_id):
         """Generate filename for simulations
         Args:
             ftype (str):    file type ('src' for source, and 'image' for exposure

@@ -82,14 +82,14 @@ if __name__ == "__main__":
         from xshear.simulation.measure import ProcessSimDM
 
         worker = ProcessSimDM(cmd_args.config)
-        input_list = worker.get_sim_fname(min_id=min_id, max_id=max_id)
+        input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for r in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "measure_fpfs":
         from xshear.simulation.measure import ProcessSimFPFS
 
         worker = ProcessSimFPFS(cmd_args.config)
-        input_list = worker.get_sim_fname(min_id=min_id, max_id=max_id)
+        input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for r in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "summary_fpfs":

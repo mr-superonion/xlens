@@ -61,8 +61,6 @@ class FPFSMeasurementTask(SimulateBase):
                     is nnord=%d"
                 % self.nnord
             )
-
-        # setup survey parameters
         self.ncov_fname = cparser.get(
             "FPFS",
             "ncov_fname",
@@ -122,7 +120,6 @@ class FPFSMeasurementTask(SimulateBase):
 
         psf_array = get_psf_array(exposure, ngrid=self.ngrid)
         fpfs.imgutil.truncate_square(psf_array, self.psf_rcut)
-        print(self.ncov_fname)
         if not os.path.isfile(self.ncov_fname):
             # FPFS noise cov task
             noise_task = fpfs.image.measure_noise_cov(

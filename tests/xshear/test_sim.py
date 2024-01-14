@@ -19,7 +19,7 @@ def test_lsst():
 
     # File name
     worker2 = MakeDMExposure(config_fname)
-    fname_list = worker2.get_sim_fname(min_id=0, max_id=1)
+    fname_list = worker2.get_sim_fnames(min_id=0, max_id=1)
     assert len(fname_list) == 3
 
     # pixel scale
@@ -40,7 +40,7 @@ def test_lsst():
 
     # FPFS measurement
     worker3 = ProcessSimFPFS(config_fname)
-    input_list = worker3.get_sim_fname(min_id=0, max_id=1)
+    input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
     for _ in input_list:
         worker3.run(_)
 
