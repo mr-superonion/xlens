@@ -22,6 +22,8 @@ from configparser import ConfigParser, ExtendedInterpolation
 from copy import deepcopy
 
 import fitsio
+import jax
+import jax.numpy as jnp
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
 from descwl_shear_sims.psfs import make_fixed_psf, make_ps_psf
@@ -134,6 +136,12 @@ class SimulateBatchBase(SimulateBase):
         if icore < len(self.rest_list):
             id_range.append(self.rest_list[icore])
         return id_range
+
+    def get_sum_e_r(self, in_nm, func, read_func):
+        assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
+        mm = read_func(in_nm)
+        e1_sum, r1_sum = jnp.sum(jax.lax.map(func, mm), axis=0)
+        return e1_sum, r1_sum
 
 
 class SimulateImage(SimulateBase):

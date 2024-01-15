@@ -13,8 +13,8 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
-import gc
 import os
+import time
 from argparse import ArgumentParser
 from configparser import ConfigParser
 
@@ -22,7 +22,7 @@ import fitsio
 import impt
 import jax
 import numpy as np
-from impt.fpfs.future import prepare_func_e
+from fpfs.catalog import FpfsCatalog, read_catalog
 
 from ..simulator import SimulateBatchBase
 
@@ -59,8 +59,8 @@ class NeffSimFPFS(SimulateBatchBase):
         self.cov_mat = fitsio.read(self.ncov_fname)
 
         # shear setup
-        self.g_comp = cparser.getint("FPFS", "g_component_measure", fallback=1)
-        assert self.g_comp in [1, 2], "The g_comp in configure file is not supported"
+        self.g_comp_measure = cparser.getint("FPFS", "g_comp_measureonent_measure", fallback=1)
+        assert self.g_comp_measure in [1, 2], "The g_comp_measure in configure file is not supported"
         self.imode = self.shear_mode_list[-1]
 
         coadd_dim = cparser.getint("simulation", "coadd_dim")
@@ -70,46 +70,43 @@ class NeffSimFPFS(SimulateBatchBase):
         self.area = np.pi * radius**2  # [arcmin^2]
         return
 
-    def get_sum_e_r(self, in_nm, e1, enoise, res1, rnoise):
-        assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
-        mm = impt.fpfs.read_catalog(in_nm)
-
-        def fune(carry, ss):
-            y = e1._obs_func(ss) - enoise._obs_func(ss)
-            return carry + y, y
-
-        def funr(carry, ss):
-            y = res1._obs_func(ss) - rnoise._obs_func(ss)
-            return carry + y, y
-
-        e1_sum, _ = jax.lax.scan(fune, 0.0, mm)
-        r1_sum, _ = jax.lax.scan(funr, 0.0, mm)
-        del mm
-        gc.collect()
-        return e1_sum, r1_sum
-
     def run(self, icore):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 2))
+        cat_obj = FpfsCatalog(
+            cov_mat=self.cov_mat,
+            snr_min=12.0,
+            ratio=self.ratio,
+            c0=self.c0,
+            c2=self.c2,
+            alpha=self.alpha,
+            beta=self.beta,
+        )
+        if self.noise_rev:
+            if self.g_comp_measure == 1:
+                func = jax.jit(cat_obj.measure_g1_noise_correct)
+            elif self.g_comp_measure == 2:
+                func = jax.jit(cat_obj.measure_g2_noise_correct)
+            else:
+                raise ValueError("g_comp_measure should be 1 or 2")
+        else:
+            if self.g_comp_measure == 1:
+                func = jax.jit(cat_obj.measure_g1)
+            elif self.g_comp_measure == 2:
+                func = jax.jit(cat_obj.measure_g2)
+            else:
+                raise ValueError("g_comp_meausre should be 1 or 2")
         print("start core: %d, with id: %s" % (icore, id_range))
+        start_time = time.time()
         for icount, ifield in enumerate(id_range):
-            e1, enoise, res1, rnoise = prepare_func_e(
-                cov_mat=self.cov_mat,
-                ratio=self.ratio,
-                c0=self.c0,
-                c2=self.c2,
-                alpha=self.alpha,
-                beta=self.beta,
-                noise_rev=self.noise_rev,
-                g_comp=self.g_comp,
-            )
             in_nm1 = os.path.join(
                 self.cat_dir,
                 "src-%05d_g1-%d_rot0_%s.fits" % (ifield, self.imode, self.bands),
             )
-            ell, e_r = self.get_sum_e_r(in_nm1, e1, enoise, res1, rnoise)
+            ell, e_r = self.get_sum_e_r(in_nm1, func, read_catalog)
             out[icount, 0] = ell
             out[icount, 1] = e_r
-            del e1, enoise, res1, rnoise
-            gc.collect()
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print("elapsed time: %.2f seconds" % elapsed_time)
         return out
