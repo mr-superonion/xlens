@@ -17,7 +17,7 @@ import os
 from configparser import ConfigParser
 from copy import deepcopy
 
-import astropy.io.fits as pyfits
+import fitsio
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
 from descwl_shear_sims.psfs import make_fixed_psf
@@ -73,6 +73,17 @@ class MakeDMExposure(SimulateBase):
             self.noise_ratio = noise_ratio
         if bands is not None:
             self.bands = bands
+
+        self.do_ds9_region = cparser.getboolean(
+            "simulation",
+            "do_ds9_region",
+            fallback=False,
+        )
+        self.do_debug_exposure = cparser.getboolean(
+            "simulation",
+            "do_debug_exposure",
+            fallback=False,
+        )
         return
 
     def load_configure(self, cparser):
@@ -138,13 +149,18 @@ class MakeDMExposure(SimulateBase):
     def generate_exposure(self, fname):
         field_id = int(fname.split("image-")[-1].split("_")[0]) + 212
         rng = np.random.RandomState(field_id)
-        star_catalog = StarCatalog(
-            rng=rng,
-            coadd_dim=self.coadd_dim,
-            buff=self.buff,
-            density=self.stellar_density,
-            layout=self.layout,
-        )
+        if "random" in self.layout:
+            star_catalog = StarCatalog(
+                rng=rng,
+                coadd_dim=self.coadd_dim,
+                buff=self.buff,
+                density=self.stellar_density,
+                layout=self.layout,
+            )
+            draw_stars = True
+        else:
+            star_catalog = None
+            draw_stars = False
         galaxy_catalog = WLDeblendGalaxyCatalog(
             rng=rng,
             coadd_dim=self.coadd_dim,
@@ -159,7 +175,7 @@ class MakeDMExposure(SimulateBase):
             coadd_dim=self.coadd_dim,
             psf=self.psf,
             draw_gals=False,
-            draw_stars=True,
+            draw_stars=draw_stars,
             draw_bright=False,
             dither=self.dither,
             rotate=self.rotate,
@@ -178,7 +194,7 @@ class MakeDMExposure(SimulateBase):
         weight_sum = 0.0
         for band in self.bands:
             print("reading %s band" % band)
-            this_gal_array = pyfits.getdata(fname.replace("_xxx", "_%s" % band))
+            this_gal_array = fitsio.read(fname.replace("_xxx", "_%s" % band))
             if gal_array is None:
                 gal_array = np.zeros_like(this_gal_array)
                 msk_array = np.zeros(gal_array.shape, dtype=int)
@@ -206,7 +222,8 @@ class MakeDMExposure(SimulateBase):
             )
             weight_sum += weight
         assert gal_array is not None
-        exposure = star_outcome["band_data"][self.bands[0]][0]
+        exposure = deepcopy(star_outcome["band_data"][self.bands[0]][0])
+        del star_outcome
         masked_image = exposure.getMaskedImage()
         masked_image.image.array[:, :] = gal_array / weight_sum
         masked_image.variance.array[:, :] = variance / (weight_sum) ** 2.0
@@ -215,3 +232,25 @@ class MakeDMExposure(SimulateBase):
 
     def run(self, fname):
         return self.generate_exposure(fname)
+
+    def write_ds9_region(self, xy, filename):
+        """
+        Write a list of (x, y) positions to a DS9 region file.
+
+        Args:
+        xy (list of tuples): List of (x, y) positions.
+        filename (str): Name of the file to save the regions.
+        """
+        header = "# Region file format: DS9 version 4.1\n"
+        header += "global color=green dashlist=8 3 width=1 font='helvetica 10 normal roman' "
+        header += "select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n"
+        header += "image\n"  # Coordinate system, using image pixels
+        with open(filename, "w") as file:
+            file.write(header)
+            for x, y in xy:
+                file.write(f"point(%d,%d) # point=circle\n" % (x + 1, y + 1))
+        return
+
+    def write_image(self, exposure, filename):
+        fitsio.write(filename, exposure.getMaskedImage().image.array)
+        return

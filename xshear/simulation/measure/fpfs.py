@@ -24,7 +24,7 @@ import os
 import time
 from configparser import ConfigParser, ExtendedInterpolation
 
-import astropy.io.fits as pyfits
+import fitsio
 import fpfs
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
@@ -54,12 +54,12 @@ class FPFSMeasurementTask(SimulateBase):
         self.ngrid = 2 * self.rcut
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
         self.psf_rcut = min(psf_rcut, self.rcut)
-        self.nnord = cparser.getint("FPFS", "nnord", fallback=4)
-        if self.nnord not in [4, 6]:
+        self.nord = cparser.getint("FPFS", "nord", fallback=4)
+        if self.nord not in [4, 6]:
             raise ValueError(
-                "Only support for nnord= 4 or nnord=6, but your input\
-                    is nnord=%d"
-                % self.nnord
+                "Only support for nord= 4 or nord=6, but your input\
+                    is nord=%d"
+                % self.nord
             )
         self.ncov_fname = cparser.get(
             "FPFS",
@@ -77,38 +77,23 @@ class FPFSMeasurementTask(SimulateBase):
             psf_array,
             sigma_arcsec=self.sigma_as,
             sigma_detect=self.sigma_det,
-            nnord=self.nnord,
+            nord=self.nord,
             pix_scale=pixel_scale,
         )
-
-        std_modes = np.sqrt(np.diagonal(cov_elem))
-        idm00 = fpfs.catalog.indexes["m00"]
-        idv0 = fpfs.catalog.indexes["v0"]
-        # Temp fix for 4th order estimator
-        if self.nnord == 6:
-            idv0 += 1
-        thres = 9.5 * std_modes[idm00] * pixel_scale**2.0
-        thres2 = -1.5 * std_modes[idv0] * pixel_scale**2.0
 
         npad = (self.image_nx - psf_array.shape[0]) // 2
         coords = meas_task.detect_sources(
             img_data=gal_array,
             psf_data=np.pad(psf_array, (npad, npad), mode="constant"),
-            thres=thres,
-            thres2=thres2,
-            bound=self.rcut + 5,
+            cov_elem=cov_elem,
+            thres=9.5,
+            thres2=-1.0,
+            bound=self.rcut,
         )
         print("pre-selected number of sources: %d" % len(coords))
         out = meas_task.measure(gal_array, coords)
         out = meas_task.get_results(out)
-        sel = (out["fpfs_M00"] + out["fpfs_M20"]) > 0.0
-        out = out[sel]
-        print("final number of sources: %d" % len(out))
-        coords = coords[sel]
-        coords = np.rec.fromarrays(
-            coords.T,
-            dtype=[("fpfs_y", "i4"), ("fpfs_x", "i4")],
-        )
+        coords = meas_task.get_results_detection(coords)
         return out, coords
 
     def measure_exposure(self, exposure):
@@ -119,31 +104,30 @@ class FPFSMeasurementTask(SimulateBase):
         self.image_nx = gal_array.shape[1]
 
         psf_array = get_psf_array(exposure, ngrid=self.ngrid)
-        fpfs.imgutil.truncate_square(psf_array, self.psf_rcut)
+        fpfs.image.util.truncate_square(psf_array, self.psf_rcut)
         if not os.path.isfile(self.ncov_fname):
             # FPFS noise cov task
             noise_task = fpfs.image.measure_noise_cov(
                 psf_array,
                 sigma_arcsec=self.sigma_as,
                 sigma_detect=self.sigma_det,
-                nnord=self.nnord,
+                nord=self.nord,
                 pix_scale=pixel_scale,
             )
             # By default, we use uncorrelated noise
             # TODO: enable correlated noise here
             noise_pow = np.ones((self.ngrid, self.ngrid)) * variance * self.ngrid**2.0
             cov_elem = np.array(noise_task.measure(noise_pow))
-            pyfits.writeto(self.ncov_fname, cov_elem, overwrite=True)
+            fitsio.write(self.ncov_fname, cov_elem, overwrite=True)
         else:
-            cov_elem = pyfits.getdata(self.ncov_fname)
+            cov_elem = fitsio.read(self.ncov_fname)
         assert np.all(np.diagonal(cov_elem) > 1e-10), "The covariance matrix is incorrect"
 
         start_time = time.time()
         cat, det = self.process_image(gal_array, psf_array, cov_elem, pixel_scale)
         del gal_array, psf_array, cov_elem
         # Stop the timer
-        end_time = time.time()
-        elapsed_time = end_time - start_time
+        elapsed_time = time.time() - start_time
         print(f"Elapsed time: {elapsed_time} seconds")
         return cat, det
 
@@ -177,12 +161,20 @@ class ProcessSimFPFS(MakeDMExposure):
             det_name,
             det,
             dtype="position",
-            nnord="4",
+            nord="4",
         )
         fpfs.io.save_catalog(
             out_name,
             cat,
             dtype="shape",
-            nnord="4",
+            nord="4",
         )
+        if self.do_ds9_region:
+            ds9_name = out_name.replace("src-", "reg-")
+            ds9_name = ds9_name.replace(".fits", ".reg")
+            pos = det[["fpfs_x", "fpfs_y"]]
+            self.write_ds9_region(pos, ds9_name)
+        if self.do_debug_exposure:
+            img_name = out_name.replace("src-", "img-")
+            self.write_image(exposure, img_name)
         return
