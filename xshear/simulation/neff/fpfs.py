@@ -19,7 +19,6 @@ from argparse import ArgumentParser
 from configparser import ConfigParser
 
 import fitsio
-import impt
 import jax
 import numpy as np
 from fpfs.catalog import FpfsCatalog, read_catalog

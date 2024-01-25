@@ -55,12 +55,6 @@ class FPFSMeasurementTask(SimulateBase):
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
         self.psf_rcut = min(psf_rcut, self.rcut)
         self.nord = cparser.getint("FPFS", "nord", fallback=4)
-        if self.nord not in [4, 6]:
-            raise ValueError(
-                "Only support for nord= 4 or nord=6, but your input\
-                    is nord=%d"
-                % self.nord
-            )
         self.ncov_fname = cparser.get(
             "FPFS",
             "ncov_fname",
@@ -143,6 +137,7 @@ class ProcessSimFPFS(MakeDMExposure):
             os.makedirs(self.cat_dir, exist_ok=True)
 
     def run(self, file_name):
+        print("processing file: %s" % file_name)
         out_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
         out_name = out_name.replace(
             "image-",
