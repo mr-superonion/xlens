@@ -30,9 +30,13 @@ def get_psf_array(exposure, ngrid):
     # Calculate the central point
     centerX, centerY = width // 2, height // 2
     centroid = afwGeom.Point2I(centerX, centerY)
-    psf_array = np.zeros((ngrid, ngrid), dtype=np.float64)
+    psf_array = np.zeros((ngrid, ngrid))
     data = exposure.getPsf().computeImage(centroid).getArray()
-    shift = (ngrid - data.shape[0] + 1) // 2
     dx = data.shape[0]
-    psf_array[shift : shift + dx, shift : shift + dx] = data
+    if ngrid > dx:
+        shift = (ngrid - dx + 1) // 2
+        psf_array[shift : shift + dx, shift : shift + dx] = data[:, :]
+    else:
+        shift = -(ngrid - dx) // 2
+        psf_array[:, :] = data[shift : shift + ngrid, shift : shift + ngrid]
     return psf_array

@@ -19,6 +19,7 @@
 # the GNU General Public License along with this program.  If not,
 # see <http://www.lsstcorp.org/LegalNotices/>.
 #
+import gc
 import json
 import os
 import time
@@ -67,7 +68,7 @@ class FPFSMeasurementTask(SimulateBase):
 
     def process_image(self, gal_array, psf_array, cov_elem, pixel_scale):
         # measurement task
-        meas_task = fpfs.image.measure_source(
+        task = fpfs.image.measure_source(
             psf_array,
             sigma_arcsec=self.sigma_as,
             sigma_detect=self.sigma_det,
@@ -75,25 +76,24 @@ class FPFSMeasurementTask(SimulateBase):
             pix_scale=pixel_scale,
         )
 
-        npad = (self.image_nx - psf_array.shape[0]) // 2
-        coords = meas_task.detect_sources(
+        coords = task.detect_sources(
             img_data=gal_array,
-            psf_data=np.pad(psf_array, (npad, npad), mode="constant"),
+            psf_data=psf_array,
             cov_elem=cov_elem,
             thres=9.5,
             thres2=-1.0,
             bound=self.rcut,
         )
         print("pre-selected number of sources: %d" % len(coords))
-        out = meas_task.measure(gal_array, coords)
-        out = meas_task.get_results(out)
-        coords = meas_task.get_results_detection(coords)
-        return out, coords
+        out = task.get_results(task.measure(gal_array, coords))
+        out2 = task.get_results_detection(coords)
+        gc.collect()
+        return out, out2
 
     def measure_exposure(self, exposure):
         pixel_scale = exposure.getWcs().getPixelScale().asArcseconds()
         masked_image = exposure.getMaskedImage()
-        gal_array = masked_image.image.array[:, :]
+        gal_array = masked_image.image.array
         variance = np.average(masked_image.variance.array)
         self.image_nx = gal_array.shape[1]
 
@@ -152,6 +152,7 @@ class ProcessSimFPFS(MakeDMExposure):
             return
         exposure = self.generate_exposure(file_name)
         cat, det = self.meas_task.measure_exposure(exposure)
+        del exposure
         fpfs.io.save_catalog(
             det_name,
             det,
@@ -169,6 +170,7 @@ class ProcessSimFPFS(MakeDMExposure):
             ds9_name = ds9_name.replace(".fits", ".reg")
             pos = det[["fpfs_x", "fpfs_y"]]
             self.write_ds9_region(pos, ds9_name)
+            del pos
         if self.do_debug_exposure:
             img_name = out_name.replace("src-", "img-")
             self.write_image(exposure, img_name)

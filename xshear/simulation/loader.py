@@ -13,6 +13,7 @@
 # GNU General Public License for more details.
 #
 
+import gc
 import os
 from configparser import ConfigParser
 from copy import deepcopy
@@ -129,7 +130,7 @@ class MakeDMExposure(SimulateBase):
             psf_type="moffat",
             psf_fwhm=psf_fwhm,
         ).shear(e1=psf_e1, e2=psf_e2)
-        self.noise_std = deepcopy(_nstd_map[self.survey_name])
+        self.noise_std = _nstd_map[self.survey_name]
         return
 
     def get_seed_from_fname(self, fname, band):
@@ -140,10 +141,9 @@ class MakeDMExposure(SimulateBase):
         fid = int(fname.split("image-")[-1].split("_")[0]) + 212
         # rotation id
         rid = int(fname.split("rot")[1][0])
-        b_map = deepcopy(_band_map)
         # band id
-        bid = b_map[band]
-        _nbands = len(b_map.values())
+        bid = _band_map[band]
+        _nbands = len(_band_map.values())
         return (fid * self.nrot + rid) * _nbands + bid
 
     def generate_exposure(self, fname):
