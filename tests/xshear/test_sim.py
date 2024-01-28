@@ -4,7 +4,7 @@ import fitsio
 import numpy as np
 
 from xshear.simulation.loader import MakeDMExposure
-from xshear.simulation.measure import ProcessSimFPFS, utils
+from xshear.simulation.measure import ProcessSimDM, ProcessSimFPFS, utils
 from xshear.simulation.neff import NeffSimFPFS
 from xshear.simulation.simulator import SimulateImage
 from xshear.simulation.summary import SummarySimFPFS
@@ -44,20 +44,24 @@ def test_lsst():
     for _ in input_list:
         worker3.run(_)
 
-    worker4 = SummarySimFPFS(
-        config_fname,
-        min_id=0,
-        max_id=1,
-        ncores=1,
-    )
-    olist = worker4.run(0)
+    worker4 = ProcessSimDM(config_fname)
+    for _ in input_list:
+        worker4.run(_)
 
-    worker5 = NeffSimFPFS(
+    worker5 = SummarySimFPFS(
         config_fname,
         min_id=0,
         max_id=1,
         ncores=1,
     )
-    worker5.run(0)
-    worker5.clear_all()
+    olist = worker5.run(0)
+
+    worker6 = NeffSimFPFS(
+        config_fname,
+        min_id=0,
+        max_id=1,
+        ncores=1,
+    )
+    worker6.run(0)
+    worker6.clear_all()
     return

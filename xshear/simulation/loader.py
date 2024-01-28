@@ -19,11 +19,13 @@ from configparser import ConfigParser
 from copy import deepcopy
 
 import fitsio
+import lsst.afw.image as afw_image
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
-from descwl_shear_sims.psfs import make_fixed_psf
+from descwl_shear_sims.psfs import make_dm_psf, make_fixed_psf
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.stars import StarCatalog
+from descwl_shear_sims.wcs import make_dm_wcs
 
 from .simulator import SimulateBase
 
@@ -105,7 +107,7 @@ class MakeDMExposure(SimulateBase):
         )
         self.layout = cparser.get("simulation", "layout")
 
-        psf_fwhm = cparser.getfloat(
+        self.psf_fwhm = cparser.getfloat(
             "simulation",
             "psf_fwhm",
             fallback=None,
@@ -116,21 +118,17 @@ class MakeDMExposure(SimulateBase):
             fallback="LSST",
         )
         print("Simulating survey: %s" % self.survey_name)
-        psf_e1 = cparser.getfloat(
+        self.psf_e1 = cparser.getfloat(
             "simulation",
             "psf_e1",
             fallback=0.0,
         )
-        psf_e2 = cparser.getfloat(
+        self.psf_e2 = cparser.getfloat(
             "simulation",
             "psf_e2",
             fallback=0.0,
         )
-        self.psf = make_fixed_psf(
-            psf_type="moffat",
-            psf_fwhm=psf_fwhm,
-        ).shear(e1=psf_e1, e2=psf_e2)
-        self.noise_std = _nstd_map[self.survey_name]
+        self.noise_std = deepcopy(_nstd_map)[self.survey_name]
         return
 
     def get_seed_from_fname(self, fname, band):
@@ -142,7 +140,7 @@ class MakeDMExposure(SimulateBase):
         # rotation id
         rid = int(fname.split("rot")[1][0])
         # band id
-        bid = _band_map[band]
+        bid = deepcopy(_band_map)[band]
         _nbands = len(_band_map.values())
         return (fid * self.nrot + rid) * _nbands + bid
 
@@ -166,14 +164,18 @@ class MakeDMExposure(SimulateBase):
             coadd_dim=self.coadd_dim,
             buff=self.buff,
             layout=self.layout,
-            density=1,
+            density=0,
         )
+        psf_obj = make_fixed_psf(
+            psf_type="moffat",
+            psf_fwhm=self.psf_fwhm,
+        ).shear(e1=self.psf_e1, e2=self.psf_e2)
         star_outcome = make_sim(
             rng=rng,
             galaxy_catalog=galaxy_catalog,
             star_catalog=star_catalog,
             coadd_dim=self.coadd_dim,
-            psf=self.psf,
+            psf=psf_obj,
             draw_gals=False,
             draw_stars=draw_stars,
             draw_bright=False,
@@ -188,16 +190,14 @@ class MakeDMExposure(SimulateBase):
             g1=0.0,
             g2=0.0,
         )
-        gal_array = None
-        msk_array = None
         variance = 0.0
         weight_sum = 0.0
+        ny = self.coadd_dim + 10
+        nx = self.coadd_dim + 10
+        gal_array = np.zeros((ny, nx))
+        msk_array = np.zeros((ny, nx), dtype=int)
         for band in self.bands:
             print("reading %s band" % band)
-            this_gal_array = fitsio.read(fname.replace("_xxx", "_%s" % band))
-            if gal_array is None:
-                gal_array = np.zeros_like(this_gal_array)
-                msk_array = np.zeros(gal_array.shape, dtype=int)
             # Add noise
             nstd_f = self.noise_std[band] * self.noise_ratio
             weight = 1.0 / (self.noise_std[band]) ** 2.0
@@ -211,24 +211,32 @@ class MakeDMExposure(SimulateBase):
             gal_array = (
                 gal_array
                 + (
-                    this_gal_array
+                    fitsio.read(fname.replace("_xxx", "_%s" % band))
                     + star_array
                     + rng2.normal(
                         scale=nstd_f,
-                        size=this_gal_array.shape,
+                        size=(ny, nx),
                     )
                 )
                 * weight
             )
             weight_sum += weight
-        assert gal_array is not None
-        exposure = deepcopy(star_outcome["band_data"][self.bands[0]][0])
-        del star_outcome
-        masked_image = exposure.getMaskedImage()
+        masked_image = afw_image.MaskedImageF(ny, nx)
         masked_image.image.array[:, :] = gal_array / weight_sum
         masked_image.variance.array[:, :] = variance / (weight_sum) ** 2.0
         masked_image.mask.array[:, :] = msk_array
-        return exposure
+        exp = afw_image.ExposureF(masked_image)
+
+        zero_flux = 10.0 ** (0.4 * self.calib_mag_zero)
+        photoCalib = afw_image.makePhotoCalibFromCalibZeroPoint(zero_flux)
+        exp.setPhotoCalib(photoCalib)
+        psf_dim = star_outcome["psf_dims"][0]
+        se_wcs = star_outcome["se_wcs"][0]
+        dm_psf = make_dm_psf(psf=psf_obj, psf_dim=deepcopy(psf_dim), wcs=deepcopy(se_wcs))
+        exp.setPsf(dm_psf)
+        dm_wcs = make_dm_wcs(se_wcs)
+        exp.setWcs(dm_wcs)
+        return exp
 
     def run(self, fname):
         return self.generate_exposure(fname)

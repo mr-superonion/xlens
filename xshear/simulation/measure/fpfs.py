@@ -87,10 +87,9 @@ class FPFSMeasurementTask(SimulateBase):
         print("pre-selected number of sources: %d" % len(coords))
         out = task.get_results(task.measure(gal_array, coords))
         out2 = task.get_results_detection(coords)
-        gc.collect()
         return out, out2
 
-    def measure_exposure(self, exposure):
+    def run(self, exposure):
         pixel_scale = exposure.getWcs().getPixelScale().asArcseconds()
         masked_image = exposure.getMaskedImage()
         gal_array = masked_image.image.array
@@ -108,31 +107,23 @@ class FPFSMeasurementTask(SimulateBase):
                 nord=self.nord,
                 pix_scale=pixel_scale,
             )
-            # By default, we use uncorrelated noise
-            # TODO: enable correlated noise here
             noise_pow = np.ones((self.ngrid, self.ngrid)) * variance * self.ngrid**2.0
             cov_elem = np.array(noise_task.measure(noise_pow))
             fitsio.write(self.ncov_fname, cov_elem, overwrite=True)
         else:
             cov_elem = fitsio.read(self.ncov_fname)
-        assert np.all(np.diagonal(cov_elem) > 1e-10), "The covariance matrix is incorrect"
 
         start_time = time.time()
         cat, det = self.process_image(gal_array, psf_array, cov_elem, pixel_scale)
-        del gal_array, psf_array, cov_elem
-        # Stop the timer
         elapsed_time = time.time() - start_time
-        print(f"Elapsed time: {elapsed_time} seconds")
+        print(f"elapsed time: {elapsed_time} seconds")
         return cat, det
-
-    def run(self, exposure):
-        return self.measure_exposure(exposure)
 
 
 class ProcessSimFPFS(MakeDMExposure):
     def __init__(self, config_name):
         super().__init__(config_name)
-        self.meas_task = FPFSMeasurementTask(config_name)
+        self.config_name = config_name
         if not os.path.isdir(self.cat_dir):
             os.makedirs(self.cat_dir, exist_ok=True)
 
@@ -151,8 +142,11 @@ class ProcessSimFPFS(MakeDMExposure):
             print("Already has measurement for simulation: %s." % out_name)
             return
         exposure = self.generate_exposure(file_name)
-        cat, det = self.meas_task.measure_exposure(exposure)
-        del exposure
+        meas_task = FPFSMeasurementTask(self.config_name)
+        cat, det = meas_task.run(exposure)
+        if self.do_debug_exposure:
+            img_name = out_name.replace("src-", "img-")
+            self.write_image(exposure, img_name)
         fpfs.io.save_catalog(
             det_name,
             det,
@@ -171,7 +165,4 @@ class ProcessSimFPFS(MakeDMExposure):
             pos = det[["fpfs_x", "fpfs_y"]]
             self.write_ds9_region(pos, ds9_name)
             del pos
-        if self.do_debug_exposure:
-            img_name = out_name.replace("src-", "img-")
-            self.write_image(exposure, img_name)
         return

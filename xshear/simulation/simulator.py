@@ -259,6 +259,7 @@ class SimulateImage(SimulateBase):
             pixel_scale=scale,
             layout=self.layout,
         )
+        bl = deepcopy(band_list)
         print("Simulation has galaxies: %d" % len(galaxy_catalog))
         for shear_mode in self.shear_mode_list:
             for irot in range(self.nrot):
@@ -280,7 +281,7 @@ class SimulateImage(SimulateBase):
                     draw_bright=self.draw_bright,
                     dither=self.dither,
                     rotate=self.rotate,
-                    bands=band_list,
+                    bands=bl,
                     noise_factor=0.0,
                     theta0=self.rot_list[irot],
                     calib_mag_zero=self.calib_mag_zero,
@@ -288,7 +289,7 @@ class SimulateImage(SimulateBase):
                     **kargs,
                 )
                 # write galaxy images
-                for band_name in band_list:
+                for band_name in bl:
                     gal_fname = "%s/image-%05d_g1-%d_rot%d_%s.fits" % (
                         self.img_dir,
                         ifield,
