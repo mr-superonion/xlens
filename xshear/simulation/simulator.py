@@ -45,6 +45,7 @@ class SimulateBase(object):
         # catalog directory
         cat_dir = cparser.get("simulation", "cat_dir")
         self.cat_dir = os.path.join(self.root_dir, cat_dir)
+        self.cat_dm_dir = cat_dir.replace("cat", "cat_dm")
 
         # summary directory
         sum_dir = cparser.get("simulation", "sum_dir")
@@ -96,6 +97,9 @@ class SimulateBase(object):
     def clear_catalog(self):
         if os.path.isdir(self.cat_dir):
             shutil.rmtree(self.cat_dir)
+
+        if os.path.isdir(self.cat_dm_dir):
+            shutil.rmtree(self.cat_dm_dir)
         return
 
     def clear_summary(self):

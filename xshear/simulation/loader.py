@@ -69,7 +69,7 @@ class MakeDMExposure(SimulateBase):
         if not os.path.isdir(self.img_dir):
             raise FileNotFoundError("Cannot find image directory")
         if not os.path.isdir(self.cat_dir):
-            os.makedirs(self.cat_dir)
+            os.makedirs(self.cat_dir, exist_ok=True)
 
         self.load_configure(cparser)
         if noise_ratio is not None:
