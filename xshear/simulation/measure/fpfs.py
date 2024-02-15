@@ -28,6 +28,7 @@ from configparser import ConfigParser, ExtendedInterpolation
 import fitsio
 import fpfs
 import numpy as np
+import numpy.lib.recfunctions as rfn
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
 from descwl_shear_sims.psfs import make_fixed_psf
 from descwl_shear_sims.sim import make_sim
@@ -61,12 +62,17 @@ class FPFSMeasurementTask(SimulateBase):
             "ncov_fname",
             fallback="",
         )
+        self.center_name = cparser.get(
+            "FPFS",
+            "center_name",
+            fallback="deblend_peak_center",
+        )
         if len(self.ncov_fname) == 0 or not os.path.isfile(self.ncov_fname):
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
         return
 
-    def process_image(self, gal_array, psf_array, cov_elem, pixel_scale):
+    def process_image(self, gal_array, psf_array, cov_elem, pixel_scale, dm_fname):
         # measurement task
         task = fpfs.image.measure_source(
             psf_array,
@@ -75,21 +81,34 @@ class FPFSMeasurementTask(SimulateBase):
             nord=self.nord,
             pix_scale=pixel_scale,
         )
+        if dm_fname is None:
+            coords = task.detect_sources(
+                img_data=gal_array,
+                psf_data=psf_array,
+                cov_elem=cov_elem,
+                thres=9.5,
+                bound=self.rcut,
+            )
+        else:
+            print("Using detected centers: %s" % dm_fname)
+            cname_list = [self.center_name + "_y", self.center_name + "_x"]
+            tmp = fitsio.read(dm_fname)
+            msk = (tmp["deblend_nPeaks"] == 1) & (tmp["deblend_nChild"] == 0)
+            coords = rfn.structured_to_unstructured(tmp[msk][cname_list])
+            del tmp, msk
+            coords = np.int_(np.round(coords))
 
-        coords = task.detect_sources(
-            img_data=gal_array,
-            psf_data=psf_array,
-            cov_elem=cov_elem,
-            thres=9.5,
-            thres2=-1.0,
-            bound=self.rcut,
-        )
         print("pre-selected number of sources: %d" % len(coords))
         out = task.get_results(task.measure(gal_array, coords))
         out2 = task.get_results_detection(coords)
+        # mask = np.ones_like(out, dtype=bool)
+        # for _ in range(8):
+        #     mask = mask & ((out["fpfs_v%d" % _] + out["fpfs_m00"] * 0.02) > 0)
+        # mask = mask & ((out["fpfs_m00"] + out["fpfs_m20"]) > 0.2)
+        # mask = mask & ((out["fpfs_m00"] - out["fpfs_m20"]) > 0.8)
         return out, out2
 
-    def run(self, exposure):
+    def run(self, exposure, dm_fname=None):
         pixel_scale = exposure.getWcs().getPixelScale().asArcseconds()
         masked_image = exposure.getMaskedImage()
         gal_array = masked_image.image.array
@@ -114,7 +133,13 @@ class FPFSMeasurementTask(SimulateBase):
             cov_elem = fitsio.read(self.ncov_fname)
 
         start_time = time.time()
-        cat, det = self.process_image(gal_array, psf_array, cov_elem, pixel_scale)
+        cat, det = self.process_image(
+            gal_array,
+            psf_array,
+            cov_elem,
+            pixel_scale,
+            dm_fname,
+        )
         elapsed_time = time.time() - start_time
         print(f"elapsed time: {elapsed_time} seconds")
         return cat, det
@@ -126,26 +151,45 @@ class ProcessSimFPFS(MakeDMExposure):
         self.config_name = config_name
         if not os.path.isdir(self.cat_dir):
             os.makedirs(self.cat_dir, exist_ok=True)
+        cparser = ConfigParser(interpolation=ExtendedInterpolation())
+        cparser.read(config_name)
+        self.detection_dir = cparser.get(
+            "FPFS",
+            "detection_dir",
+            fallback="",
+        )
+        print(self.detection_dir)
 
     def run(self, file_name):
         print("processing file: %s" % file_name)
-        out_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
-        out_name = out_name.replace(
+        cat_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
+        cat_name = cat_name.replace(
             "image-",
             "src-",
         ).replace(
             "_xxx",
             "_%s" % self.bands,
         )
-        det_name = out_name.replace("src-", "det-")
-        if os.path.isfile(out_name) and os.path.isfile(det_name):
-            print("Already has measurement for simulation: %s." % out_name)
+        if len(self.detection_dir) == 0 or not os.path.isdir(self.detection_dir):
+            dm_fname = None
+        else:
+            dm_fname = os.path.join(self.detection_dir, file_name.split("/")[-1])
+            dm_fname = dm_fname.replace(
+                "image-",
+                "src-",
+            ).replace(
+                "_xxx",
+                "_%s" % self.bands,
+            )
+        det_name = cat_name.replace("src-", "det-")
+        if os.path.isfile(cat_name) and os.path.isfile(det_name):
+            print("Already has measurement for simulation: %s." % cat_name)
             return
         exposure = self.generate_exposure(file_name)
         meas_task = FPFSMeasurementTask(self.config_name)
-        cat, det = meas_task.run(exposure)
+        cat, det = meas_task.run(exposure, dm_fname=dm_fname)
         if self.do_debug_exposure:
-            img_name = out_name.replace("src-", "img-")
+            img_name = cat_name.replace("src-", "img-")
             self.write_image(exposure, img_name)
         fpfs.io.save_catalog(
             det_name,
@@ -154,13 +198,13 @@ class ProcessSimFPFS(MakeDMExposure):
             nord="4",
         )
         fpfs.io.save_catalog(
-            out_name,
+            cat_name,
             cat,
             dtype="shape",
             nord="4",
         )
         if self.do_ds9_region:
-            ds9_name = out_name.replace("src-", "reg-")
+            ds9_name = cat_name.replace("src-", "reg-")
             ds9_name = ds9_name.replace(".fits", ".reg")
             pos = det[["fpfs_x", "fpfs_y"]]
             self.write_ds9_region(pos, ds9_name)

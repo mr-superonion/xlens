@@ -62,7 +62,7 @@ class SimulateBase(object):
         self.noise_ratio = cparser.getfloat(
             "simulation",
             "noise_ratio",
-            fallback=None,
+            fallback=0.0,
         )
 
         # bands used for measurement

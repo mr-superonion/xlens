@@ -60,9 +60,16 @@ class MakeDMExposure(SimulateBase):
     def __init__(
         self,
         config_name,
-        noise_ratio=None,
-        bands=None,
+        noise_ratio_overwrite=None,
+        bands_overwrite=None,
     ):
+        """A Class to load DM exposures
+
+        Args:
+        config_name (str):              configuration file name
+        noise_ratio_overwrite (float):  overwrite noise ratio with this value
+        bands_overwrite (float):        overwrite bands with this value
+        """
         cparser = ConfigParser()
         cparser.read(config_name)
         super().__init__(cparser)
@@ -72,10 +79,10 @@ class MakeDMExposure(SimulateBase):
             os.makedirs(self.cat_dir, exist_ok=True)
 
         self.load_configure(cparser)
-        if noise_ratio is not None:
-            self.noise_ratio = noise_ratio
-        if bands is not None:
-            self.bands = bands
+        if noise_ratio_overwrite is not None:
+            self.noise_ratio = noise_ratio_overwrite
+        if bands_overwrite is not None:
+            self.bands = bands_overwrite
 
         self.do_ds9_region = cparser.getboolean(
             "simulation",
