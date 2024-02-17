@@ -210,23 +210,6 @@ class SimulateImage(SimulateBase):
             "draw_bright",
             fallback=False,
         )
-        self.star_bleeds = cparser.getboolean(
-            "simulation",
-            "star_bleeds",
-            fallback=False,
-        )
-
-        # Systematics
-        self.cosmic_rays = cparser.getboolean(
-            "simulation",
-            "cosmic_rays",
-            fallback=False,
-        )
-        self.bad_columns = cparser.getboolean(
-            "simulation",
-            "bad_columns",
-            fallback=False,
-        )
         return
 
     def simulate_image(self, ifield):
@@ -240,9 +223,9 @@ class SimulateImage(SimulateBase):
         ).pixel_scale
 
         kargs = {
-            "cosmic_rays": self.cosmic_rays,
-            "bad_columns": self.bad_columns,
-            "star_bleeds": self.star_bleeds,
+            "cosmic_rays": False,
+            "bad_columns": False,
+            "star_bleeds": False,
             "draw_method": "auto",
         }
         psf = make_fixed_psf(

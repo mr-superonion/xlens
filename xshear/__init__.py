@@ -1,3 +1,3 @@
-from . import simulation
+from . import simulation, utils
 
-__all__ = ["simulation"]
+__all__ = ["simulation", "utils"]

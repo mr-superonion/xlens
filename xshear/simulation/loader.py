@@ -25,6 +25,7 @@ from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
 from descwl_shear_sims.psfs import make_dm_psf, make_fixed_psf
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.stars import StarCatalog
+from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
 from descwl_shear_sims.wcs import make_dm_wcs
 
 from .simulator import SimulateBase
@@ -92,6 +93,24 @@ class MakeDMExposure(SimulateBase):
         self.do_debug_exposure = cparser.getboolean(
             "simulation",
             "do_debug_exposure",
+            fallback=False,
+        )
+
+        self.star_bleeds = cparser.getboolean(
+            "simulation",
+            "star_bleeds",
+            fallback=False,
+        )
+
+        # Systematics
+        self.cosmic_rays = cparser.getboolean(
+            "simulation",
+            "cosmic_rays",
+            fallback=False,
+        )
+        self.bad_columns = cparser.getboolean(
+            "simulation",
+            "bad_columns",
             fallback=False,
         )
         return
@@ -166,9 +185,16 @@ class MakeDMExposure(SimulateBase):
         else:
             star_catalog = None
             draw_stars = False
+
+        scale = get_survey(
+            gal_type="wldeblend",
+            band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
+            survey_name=self.survey_name,
+        ).pixel_scale
         galaxy_catalog = WLDeblendGalaxyCatalog(
             rng=rng,
             coadd_dim=self.coadd_dim,
+            pixel_scale=scale,
             buff=self.buff,
             layout=self.layout,
             density=0,
@@ -177,6 +203,12 @@ class MakeDMExposure(SimulateBase):
             psf_type="moffat",
             psf_fwhm=self.psf_fwhm,
         ).shear(e1=self.psf_e1, e2=self.psf_e2)
+        kargs = {
+            "cosmic_rays": self.cosmic_rays,
+            "bad_columns": self.bad_columns,
+            "star_bleeds": self.star_bleeds,
+            "draw_method": "auto",
+        }
         star_outcome = make_sim(
             rng=rng,
             galaxy_catalog=galaxy_catalog,
@@ -190,12 +222,11 @@ class MakeDMExposure(SimulateBase):
             rotate=self.rotate,
             bands=[b for b in self.bands],
             noise_factor=0.0,
-            cosmic_rays=False,
-            bad_columns=False,
-            star_bleeds=False,
-            draw_method="auto",
+            calib_mag_zero=self.calib_mag_zero,
+            survey_name=self.survey_name,
             g1=0.0,
             g2=0.0,
+            **kargs,
         )
         variance = 0.0
         weight_sum = 0.0
@@ -239,7 +270,7 @@ class MakeDMExposure(SimulateBase):
         exp.setPhotoCalib(photoCalib)
         psf_dim = star_outcome["psf_dims"][0]
         se_wcs = star_outcome["se_wcs"][0]
-        dm_psf = make_dm_psf(psf=psf_obj, psf_dim=deepcopy(psf_dim), wcs=deepcopy(se_wcs))
+        dm_psf = make_dm_psf(psf=psf_obj, psf_dim=psf_dim, wcs=deepcopy(se_wcs))
         exp.setPsf(dm_psf)
         dm_wcs = make_dm_wcs(se_wcs)
         exp.setWcs(dm_wcs)
