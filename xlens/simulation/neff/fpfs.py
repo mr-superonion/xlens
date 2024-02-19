@@ -65,7 +65,7 @@ class NeffSimFPFS(SimulateBatchBase):
         coadd_dim = cparser.getint("simulation", "coadd_dim")
         buff = cparser.getint("simulation", "buff")
         coadd_scale = cparser.getint("simulation", "coadd_scale", fallback=0.2)
-        radius = (coadd_dim / 2.0 - buff) * coadd_scale / 60.0
+        radius = ((coadd_dim + 10) / 2.0 - buff) * coadd_scale / 60.0
         self.area = np.pi * radius**2  # [arcmin^2]
         return
 

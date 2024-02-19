@@ -4,7 +4,7 @@ _src_path: gh:lincc-frameworks/python-project-template
 author_email: mr.superonion@hotmail.com
 author_name: Xiangchong Li
 custom_install: false
-package_name: xshear
+package_name: xlens
 project_license: none
-project_name: xshear
+project_name: xlens
 project_organization: mr-superonion

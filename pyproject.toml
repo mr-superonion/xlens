@@ -1,5 +1,5 @@
 [project]
-name = "xshear"
+name = "xlens"
 license = {file = "LICENSE"}
 readme = "README.md"
 authors = [
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.urls]
-"Source Code" = "https://github.com/mr-superonion/xshear"
+"Source Code" = "https://github.com/mr-superonion/xlens"
 
 # On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
 [project.optional-dependencies]
@@ -46,7 +46,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
-write_to = "xshear/__version__.py"
+write_to = "xlens/__version__.py"
 
 [tool.pytest.ini_options]
 testpaths = [
@@ -63,4 +63,4 @@ profile = "black"
 line_length = 110
 
 [tool.coverage.run]
-omit=["xshear/__version__.py"]
+omit=["xlens/__version__.py"]

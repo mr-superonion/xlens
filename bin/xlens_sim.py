@@ -72,28 +72,28 @@ if __name__ == "__main__":
     taskname = cmd_args.task_name
 
     if taskname.lower() == "simulate_image":
-        from xshear.simulation.simulator import SimulateImage
+        from xlens.simulation.simulator import SimulateImage
 
         input_list = list(range(min_id, max_id))
         worker = SimulateImage(cmd_args.config)
         for r in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "measure_dm":
-        from xshear.simulation.measure import ProcessSimDM
+        from xlens.simulation.measure import ProcessSimDM
 
         worker = ProcessSimDM(cmd_args.config)
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for r in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "measure_fpfs":
-        from xshear.simulation.measure import ProcessSimFPFS
+        from xlens.simulation.measure import ProcessSimFPFS
 
         worker = ProcessSimFPFS(cmd_args.config)
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for r in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "summary_fpfs":
-        from xshear.simulation.summary import SummarySimFPFS
+        from xlens.simulation.summary import SummarySimFPFS
 
         worker = SummarySimFPFS(
             cmd_args.config,
@@ -106,7 +106,7 @@ if __name__ == "__main__":
             fitsio.write(worker.ofname, np.vstack(list(olist)))
         worker.display_result()
     elif taskname.lower() == "neff_fpfs":
-        from xshear.simulation.neff import NeffSimFPFS
+        from xlens.simulation.neff import NeffSimFPFS
 
         worker = NeffSimFPFS(
             cmd_args.config,

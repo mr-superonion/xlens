@@ -1,8 +1,8 @@
-.. xshear documentation main file.
+.. xlens documentation main file.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to xshear's documentation!
+Welcome to xlens's documentation!
 ========================================================================================
 
 Dev Guide - Getting Started

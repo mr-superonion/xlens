@@ -3,11 +3,11 @@ import os
 import fitsio
 import numpy as np
 
-from xshear.simulation.loader import MakeDMExposure
-from xshear.simulation.measure import ProcessSimDM, ProcessSimFPFS, utils
-from xshear.simulation.neff import NeffSimFPFS
-from xshear.simulation.simulator import SimulateImage
-from xshear.simulation.summary import SummarySimFPFS
+from xlens.simulation.loader import MakeDMExposure
+from xlens.simulation.measure import ProcessSimDM, ProcessSimFPFS, utils
+from xlens.simulation.neff import NeffSimFPFS
+from xlens.simulation.simulator import SimulateImage
+from xlens.simulation.summary import SummarySimFPFS
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 

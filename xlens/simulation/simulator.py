@@ -45,7 +45,10 @@ class SimulateBase(object):
         # catalog directory
         cat_dir = cparser.get("simulation", "cat_dir")
         self.cat_dir = os.path.join(self.root_dir, cat_dir)
-        self.cat_dm_dir = cat_dir.replace("cat", "cat_dm")
+        cat_dm_dir = cparser.get("simulation", "cat_dm_dir", fallback=None)
+        if cat_dm_dir is None:
+            cat_dm_dir = cat_dir.replace("cat", "cat_dm")
+        self.cat_dm_dir = os.path.join(self.root_dir, cat_dm_dir)
 
         # summary directory
         sum_dir = cparser.get("simulation", "sum_dir")

@@ -57,7 +57,7 @@ class DMMeasurementConfig(pexConfig.Config):
         self.deblend.maxFootprintSize = 600
 
         self.measurement.load(os.path.join(getPackageDir("obs_subaru"), "config", "hsm.py"))
-        # self.load(os.path.join(getPackageDir("obs_subaru"), "config", "cmodel.py"))
+        self.load(os.path.join(getPackageDir("obs_subaru"), "config", "cmodel.py"))
 
 
 class DMMeasurementTask(pipeBase.PipelineTask):
@@ -116,14 +116,17 @@ class ProcessSimDM(MakeDMExposure):
     def __init__(self, config_name):
         super().__init__(config_name)
         self.dm_task = DMMeasurementTask()
-        self.output_dir = self.cat_dir.replace("cat", "cat_dm")
+        self.output_dir = self.cat_dm_dir
         if not os.path.isdir(self.output_dir):
             os.makedirs(self.output_dir, exist_ok=True)
 
     def run(self, file_name):
-        exposure = self.generate_exposure(file_name)
-        sources = self.dm_task.measure_exposure(exposure)
         out_name = os.path.join(self.output_dir, file_name.split("/")[-1])
         out_name = out_name.replace("image-", "src-").replace("_xxx", "_%s" % self.bands)
+        if os.path.isfile(out_name):
+            print("Already has the output file")
+            return
+        exposure = self.generate_exposure(file_name)
+        sources = self.dm_task.measure_exposure(exposure)
         sources.writeFits(out_name)
         return
