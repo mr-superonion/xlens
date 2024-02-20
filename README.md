@@ -6,7 +6,6 @@
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/mr-superonion/xlens/smoke-test.yml)](https://github.com/mr-superonion/xlens/actions/workflows/smoke-test.yml)
 [![codecov](https://codecov.io/gh/mr-superonion/xlens/branch/main/graph/badge.svg)](https://codecov.io/gh/mr-superonion/xlens)
 [![Read the Docs](https://img.shields.io/readthedocs/xlens)](https://xlens.readthedocs.io/)
-[![benchmarks](https://img.shields.io/github/actions/workflow/status/mr-superonion/xlens/asv-main.yml?label=benchmarks)](https://mr-superonion.github.io/xlens/)
 
 This project was automatically generated using the LINCC-Frameworks
 [python-project-template](https://github.com/lincc-frameworks/python-project-template).
