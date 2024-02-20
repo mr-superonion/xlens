@@ -4,15 +4,11 @@ import numpy as np
 from astropy.table import Table, join
 
 
-def prepare_simulation_dm_catalog(filename, isim=-1):
+def read_dm_catalog(filename):
     """From LSST pipeline data to HSC catalog data
 
     Args:
     filename (str):     fits filename to read
-    fieldname (str):    HSC field information
-    isim (int):         simulation subfield information
-    ngalR (int):        number of stamps in each row
-    ngrid (int):        number of grids in each stamp
 
     Returns:
     catalog (ndarray): the prepared catalog for a subfield
@@ -50,7 +46,7 @@ def prepare_simulation_dm_catalog(filename, isim=-1):
         return None
     catalog = catalog[colNames]
     # Add column to make a WL flag for the simulation data:
-    catalog["weak_lensing_flag"] = get_wl_cuts(catalog)
+    catalog["dm_hsc_wl_flag"] = get_wl_cuts(catalog)
     return catalog
 
 
@@ -189,7 +185,7 @@ def get_imag_A10(catalog):
     elif "i_apertureflux_10_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_10_mag"]
     elif "base_CircularApertureFlux_3_0_instFlux" in catalog.dtype.names:  # pipe 7
-        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_3_0_instFlux"]) + 27.0
+        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_3_0_instFlux"]) + 30.0
     else:
         magnitude = _nan_array(len(catalog))
     return magnitude
@@ -205,7 +201,7 @@ def get_imag_A15(catalog):
     elif "i_apertureflux_15_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_15_mag"]
     elif "base_CircularApertureFlux_4_5_instFlux" in catalog.dtype.names:  # pipe 7
-        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_4_5_instFlux"]) + 27.0
+        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_4_5_instFlux"]) + 30.0
     else:
         magnitude = _nan_array(len(catalog))
     return magnitude
@@ -221,7 +217,7 @@ def get_imag_A20(catalog):
     if "i_apertureflux_20_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_20_mag"]
     elif "base_CircularApertureFlux_6_0_instFlux" in catalog.dtype.names:  # pipe 7
-        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_6_0_instFlux"]) + 27.0
+        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_6_0_instFlux"]) + 30.0
     else:
         magnitude = _nan_array(len(catalog))
     return magnitude
@@ -245,7 +241,7 @@ def get_imag(catalog):
     elif "imag_cmodel" in catalog.dtype.names:  # s15
         mag = catalog["imag_cmodel"]
     elif "modelfit_CModel_instFlux" in catalog.dtype.names:  # pipe 7
-        mag = -2.5 * np.log10(catalog["modelfit_CModel_instFlux"]) + 27.0
+        mag = -2.5 * np.log10(catalog["modelfit_CModel_instFlux"]) + 30.0
     else:
         mag = _nan_array(len(catalog))
     return mag
@@ -267,7 +263,7 @@ def get_imag_psf(catalog):
     elif "imag_psf" in catalog.dtype.names:  # s15
         magnitude = catalog["imag_psf"]
     elif "base_PsfFlux_instFlux" in catalog.dtype.names:  # pipe 7
-        magnitude = -2.5 * np.log10(catalog["base_PsfFlux_instFlux"]) + 27.0
+        magnitude = -2.5 * np.log10(catalog["base_PsfFlux_instFlux"]) + 30.0
     else:
         magnitude = _nan_array(len(catalog))
     return magnitude
@@ -449,7 +445,7 @@ def get_res(catalog):
     return res
 
 
-def get_sdss_size(catalog, dtype="det"):
+def get_sdss_size(catalog, dtype="det", pixel_scale=0.168):
     """This utility gets the observed galaxy size from a data or sims catalog
     using the specified size definition from the second moments matrix.
 
@@ -461,9 +457,9 @@ def get_sdss_size(catalog, dtype="det"):
     size (ndarray):     galaxy size
     """
     if "base_SdssShape_xx" in catalog.dtype.names:  # pipe 7
-        gal_mxx = catalog["base_SdssShape_xx"] * 0.168**2.0
-        gal_myy = catalog["base_SdssShape_yy"] * 0.168**2.0
-        gal_mxy = catalog["base_SdssShape_xy"] * 0.168**2.0
+        gal_mxx = catalog["base_SdssShape_xx"] * pixel_scale**2.0
+        gal_myy = catalog["base_SdssShape_yy"] * pixel_scale**2.0
+        gal_mxy = catalog["base_SdssShape_xy"] * pixel_scale**2.0
     elif "i_sdssshape_shape11" in catalog.dtype.names:  # s18 & s19
         gal_mxx = catalog["i_sdssshape_shape11"]
         gal_myy = catalog["i_sdssshape_shape22"]
@@ -544,7 +540,7 @@ def get_sigma_e(catalog):
     return sigma_e
 
 
-def get_psf_size(catalog, dtype="fwhm"):
+def get_psf_size(catalog, dtype="fwhm", pixel_scale=0.168):
     """This utility gets the PSF size from a data or sims catalog using the
     specified size definition from the second moments matrix.
 
@@ -556,9 +552,9 @@ def get_psf_size(catalog, dtype="fwhm"):
     size (ndarray):     PSF size
     """
     if "base_SdssShape_psf_xx" in catalog.dtype.names:
-        psf_mxx = catalog["base_SdssShape_psf_xx"] * 0.168**2.0
-        psf_myy = catalog["base_SdssShape_psf_yy"] * 0.168**2.0
-        psf_mxy = catalog["base_SdssShape_psf_xy"] * 0.168**2.0
+        psf_mxx = catalog["base_SdssShape_psf_xx"] * pixel_scale**2.0
+        psf_myy = catalog["base_SdssShape_psf_yy"] * pixel_scale**2.0
+        psf_mxy = catalog["base_SdssShape_psf_xy"] * pixel_scale**2.0
     elif "i_sdssshape_psf_shape11" in catalog.dtype.names:
         psf_mxx = catalog["i_sdssshape_psf_shape11"]
         psf_myy = catalog["i_sdssshape_psf_shape22"]
@@ -631,16 +627,16 @@ def get_gal_ellip(catalog):
     return (mxx - myy) / (mxx + myy), 2.0 * mxy / (mxx + myy)
 
 
-def get_psf_ellip(catalog, return_shear=False):
+def get_psf_ellip(catalog, return_shear=False, pixel_scale=0.168):
     """This utility gets the PSF ellipticity (uncalibrated shear) from a data
     or sims catalog.
     """
     if "e1_psf" in catalog.dtype.names:
         return catalog["e1_psf"], catalog["e2_psf"]
     elif "base_SdssShape_psf_xx" in catalog.dtype.names:
-        psf_mxx = catalog["base_SdssShape_psf_xx"] * 0.168**2.0
-        psf_myy = catalog["base_SdssShape_psf_yy"] * 0.168**2.0
-        psf_mxy = catalog["base_SdssShape_psf_xy"] * 0.168**2.0
+        psf_mxx = catalog["base_SdssShape_psf_xx"] * pixel_scale**2.0
+        psf_myy = catalog["base_SdssShape_psf_yy"] * pixel_scale**2.0
+        psf_mxy = catalog["base_SdssShape_psf_xy"] * pixel_scale**2.0
     elif "i_sdssshape_psf_shape11" in catalog.dtype.names:
         psf_mxx = catalog["i_sdssshape_psf_shape11"]
         psf_myy = catalog["i_sdssshape_psf_shape22"]
@@ -658,7 +654,7 @@ def get_psf_ellip(catalog, return_shear=False):
         return (psf_mxx - psf_myy) / (psf_mxx + psf_myy), 2.0 * psf_mxy / (psf_mxx + psf_myy)
 
 
-def get_sdss_ellip(catalog, return_shear=False):
+def get_sdss_ellip(catalog, return_shear=False, pixel_scale=0.168):
     """This utility gets the SDSS ellipticity (uncalibrated shear) from a data
     or sims catalog.
     """
@@ -671,9 +667,9 @@ def get_sdss_ellip(catalog, return_shear=False):
         psf_myy = catalog["ishape_sdss_iyy"]
         psf_mxy = catalog["ishape_sdss_ixy"]
     elif "base_SdssShape_xx" in catalog.dtype.names:  # pipeline
-        psf_mxx = catalog["base_SdssShape_xx"] * 0.168**2.0
-        psf_myy = catalog["base_SdssShape_yy"] * 0.168**2.0
-        psf_mxy = catalog["base_SdssShape_xy"] * 0.168**2.0
+        psf_mxx = catalog["base_SdssShape_xx"] * pixel_scale**2.0
+        psf_myy = catalog["base_SdssShape_yy"] * pixel_scale**2.0
+        psf_mxy = catalog["base_SdssShape_xy"] * pixel_scale**2.0
     else:
         raise ValueError("Input catalog does not have required coulmn name")
     if return_shear:
@@ -682,19 +678,13 @@ def get_sdss_ellip(catalog, return_shear=False):
         return (psf_mxx - psf_myy) / (psf_mxx + psf_myy), 2.0 * psf_mxy / (psf_mxx + psf_myy)
 
 
-def update_wl_cuts(catalog):
-    """Update the weak-lensing cuts"""
-    catalog["weak_lensing_flag"] = get_wl_cuts(catalog)
-    return catalog
-
-
 def get_wl_cuts(catalog):
     """Returns the weak-lensing cuts"""
     sig_e = get_sigma_e(catalog)
     absE = get_abs_ellip(catalog)
     fwhm = get_psf_size(catalog, "fwhm")
     wlflag = (
-        ((get_imag(catalog) - catalog["a_i"]) < 24.5)
+        ((get_imag(catalog)) < 24.5)
         & (absE <= 2.0)
         & (get_res(catalog) >= 0.3)
         & (get_snr(catalog) >= 10.0)

@@ -61,6 +61,7 @@ class SummarySimFPFS(SimulateBatchBase):
         self.upper_mag = cparser.getfloat("FPFS", "magcut", fallback=27.5)
         self.lower_m00 = 10 ** ((self.calib_mag_zero - self.upper_mag) / 2.5)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
+        self.thres2 = cparser.getfloat("FPFS", "thres2", fallback=0.0)
 
         # shear setup
         self.shear_value = cparser.getfloat("simulation", "shear_value")
@@ -93,6 +94,7 @@ class SummarySimFPFS(SimulateBatchBase):
             c2=self.c2,
             alpha=self.alpha,
             beta=self.beta,
+            thres2=self.thres2,
         )
         if self.noise_rev:
             if self.g_comp_measure == 1:

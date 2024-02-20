@@ -53,6 +53,7 @@ class FPFSMeasurementTask(SimulateBase):
         self.sigma_as = cparser.getfloat("FPFS", "sigma_as")
         self.sigma_det = cparser.getfloat("FPFS", "sigma_det")
         self.rcut = cparser.getint("FPFS", "rcut", fallback=32)
+        self.thres2 = cparser.getfloat("FPFS", "thres2", fallback=0.0)
         self.ngrid = 2 * self.rcut
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
         self.psf_rcut = min(psf_rcut, self.rcut)
@@ -86,7 +87,8 @@ class FPFSMeasurementTask(SimulateBase):
                 img_data=gal_array,
                 psf_data=psf_array,
                 cov_elem=cov_elem,
-                thres=9.5,
+                thres=8.0,
+                thres2=self.thres2,
                 bound=self.rcut,
             )
         else:

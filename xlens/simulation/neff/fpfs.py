@@ -46,6 +46,7 @@ class NeffSimFPFS(SimulateBatchBase):
         self.c2 = cparser.getfloat("FPFS", "c2")
         self.alpha = cparser.getfloat("FPFS", "alpha")
         self.beta = cparser.getfloat("FPFS", "beta")
+        self.thres2 = cparser.getfloat("FPFS", "thres2", fallback=0.0)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
         self.ncov_fname = cparser.get(
             "FPFS",
@@ -64,7 +65,7 @@ class NeffSimFPFS(SimulateBatchBase):
 
         coadd_dim = cparser.getint("simulation", "coadd_dim")
         buff = cparser.getint("simulation", "buff")
-        coadd_scale = cparser.getint("simulation", "coadd_scale", fallback=0.2)
+        coadd_scale = cparser.getfloat("simulation", "coadd_scale", fallback=0.2)
         radius = ((coadd_dim + 10) / 2.0 - buff) * coadd_scale / 60.0
         self.area = np.pi * radius**2  # [arcmin^2]
         return
@@ -74,12 +75,13 @@ class NeffSimFPFS(SimulateBatchBase):
         out = np.zeros((len(id_range), 2))
         cat_obj = FpfsCatalog(
             cov_mat=self.cov_mat,
-            snr_min=12.0,
+            snr_min=10.0,
             ratio=self.ratio,
             c0=self.c0,
             c2=self.c2,
             alpha=self.alpha,
             beta=self.beta,
+            thres2=self.thres2,
         )
         if self.noise_rev:
             if self.g_comp_measure == 1:
