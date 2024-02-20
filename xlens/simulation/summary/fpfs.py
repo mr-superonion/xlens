@@ -58,8 +58,8 @@ class SummarySimFPFS(SimulateBatchBase):
         self.c2 = cparser.getfloat("FPFS", "c2")
         self.alpha = cparser.getfloat("FPFS", "alpha")
         self.beta = cparser.getfloat("FPFS", "beta")
-        self.upper_mag = cparser.getfloat("FPFS", "magcut", fallback=27.5)
-        self.lower_m00 = 10 ** ((self.calib_mag_zero - self.upper_mag) / 2.5)
+        upper_mag = cparser.getfloat("FPFS", "magcut", fallback=27.5)
+        self.lower_m00 = 10 ** ((self.calib_mag_zero - upper_mag) / 2.5)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
         self.thres2 = cparser.getfloat("FPFS", "thres2", fallback=0.0)
 
@@ -79,7 +79,7 @@ class SummarySimFPFS(SimulateBatchBase):
 
         self.ofname = os.path.join(
             self.sum_dir,
-            "bin_%s.fits" % (self.upper_mag),
+            "bin_%s.fits" % (upper_mag),
         )
         return
 
