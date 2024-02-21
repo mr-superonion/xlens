@@ -49,7 +49,7 @@ class NeffSimFPFS(SimulateBatchBase):
         self.snr_min = cparser.getfloat("FPFS", "snr_min", fallback=12.0)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
 
-        self.radial_n = cparser.getint("FPFS", "nord", fallback=2)
+        self.radial_n = cparser.getint("FPFS", "radial_n", fallback=2)
         self.nord = cparser.getint("FPFS", "nord", fallback=4)
         assert self.radial_n in [2, 4]
         if self.radial_n == 2:
@@ -73,8 +73,7 @@ class NeffSimFPFS(SimulateBatchBase):
             "g_comp_measureonent_measure",
             fallback=1,
         )
-        assert self.g_comp_measure in [1, 2], \
-            "The g_comp_measure in configure file is not supported"
+        assert self.g_comp_measure in [1, 2], "The g_comp_measure in configure file is not supported"
         self.imode = self.shear_mode_list[-1]
 
         coadd_dim = cparser.getint("simulation", "coadd_dim")
