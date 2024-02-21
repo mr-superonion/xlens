@@ -48,6 +48,15 @@ class NeffSimFPFS(SimulateBatchBase):
         self.thres2 = cparser.getfloat("FPFS", "thres2", fallback=0.0)
         self.snr_min = cparser.getfloat("FPFS", "snr_min", fallback=12.0)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
+
+        self.radial_n = cparser.getint("FPFS", "nord", fallback=2)
+        self.nord = cparser.getint("FPFS", "nord", fallback=4)
+        assert self.radial_n in [2, 4]
+        if self.radial_n == 2:
+            assert self.nord >= 4
+        if self.radial_n == 4:
+            assert self.nord >= 6
+
         self.ncov_fname = cparser.get(
             "FPFS",
             "ncov_fname",
