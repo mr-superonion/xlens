@@ -21,7 +21,7 @@ from configparser import ConfigParser, ExtendedInterpolation
 import fitsio
 import jax
 import numpy as np
-from fpfs.catalog import FpfsCatalog, read_catalog
+from fpfs.catalog import fpfs_catalog, read_catalog
 
 from ..simulator import SimulateBatchBase
 
@@ -86,7 +86,7 @@ class SummarySimFPFS(SimulateBatchBase):
     def run(self, icore):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 4))
-        cat_obj = FpfsCatalog(
+        cat_obj = fpfs_catalog(
             cov_mat=self.cov_mat,
             snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
             ratio=self.ratio,
@@ -141,10 +141,11 @@ class SummarySimFPFS(SimulateBatchBase):
             a = fitsio.read(fname)
             a = a[np.argsort(a[:, 0])]
             nsim = a.shape[0]
-            msk = np.isnan(a[:, 3])
             b = np.average(a, axis=0)
-            c = np.std(a, axis=0)
-            print("multiplicative bias:", b[1] / b[3] / self.shear_value / 2.0 - 1),
+            print(
+                "multiplicative bias:",
+                b[1] / b[3] / self.shear_value / 2.0 - 1,
+            )
             print(
                 "1-sigma error:",
                 np.std(a[:, 1] / a[:, 3]) / self.shear_value / 2.0 / np.sqrt(nsim),

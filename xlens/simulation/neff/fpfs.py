@@ -20,7 +20,7 @@ from configparser import ConfigParser
 import fitsio
 import jax
 import numpy as np
-from fpfs.catalog import FpfsCatalog, read_catalog
+from fpfs.catalog import fpfs_catalog, read_catalog
 
 from ..simulator import SimulateBatchBase
 
@@ -46,8 +46,7 @@ class NeffSimFPFS(SimulateBatchBase):
         self.alpha = cparser.getfloat("FPFS", "alpha")
         self.beta = cparser.getfloat("FPFS", "beta")
         self.thres2 = cparser.getfloat("FPFS", "thres2", fallback=0.0)
-        upper_mag = cparser.getfloat("FPFS", "magcut", fallback=27.5)
-        self.lower_m00 = 10 ** ((self.calib_mag_zero - upper_mag) / 2.5)
+        self.snr_min = cparser.getfloat("FPFS", "snr_min", fallback=12.0)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
         self.ncov_fname = cparser.get(
             "FPFS",
@@ -79,9 +78,9 @@ class NeffSimFPFS(SimulateBatchBase):
     def run(self, icore):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 2))
-        cat_obj = FpfsCatalog(
+        cat_obj = fpfs_catalog(
             cov_mat=self.cov_mat,
-            snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
+            snr_min=self.snr_min,
             ratio=self.ratio,
             c0=self.c0,
             c2=self.c2,

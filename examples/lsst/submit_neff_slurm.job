@@ -1,0 +1,19 @@
+#!/bin/bash
+#SBATCH --nodes 4
+#SBATCH --ntasks-per-node 28
+#SBATCH --time 24:00:00
+#SBATCH --job-name fpfs
+#SBATCH -o log/fpfs-neff.out
+#SBATCH -e log/fpfs-neff.error
+
+source /hildafs/projects/phy200017p/share/ana/setupLsstim1.sh
+
+export config_file=config_neff.ini
+
+export min_id=0
+export max_id=200
+
+# Measure galaxy and store catalog to disk
+mpirun -np 112 --bind-to core xlens_sim.py measure_fpfs --config ./$config_file --min_id $min_id --max_id $max_id --mpi &&
+# Measure effective galaxy number density
+mpirun -np 112 --bind-to core xlens_sim.py neff_fpfs --config ./$config_file --min_id $min_id --max_id $max_id --mpi
