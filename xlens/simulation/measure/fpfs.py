@@ -52,7 +52,7 @@ class FPFSMeasurementTask(SimulateBase):
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
         self.psf_rcut = min(psf_rcut, self.rcut)
 
-        self.radial_n = cparser.getint("FPFS", "nord", fallback=2)
+        self.radial_n = cparser.getint("FPFS", "radial_n", fallback=2)
         self.nord = cparser.getint("FPFS", "nord", fallback=4)
         assert self.radial_n in [2, 4]
         if self.radial_n == 2:
