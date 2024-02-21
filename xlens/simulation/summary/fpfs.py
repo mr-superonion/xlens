@@ -20,7 +20,6 @@ from configparser import ConfigParser, ExtendedInterpolation
 
 import fitsio
 import jax
-import jax.numpy as jnp
 import numpy as np
 from fpfs.catalog import FpfsCatalog, read_catalog
 
@@ -75,7 +74,8 @@ class SummarySimFPFS(SimulateBatchBase):
             "g_component_measure",
             fallback=1,
         )
-        assert self.g_comp_measure in [1, 2], "The g_comp_measure in configure file is not supported"
+        assert self.g_comp_measure in [1, 2], \
+            "The g_comp_measure in configure file is not supported"
 
         self.ofname = os.path.join(
             self.sum_dir,

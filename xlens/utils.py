@@ -20,7 +20,8 @@ def find_number_after_keyword(file_path, keyword):
         for line in file:
             # Check if the keyword is in the current line
             if keyword in line:
-                # Split the line at the keyword and take the second part (the number)
+                # Split the line at the keyword and take the second part (the
+                # number)
                 number_str = line.split(keyword)[1].strip()
                 # Convert the number string to a float
                 try:
@@ -29,5 +30,6 @@ def find_number_after_keyword(file_path, keyword):
                 except ValueError:
                     print(f"Could not convert {number_str} to float.")
                     return None
-    # Return None if the keyword was not found or if there was an issue converting the number
+    # Return None if the keyword was not found or if there was an issue
+    # converting the number
     return None

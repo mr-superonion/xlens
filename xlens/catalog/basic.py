@@ -1,7 +1,7 @@
 import astropy.io.fits as pyfits
 import healpy as hp
 import numpy as np
-from astropy.table import Table, join
+from astropy.table import Table
 
 
 def read_dm_catalog(filename):
@@ -16,7 +16,7 @@ def read_dm_catalog(filename):
 
     # Read the catalog data
     catalog = Table.read(filename)
-    colNames = catalog.colnames
+    col_names = catalog.colnames
 
     # Load the header to get proper name of flags
     header = pyfits.getheader(filename, 1)
@@ -44,7 +44,7 @@ def read_dm_catalog(filename):
     catalog = catalog[mask]
     if len(catalog) == 0:
         return None
-    catalog = catalog[colNames]
+    catalog = catalog[col_names]
     # Add column to make a WL flag for the simulation data:
     catalog["dm_hsc_wl_flag"] = get_wl_cuts(catalog)
     return catalog
@@ -123,7 +123,7 @@ def get_snr_apertures(catalog):
     return snr10, snr15, snr20
 
 
-def get_snr_localBG(catalog):
+def get_snr_local_background(catalog):
     """This utility computes the S/N for each object in the catalog,
     based on local background flux. It does not impose any cuts
     and returns NaNs for invalid S/N values.
@@ -175,14 +175,12 @@ def get_photo_z(catalog, method_name):
     return z
 
 
-def get_imag_A10(catalog):
+def get_imag_aperture10(catalog):
     """This utility returns the i-band magnitude of the objects in the input
     data or simulation catalog. Does not apply any cuts and returns NaNs for
     invalid values.
     """
-    if "magA10" in catalog.dtype.names:
-        return catalog["magA10"]
-    elif "i_apertureflux_10_mag" in catalog.dtype.names:  # s18 s19
+    if "i_apertureflux_10_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_10_mag"]
     elif "base_CircularApertureFlux_3_0_instFlux" in catalog.dtype.names:  # pipe 7
         magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_3_0_instFlux"]) + 30.0
@@ -191,14 +189,12 @@ def get_imag_A10(catalog):
     return magnitude
 
 
-def get_imag_A15(catalog):
+def get_imag_aperture15(catalog):
     """This utility returns the i-band magnitude of the objects in the input
     data or simulation catalog. Does not apply any cuts and returns NaNs for
     invalid values.
     """
-    if "magA15" in catalog.dtype.names:
-        return catalog["magA15"]
-    elif "i_apertureflux_15_mag" in catalog.dtype.names:  # s18 s19
+    if "i_apertureflux_15_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_15_mag"]
     elif "base_CircularApertureFlux_4_5_instFlux" in catalog.dtype.names:  # pipe 7
         magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_4_5_instFlux"]) + 30.0
@@ -207,13 +203,11 @@ def get_imag_A15(catalog):
     return magnitude
 
 
-def get_imag_A20(catalog):
+def get_imag_aperture20(catalog):
     """This utility returns the i-band magnitude of the objects in the input
     data or simulation catalog. Does not apply any cuts and returns NaNs for
     invalid values.
     """
-    if "magA20" in catalog.dtype.names:
-        return catalog["magA20"]
     if "i_apertureflux_20_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_20_mag"]
     elif "base_CircularApertureFlux_6_0_instFlux" in catalog.dtype.names:  # pipe 7
@@ -287,20 +281,20 @@ def get_npass(catalog, meas="cmodel"):
         zcountinputs = catalog["z_inputcount_value"]
         ycountinputs = catalog["y_inputcount_value"]
         if meas == "cmodel":
-            pendN = "cmodel_mag"
+            pp = "cmodel_mag"
         elif meas == "aperture":
-            pendN = "apertureflux_10_mag"
+            pp = "apertureflux_10_mag"
         else:
             return _nan_array(len(catalog))
-        if "forced_g_%ssigma" % pendN in catalog.dtype.names:  # For S18A
-            pendN += "sigma"
-        if "forced_g_%serr" % pendN in catalog.dtype.names:  # For S19A
-            pendN += "err"
+        if "forced_g_%ssigma" % pp in catalog.dtype.names:  # For S18A
+            pp += "sigma"
+        if "forced_g_%serr" % pp in catalog.dtype.names:  # For S19A
+            pp += "err"
         # multi-band detection to remove junk
-        g_snr = (2.5 / np.log(10.0)) / catalog["forced_g_%s" % pendN]
-        r_snr = (2.5 / np.log(10.0)) / catalog["forced_r_%s" % pendN]
-        z_snr = (2.5 / np.log(10.0)) / catalog["forced_z_%s" % pendN]
-        y_snr = (2.5 / np.log(10.0)) / catalog["forced_y_%s" % pendN]
+        g_snr = (2.5 / np.log(10.0)) / catalog["forced_g_%s" % pp]
+        r_snr = (2.5 / np.log(10.0)) / catalog["forced_r_%s" % pp]
+        z_snr = (2.5 / np.log(10.0)) / catalog["forced_z_%s" % pp]
+        y_snr = (2.5 / np.log(10.0)) / catalog["forced_y_%s" % pp]
     elif "gcountinputs" in catalog.dtype.names:
         gcountinputs = catalog["gcountinputs"]
         rcountinputs = catalog["rcountinputs"]
@@ -691,7 +685,7 @@ def get_wl_cuts(catalog):
         & (sig_e > 0.0)
         & (sig_e < 0.4)
         & (get_logb(catalog) <= -0.38)
-        & (get_imag_A10(catalog) < 25.5)
+        & (get_imag_aperture10(catalog) < 25.5)
         & (~np.isnan(fwhm))
     )
     return wlflag

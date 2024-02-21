@@ -19,8 +19,6 @@
 # the GNU General Public License along with this program.  If not,
 # see <http://www.lsstcorp.org/LegalNotices/>.
 #
-import gc
-import json
 import os
 import time
 from configparser import ConfigParser, ExtendedInterpolation
@@ -29,10 +27,6 @@ import fitsio
 import fpfs
 import numpy as np
 import numpy.lib.recfunctions as rfn
-from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
-from descwl_shear_sims.psfs import make_fixed_psf
-from descwl_shear_sims.sim import make_sim
-from descwl_shear_sims.stars import StarCatalog
 
 from ..loader import MakeDMExposure
 from ..simulator import SimulateBase
@@ -103,11 +97,6 @@ class FPFSMeasurementTask(SimulateBase):
         print("pre-selected number of sources: %d" % len(coords))
         out = task.get_results(task.measure(gal_array, coords))
         out2 = task.get_results_detection(coords)
-        # mask = np.ones_like(out, dtype=bool)
-        # for _ in range(8):
-        #     mask = mask & ((out["fpfs_v%d" % _] + out["fpfs_m00"] * 0.02) > 0)
-        # mask = mask & ((out["fpfs_m00"] + out["fpfs_m20"]) > 0.2)
-        # mask = mask & ((out["fpfs_m00"] - out["fpfs_m20"]) > 0.8)
         return out, out2
 
     def run(self, exposure, dm_fname=None):

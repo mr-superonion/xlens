@@ -26,7 +26,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
-from descwl_shear_sims.psfs import make_fixed_psf, make_ps_psf
+from descwl_shear_sims.psfs import make_fixed_psf
 from descwl_shear_sims.shear import ShearRedshift
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
@@ -78,7 +78,7 @@ class SimulateBase(object):
     def get_sim_fnames(self, min_id, max_id):
         """Generate filename for simulations
         Args:
-            ftype (str):    file type ('src' for source, and 'image' for exposure
+            ftype (str):    file type ('src' for gal, and 'image' for exposure
             min_id (int):   minimum id
             max_id (int):   maximum id
         Returns:

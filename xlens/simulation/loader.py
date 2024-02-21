@@ -13,7 +13,6 @@
 # GNU General Public License for more details.
 #
 
-import gc
 import os
 from configparser import ConfigParser
 from copy import deepcopy
@@ -45,14 +44,12 @@ _nstd_map = {
         "r": 0.371,
         "i": 0.595,
         "z": 1.155,
-        "a": 0.2186,
     },
     "HSC": {
         "g": 0.964,
         "r": 0.964,
         "i": 0.964,
         "z": 0.964,
-        "a": 0.964,
     },
 }
 
@@ -209,6 +206,12 @@ class MakeDMExposure(SimulateBase):
             "star_bleeds": self.star_bleeds,
             "draw_method": "auto",
         }
+        if self.bands != "a":
+            blist = [b for b in self.bands]
+            bands = self.bands
+        else:
+            blist = ["g", "r", "i", "z"]
+            bands = "aaaa"
         star_outcome = make_sim(
             rng=rng,
             galaxy_catalog=galaxy_catalog,
@@ -220,7 +223,7 @@ class MakeDMExposure(SimulateBase):
             draw_bright=False,
             dither=self.dither,
             rotate=self.rotate,
-            bands=[b for b in self.bands],
+            bands=blist,
             noise_factor=0.0,
             calib_mag_zero=self.calib_mag_zero,
             survey_name=self.survey_name,
@@ -234,7 +237,7 @@ class MakeDMExposure(SimulateBase):
         nx = self.coadd_dim + 10
         gal_array = np.zeros((ny, nx))
         msk_array = np.zeros((ny, nx), dtype=int)
-        for band in self.bands:
+        for i, band in enumerate(blist):
             print("reading %s band" % band)
             # Add noise
             nstd_f = self.noise_std[band] * self.noise_ratio
@@ -249,7 +252,7 @@ class MakeDMExposure(SimulateBase):
             gal_array = (
                 gal_array
                 + (
-                    fitsio.read(fname.replace("_xxx", "_%s" % band))
+                    fitsio.read(fname.replace("_xxx", "_%s" % bands[i]))
                     + star_array
                     + rng2.normal(
                         scale=nstd_f,
@@ -266,8 +269,8 @@ class MakeDMExposure(SimulateBase):
         exp = afw_image.ExposureF(masked_image)
 
         zero_flux = 10.0 ** (0.4 * self.calib_mag_zero)
-        photoCalib = afw_image.makePhotoCalibFromCalibZeroPoint(zero_flux)
-        exp.setPhotoCalib(photoCalib)
+        photo_calib = afw_image.makePhotoCalibFromCalibZeroPoint(zero_flux)
+        exp.setPhotoCalib(photo_calib)
         psf_dim = star_outcome["psf_dims"][0]
         se_wcs = star_outcome["se_wcs"][0]
         dm_psf = make_dm_psf(psf=psf_obj, psf_dim=psf_dim, wcs=deepcopy(se_wcs))
