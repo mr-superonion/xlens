@@ -31,6 +31,8 @@ from descwl_shear_sims.shear import ShearRedshift
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
 
+from .halo import ShearHalo
+
 band_list = ["g", "r", "i", "z"]
 nband = len(band_list)
 
@@ -43,19 +45,19 @@ class SimulateBase(object):
         self.img_dir = os.path.join(self.root_dir, self.sim_name)
 
         # catalog directory
-        cat_dir = cparser.get("simulation", "cat_dir")
-        self.cat_dir = os.path.join(self.root_dir, cat_dir)
-        cat_dm_dir = cparser.get("simulation", "cat_dm_dir", fallback=None)
-        if cat_dm_dir is None:
-            cat_dm_dir = cat_dir.replace("cat", "cat_dm")
-        self.cat_dm_dir = os.path.join(self.root_dir, cat_dm_dir)
+        cat_dir = cparser.get("simulation", "cat_dir", fallback=None)
+        if cat_dir is not None:
+            self.cat_dir = os.path.join(self.root_dir, cat_dir)
+            cat_dm_dir = cparser.get("simulation", "cat_dm_dir", fallback=None)
+            if cat_dm_dir is None and cat_dir is not None:
+                cat_dm_dir = cat_dir.replace("cat", "cat_dm")
+            self.cat_dm_dir = os.path.join(self.root_dir, cat_dm_dir)
 
         # summary directory
-        sum_dir = cparser.get("simulation", "sum_dir")
-        self.sum_dir = os.path.join(self.root_dir, sum_dir)
+        sum_dir = cparser.get("simulation", "sum_dir", fallback=None)
+        if sum_dir is not None:
+            self.sum_dir = os.path.join(self.root_dir, sum_dir)
 
-        self.shear_mode_list = json.loads(cparser.get("simulation", "shear_mode_list"))
-        self.nshear = len(self.shear_mode_list)
         # number of rotations for ring test
         self.nrot = cparser.getint("simulation", "nrot")
         # number of redshiftbins
@@ -73,6 +75,47 @@ class SimulateBase(object):
 
         # magnitude zero point
         self.calib_mag_zero = 30.0
+
+        # layout of the simulation (random, random_disk, or hex)
+        self.layout = cparser.get("simulation", "layout")
+        # Whether do rotation or dithering
+        self.rotate = cparser.getboolean("simulation", "rotate")
+        self.dither = cparser.getboolean("simulation", "dither")
+        # version of the PSF simulation: 0 -- fixed PSF
+        self.psf_variation = cparser.getfloat(
+            "simulation",
+            "psf_variation",
+            fallback=0.0,
+        )
+        # size of the exposure image
+        self.coadd_dim = cparser.getint("simulation", "coadd_dim")
+        # buffer length to avoid galaxies hitting the boundary of the exposure
+        self.buff = cparser.getint("simulation", "buff")
+        self.survey_name = cparser.get(
+            "simulation",
+            "survey_name",
+            fallback="LSST",
+        )
+        self.psf_fwhm = cparser.getfloat(
+            "simulation",
+            "psf_fwhm",
+            fallback=None,
+        )
+        self.psf_e1 = cparser.getfloat(
+            "simulation",
+            "psf_e1",
+            fallback=0.0,
+        )
+        self.psf_e2 = cparser.getfloat(
+            "simulation",
+            "psf_e2",
+            fallback=0.0,
+        )
+
+        self.shear_mode_list = json.loads(
+            cparser.get("simulation", "shear_mode_list"),
+        )
+        self.nshear = len(self.shear_mode_list)
         return
 
     def get_sim_fnames(self, min_id, max_id):
@@ -175,21 +218,6 @@ class SimulateImage(SimulateBase):
         if not os.path.isdir(self.img_dir):
             os.makedirs(self.img_dir, exist_ok=True)
 
-        # layout of the simulation (random, random_disk, or hex)
-        self.layout = cparser.get("simulation", "layout")
-        # Whether do rotation or dithering
-        self.rotate = cparser.getboolean("simulation", "rotate")
-        self.dither = cparser.getboolean("simulation", "dither")
-        # version of the PSF simulation: 0 -- fixed PSF
-        self.psf_variation = cparser.getfloat(
-            "simulation",
-            "psf_variation",
-            fallback=0.0,
-        )
-        # size of the exposure image
-        self.coadd_dim = cparser.getint("simulation", "coadd_dim")
-        # buffer length to avoid galaxies hitting the boundary of the exposure
-        self.buff = cparser.getint("simulation", "buff")
         self.shear_component_sim = cparser.get(
             "simulation",
             "shear_component",
@@ -197,41 +225,9 @@ class SimulateImage(SimulateBase):
         )
         self.z_bounds = json.loads(cparser.get("simulation", "z_bounds"))
         self.shear_value = cparser.getfloat("simulation", "shear_value")
-        self.survey_name = cparser.get(
-            "simulation",
-            "survey_name",
-            fallback="LSST",
-        )
-        self.psf_fwhm = cparser.getfloat(
-            "simulation",
-            "psf_fwhm",
-            fallback=None,
-        )
-        self.psf_e1 = cparser.getfloat(
-            "simulation",
-            "psf_e1",
-            fallback=0.0,
-        )
-        self.psf_e2 = cparser.getfloat(
-            "simulation",
-            "psf_e2",
-            fallback=0.0,
-        )
-
-        # Stars
-        self.draw_stars = cparser.getboolean(
-            "simulation",
-            "draw_stars",
-            fallback=False,
-        )
-        self.draw_bright = cparser.getboolean(
-            "simulation",
-            "draw_bright",
-            fallback=False,
-        )
         return
 
-    def simulate_image(self, ifield):
+    def run(self, ifield):
         print("Simulating for field: %d" % ifield)
         rng = np.random.RandomState(ifield)
 
@@ -268,13 +264,13 @@ class SimulateImage(SimulateBase):
         bl = deepcopy(band_list)
         print("Simulation has galaxies: %d" % len(galaxy_catalog))
         for shear_mode in self.shear_mode_list:
+            shear_obj = ShearRedshift(
+                z_bounds=self.z_bounds,
+                mode=shear_mode,
+                g_dist=self.shear_component_sim,
+                shear_value=self.shear_value,
+            )
             for irot in range(self.nrot):
-                shear_obj = ShearRedshift(
-                    z_bounds=self.z_bounds,
-                    mode=shear_mode,
-                    g_dist=self.shear_component_sim,
-                    shear_value=self.shear_value,
-                )
                 sim_data = make_sim(
                     rng=rng,
                     galaxy_catalog=galaxy_catalog,
@@ -283,8 +279,8 @@ class SimulateImage(SimulateBase):
                     shear_obj=shear_obj,
                     psf=psf,
                     draw_gals=True,
-                    draw_stars=self.draw_stars,
-                    draw_bright=self.draw_bright,
+                    draw_stars=False,
+                    draw_bright=False,
                     dither=self.dither,
                     rotate=self.rotate,
                     bands=bl,
@@ -312,5 +308,88 @@ class SimulateImage(SimulateBase):
         del galaxy_catalog, psf
         return
 
+
+class SimulateImageHalo(SimulateBase):
+    def __init__(self, config_name):
+        cparser = ConfigParser(interpolation=ExtendedInterpolation())
+        cparser.read(config_name)
+        super().__init__(cparser)
+        if not os.path.isdir(self.img_dir):
+            os.makedirs(self.img_dir, exist_ok=True)
+        return
+
     def run(self, ifield):
-        self.simulate_image(ifield)
+        print("Simulating for field: %d" % ifield)
+        rng = np.random.RandomState(ifield)
+
+        scale = get_survey(
+            gal_type="wldeblend",
+            band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
+            survey_name=self.survey_name,
+        ).pixel_scale
+
+        kargs = {
+            "cosmic_rays": False,
+            "bad_columns": False,
+            "star_bleeds": False,
+            "draw_method": "auto",
+        }
+        psf = make_fixed_psf(
+            psf_type="moffat",
+            psf_fwhm=self.psf_fwhm,
+        ).shear(e1=self.psf_e1, e2=self.psf_e2)
+
+        # galaxy catalog; you can make your own
+        galaxy_catalog = WLDeblendGalaxyCatalog(
+            rng=rng,
+            coadd_dim=self.coadd_dim,
+            buff=self.buff,
+            pixel_scale=scale,
+            layout=self.layout,
+        )
+        bl = deepcopy(band_list)
+        print("Simulation has galaxies: %d" % len(galaxy_catalog))
+        for shear_mode in self.shear_mode_list:
+            par = [4e14, 6.0, 0.2]
+            shear_obj = ShearHalo(
+                mass=par[0],
+                conc=par[1],
+                z_lens=par[2],
+            )
+            for irot in range(self.nrot):
+                sim_data = make_sim(
+                    rng=rng,
+                    galaxy_catalog=galaxy_catalog,
+                    star_catalog=None,
+                    coadd_dim=self.coadd_dim,
+                    shear_obj=shear_obj,
+                    psf=psf,
+                    draw_gals=True,
+                    draw_stars=False,
+                    draw_bright=False,
+                    dither=self.dither,
+                    rotate=self.rotate,
+                    bands=bl,
+                    noise_factor=0.0,
+                    theta0=self.rot_list[irot],
+                    calib_mag_zero=self.calib_mag_zero,
+                    survey_name=self.survey_name,
+                    **kargs,
+                )
+                # write galaxy images
+                for band_name in bl:
+                    gal_fname = "%s/image-%05d_g1-%d_rot%d_%s.fits" % (
+                        self.img_dir,
+                        ifield,
+                        shear_mode,
+                        irot,
+                        band_name,
+                    )
+                    mi = sim_data["band_data"][band_name][0].getMaskedImage()
+                    gdata = mi.getImage().getArray()
+                    fitsio.write(gal_fname, gdata)
+                    del mi, gdata, gal_fname
+                del sim_data
+                gc.collect()
+        del galaxy_catalog, psf
+        return

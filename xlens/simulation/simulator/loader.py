@@ -27,7 +27,7 @@ from descwl_shear_sims.stars import StarCatalog
 from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
 from descwl_shear_sims.wcs import make_dm_wcs
 
-from .simulator import SimulateBase
+from .base import SimulateBase
 
 _band_map = {
     "g": 0,

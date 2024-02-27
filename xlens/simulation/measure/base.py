@@ -32,7 +32,7 @@ from lsst.meas.base import CatalogCalculationTask, SingleFrameMeasurementTask
 from lsst.meas.deblender import SourceDeblendTask
 from lsst.utils import getPackageDir
 
-from ..loader import MakeDMExposure
+from ..simulator.loader import MakeDMExposure
 
 
 class DMMeasurementConfig(pexConfig.Config):
