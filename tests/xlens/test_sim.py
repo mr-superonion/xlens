@@ -3,10 +3,10 @@ import os
 import fitsio
 import numpy as np
 
-from xlens.simulation.loader import MakeDMExposure
 from xlens.simulation.measure import ProcessSimDM, ProcessSimFpfs, utils
 from xlens.simulation.neff import NeffSimFpfs
-from xlens.simulation.simulator import SimulateImage
+from xlens.simulation.simulator.base import SimulateImage
+from xlens.simulation.simulator.loader import MakeDMExposure
 from xlens.simulation.summary import SummarySimFpfs
 
 this_dir = os.path.dirname(os.path.abspath(__file__))

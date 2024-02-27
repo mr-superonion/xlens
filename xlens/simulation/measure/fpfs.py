@@ -28,8 +28,8 @@ import fpfs
 import numpy as np
 import numpy.lib.recfunctions as rfn
 
-from ..loader import MakeDMExposure
-from ..simulator import SimulateBase
+from ..simulator.base import SimulateBase
+from ..simulator.loader import MakeDMExposure
 from .utils import get_psf_array
 
 

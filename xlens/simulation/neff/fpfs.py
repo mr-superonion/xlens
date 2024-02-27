@@ -22,7 +22,7 @@ import jax
 import numpy as np
 from fpfs.catalog import fpfs4_catalog, fpfs_catalog, read_catalog
 
-from ..simulator import SimulateBatchBase
+from ..simulator.base import SimulateBatchBase
 
 
 class NeffSimFpfs(SimulateBatchBase):
