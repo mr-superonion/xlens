@@ -25,7 +25,7 @@ from fpfs.catalog import fpfs4_catalog, fpfs_catalog, read_catalog
 from ..simulator import SimulateBatchBase
 
 
-class NeffSimFPFS(SimulateBatchBase):
+class NeffSimFpfs(SimulateBatchBase):
     def __init__(
         self,
         config_name,
@@ -45,7 +45,6 @@ class NeffSimFPFS(SimulateBatchBase):
         self.c2 = cparser.getfloat("FPFS", "c2")
         self.alpha = cparser.getfloat("FPFS", "alpha")
         self.beta = cparser.getfloat("FPFS", "beta")
-        self.thres2 = cparser.getfloat("FPFS", "thres2", fallback=0.0)
         self.snr_min = cparser.getfloat("FPFS", "snr_min", fallback=12.0)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
 
@@ -67,6 +66,9 @@ class NeffSimFPFS(SimulateBatchBase):
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
         self.cov_mat = fitsio.read(self.ncov_fname)
 
+        self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
+        self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
+
         # shear setup
         self.g_comp_measure = cparser.getint(
             "FPFS",
@@ -81,12 +83,24 @@ class NeffSimFPFS(SimulateBatchBase):
         coadd_scale = cparser.getfloat("simulation", "coadd_scale", fallback=0.2)
         radius = ((coadd_dim + 10) / 2.0 - buff) * coadd_scale / 60.0
         self.area = np.pi * radius**2  # [arcmin^2]
+
+        self.detection_dir = cparser.get(
+            "FPFS",
+            "detection_dir",
+            fallback="",
+        )
+        self.use_peak = False
+        if len(self.detection_dir) == 0 and not self.use_peak:
+            self.do_detect = True
+        else:
+            self.do_detect = False
         return
 
     def run(self, icore):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 2))
-        if self.nord == 4:
+
+        if self.radial_n == 2:
             cat_obj = fpfs_catalog(
                 cov_mat=self.cov_mat,
                 snr_min=self.snr_min,
@@ -95,8 +109,8 @@ class NeffSimFPFS(SimulateBatchBase):
                 c2=self.c2,
                 alpha=self.alpha,
                 beta=self.beta,
-                thres2=self.thres2,
-                nord=self.nord,
+                pthres=self.pthres,
+                pratio=self.pratio,
             )
         else:
             cat_obj = fpfs4_catalog(
@@ -107,21 +121,29 @@ class NeffSimFPFS(SimulateBatchBase):
                 c2=self.c2,
                 alpha=self.alpha,
                 beta=self.beta,
-                thres2=self.thres2,
-                nord=self.nord,
+                pthres=self.pthres,
+                pratio=self.pratio,
             )
-        if self.noise_rev:
-            if self.g_comp_measure == 1:
-                func = jax.jit(cat_obj.measure_g1_noise_correct)
-            elif self.g_comp_measure == 2:
-                func = jax.jit(cat_obj.measure_g2_noise_correct)
+        if self.do_detect:
+            if self.noise_rev:
+                if self.g_comp_measure == 1:
+                    func = jax.jit(cat_obj.measure_g1_noise_correct)
+                elif self.g_comp_measure == 2:
+                    func = jax.jit(cat_obj.measure_g2_noise_correct)
+                else:
+                    raise ValueError("g_comp_measure should be 1 or 2")
             else:
-                raise ValueError("g_comp_measure should be 1 or 2")
+                if self.g_comp_measure == 1:
+                    func = jax.jit(cat_obj.measure_g1)
+                elif self.g_comp_measure == 2:
+                    func = jax.jit(cat_obj.measure_g2)
+                else:
+                    raise ValueError("g_comp_meausre should be 1 or 2")
         else:
             if self.g_comp_measure == 1:
-                func = jax.jit(cat_obj.measure_g1)
+                func = jax.jit(cat_obj.measure_g1_no_detect)
             elif self.g_comp_measure == 2:
-                func = jax.jit(cat_obj.measure_g2)
+                func = jax.jit(cat_obj.measure_g2_no_detect)
             else:
                 raise ValueError("g_comp_meausre should be 1 or 2")
         print("start core: %d, with id: %s" % (icore, id_range))
@@ -138,3 +160,13 @@ class NeffSimFPFS(SimulateBatchBase):
         elapsed_time = end_time - start_time
         print("elapsed time: %.2f seconds" % elapsed_time)
         return out
+
+    def get_sum_e_r(self, in_nm, func, read_func):
+        assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
+        mm = read_func(in_nm)
+        if self.use_peak:
+            in_nm2 = in_nm.replace("src", "det")
+            msk = fitsio.read(in_nm2)[:, 2].astype(bool)
+            mm = mm[msk]
+        e1_sum, r1_sum = jax.numpy.sum(jax.lax.map(func, mm), axis=0)
+        return e1_sum, r1_sum

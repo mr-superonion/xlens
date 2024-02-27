@@ -116,6 +116,28 @@ class SimulateBase(object):
         self.clear_summary()
         return
 
+    def write_image(self, exposure, filename):
+        fitsio.write(filename, exposure.getMaskedImage().image.array)
+        return
+
+    def write_ds9_region(self, xy, filename):
+        """
+        Write a list of (x, y) positions to a DS9 region file.
+
+        Args:
+        xy (list of tuples): List of (x, y) positions.
+        filename (str): Name of the file to save the regions.
+        """
+        header = "# Region file format: DS9 version 4.1\n"
+        header += "global color=green dashlist=8 3 width=1 font='helvetica 10 normal roman' "
+        header += "select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n"
+        header += "image\n"  # Coordinate system, using image pixels
+        with open(filename, "w") as file:
+            file.write(header)
+            for x, y in xy:
+                file.write(f"point(%d,%d) # point=circle\n" % (x + 1, y + 1))
+        return
+
 
 class SimulateBatchBase(SimulateBase):
     def __init__(
@@ -143,12 +165,6 @@ class SimulateBatchBase(SimulateBase):
         if icore < len(self.rest_list):
             id_range.append(self.rest_list[icore])
         return id_range
-
-    def get_sum_e_r(self, in_nm, func, read_func):
-        assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
-        mm = read_func(in_nm)
-        e1_sum, r1_sum = jnp.sum(jax.lax.map(func, mm), axis=0)
-        return e1_sum, r1_sum
 
 
 class SimulateImage(SimulateBase):

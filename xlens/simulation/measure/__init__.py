@@ -1,5 +1,5 @@
 from . import utils
 from .base import ProcessSimDM
-from .fpfs import ProcessSimFPFS
+from .fpfs import ProcessSimFpfs
 
-__all__ = ["ProcessSimDM", "ProcessSimFPFS", "utils"]
+__all__ = ["ProcessSimDM", "ProcessSimFpfs", "utils"]

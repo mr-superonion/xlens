@@ -1,3 +1,3 @@
-from .fpfs import SummarySimFPFS
+from .fpfs import SummarySimFpfs
 
-__all__ = ["SummarySimFPFS"]
+__all__ = ["SummarySimFpfs"]
