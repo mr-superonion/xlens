@@ -82,17 +82,6 @@ class MakeDMExposure(SimulateBase):
         if bands_overwrite is not None:
             self.bands = bands_overwrite
 
-        self.do_ds9_region = cparser.getboolean(
-            "simulation",
-            "do_ds9_region",
-            fallback=False,
-        )
-        self.do_debug_exposure = cparser.getboolean(
-            "simulation",
-            "do_debug_exposure",
-            fallback=False,
-        )
-
         self.star_bleeds = cparser.getboolean(
             "simulation",
             "star_bleeds",
@@ -281,25 +270,3 @@ class MakeDMExposure(SimulateBase):
 
     def run(self, fname):
         return self.generate_exposure(fname)
-
-    def write_ds9_region(self, xy, filename):
-        """
-        Write a list of (x, y) positions to a DS9 region file.
-
-        Args:
-        xy (list of tuples): List of (x, y) positions.
-        filename (str): Name of the file to save the regions.
-        """
-        header = "# Region file format: DS9 version 4.1\n"
-        header += "global color=green dashlist=8 3 width=1 font='helvetica 10 normal roman' "
-        header += "select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n"
-        header += "image\n"  # Coordinate system, using image pixels
-        with open(filename, "w") as file:
-            file.write(header)
-            for x, y in xy:
-                file.write(f"point(%d,%d) # point=circle\n" % (x + 1, y + 1))
-        return
-
-    def write_image(self, exposure, filename):
-        fitsio.write(filename, exposure.getMaskedImage().image.array)
-        return

@@ -4,10 +4,10 @@ import fitsio
 import numpy as np
 
 from xlens.simulation.loader import MakeDMExposure
-from xlens.simulation.measure import ProcessSimDM, ProcessSimFPFS, utils
-from xlens.simulation.neff import NeffSimFPFS
+from xlens.simulation.measure import ProcessSimDM, ProcessSimFpfs, utils
+from xlens.simulation.neff import NeffSimFpfs
 from xlens.simulation.simulator import SimulateImage
-from xlens.simulation.summary import SummarySimFPFS
+from xlens.simulation.summary import SummarySimFpfs
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -39,7 +39,7 @@ def test_lsst():
     np.testing.assert_allclose(psf_array, psf_target, atol=1e-5, rtol=1e-3)
 
     # FPFS measurement
-    worker3 = ProcessSimFPFS(config_fname)
+    worker3 = ProcessSimFpfs(config_fname)
     input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
     for _ in input_list:
         worker3.run(_)
@@ -48,7 +48,7 @@ def test_lsst():
     for _ in input_list:
         worker4.run(_)
 
-    worker5 = SummarySimFPFS(
+    worker5 = SummarySimFpfs(
         config_fname,
         min_id=0,
         max_id=1,
@@ -56,7 +56,7 @@ def test_lsst():
     )
     olist = worker5.run(0)
 
-    worker6 = NeffSimFPFS(
+    worker6 = NeffSimFpfs(
         config_fname,
         min_id=0,
         max_id=1,
@@ -92,7 +92,7 @@ def test_hsc():
     _name = os.path.join(this_dir, "psf_hsc.fits")
 
     # FPFS measurement
-    worker3 = ProcessSimFPFS(config_fname)
+    worker3 = ProcessSimFpfs(config_fname)
     input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
     for _ in input_list:
         worker3.run(_)
@@ -101,7 +101,7 @@ def test_hsc():
     for _ in input_list:
         worker4.run(_)
 
-    worker5 = SummarySimFPFS(
+    worker5 = SummarySimFpfs(
         config_fname,
         min_id=0,
         max_id=1,
@@ -109,7 +109,7 @@ def test_hsc():
     )
     olist = worker5.run(0)
 
-    worker6 = NeffSimFPFS(
+    worker6 = NeffSimFpfs(
         config_fname,
         min_id=0,
         max_id=1,

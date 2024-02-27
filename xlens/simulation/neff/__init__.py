@@ -1,3 +1,3 @@
-from .fpfs import NeffSimFPFS
+from .fpfs import NeffSimFpfs
 
-__all__ = ["NeffSimFPFS"]
+__all__ = ["NeffSimFpfs"]

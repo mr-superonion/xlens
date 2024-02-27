@@ -56,8 +56,8 @@ class DMMeasurementConfig(pexConfig.Config):
         self.deblend.maxFootprintArea = 500 * 500
         self.deblend.maxFootprintSize = 600
 
-        self.measurement.load(os.path.join(getPackageDir("obs_subaru"), "config", "hsm.py"))
-        self.load(os.path.join(getPackageDir("obs_subaru"), "config", "cmodel.py"))
+        # self.measurement.load(os.path.join(getPackageDir("obs_subaru"), "config", "hsm.py"))
+        # self.load(os.path.join(getPackageDir("obs_subaru"), "config", "cmodel.py"))
 
 
 class DMMeasurementTask(pipeBase.PipelineTask):

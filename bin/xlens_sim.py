@@ -86,16 +86,16 @@ if __name__ == "__main__":
         for r in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "measure_fpfs":
-        from xlens.simulation.measure import ProcessSimFPFS
+        from xlens.simulation.measure import ProcessSimFpfs
 
-        worker = ProcessSimFPFS(cmd_args.config)
+        worker = ProcessSimFpfs(cmd_args.config)
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for r in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "summary_fpfs":
-        from xlens.simulation.summary import SummarySimFPFS
+        from xlens.simulation.summary import SummarySimFpfs
 
-        worker = SummarySimFPFS(
+        worker = SummarySimFpfs(
             cmd_args.config,
             min_id=min_id,
             max_id=max_id,
@@ -106,9 +106,9 @@ if __name__ == "__main__":
             fitsio.write(worker.ofname, np.vstack(list(olist)))
         worker.display_result()
     elif taskname.lower() == "neff_fpfs":
-        from xlens.simulation.neff import NeffSimFPFS
+        from xlens.simulation.neff import NeffSimFpfs
 
-        worker = NeffSimFPFS(
+        worker = NeffSimFpfs(
             cmd_args.config,
             min_id=min_id,
             max_id=max_id,

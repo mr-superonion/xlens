@@ -26,7 +26,7 @@ from fpfs.catalog import fpfs_catalog, read_catalog
 from ..simulator import SimulateBatchBase
 
 
-class SummarySimFPFS(SimulateBatchBase):
+class SummarySimFpfs(SimulateBatchBase):
     def __init__(
         self,
         config_name,
@@ -59,6 +59,10 @@ class SummarySimFPFS(SimulateBatchBase):
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
         self.cov_mat = fitsio.read(self.ncov_fname)
+
+        self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
+        self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
+
         self.ratio = cparser.getfloat("FPFS", "ratio")
         self.c0 = cparser.getfloat("FPFS", "c0")
         self.c2 = cparser.getfloat("FPFS", "c2")
@@ -67,7 +71,6 @@ class SummarySimFPFS(SimulateBatchBase):
         upper_mag = cparser.getfloat("FPFS", "magcut", fallback=27.5)
         self.lower_m00 = 10 ** ((self.calib_mag_zero - upper_mag) / 2.5)
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
-        self.thres2 = cparser.getfloat("FPFS", "thres2", fallback=0.0)
 
         # shear setup
         self.shear_value = cparser.getfloat("simulation", "shear_value")
@@ -81,8 +84,7 @@ class SummarySimFPFS(SimulateBatchBase):
             "g_component_measure",
             fallback=1,
         )
-        assert self.g_comp_measure in [1, 2], \
-            "The g_comp_measure in configure file is not supported"
+        assert self.g_comp_measure in [1, 2], "The g_comp_measure in configure file is not supported"
 
         self.ofname = os.path.join(
             self.sum_dir,
@@ -101,7 +103,8 @@ class SummarySimFPFS(SimulateBatchBase):
             c2=self.c2,
             alpha=self.alpha,
             beta=self.beta,
-            thres2=self.thres2,
+            pthres=self.pthres,
+            pratio=self.pratio,
         )
         if self.noise_rev:
             if self.g_comp_measure == 1:
@@ -139,6 +142,12 @@ class SummarySimFPFS(SimulateBatchBase):
         elapsed_time = (end_time - start_time) / 4.0
         print("elapsed time: %.2f seconds" % elapsed_time)
         return out
+
+    def get_sum_e_r(self, in_nm, func, read_func):
+        assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
+        mm = read_func(in_nm)
+        e1_sum, r1_sum = jax.numpy.sum(jax.lax.map(func, mm), axis=0)
+        return e1_sum, r1_sum
 
     def display_result(self):
         flist = glob.glob("%s/bin_*.*.fits" % (self.sum_dir))
