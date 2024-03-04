@@ -21,7 +21,7 @@ from configparser import ConfigParser, ExtendedInterpolation
 import fitsio
 import jax
 import numpy as np
-from fpfs.catalog import fpfs_catalog, read_catalog
+from fpfs.catalog import fpfs4_catalog, fpfs_catalog, read_catalog
 
 from ..simulator.base import SimulateBatchBase
 
@@ -95,17 +95,30 @@ class SummarySimFpfs(SimulateBatchBase):
     def run(self, icore):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 4))
-        cat_obj = fpfs_catalog(
-            cov_mat=self.cov_mat,
-            snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
-            ratio=self.ratio,
-            c0=self.c0,
-            c2=self.c2,
-            alpha=self.alpha,
-            beta=self.beta,
-            pthres=self.pthres,
-            pratio=self.pratio,
-        )
+        if self.nord == 4:
+            cat_obj = fpfs_catalog(
+                cov_mat=self.cov_mat,
+                snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
+                ratio=self.ratio,
+                c0=self.c0,
+                c2=self.c2,
+                alpha=self.alpha,
+                beta=self.beta,
+                pthres=self.pthres,
+                pratio=self.pratio,
+            )
+        else:
+            cat_obj = fpfs4_catalog(
+                cov_mat=self.cov_mat,
+                snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
+                ratio=self.ratio,
+                c0=self.c0,
+                c2=self.c2,
+                alpha=self.alpha,
+                beta=self.beta,
+                pthres=self.pthres,
+                pratio=self.pratio,
+            )
         if self.noise_rev:
             if self.g_comp_measure == 1:
                 func = jax.jit(cat_obj.measure_g1_noise_correct)
