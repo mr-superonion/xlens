@@ -63,13 +63,6 @@ class SimulateBase(object):
         # number of redshiftbins
         self.rot_list = [np.pi / self.nrot * i for i in range(self.nrot)]
 
-        # noise ratio
-        self.noise_ratio = cparser.getfloat(
-            "simulation",
-            "noise_ratio",
-            fallback=0.0,
-        )
-
         # bands used for measurement
         self.bands = cparser.get("simulation", "band")
 
@@ -112,6 +105,11 @@ class SimulateBase(object):
             fallback=0.0,
         )
 
+        self.shear_comp_sim = cparser.get(
+            "simulation",
+            "shear_component",
+            fallback="g1",
+        )
         self.shear_mode_list = json.loads(
             cparser.get("simulation", "shear_mode_list"),
         )
@@ -154,9 +152,12 @@ class SimulateBase(object):
         return
 
     def clear_all(self):
-        self.clear_image()
-        self.clear_catalog()
-        self.clear_summary()
+        if hasattr(self, "img_dir"):
+            self.clear_image()
+        if hasattr(self, "cat_dir"):
+            self.clear_catalog()
+        if hasattr(self, "sum_dir"):
+            self.clear_summary()
         return
 
     def write_image(self, exposure, filename):
@@ -218,11 +219,6 @@ class SimulateImage(SimulateBase):
         if not os.path.isdir(self.img_dir):
             os.makedirs(self.img_dir, exist_ok=True)
 
-        self.shear_component_sim = cparser.get(
-            "simulation",
-            "shear_component",
-            fallback="g1",
-        )
         self.z_bounds = json.loads(cparser.get("simulation", "z_bounds"))
         self.shear_value = cparser.getfloat("simulation", "shear_value")
         return
@@ -267,7 +263,7 @@ class SimulateImage(SimulateBase):
             shear_obj = ShearRedshift(
                 z_bounds=self.z_bounds,
                 mode=shear_mode,
-                g_dist=self.shear_component_sim,
+                g_dist=self.shear_comp_sim,
                 shear_value=self.shear_value,
             )
             for irot in range(self.nrot):
@@ -292,9 +288,10 @@ class SimulateImage(SimulateBase):
                 )
                 # write galaxy images
                 for band_name in bl:
-                    gal_fname = "%s/image-%05d_g1-%d_rot%d_%s.fits" % (
+                    gal_fname = "%s/image-%05d_%s-%d_rot%d_%s.fits" % (
                         self.img_dir,
                         ifield,
+                        self.shear_comp_sim,
                         shear_mode,
                         irot,
                         band_name,

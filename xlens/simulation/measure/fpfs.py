@@ -19,12 +19,15 @@
 # the GNU General Public License along with this program.  If not,
 # see <http://www.lsstcorp.org/LegalNotices/>.
 #
+import gc
 import os
 import time
 from configparser import ConfigParser, ExtendedInterpolation
 
 import fitsio
 import fpfs
+import jax
+import jax.numpy as jnp
 import numpy as np
 import numpy.lib.recfunctions as rfn
 
@@ -32,8 +35,11 @@ from ..simulator.base import SimulateBase
 from ..simulator.loader import MakeDMExposure
 from .utils import get_psf_array
 
+# from memory_profiler import profile
+
 
 class ProcessSimFpfs(SimulateBase):
+    # @profile
     def __init__(self, config_name):
         cparser = ConfigParser(interpolation=ExtendedInterpolation())
         cparser.read(config_name)
@@ -46,7 +52,6 @@ class ProcessSimFpfs(SimulateBase):
 
         # setup FPFS task
         self.sigma_as = cparser.getfloat("FPFS", "sigma_as")
-        self.sigma_det = cparser.getfloat("FPFS", "sigma_det")
         self.rcut = cparser.getint("FPFS", "rcut", fallback=32)
         self.ngrid = 2 * self.rcut
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
@@ -62,16 +67,12 @@ class ProcessSimFpfs(SimulateBase):
 
         self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
         self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
+        self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=8)
 
         self.ncov_fname = cparser.get(
             "FPFS",
             "ncov_fname",
             fallback="",
-        )
-        self.center_name = cparser.get(
-            "FPFS",
-            "center_name",
-            fallback="deblend_peak_center",
         )
         if len(self.ncov_fname) == 0 or not os.path.isfile(self.ncov_fname):
             # estimate and write the noise covariance
@@ -82,12 +83,12 @@ class ProcessSimFpfs(SimulateBase):
             "detection_dir",
             fallback="",
         )
-
-        self.do_ds9_region = cparser.getboolean(
-            "simulation",
-            "do_ds9_region",
-            fallback=False,
+        self.center_name = cparser.get(
+            "FPFS",
+            "center_name",
+            fallback="deblend_peak_center",
         )
+
         self.do_debug_exposure = cparser.getboolean(
             "simulation",
             "do_debug_exposure",
@@ -95,14 +96,22 @@ class ProcessSimFpfs(SimulateBase):
         )
         return
 
-    def process_image(self, gal_array, psf_array, cov_elem, pixel_scale, dm_fname):
+    def process_image(
+        self,
+        gal_array,
+        psf_array,
+        cov_elem,
+        pixel_scale,
+        noise_array=None,
+        dm_fname=None,
+    ):
         # measurement task
         task = fpfs.image.measure_source(
             psf_array,
             sigma_arcsec=self.sigma_as,
-            sigma_detect=self.sigma_det,
             nord=self.nord,
             pix_scale=pixel_scale,
+            det_nrot=self.det_nrot,
         )
         if dm_fname is None:
             coords = task.detect_source(
@@ -112,7 +121,7 @@ class ProcessSimFpfs(SimulateBase):
                 fthres=8.0,
                 pthres=self.pthres,
                 pratio=self.pratio,
-                bound=self.rcut,
+                bound=self.rcut + 5,
             )
         else:
             print("Using detected centers: %s" % dm_fname)
@@ -121,22 +130,81 @@ class ProcessSimFpfs(SimulateBase):
             msk = (tmp["deblend_nPeaks"] == 1) & (tmp["deblend_nChild"] == 0)
             coords = rfn.structured_to_unstructured(tmp[msk][cname_list])
             del tmp, msk
-            coords = np.int_(np.round(coords))
+            coords = np.array(np.int_(np.round(coords)))
 
         print("pre-selected number of sources: %d" % len(coords))
-        out = task.get_results(task.measure(gal_array, coords))
-        out2 = task.get_results_detection(coords)
-        return out, out2
+        src = task.measure(gal_array, coords)
+        sel = (src[:, task.di["m00"]] + src[:, task.di["m20"]]) > 1e-5
+        src = src[sel]
+        coords = coords[sel]
+        if noise_array is not None:
+            noise = task.measure(noise_array, coords)
+        else:
+            noise = None
+        print("post-selected number of sources: %d" % len(coords))
+        del task
+        return coords, src, noise
 
+    def prepare_data(self, file_name):
+        dm_task = MakeDMExposure(self.config_name)
+        exposure = dm_task.generate_exposure(file_name)
+        pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
+        variance = np.average(exposure.getMaskedImage().variance.array)
+        seed = dm_task.get_seed_from_fname(file_name, "i") + 1
+        ny = self.coadd_dim + 10
+        nx = self.coadd_dim + 10
+        rng = np.random.RandomState(seed)
+        noise_array = rng.normal(
+            scale=np.sqrt(variance),
+            size=(ny, nx),
+        )
+        gal_array = jnp.asarray(exposure.getMaskedImage().image.array + noise_array)
+        if self.do_debug_exposure:
+            self.write_image(exposure, "debug.fits")
+
+        psf_array = np.asarray(get_psf_array(exposure, ngrid=self.ngrid))
+        fpfs.image.util.truncate_square(psf_array, self.psf_rcut)
+        del exposure
+        if not os.path.isfile(self.ncov_fname):
+            # FPFS noise cov task
+            noise_task = fpfs.image.measure_noise_cov(
+                psf_array,
+                sigma_arcsec=self.sigma_as,
+                nord=self.nord,
+                pix_scale=pixel_scale,
+                det_nrot=self.det_nrot,
+            )
+            noise_pow = np.ones((self.ngrid, self.ngrid)) * variance * 2.0 * self.ngrid**2.0
+            cov_elem = noise_task.measure(noise_pow)
+            fitsio.write(self.ncov_fname, np.asarray(cov_elem), overwrite=True)
+            del noise_task
+        else:
+            cov_elem = jnp.asarray(fitsio.read(self.ncov_fname))
+        gc.collect()
+        return {
+            "gal": gal_array,
+            "psf": psf_array,
+            "cov": cov_elem,
+            "scale": pixel_scale,
+            "noise": noise_array,
+        }
+
+    # @profile
     def run(self, file_name):
-        cat_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
-        cat_name = cat_name.replace(
+        src_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
+        src_name = src_name.replace(
             "image-",
             "src-",
         ).replace(
             "_xxx",
             "_%s" % self.bands,
         )
+        det_name = src_name.replace("src-", "det-")
+        noi_name = src_name.replace("src-", "noise-")
+        if os.path.isfile(src_name) and os.path.isfile(det_name):
+            print("Already has measurement for simulation: %s." % src_name)
+            return
+
         if len(self.detection_dir) == 0:
             dm_fname = None
         else:
@@ -148,64 +216,23 @@ class ProcessSimFpfs(SimulateBase):
                 "_xxx",
                 "_%s" % self.bands,
             )
-        det_name = cat_name.replace("src-", "det-")
-        if os.path.isfile(cat_name) and os.path.isfile(det_name):
-            print("Already has measurement for simulation: %s." % cat_name)
-            return
-        exposure = MakeDMExposure(self.config_name).generate_exposure(file_name)
-        pixel_scale = exposure.getWcs().getPixelScale().asArcseconds()
-        masked_image = exposure.getMaskedImage()
-        gal_array = masked_image.image.array
-        variance = np.average(masked_image.variance.array)
-        self.image_nx = gal_array.shape[1]
 
-        psf_array = get_psf_array(exposure, ngrid=self.ngrid)
-        fpfs.image.util.truncate_square(psf_array, self.psf_rcut)
-        if not os.path.isfile(self.ncov_fname):
-            # FPFS noise cov task
-            noise_task = fpfs.image.measure_noise_cov(
-                psf_array,
-                sigma_arcsec=self.sigma_as,
-                sigma_detect=self.sigma_det,
-                nord=self.nord,
-                pix_scale=pixel_scale,
-            )
-            noise_pow = np.ones((self.ngrid, self.ngrid)) * variance * self.ngrid**2.0
-            cov_elem = np.array(noise_task.measure(noise_pow))
-            fitsio.write(self.ncov_fname, cov_elem, overwrite=True)
-        else:
-            cov_elem = fitsio.read(self.ncov_fname)
-
+        data = self.prepare_data(file_name)
         start_time = time.time()
-        cat, det = self.process_image(
-            gal_array,
-            psf_array,
-            cov_elem,
-            pixel_scale,
-            dm_fname,
+        det, src, noise = self.process_image(
+            gal_array=data["gal"],
+            psf_array=data["psf"],
+            cov_elem=data["cov"],
+            pixel_scale=data["scale"],
+            noise_array=data["noise"],
+            dm_fname=dm_fname,
         )
         elapsed_time = time.time() - start_time
-        print(f"elapsed time: {elapsed_time} seconds")
-
-        if self.do_debug_exposure:
-            img_name = cat_name.replace("src-", "img-")
-            self.write_image(exposure, img_name)
-        fpfs.io.save_catalog(
-            det_name,
-            det,
-            dtype="position",
-            nord="%d" % self.nord,
-        )
-        fpfs.io.save_catalog(
-            cat_name,
-            cat,
-            dtype="shape",
-            nord="%d" % self.nord,
-        )
-        if self.do_ds9_region:
-            ds9_name = cat_name.replace("src-", "reg-")
-            ds9_name = ds9_name.replace(".fits", ".reg")
-            pos = det[["fpfs_x", "fpfs_y"]]
-            self.write_ds9_region(pos, ds9_name)
-            del pos
+        print("Elapsed time: %.2f seconds, number of gals: %d" % (elapsed_time, len(src)))
+        del data
+        fitsio.write(det_name, np.asarray(det))
+        fitsio.write(src_name, np.asarray(src))
+        fitsio.write(noi_name, np.asarray(noise))
+        del src, det
+        gc.collect()
         return

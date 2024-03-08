@@ -46,7 +46,6 @@ class ProcessSimFpfsNoise(SimulateBase):
 
         # setup FPFS task
         self.sigma_as = cparser.getfloat("FPFS", "sigma_as")
-        self.sigma_det = cparser.getfloat("FPFS", "sigma_det")
         self.rcut = cparser.getint("FPFS", "rcut", fallback=32)
         self.ngrid = 2 * self.rcut
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
@@ -62,6 +61,7 @@ class ProcessSimFpfsNoise(SimulateBase):
 
         self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
         self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
+        self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=8)
 
         self.ncov_fname = cparser.get(
             "FPFS",
@@ -83,9 +83,9 @@ class ProcessSimFpfsNoise(SimulateBase):
         task = fpfs.image.measure_source(
             psf_array,
             sigma_arcsec=self.sigma_as,
-            sigma_detect=self.sigma_det,
             nord=self.nord,
             pix_scale=pixel_scale,
+            det_nrot=self.det_nrot,
         )
         # coords = fitsio.read(dm_fname)
         # print("pre-selected number of sources: %d" % len(coords))

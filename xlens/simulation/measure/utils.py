@@ -31,7 +31,7 @@ def get_psf_array(exposure, ngrid):
     centerX, centerY = width // 2, height // 2
     centroid = afwGeom.Point2I(centerX, centerY)
     psf_array = np.zeros((ngrid, ngrid))
-    data = exposure.getPsf().computeImage(centroid).getArray()
+    data = exposure.getPsf().computeImage(centroid).getArray().copy()
     dx = data.shape[0]
     if ngrid > dx:
         shift = (ngrid - dx + 1) // 2
