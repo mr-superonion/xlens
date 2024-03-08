@@ -12,6 +12,7 @@ def test_halo():
     config_fname = os.path.join(this_dir, "./config1_halo.ini")
     worker1 = SimulateImageHalo(config_fname)
     worker1.run(0)
+    worker1.clear_all()
     return
 
 

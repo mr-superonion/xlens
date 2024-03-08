@@ -58,14 +58,14 @@ class MakeDMExposure(SimulateBase):
     def __init__(
         self,
         config_name,
-        noise_ratio_overwrite=None,
+        noise_std_overwrite=None,
         bands_overwrite=None,
     ):
         """A Class to load DM exposures
 
         Args:
         config_name (str):              configuration file name
-        noise_ratio_overwrite (float):  overwrite noise ratio with this value
+        noise_std_overwrite (float):    overwrite noise standard deviation
         bands_overwrite (float):        overwrite bands with this value
         """
         cparser = ConfigParser()
@@ -77,18 +77,20 @@ class MakeDMExposure(SimulateBase):
             os.makedirs(self.cat_dir, exist_ok=True)
 
         self.load_configure(cparser)
-        if noise_ratio_overwrite is not None:
-            self.noise_ratio = noise_ratio_overwrite
         if bands_overwrite is not None:
             self.bands = bands_overwrite
 
+        # Systematics
+        self.draw_bright = cparser.getboolean(
+            "simulation",
+            "draw_bright",
+            fallback=False,
+        )
         self.star_bleeds = cparser.getboolean(
             "simulation",
             "star_bleeds",
             fallback=False,
         )
-
-        # Systematics
         self.cosmic_rays = cparser.getboolean(
             "simulation",
             "cosmic_rays",
@@ -98,6 +100,24 @@ class MakeDMExposure(SimulateBase):
             "simulation",
             "bad_columns",
             fallback=False,
+        )
+
+        noise_std = cparser.getfloat(
+            "simulation",
+            "noise_std",
+            fallback=None,
+        )
+        if noise_std_overwrite is not None:
+            noise_std = noise_std_overwrite
+        if noise_std is None:
+            self.base_std = deepcopy(_nstd_map)[self.survey_name]
+        else:
+            dd = deepcopy(_nstd_map)[self.survey_name]
+            self.base_std = {key: noise_std for key in dd.keys()}
+        self.noise_ratio = cparser.getfloat(
+            "simulation",
+            "noise_ratio",
+            fallback=0.0,
         )
         return
 
@@ -140,7 +160,6 @@ class MakeDMExposure(SimulateBase):
             "psf_e2",
             fallback=0.0,
         )
-        self.noise_std = deepcopy(_nstd_map)[self.survey_name]
         return
 
     def get_seed_from_fname(self, fname, band):
@@ -154,7 +173,7 @@ class MakeDMExposure(SimulateBase):
         # band id
         bid = deepcopy(_band_map)[band]
         _nbands = len(_band_map.values())
-        return (fid * self.nrot + rid) * _nbands + bid
+        return ((fid * self.nrot + rid) * _nbands + bid) * 3
 
     def generate_exposure(self, fname):
         field_id = int(fname.split("image-")[-1].split("_")[0]) + 212
@@ -193,6 +212,7 @@ class MakeDMExposure(SimulateBase):
             "cosmic_rays": self.cosmic_rays,
             "bad_columns": self.bad_columns,
             "star_bleeds": self.star_bleeds,
+            "draw_bright": self.draw_bright,
             "draw_method": "auto",
         }
         if self.bands != "a":
@@ -209,7 +229,6 @@ class MakeDMExposure(SimulateBase):
             psf=psf_obj,
             draw_gals=False,
             draw_stars=draw_stars,
-            draw_bright=False,
             dither=self.dither,
             rotate=self.rotate,
             bands=blist,
@@ -229,8 +248,8 @@ class MakeDMExposure(SimulateBase):
         for i, band in enumerate(blist):
             print("reading %s band" % band)
             # Add noise
-            nstd_f = self.noise_std[band] * self.noise_ratio
-            weight = 1.0 / (self.noise_std[band]) ** 2.0
+            nstd_f = self.base_std[band] * self.noise_ratio
+            weight = 1.0 / (self.base_std[band]) ** 2.0
             variance += (nstd_f * weight) ** 2.0
             seed = self.get_seed_from_fname(fname, band)
             rng2 = np.random.RandomState(seed)
