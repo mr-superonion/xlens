@@ -2,26 +2,29 @@ import galsim
 
 
 class ShearKappa(object):
-    def __init__(
-        self,
-        gamma1,
-        gamma2,
-        kappa,
-    ):
+    def __init__(self, mode, g_dist="g1", shear_value=0.02, kappa=0.05):
         """Shear distortion from halo
 
         Args:
-        mass (float):               mass of the halo [M_sun]
-        conc (float):               concerntration
-        z_lens (float):             lens redshift
-        ra_lens (float):            ra of halo position [arcsec]
-        dec_lens (float):           dec of halo position [arcsec]
-        halo_profile (str):         halo profile name
-        cosmo (astropy.cosmology):  cosmology object
+        shear_value (float)     the amplitude of shear
+        kappa (float)           kappa
         """
-        self.gamma1 = gamma1
-        self.gamma2 = gamma2
         self.kappa = kappa
+
+        if mode == "0000":
+            gv = shear_value * -1.0
+        elif mode == "1111":
+            gv = shear_value
+        else:
+            raise ValueError("mode not supported")
+        if g_dist == "g1":
+            self.gamma1 = gv
+            self.gamma2 = 0.0
+        elif g_dist == "g2":
+            self.gamma1 = 0.0
+            self.gamma2 = gv
+        else:
+            raise ValueError("g_dist not supported")
         return
 
     def distort_galaxy(self, gso, shift, redshift):
