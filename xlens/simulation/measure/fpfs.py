@@ -158,7 +158,6 @@ class ProcessSimFpfs(SimulateBase):
             del noise_task
         else:
             cov_elem = jnp.asarray(fitsio.read(self.ncov_fname))
-        gc.collect()
         return {
             "gal_array": gal_array,
             "psf_array": psf_array,
@@ -185,7 +184,13 @@ class ProcessSimFpfs(SimulateBase):
 
         data = self.prepare_data(file_name)
         start_time = time.time()
-        det, src, noise = self.process_image(**data)
+        det, src, noise = self.process_image(
+            gal_array=data["gal_array"],
+            psf_array=data["psf_array"],
+            cov_elem=data["cov_elem"],
+            pixel_scale=data["pixel_scale"],
+            noise_array=data["noise_array"],
+        )
         elapsed_time = time.time() - start_time
         print("Elapsed time: %.2f seconds, number of gals: %d" % (elapsed_time, len(src)))
         del data

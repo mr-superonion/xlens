@@ -31,7 +31,7 @@ from descwl_shear_sims.shear import ShearRedshift
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
 
-from .halo import ShearHalo
+from .perturbation import ShearHalo, ShearKappa
 
 band_list = ["g", "r", "i", "z"]
 nband = len(band_list)
@@ -265,6 +265,97 @@ class SimulateImage(SimulateBase):
                 mode=shear_mode,
                 g_dist=self.shear_comp_sim,
                 shear_value=self.shear_value,
+            )
+            for irot in range(self.nrot):
+                sim_data = make_sim(
+                    rng=rng,
+                    galaxy_catalog=galaxy_catalog,
+                    star_catalog=None,
+                    coadd_dim=self.coadd_dim,
+                    shear_obj=shear_obj,
+                    psf=self.psf_obj,
+                    draw_gals=True,
+                    draw_stars=False,
+                    draw_bright=False,
+                    dither=self.dither,
+                    rotate=self.rotate,
+                    bands=bl,
+                    noise_factor=0.0,
+                    theta0=self.rot_list[irot],
+                    calib_mag_zero=self.calib_mag_zero,
+                    survey_name=self.survey_name,
+                    **kargs,
+                )
+                # write galaxy images
+                for band_name in bl:
+                    gal_fname = "%s/image-%05d_%s-%d_rot%d_%s.fits" % (
+                        self.img_dir,
+                        ifield,
+                        self.shear_comp_sim,
+                        shear_mode,
+                        irot,
+                        band_name,
+                    )
+                    mi = sim_data["band_data"][band_name][0].getMaskedImage()
+                    gdata = mi.getImage().getArray()
+                    fitsio.write(gal_fname, gdata)
+                    del mi, gdata, gal_fname
+                del sim_data
+                gc.collect()
+        del galaxy_catalog
+        return
+
+
+class SimulateImageKappa(SimulateBase):
+    def __init__(self, config_name):
+        cparser = ConfigParser(interpolation=ExtendedInterpolation())
+        cparser.read(config_name)
+        super().__init__(cparser)
+        if not os.path.isdir(self.img_dir):
+            os.makedirs(self.img_dir, exist_ok=True)
+
+        self.shear_value = cparser.getfloat("simulation", "shear_value")
+        self.kappa = cparser.getfloat("simulation", "kappa")
+        return
+
+    def run(self, ifield):
+        print("Simulating for field: %d" % ifield)
+        rng = np.random.RandomState(ifield)
+
+        scale = get_survey(
+            gal_type="wldeblend",
+            band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
+            survey_name=self.survey_name,
+        ).pixel_scale
+
+        kargs = {
+            "cosmic_rays": False,
+            "bad_columns": False,
+            "star_bleeds": False,
+            "draw_method": "auto",
+        }
+
+        nfiles = len(glob.glob("%s/image-%05d_g1-*" % (self.img_dir, ifield)))
+        if nfiles == self.nrot * self.nshear * nband:
+            print("We aleady have all the images for this subfield.")
+            return
+
+        # galaxy catalog; you can make your own
+        galaxy_catalog = WLDeblendGalaxyCatalog(
+            rng=rng,
+            coadd_dim=self.coadd_dim,
+            buff=self.buff,
+            pixel_scale=scale,
+            layout=self.layout,
+        )
+        bl = deepcopy(band_list)
+        print("Simulation has galaxies: %d" % len(galaxy_catalog))
+        for shear_mode in self.shear_mode_list:
+            shear_obj = ShearKappa(
+                mode=shear_mode,
+                g_dist=self.shear_comp_sim,
+                shear_value=self.shear_value,
+                kappa=self.kappa,
             )
             for irot in range(self.nrot):
                 sim_data = make_sim(
