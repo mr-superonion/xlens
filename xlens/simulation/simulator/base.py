@@ -104,6 +104,10 @@ class SimulateBase(object):
             "psf_e2",
             fallback=0.0,
         )
+        self.psf_obj = make_fixed_psf(
+            psf_type="moffat",
+            psf_fwhm=self.psf_fwhm,
+        ).shear(e1=self.psf_e1, e2=self.psf_e2)
 
         self.shear_comp_sim = cparser.get(
             "simulation",
@@ -239,10 +243,6 @@ class SimulateImage(SimulateBase):
             "star_bleeds": False,
             "draw_method": "auto",
         }
-        psf = make_fixed_psf(
-            psf_type="moffat",
-            psf_fwhm=self.psf_fwhm,
-        ).shear(e1=self.psf_e1, e2=self.psf_e2)
 
         nfiles = len(glob.glob("%s/image-%05d_g1-*" % (self.img_dir, ifield)))
         if nfiles == self.nrot * self.nshear * nband:
@@ -273,7 +273,7 @@ class SimulateImage(SimulateBase):
                     star_catalog=None,
                     coadd_dim=self.coadd_dim,
                     shear_obj=shear_obj,
-                    psf=psf,
+                    psf=self.psf_obj,
                     draw_gals=True,
                     draw_stars=False,
                     draw_bright=False,
@@ -302,7 +302,7 @@ class SimulateImage(SimulateBase):
                     del mi, gdata, gal_fname
                 del sim_data
                 gc.collect()
-        del galaxy_catalog, psf
+        del galaxy_catalog
         return
 
 
@@ -331,10 +331,6 @@ class SimulateImageHalo(SimulateBase):
             "star_bleeds": False,
             "draw_method": "auto",
         }
-        psf = make_fixed_psf(
-            psf_type="moffat",
-            psf_fwhm=self.psf_fwhm,
-        ).shear(e1=self.psf_e1, e2=self.psf_e2)
 
         # galaxy catalog; you can make your own
         galaxy_catalog = WLDeblendGalaxyCatalog(
@@ -360,7 +356,7 @@ class SimulateImageHalo(SimulateBase):
                     star_catalog=None,
                     coadd_dim=self.coadd_dim,
                     shear_obj=shear_obj,
-                    psf=psf,
+                    psf=self.psf_obj,
                     draw_gals=True,
                     draw_stars=False,
                     draw_bright=False,
@@ -388,5 +384,5 @@ class SimulateImageHalo(SimulateBase):
                     del mi, gdata, gal_fname
                 del sim_data
                 gc.collect()
-        del galaxy_catalog, psf
+        del galaxy_catalog
         return

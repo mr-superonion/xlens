@@ -195,7 +195,7 @@ class SummarySimFpfs(SimulateBatchBase):
         res = []
         for fname in flist:
             obs = float(fname.split("/")[-1].split(spt)[-1].split(".fits")[0])
-            obs = obs / float(pf[test_obs])
+            obs = obs / float(pf[cname])
             print("%s is: %s" % (cname, obs))
             a = fitsio.read(fname)
             a = a[np.argsort(a[:, 0])]

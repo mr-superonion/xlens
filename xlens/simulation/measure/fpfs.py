@@ -78,21 +78,10 @@ class ProcessSimFpfs(SimulateBase):
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
 
-        self.detection_dir = cparser.get(
-            "FPFS",
-            "detection_dir",
-            fallback="",
-        )
         self.center_name = cparser.get(
             "FPFS",
             "center_name",
             fallback="deblend_peak_center",
-        )
-
-        self.do_debug_exposure = cparser.getboolean(
-            "simulation",
-            "do_debug_exposure",
-            fallback=False,
         )
         return
 
@@ -102,8 +91,7 @@ class ProcessSimFpfs(SimulateBase):
         psf_array,
         cov_elem,
         pixel_scale,
-        noise_array=None,
-        dm_fname=None,
+        noise_array,
     ):
         # measurement task
         task = fpfs.image.measure_source(
@@ -113,35 +101,25 @@ class ProcessSimFpfs(SimulateBase):
             pix_scale=pixel_scale,
             det_nrot=self.det_nrot,
         )
-        if dm_fname is None:
-            coords = task.detect_source(
-                img_data=gal_array,
-                psf_data=psf_array,
-                cov_elem=cov_elem,
-                fthres=8.0,
-                pthres=self.pthres,
-                pratio=self.pratio,
-                bound=self.rcut + 5,
-            )
-        else:
-            print("Using detected centers: %s" % dm_fname)
-            cname_list = [self.center_name + "_y", self.center_name + "_x"]
-            tmp = fitsio.read(dm_fname)
-            msk = (tmp["deblend_nPeaks"] == 1) & (tmp["deblend_nChild"] == 0)
-            coords = rfn.structured_to_unstructured(tmp[msk][cname_list])
-            del tmp, msk
-            coords = np.array(np.int_(np.round(coords)))
+        coords = task.detect_source(
+            img_array=gal_array,
+            psf_array=psf_array,
+            cov_elem=cov_elem,
+            fthres=8.5,
+            pthres=self.pthres,
+            pratio=self.pratio,
+            bound=self.rcut + 5,
+            noise_array=noise_array,
+        )
 
         print("pre-selected number of sources: %d" % len(coords))
         src = task.measure(gal_array, coords)
+        noise = task.measure(noise_array, coords, psf_f=task.psf_rot_f)
+        src = src + noise
         sel = (src[:, task.di["m00"]] + src[:, task.di["m20"]]) > 1e-5
-        src = src[sel]
         coords = coords[sel]
-        if noise_array is not None:
-            noise = task.measure(noise_array, coords)
-        else:
-            noise = None
-        print("post-selected number of sources: %d" % len(coords))
+        src = src[sel]
+        noise = noise[sel]
         del task
         return coords, src, noise
 
@@ -158,9 +136,7 @@ class ProcessSimFpfs(SimulateBase):
             scale=np.sqrt(variance),
             size=(ny, nx),
         )
-        gal_array = jnp.asarray(exposure.getMaskedImage().image.array + noise_array)
-        if self.do_debug_exposure:
-            self.write_image(exposure, "debug.fits")
+        gal_array = jnp.asarray(exposure.getMaskedImage().image.array)
 
         psf_array = np.asarray(get_psf_array(exposure, ngrid=self.ngrid))
         fpfs.image.util.truncate_square(psf_array, self.psf_rcut)
@@ -174,7 +150,9 @@ class ProcessSimFpfs(SimulateBase):
                 pix_scale=pixel_scale,
                 det_nrot=self.det_nrot,
             )
-            noise_pow = np.ones((self.ngrid, self.ngrid)) * variance * 2.0 * self.ngrid**2.0
+            noise_pow = (
+                np.ones((self.ngrid, self.ngrid)) * variance * 2.0 * self.ngrid**2.0
+            )  # variance times 2
             cov_elem = noise_task.measure(noise_pow)
             fitsio.write(self.ncov_fname, np.asarray(cov_elem), overwrite=True)
             del noise_task
@@ -182,11 +160,11 @@ class ProcessSimFpfs(SimulateBase):
             cov_elem = jnp.asarray(fitsio.read(self.ncov_fname))
         gc.collect()
         return {
-            "gal": gal_array,
-            "psf": psf_array,
-            "cov": cov_elem,
-            "scale": pixel_scale,
-            "noise": noise_array,
+            "gal_array": gal_array,
+            "psf_array": psf_array,
+            "cov_elem": cov_elem,
+            "pixel_scale": pixel_scale,
+            "noise_array": noise_array,
         }
 
     # @profile
@@ -205,28 +183,9 @@ class ProcessSimFpfs(SimulateBase):
             print("Already has measurement for simulation: %s." % src_name)
             return
 
-        if len(self.detection_dir) == 0:
-            dm_fname = None
-        else:
-            dm_fname = os.path.join(self.detection_dir, file_name.split("/")[-1])
-            dm_fname = dm_fname.replace(
-                "image-",
-                "src-",
-            ).replace(
-                "_xxx",
-                "_%s" % self.bands,
-            )
-
         data = self.prepare_data(file_name)
         start_time = time.time()
-        det, src, noise = self.process_image(
-            gal_array=data["gal"],
-            psf_array=data["psf"],
-            cov_elem=data["cov"],
-            pixel_scale=data["scale"],
-            noise_array=data["noise"],
-            dm_fname=dm_fname,
-        )
+        det, src, noise = self.process_image(**data)
         elapsed_time = time.time() - start_time
         print("Elapsed time: %.2f seconds, number of gals: %d" % (elapsed_time, len(src)))
         del data
