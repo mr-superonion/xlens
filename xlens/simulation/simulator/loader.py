@@ -76,11 +76,15 @@ class MakeDMExposure(SimulateBase):
         if not os.path.isdir(self.cat_dir):
             os.makedirs(self.cat_dir, exist_ok=True)
 
-        self.load_configure(cparser)
         if bands_overwrite is not None:
             self.bands = bands_overwrite
 
         # Systematics
+        self.stellar_density = cparser.getfloat(
+            "simulation",
+            "stellar_density",
+            fallback=0.0,
+        )
         self.draw_bright = cparser.getboolean(
             "simulation",
             "draw_bright",
@@ -117,47 +121,6 @@ class MakeDMExposure(SimulateBase):
         self.noise_ratio = cparser.getfloat(
             "simulation",
             "noise_ratio",
-            fallback=0.0,
-        )
-        return
-
-    def load_configure(self, cparser):
-        # number of rotation of galaxies (positions and shapes)
-        self.nrot = cparser.getint("simulation", "nrot", fallback=2)
-        # whehter rotate single exposure or not
-        self.rotate = cparser.getboolean("simulation", "rotate", fallback=False)
-        # whehter do the dithering
-        self.dither = cparser.getboolean("simulation", "dither", fallback=False)
-        self.coadd_dim = cparser.getint("simulation", "coadd_dim")
-        # buffer length to avoid galaxies hitting the boundary of the exposure
-        self.buff = cparser.getint("simulation", "buff")
-
-        self.stellar_density = cparser.getfloat(
-            "simulation",
-            "stellar_density",
-            fallback=0.0,
-        )
-        self.layout = cparser.get("simulation", "layout")
-
-        self.psf_fwhm = cparser.getfloat(
-            "simulation",
-            "psf_fwhm",
-            fallback=None,
-        )
-        self.survey_name = cparser.get(
-            "simulation",
-            "survey_name",
-            fallback="LSST",
-        )
-        print("Simulating survey: %s" % self.survey_name)
-        self.psf_e1 = cparser.getfloat(
-            "simulation",
-            "psf_e1",
-            fallback=0.0,
-        )
-        self.psf_e2 = cparser.getfloat(
-            "simulation",
-            "psf_e2",
             fallback=0.0,
         )
         return
@@ -202,12 +165,9 @@ class MakeDMExposure(SimulateBase):
             pixel_scale=scale,
             buff=self.buff,
             layout=self.layout,
-            density=0,
+            select_observable="r_ab",
+            select_upper_limit=0,  # make an empty galaxy catalog
         )
-        psf_obj = make_fixed_psf(
-            psf_type="moffat",
-            psf_fwhm=self.psf_fwhm,
-        ).shear(e1=self.psf_e1, e2=self.psf_e2)
         kargs = {
             "cosmic_rays": self.cosmic_rays,
             "bad_columns": self.bad_columns,
@@ -226,7 +186,7 @@ class MakeDMExposure(SimulateBase):
             galaxy_catalog=galaxy_catalog,
             star_catalog=star_catalog,
             coadd_dim=self.coadd_dim,
-            psf=psf_obj,
+            psf=self.psf_obj,
             draw_gals=False,
             draw_stars=draw_stars,
             dither=self.dither,
@@ -281,7 +241,11 @@ class MakeDMExposure(SimulateBase):
         exp.setPhotoCalib(photo_calib)
         psf_dim = star_outcome["psf_dims"][0]
         se_wcs = star_outcome["se_wcs"][0]
-        dm_psf = make_dm_psf(psf=psf_obj, psf_dim=psf_dim, wcs=deepcopy(se_wcs))
+        dm_psf = make_dm_psf(
+            psf=self.psf_obj,
+            psf_dim=psf_dim,
+            wcs=deepcopy(se_wcs),
+        )
         exp.setPsf(dm_psf)
         dm_wcs = make_dm_wcs(se_wcs)
         exp.setWcs(dm_wcs)
