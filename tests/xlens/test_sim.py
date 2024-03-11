@@ -118,3 +118,7 @@ def test_hsc():
     worker6.run(0)
     worker6.clear_all()
     return
+
+
+if __name__ == "__main__":
+    test_lsst()

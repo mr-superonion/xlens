@@ -191,9 +191,9 @@ class ProcessSimFpfs(SimulateBase):
         elapsed_time = time.time() - start_time
         print("Elapsed time: %.2f seconds, number of gals: %d" % (elapsed_time, len(src)))
         del data
-        fitsio.write(det_name, np.asarray(det))
-        fitsio.write(src_name, np.asarray(src))
-        fitsio.write(noi_name, np.asarray(noise))
+        fitsio.write(det_name, det)
+        fitsio.write(src_name, src)
+        fitsio.write(noi_name, noise)
         del src, det
         gc.collect()
         return
