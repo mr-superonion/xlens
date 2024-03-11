@@ -134,8 +134,9 @@ class MakeDMExposure(SimulateBase):
         # rotation id
         rid = int(fname.split("rot")[1][0])
         # band id
-        bid = deepcopy(_band_map)[band]
-        _nbands = len(_band_map.values())
+        bm = deepcopy(_band_map)
+        bid = bm[band]
+        _nbands = len(bm.values())
         return ((fid * self.nrot + rid) * _nbands + bid) * 3
 
     def generate_exposure(self, fname):
