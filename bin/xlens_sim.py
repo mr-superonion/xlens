@@ -72,14 +72,14 @@ if __name__ == "__main__":
     taskname = cmd_args.task_name
 
     if taskname.lower() == "simulate_image":
-        from xlens.simulation.simulator import SimulateImage
+        from xlens.simulation.simulator.base import SimulateImage
 
         input_list = list(range(min_id, max_id))
         worker = SimulateImage(cmd_args.config)
         for r in pool.map(worker.run, input_list):
             pass
     if taskname.lower() == "simulate_kappa":
-        from xlens.simulation.simulator import SimulateImageKappa
+        from xlens.simulation.simulator.base import SimulateImageKappa
 
         input_list = list(range(min_id, max_id))
         worker = SimulateImage(cmd_args.config)
