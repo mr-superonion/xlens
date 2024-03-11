@@ -26,10 +26,8 @@ from configparser import ConfigParser, ExtendedInterpolation
 
 import fitsio
 import fpfs
-import jax
 import jax.numpy as jnp
 import numpy as np
-import numpy.lib.recfunctions as rfn
 
 from ..simulator.base import SimulateBase
 from ..simulator.loader import MakeDMExposure
@@ -117,10 +115,11 @@ class ProcessSimFpfs(SimulateBase):
         noise = task.measure(noise_array, coords, psf_f=task.psf_rot_f)
         src = src + noise
         sel = (src[:, task.di["m00"]] + src[:, task.di["m20"]]) > 1e-5
+        del task
         coords = coords[sel]
         src = src[sel]
         noise = noise[sel]
-        del task
+        gc.collect()
         return coords, src, noise
 
     def prepare_data(self, file_name):
@@ -129,6 +128,10 @@ class ProcessSimFpfs(SimulateBase):
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         variance = np.average(exposure.getMaskedImage().variance.array)
         seed = dm_task.get_seed_from_fname(file_name, "i") + 1
+        gal_array = jnp.asarray(exposure.getMaskedImage().image.array)
+        psf_array = np.asarray(get_psf_array(exposure, ngrid=self.ngrid))
+        fpfs.image.util.truncate_square(psf_array, self.psf_rcut)
+        del exposure, dm_task
         ny = self.coadd_dim + 10
         nx = self.coadd_dim + 10
         rng = np.random.RandomState(seed)
@@ -136,11 +139,6 @@ class ProcessSimFpfs(SimulateBase):
             scale=np.sqrt(variance),
             size=(ny, nx),
         )
-        gal_array = jnp.asarray(exposure.getMaskedImage().image.array)
-
-        psf_array = np.asarray(get_psf_array(exposure, ngrid=self.ngrid))
-        fpfs.image.util.truncate_square(psf_array, self.psf_rcut)
-        del exposure
         if not os.path.isfile(self.ncov_fname):
             # FPFS noise cov task
             noise_task = fpfs.image.measure_noise_cov(
@@ -157,7 +155,8 @@ class ProcessSimFpfs(SimulateBase):
             fitsio.write(self.ncov_fname, np.asarray(cov_elem), overwrite=True)
             del noise_task
         else:
-            cov_elem = jnp.asarray(fitsio.read(self.ncov_fname))
+            cov_elem = fitsio.read(self.ncov_fname)
+        gc.collect()
         return {
             "gal_array": gal_array,
             "psf_array": psf_array,
@@ -191,12 +190,12 @@ class ProcessSimFpfs(SimulateBase):
             pixel_scale=data["pixel_scale"],
             noise_array=data["noise_array"],
         )
+        del data
         elapsed_time = time.time() - start_time
         print("Elapsed time: %.2f seconds, number of gals: %d" % (elapsed_time, len(src)))
-        del data
         fitsio.write(det_name, np.asarray(det))
         fitsio.write(src_name, np.asarray(src))
         fitsio.write(noi_name, np.asarray(noise))
-        del src, det
+        del src, det, noise
         gc.collect()
         return

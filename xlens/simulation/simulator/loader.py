@@ -21,7 +21,7 @@ import fitsio
 import lsst.afw.image as afw_image
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
-from descwl_shear_sims.psfs import make_dm_psf, make_fixed_psf
+from descwl_shear_sims.psfs import make_dm_psf
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.stars import StarCatalog
 from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
