@@ -1,4 +1,4 @@
-from . import base, loader
+from . import base, loader, perturbation
 
 """
 simulator: for image simulation
@@ -7,4 +7,4 @@ summary: from catalog to average number
 neff: from catalog to effective galaxy number
 """
 
-__all__ = ["loader", "base"]
+__all__ = ["loader", "base", "perturbation"]
