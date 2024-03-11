@@ -177,6 +177,15 @@ class ProcessSimFpfs(SimulateBase):
             cov_elem = fitsio.read(self.ncov_fname)
 
         start_time = time.time()
+        bs = False
+        if bs:
+            from astropy.io import fits
+
+            filename = "/hildafs/projects/phy200017p/andypark/StarMask/brightstar.fits"
+            bright_star = fits.getdata(filename)
+            print("loaded bright star")
+            gal_array = gal_array + bright_star
+
         cat, det = self.process_image(
             gal_array,
             psf_array,
