@@ -26,10 +26,7 @@ from configparser import ConfigParser, ExtendedInterpolation
 
 import fitsio
 import fpfs
-import jax
-import jax.numpy as jnp
 import numpy as np
-import numpy.lib.recfunctions as rfn
 
 from ..simulator.base import SimulateBase
 from ..simulator.loader import MakeDMExposure
@@ -136,7 +133,7 @@ class ProcessSimFpfs(SimulateBase):
             scale=np.sqrt(variance),
             size=(ny, nx),
         )
-        gal_array = jnp.asarray(exposure.getMaskedImage().image.array)
+        gal_array = exposure.getMaskedImage().image.array
 
         psf_array = np.asarray(get_psf_array(exposure, ngrid=self.ngrid))
         fpfs.image.util.truncate_square(psf_array, self.psf_rcut)
@@ -157,7 +154,7 @@ class ProcessSimFpfs(SimulateBase):
             fitsio.write(self.ncov_fname, np.asarray(cov_elem), overwrite=True)
             del noise_task
         else:
-            cov_elem = jnp.asarray(fitsio.read(self.ncov_fname))
+            cov_elem = fitsio.read(self.ncov_fname)
         return {
             "gal_array": gal_array,
             "psf_array": psf_array,
