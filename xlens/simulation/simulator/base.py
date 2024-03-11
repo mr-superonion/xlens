@@ -116,6 +116,11 @@ class SimulateBase(object):
             cparser.get("simulation", "shear_mode_list"),
         )
         self.nshear = len(self.shear_mode_list)
+        self.shear_component_sim = cparser.get(
+            "simulation",
+            "shear_component",
+            fallback="g1",
+        )
         return
 
     def get_sim_fnames(self, min_id, max_id):
@@ -128,7 +133,9 @@ class SimulateBase(object):
             out (list):     a list of file name
         """
         out = [
-            os.path.join(self.img_dir, "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid))
+            os.path.join(
+                self.img_dir, "image-%05d_%s-%d_rot%d_xxx.fits" % (fid, self.shear_component_sim, gid, rid)
+            )
             for fid in range(min_id, max_id)
             for gid in self.shear_mode_list
             for rid in range(self.nrot)
