@@ -22,8 +22,6 @@ from configparser import ConfigParser, ExtendedInterpolation
 from copy import deepcopy
 
 import fitsio
-import jax
-import jax.numpy as jnp
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
 from descwl_shear_sims.psfs import make_fixed_psf
