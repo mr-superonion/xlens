@@ -112,13 +112,17 @@ class ProcessSimFpfs(SimulateBase):
 
         print("pre-selected number of sources: %d" % len(coords))
         src = task.measure(gal_array, coords)
-        noise = task.measure(noise_array, coords, psf_f=task.psf_rot_f)
-        src = src + noise
+        if noise_array is not None:
+            noise = task.measure(noise_array, coords, psf_f=task.psf_rot_f)
+            src = src + noise
+        else:
+            noise = None
         sel = (src[:, task.di["m00"]] + src[:, task.di["m20"]]) > 1e-5
-        del task
         coords = coords[sel]
         src = src[sel]
-        noise = noise[sel]
+        if noise is not None:
+            noise = noise[sel]
+        del task, sel
         gc.collect()
         return coords, src, noise
 
@@ -135,10 +139,13 @@ class ProcessSimFpfs(SimulateBase):
         ny = self.coadd_dim + 10
         nx = self.coadd_dim + 10
         rng = np.random.RandomState(seed)
-        noise_array = rng.normal(
-            scale=np.sqrt(variance),
-            size=(ny, nx),
-        )
+        if variance > 1e-8:
+            noise_array = rng.normal(
+                scale=np.sqrt(variance),
+                size=(ny, nx),
+            )
+        else:
+            noise_array = None
         if not os.path.isfile(self.ncov_fname):
             # FPFS noise cov task
             noise_task = fpfs.image.measure_noise_cov(
@@ -195,7 +202,8 @@ class ProcessSimFpfs(SimulateBase):
         print("Elapsed time: %.2f seconds, number of gals: %d" % (elapsed_time, len(src)))
         fitsio.write(det_name, np.asarray(det))
         fitsio.write(src_name, np.asarray(src))
-        fitsio.write(noi_name, np.asarray(noise))
+        if noise is not None:
+            fitsio.write(noi_name, np.asarray(noise))
         del src, det, noise
         gc.collect()
         return
