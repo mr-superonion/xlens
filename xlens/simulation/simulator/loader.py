@@ -83,8 +83,10 @@ class MakeDMExposure(SimulateBase):
         self.stellar_density = cparser.getfloat(
             "simulation",
             "stellar_density",
-            fallback=0.0,
+            fallback=-1.0,
         )
+        if self.stellar_density < -0.01:
+            self.stellar_density = None
         self.draw_bright = cparser.getboolean(
             "simulation",
             "draw_bright",
@@ -148,10 +150,13 @@ class MakeDMExposure(SimulateBase):
                 coadd_dim=self.coadd_dim,
                 buff=self.buff,
                 density=self.stellar_density,
+                min_density=2.0,
+                max_density=100.0,
                 layout=self.layout,
             )
             draw_stars = True
         else:
+            # isolated sims are not interesting, tested many times..
             star_catalog = None
             draw_stars = False
 

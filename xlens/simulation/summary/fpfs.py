@@ -175,9 +175,12 @@ class SummarySimFpfs(SimulateBatchBase):
         else:
             raise ValueError("g_comp_measure should be 1 or 2")
         assert os.path.isfile(mname), "Cannot find input galaxy shear catalogs : %s " % (mname)
-        nname = mname.replace("src-", "noise-")
         mm = fitsio.read(mname)
-        nn = fitsio.read(nname)
+        nname = mname.replace("src-", "noise-")
+        if os.path.isfile(nname):
+            nn = fitsio.read(nname)
+        else:
+            nn = jax.numpy.zeros_like(mm)
         sel = jax.lax.map(cat_obj._wdet, mm) > 1e-4
         mm = mm[sel]
         nn = nn[sel]
@@ -198,6 +201,8 @@ class SummarySimFpfs(SimulateBatchBase):
             obs = obs / float(pf[cname])
             print("%s is: %s" % (cname, obs))
             a = fitsio.read(fname)
+            msk = (a[:, 0] != 3640) & (a[:, 0] != 2297)
+            a = a[msk]
             a = a[np.argsort(a[:, 0])]
             nsim = a.shape[0]
             b = np.average(a, axis=0)
@@ -206,14 +211,14 @@ class SummarySimFpfs(SimulateBatchBase):
                 "multiplicative bias:",
                 mbias,
             )
-            merr = np.std(a[:, 1]) / np.average(a[:, 3]) / self.shear_value / 2.0 / np.sqrt(nsim)
+            merr = np.std(a[:, 1] / a[:, 3]) / self.shear_value / 2.0 / np.sqrt(nsim)
             print(
                 "1-sigma error:",
                 merr,
             )
             cbias = b[2] / b[3]
             print("additive bias:", cbias)
-            cerr = np.std(a[:, 2]) / np.average(a[:, 3]) / np.sqrt(nsim)
+            cerr = np.std(a[:, 2] / a[:, 3]) / np.sqrt(nsim)
             print(
                 "1-sigma error:",
                 cerr,
