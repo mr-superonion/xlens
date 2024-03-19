@@ -1,3 +1,5 @@
+import math
+
 import galsim
 
 
@@ -11,9 +13,10 @@ class ShearKappa(object):
         """
         self.kappa = kappa
 
-        if mode == "0000":
+        mode = str(mode)
+        if mode == "0":
             gv = shear_value * -1.0
-        elif mode == "1111":
+        elif mode == "1":
             gv = shear_value
         else:
             raise ValueError("mode not supported")
@@ -44,5 +47,10 @@ class ShearKappa(object):
         g2 = self.gamma2 / (1 - self.kappa)
         mu = 1.0 / ((1 - self.kappa) ** 2 - self.gamma1**2 - self.gamma2**2)
         gso = gso.lens(g1=g1, g2=g2, mu=mu)
-        shift = shift.lens(g1=g1, g2=g2, mu=mu)
+        shear = galsim.Shear(g1=g1, g2=g2)
+        shear_mat = shear.getMatrix() * math.sqrt(mu)
+        shift = galsim.PositionD(
+            shift.x * shear_mat[0, 0] + shift.y * shear_mat[0, 1],
+            shift.x * shear_mat[1, 0] + shift.y * shear_mat[1, 1],
+        )
         return gso, shift
