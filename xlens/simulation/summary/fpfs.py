@@ -21,7 +21,7 @@ from configparser import ConfigParser, ExtendedInterpolation
 import fitsio
 import jax
 import numpy as np
-from fpfs.catalog import fpfs_catalog, read_catalog
+from fpfs.catalog import fpfs4_catalog, fpfs_catalog, read_catalog
 
 from ..simulator.base import SimulateBatchBase
 
@@ -59,6 +59,10 @@ class SummarySimFpfs(SimulateBatchBase):
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
         self.cov_mat = fitsio.read(self.ncov_fname)
+        if (self.radial_n == 2 and self.nord == 4) and self.cov_mat.shape[0] == 32:
+            self.cov_mat = np.delete(self.cov_mat, 7, axis=0)
+            self.cov_mat = np.delete(self.cov_mat, 7, axis=1)
+            assert self.cov_mat.shape[0] == 31 and self.cov_mat.shape[1] == 31
 
         self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
         self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
@@ -95,17 +99,30 @@ class SummarySimFpfs(SimulateBatchBase):
     def run(self, icore):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 4))
-        cat_obj = fpfs_catalog(
-            cov_mat=self.cov_mat,
-            snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
-            ratio=self.ratio,
-            c0=self.c0,
-            c2=self.c2,
-            alpha=self.alpha,
-            beta=self.beta,
-            pthres=self.pthres,
-            pratio=self.pratio,
-        )
+        if self.nord == 4:
+            cat_obj = fpfs_catalog(
+                cov_mat=self.cov_mat,
+                snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
+                ratio=self.ratio,
+                c0=self.c0,
+                c2=self.c2,
+                alpha=self.alpha,
+                beta=self.beta,
+                pthres=self.pthres,
+                pratio=self.pratio,
+            )
+        else:
+            cat_obj = fpfs4_catalog(
+                cov_mat=self.cov_mat,
+                snr_min=self.lower_m00 / np.sqrt(self.cov_mat[0, 0]),
+                ratio=self.ratio,
+                c0=self.c0,
+                c2=self.c2,
+                alpha=self.alpha,
+                beta=self.beta,
+                pthres=self.pthres,
+                pratio=self.pratio,
+            )
         if self.noise_rev:
             if self.g_comp_measure == 1:
                 func = jax.jit(cat_obj.measure_g1_noise_correct)
@@ -145,7 +162,18 @@ class SummarySimFpfs(SimulateBatchBase):
 
     def get_sum_e_r(self, in_nm, func, read_func):
         assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
-        mm = read_func(in_nm)
+        mm = read_func(in_nm, self.nord)
+        bs = False
+        if bs:
+            from astropy.io import fits
+
+            det_file = in_nm.replace("src", "det")
+            det = fits.getdata(det_file)
+            radial = np.hypot(det[:, 0], det[:, 1]) * 0.2
+            nbins = 10
+            radial_bins = np.linspace(0, 721, nbins)
+            radial_idx = np.digitize(radial, radial_bins)
+
         e1_sum, r1_sum = jax.numpy.sum(jax.lax.map(func, mm), axis=0)
         return e1_sum, r1_sum
 

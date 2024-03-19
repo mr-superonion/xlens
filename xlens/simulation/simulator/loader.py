@@ -183,7 +183,6 @@ class MakeDMExposure(SimulateBase):
             pixel_scale=scale,
             buff=self.buff,
             layout=self.layout,
-            density=0,
         )
         psf_obj = make_fixed_psf(
             psf_type="moffat",
