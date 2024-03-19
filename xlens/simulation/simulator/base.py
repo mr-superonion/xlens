@@ -74,7 +74,7 @@ class SimulateBase(object):
         self.bands = cparser.get("simulation", "band")
 
         # magnitude zero point
-        self.calib_mag_zero = 30.0
+        self.calib_mag_zero = cparser.getfloat("survey", "mag_zero", fallback=30.0)
 
         # layout of the simulation (random, random_disk, or hex)
         self.layout = cparser.get("simulation", "layout")
@@ -344,6 +344,10 @@ class SimulateImageKappa(SimulateBase):
             "star_bleeds": False,
             "draw_method": "auto",
         }
+        psf = make_fixed_psf(
+            psf_type="moffat",
+            psf_fwhm=self.psf_fwhm,
+        ).shear(e1=self.psf_e1, e2=self.psf_e2)
 
         nfiles = len(glob.glob("%s/image-%05d_g1-*" % (self.img_dir, ifield)))
         if nfiles == self.nrot * self.nshear * nband:
@@ -358,12 +362,11 @@ class SimulateImageKappa(SimulateBase):
             pixel_scale=scale,
             layout=self.layout,
         )
-        bl = deepcopy(band_list)
         print("Simulation has galaxies: %d" % len(galaxy_catalog))
         for shear_mode in self.shear_mode_list:
             shear_obj = ShearKappa(
                 mode=shear_mode,
-                g_dist=self.shear_comp_sim,
+                g_dist=self.shear_component_sim,
                 shear_value=self.shear_value,
                 kappa=self.kappa,
             )
@@ -374,13 +377,13 @@ class SimulateImageKappa(SimulateBase):
                     star_catalog=None,
                     coadd_dim=self.coadd_dim,
                     shear_obj=shear_obj,
-                    psf=self.psf_obj,
+                    psf=psf,
                     draw_gals=True,
                     draw_stars=False,
                     draw_bright=False,
                     dither=self.dither,
                     rotate=self.rotate,
-                    bands=bl,
+                    bands=self.bands,
                     noise_factor=0.0,
                     theta0=self.rot_list[irot],
                     calib_mag_zero=self.calib_mag_zero,
@@ -388,15 +391,17 @@ class SimulateImageKappa(SimulateBase):
                     **kargs,
                 )
                 # write galaxy images
-                for band_name in bl:
+                for band_name in [self.bands]:
                     gal_fname = "%s/image-%05d_%s-%d_rot%d_%s.fits" % (
                         self.img_dir,
                         ifield,
-                        self.shear_comp_sim,
+                        self.shear_component_sim,
                         shear_mode,
                         irot,
                         band_name,
                     )
+                    if os.path.exists(gal_fname):
+                        continue
                     mi = sim_data["band_data"][band_name][0].getMaskedImage()
                     gdata = mi.getImage().getArray()
                     fitsio.write(gal_fname, gdata)
