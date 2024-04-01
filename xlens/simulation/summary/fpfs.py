@@ -201,7 +201,8 @@ class SummarySimFpfs(SimulateBatchBase):
             obs = obs / float(pf[cname])
             print("%s is: %s" % (cname, obs))
             a = fitsio.read(fname)
-            msk = (a[:, 0] != 3640) & (a[:, 0] != 2297)
+            rave = np.average(a[:, 3])
+            msk = (a[:, 3] >= 100) & (a[:, 3] < rave * 2.0)
             a = a[msk]
             a = a[np.argsort(a[:, 0])]
             nsim = a.shape[0]
@@ -211,14 +212,14 @@ class SummarySimFpfs(SimulateBatchBase):
                 "multiplicative bias:",
                 mbias,
             )
-            merr = np.std(a[:, 1] / a[:, 3]) / self.shear_value / 2.0 / np.sqrt(nsim)
+            merr = np.std(a[:, 1]) / np.average(a[:, 3]) / self.shear_value / 2.0 / np.sqrt(nsim)
             print(
                 "1-sigma error:",
                 merr,
             )
             cbias = b[2] / b[3]
             print("additive bias:", cbias)
-            cerr = np.std(a[:, 2] / a[:, 3]) / np.sqrt(nsim)
+            cerr = np.std(a[:, 2]) / np.average(a[:, 3]) / np.sqrt(nsim)
             print(
                 "1-sigma error:",
                 cerr,
