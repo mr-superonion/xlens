@@ -44,7 +44,7 @@ class SummarySimFpfs(SimulateBatchBase):
         cparser.read(config_name)
         super().__init__(cparser, min_id, max_id, ncores)
         if not os.path.isdir(self.cat_dir):
-            raise FileNotFoundError("Cannot find image directory")
+            raise FileNotFoundError("Cannot find catalog directory")
 
         # FPFS parameters
         self.radial_n = cparser.getint("FPFS", "radial_n", fallback=2)
