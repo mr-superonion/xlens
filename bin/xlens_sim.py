@@ -8,7 +8,13 @@ import schwimmbad
 
 # from memory_profiler import profile
 
-task_list = ["simulate_image", "measure_dm", "measure_fpfs", "summary_fpfs"]
+task_list = [
+    "simulate_image",
+    "measure_dm",
+    "measure_fpfs",
+    "summary_fpfs",
+    "measure_anacal",
+]
 
 
 def get_processor_count(pool, args):
@@ -45,6 +51,13 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         from xlens.simulation.measure import ProcessSimFpfs
 
         worker = ProcessSimFpfs(cmd_args.config)
+        input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
+        for _ in pool.map(worker.run, input_list):
+            pass
+    elif taskname.lower() == "measure_anacal":
+        from xlens.simulation.measure import ProcessSimAnacal
+
+        worker = ProcessSimAnacal(cmd_args.config)
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for _ in pool.map(worker.run, input_list):
             pass
