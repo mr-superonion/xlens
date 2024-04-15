@@ -19,7 +19,7 @@
 # the GNU General Public License along with this program.  If not,
 # see <http://www.lsstcorp.org/LegalNotices/>.
 #
-import lsst.geom as afwGeom
+import lsst.geom as lsst_geom
 import numpy as np
 
 
@@ -28,15 +28,22 @@ def get_psf_array(exposure, ngrid):
     bbox = exposure.getBBox()
     width, height = bbox.getWidth(), bbox.getHeight()
     # Calculate the central point
-    centerX, centerY = width // 2, height // 2
-    centroid = afwGeom.Point2I(centerX, centerY)
+    x_array = np.linspace(0, width, 10, dtype=int)
+    y_array = np.linspace(0, height, 10, dtype=int)
+    x_grid, y_grid = np.meshgrid(x_array, y_array)
+
     psf_array = np.zeros((ngrid, ngrid))
-    data = exposure.getPsf().computeImage(centroid).getArray().copy()
-    dx = data.shape[0]
-    if ngrid > dx:
-        shift = (ngrid - dx + 1) // 2
-        psf_array[shift : shift + dx, shift : shift + dx] = data[:, :]
-    else:
-        shift = -(ngrid - dx) // 2
-        psf_array[:, :] = data[shift : shift + ngrid, shift : shift + ngrid]
+    for xc, yc in zip(x_grid.ravel(), y_grid.ravel()):
+        tmp = np.zeros((ngrid, ngrid))
+        centroid = lsst_geom.Point2I(xc, yc)
+        data = exposure.getPsf().computeImage(centroid).getArray()
+        dx = data.shape[0]
+        if ngrid > dx:
+            shift = (ngrid - dx + 1) // 2
+            tmp[shift : shift + dx, shift : shift + dx] = data[:, :]
+        else:
+            shift = -(ngrid - dx) // 2
+            tmp[:, :] = data[shift : shift + ngrid, shift : shift + ngrid]
+        psf_array = psf_array + tmp
+    psf_array = psf_array / 100.0
     return psf_array

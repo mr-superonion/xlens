@@ -76,7 +76,10 @@ class NeffSimFpfs(SimulateBatchBase):
             "g_comp_measureonent_measure",
             fallback=1,
         )
-        assert self.g_comp_measure in [1, 2], "The g_comp_measure in configure file is not supported"
+        assert self.g_comp_measure in [
+            1,
+            2,
+        ], "The g_comp_measure in configure file is not supported"
         self.imode = self.shear_mode_list[-1]
 
         # neff
@@ -139,7 +142,9 @@ class NeffSimFpfs(SimulateBatchBase):
             func = lambda x: cat_obj.measure_g2_denoise(x, self.noise_rev)
         else:
             raise ValueError("g_comp_measure should be 1 or 2")
-        assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
+        assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (
+            in_nm
+        )
         mm = fitsio.read(in_nm)
         sel = jax.lax.map(cat_obj._wdet, mm) > 1e-4
         mm = mm[sel]
@@ -153,7 +158,9 @@ class NeffSimFpfs(SimulateBatchBase):
             func = cat_obj.measure_g2_renoise
         else:
             raise ValueError("g_comp_measure should be 1 or 2")
-        assert os.path.isfile(mname), "Cannot find input galaxy shear catalogs : %s " % (mname)
+        assert os.path.isfile(mname), "Cannot find input galaxy shear catalogs : %s " % (
+            mname
+        )
         nname = mname.replace("src-", "noise-")
         mm = fitsio.read(mname)
         nn = fitsio.read(nname)

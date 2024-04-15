@@ -55,6 +55,7 @@ def test_lsst():
         ncores=1,
     )
     olist = worker5.run(0)
+    del olist
 
     worker6 = NeffSimFpfs(
         config_fname,
@@ -90,6 +91,7 @@ def test_hsc():
     # PSF
     psf_array = utils.get_psf_array(exposure, ngrid=64)
     _name = os.path.join(this_dir, "psf_hsc.fits")
+    del psf_array, _name
 
     # FPFS measurement
     worker3 = ProcessSimFpfs(config_fname)
@@ -108,6 +110,7 @@ def test_hsc():
         ncores=1,
     )
     olist = worker5.run(0)
+    del olist
 
     worker6 = NeffSimFpfs(
         config_fname,

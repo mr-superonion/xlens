@@ -1,5 +1,4 @@
 import galsim
-import numpy as np
 from astropy.cosmology import Planck18
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel

@@ -66,6 +66,9 @@ class SummarySimFpfs(SimulateBatchBase):
         self.beta = cparser.getfloat("FPFS", "beta")
         self.snr_min = cparser.getfloat("FPFS", "snr_min", fallback=10.0)
         self.r2_min = cparser.getfloat("FPFS", "r2_min", fallback=0.05)
+        rmax = cparser.getfloat("FPFS", "r_max", fallback=10000)
+        self.rmax2 = rmax * rmax
+
         self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
 
         self.ncov_fname = cparser.get(
@@ -85,7 +88,10 @@ class SummarySimFpfs(SimulateBatchBase):
             "g_component_measure",
             fallback=1,
         )
-        assert self.g_comp_measure in [1, 2], "The g_comp_measure in configure file is not supported"
+        assert self.g_comp_measure in [
+            1,
+            2,
+        ], "The g_comp_measure in configure file is not supported"
 
         # summary
         if not os.path.isdir(self.sum_dir):
@@ -100,6 +106,7 @@ class SummarySimFpfs(SimulateBatchBase):
                 int(self.cut * pf[self.test_obs]),
             ),
         )
+        self.image_center = (self.coadd_dim + 10) / 2.0
         return
 
     def run(self, icore):
@@ -132,7 +139,7 @@ class SummarySimFpfs(SimulateBatchBase):
                         self.bands,
                     ),
                 )
-                e1_1, r1_1 = self.get_obs_sum2(in_nm1, cat_obj)
+                e1_1, r1_1 = self.get_obs_sum(in_nm1, cat_obj)
                 in_nm2 = os.path.join(
                     self.cat_dir,
                     "src-%05d_%s-1_rot%d_%s.fits"
@@ -143,7 +150,7 @@ class SummarySimFpfs(SimulateBatchBase):
                         self.bands,
                     ),
                 )
-                e1_2, r1_2 = self.get_obs_sum2(in_nm2, cat_obj)
+                e1_2, r1_2 = self.get_obs_sum(in_nm2, cat_obj)
                 out[icount, 0] = ifield
                 out[icount, 1] = out[icount, 1] + (e1_2 - e1_1)
                 out[icount, 2] = out[icount, 2] + (e1_1 + e1_2) / 2.0
@@ -155,35 +162,29 @@ class SummarySimFpfs(SimulateBatchBase):
 
     def get_obs_sum(self, mname, cat_obj):
         if self.g_comp_measure == 1:
-            func = lambda x: cat_obj.measure_g1_denoise(x, self.noise_rev)
-        elif self.g_comp_measure == 2:
-            func = lambda x: cat_obj.measure_g2_denoise(x, self.noise_rev)
-        else:
-            raise ValueError("g_comp_measure should be 1 or 2")
-        assert os.path.isfile(mname), "Cannot find input galaxy shear catalogs : %s " % (mname)
-        mm = fitsio.read(mname)
-        sel = jax.lax.map(cat_obj._wdet, mm) > 1e-4
-        mm = mm[sel]
-        e1_sum, r1_sum = jax.numpy.sum(func(mm), axis=0)
-        return e1_sum, r1_sum
-
-    def get_obs_sum2(self, mname, cat_obj):
-        if self.g_comp_measure == 1:
             func = cat_obj.measure_g1_renoise
         elif self.g_comp_measure == 2:
             func = cat_obj.measure_g2_renoise
         else:
             raise ValueError("g_comp_measure should be 1 or 2")
-        assert os.path.isfile(mname), "Cannot find input galaxy shear catalogs : %s " % (mname)
+        assert os.path.isfile(mname), "Cannot find input galaxy shear catalogs : %s " % (
+            mname
+        )
         mm = fitsio.read(mname)
         nname = mname.replace("src-", "noise-")
         if os.path.isfile(nname):
             nn = fitsio.read(nname)
         else:
             nn = jax.numpy.zeros_like(mm)
-        sel = jax.lax.map(cat_obj._wdet, mm) > 1e-4
+        dname = mname.replace("src-", "det-")
+        det = fitsio.read(dname)
+        r2 = (det[:, 0] - self.image_center) ** 2.0 + (
+            det[:, 1] - self.image_center
+        ) ** 2.0
+        sel = r2 < self.rmax2
         mm = mm[sel]
         nn = nn[sel]
+        del sel
         e1_sum, r1_sum = jax.numpy.sum(func(mm, nn), axis=0)
         return e1_sum, r1_sum
 
@@ -212,7 +213,13 @@ class SummarySimFpfs(SimulateBatchBase):
                 "multiplicative bias:",
                 mbias,
             )
-            merr = np.std(a[:, 1]) / np.average(a[:, 3]) / self.shear_value / 2.0 / np.sqrt(nsim)
+            merr = (
+                np.std(a[:, 1])
+                / np.average(a[:, 3])
+                / self.shear_value
+                / 2.0
+                / np.sqrt(nsim)
+            )
             print(
                 "1-sigma error:",
                 merr,
