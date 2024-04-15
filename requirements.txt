@@ -1,0 +1,13 @@
+pip
+numpy
+scipy
+astropy
+fitsio
+galsim
+lenstronomy
+matplotlib
+schwimmbad
+
+flake8
+black
+pytest
