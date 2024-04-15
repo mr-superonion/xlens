@@ -17,6 +17,7 @@ import os
 from configparser import ConfigParser
 from copy import deepcopy
 
+import anacal
 import fitsio
 import lsst.afw.image as afw_image
 import numpy as np
@@ -125,6 +126,11 @@ class MakeDMExposure(SimulateBase):
             "noise_ratio",
             fallback=0.0,
         )
+        self.corr_fname = cparser.get(
+            "simulation",
+            "noise_corr_fname",
+            fallback=None,
+        )
         return
 
     def get_seed_from_fname(self, fname, band):
@@ -142,8 +148,15 @@ class MakeDMExposure(SimulateBase):
         return ((fid * self.nrot + rid) * _nbands + bid) * 3
 
     def generate_exposure(self, fname):
-        field_id = int(fname.split("image-")[-1].split("_")[0]) + 212
+        field_id = int(fname.split("image-")[-1].split("_")[0])
         rng = np.random.RandomState(field_id)
+        pixel_scale = get_survey(
+            gal_type="wldeblend",
+            band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
+            survey_name=self.survey_name,
+        ).pixel_scale
+        psf_obj = self.get_psf_obj(rng, pixel_scale)
+
         if "random" in self.layout:
             star_catalog = StarCatalog(
                 rng=rng,
@@ -159,16 +172,14 @@ class MakeDMExposure(SimulateBase):
             # isolated sims are not interesting, tested many times..
             star_catalog = None
             draw_stars = False
-
-        scale = get_survey(
-            gal_type="wldeblend",
-            band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
-            survey_name=self.survey_name,
-        ).pixel_scale
+        if self.corr_fname is None:
+            noise_corr = None
+        else:
+            noise_corr = fitsio.read(self.corr_fname)
         galaxy_catalog = WLDeblendGalaxyCatalog(
             rng=rng,
             coadd_dim=self.coadd_dim,
-            pixel_scale=scale,
+            pixel_scale=pixel_scale,
             buff=self.buff,
             layout=self.layout,
             select_observable="r_ab",
@@ -180,6 +191,10 @@ class MakeDMExposure(SimulateBase):
             "star_bleeds": self.star_bleeds,
             "draw_bright": self.draw_bright,
             "draw_method": "auto",
+            "noise_factor": 0.0,
+            "g1": 0.0,
+            "g2": 0.0,
+            "draw_gals": False,
         }
         if self.bands != "a":
             blist = [b for b in self.bands]
@@ -192,17 +207,13 @@ class MakeDMExposure(SimulateBase):
             galaxy_catalog=galaxy_catalog,
             star_catalog=star_catalog,
             coadd_dim=self.coadd_dim,
-            psf=self.psf_obj,
-            draw_gals=False,
+            psf=psf_obj,
             draw_stars=draw_stars,
             dither=self.dither,
             rotate=self.rotate,
             bands=blist,
-            noise_factor=0.0,
             calib_mag_zero=self.calib_mag_zero,
             survey_name=self.survey_name,
-            g1=0.0,
-            g2=0.0,
             **kargs,
         )
         variance = 0.0
@@ -217,25 +228,44 @@ class MakeDMExposure(SimulateBase):
             nstd_f = self.base_std[band] * self.noise_ratio
             weight = 1.0 / (self.base_std[band]) ** 2.0
             variance += (nstd_f * weight) ** 2.0
-            seed = self.get_seed_from_fname(fname, band)
-            rng2 = np.random.RandomState(seed)
             print("Using noisy setup with std: %.2f" % nstd_f)
-            print("The random seed is %d" % seed)
+            if nstd_f > 1e-4:
+                seed = self.get_seed_from_fname(fname, band)
+                print("The random seed is %d" % seed)
+                if noise_corr is None:
+                    noise_array = np.random.RandomState(seed).normal(
+                        scale=nstd_f,
+                        size=(ny, nx),
+                    )
+                else:
+                    noise_array = (
+                        anacal.noise.simulate_noise(
+                            seed=seed,
+                            correlation=noise_corr,
+                            nx=nx,
+                            ny=ny,
+                            scale=pixel_scale,
+                        )
+                        * nstd_f
+                    )
+                print("Simulated noise STD is: %.2f" % np.std(noise_array))
+            else:
+                noise_array = 0.0
             star_array = star_outcome["band_data"][band][0].getMaskedImage().image.array
-            msk_array = msk_array & (star_outcome["band_data"][band][0].getMaskedImage().mask.array)
+            msk_array = msk_array & (
+                star_outcome["band_data"][band][0].getMaskedImage().mask.array
+            )
             gal_array = (
                 gal_array
                 + (
                     fitsio.read(fname.replace("_xxx", "_%s" % bands[i]))
                     + star_array
-                    + rng2.normal(
-                        scale=nstd_f,
-                        size=(ny, nx),
-                    )
+                    + noise_array
                 )
                 * weight
             )
             weight_sum += weight
+            del noise_array
         masked_image = afw_image.MaskedImageF(ny, nx)
         masked_image.image.array[:, :] = gal_array / weight_sum
         masked_image.variance.array[:, :] = variance / (weight_sum) ** 2.0
@@ -248,7 +278,7 @@ class MakeDMExposure(SimulateBase):
         psf_dim = star_outcome["psf_dims"][0]
         se_wcs = star_outcome["se_wcs"][0]
         dm_psf = make_dm_psf(
-            psf=self.psf_obj,
+            psf=psf_obj,
             psf_dim=psf_dim,
             wcs=deepcopy(se_wcs),
         )

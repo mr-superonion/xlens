@@ -35,6 +35,12 @@ from .utils import get_psf_array
 # from memory_profiler import profile
 
 
+def rotate90(image):
+    rotated_image = np.zeros_like(image)
+    rotated_image[1:, 1:] = np.rot90(m=image[1:, 1:], k=-1)
+    return rotated_image
+
+
 class ProcessSimAnacal(SimulateBase):
     # @profile
     def __init__(self, config_name):
@@ -64,6 +70,7 @@ class ProcessSimAnacal(SimulateBase):
 
         self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
         self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
+        self.wdet_cut = cparser.getfloat("FPFS", "wdet_cut", fallback=0.00)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
 
         self.ncov_fname = cparser.get(
@@ -74,6 +81,12 @@ class ProcessSimAnacal(SimulateBase):
         if len(self.ncov_fname) == 0 or not os.path.isfile(self.ncov_fname):
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
+
+        self.corr_fname = cparser.get(
+            "simulation",
+            "noise_corr_fname",
+            fallback=None,
+        )
 
         self.center_name = cparser.get(
             "FPFS",
@@ -110,6 +123,7 @@ class ProcessSimAnacal(SimulateBase):
             std_m00=std_m00,
             std_v=std_v,
             noise_array=noise_array,
+            wdet_cut=self.wdet_cut,
         )
         del dtask
         print("pre-selected number of sources: %d" % len(coords))
@@ -137,8 +151,8 @@ class ProcessSimAnacal(SimulateBase):
 
     def prepare_data(self, file_name):
         dm_task = MakeDMExposure(self.config_name)
+        # using seeds that are not used in simulation
         seed = dm_task.get_seed_from_fname(file_name, "i") + 1
-
         exposure = dm_task.generate_exposure(file_name)
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         variance = np.average(exposure.getMaskedImage().variance.array)
@@ -148,12 +162,26 @@ class ProcessSimAnacal(SimulateBase):
         del exposure, dm_task
         ny = self.coadd_dim + 10
         nx = self.coadd_dim + 10
-        rng = np.random.RandomState(seed)
+        noise_std = np.sqrt(variance)
         if variance > 1e-8:
-            noise_array = rng.normal(
-                scale=np.sqrt(variance),
-                size=(ny, nx),
-            )
+            if self.corr_fname is None:
+                noise_array = np.random.RandomState(seed).normal(
+                    scale=noise_std,
+                    size=(ny, nx),
+                )
+            else:
+                noise_corr = fitsio.read(self.corr_fname)
+                noise_corr = rotate90(noise_corr)
+                noise_array = (
+                    anacal.noise.simulate_noise(
+                        seed=seed,
+                        correlation=noise_corr,
+                        nx=nx,
+                        ny=ny,
+                        scale=pixel_scale,
+                    )
+                    * noise_std
+                )
         else:
             noise_array = None
         cov_elem = fitsio.read(self.ncov_fname)
@@ -178,6 +206,10 @@ class ProcessSimAnacal(SimulateBase):
         )
         det_name = src_name.replace("src-", "det-")
         noi_name = src_name.replace("src-", "noise-")
+
+        # dm_task = MakeDMExposure(self.config_name)
+        # seed = dm_task.get_seed_from_fname(file_name, "i") + 1
+
         if os.path.isfile(src_name) and os.path.isfile(det_name):
             print("Already has measurement for simulation: %s." % src_name)
             return

@@ -22,7 +22,6 @@
 #
 import os
 
-import lsst.afw.image as afwImg
 import lsst.afw.table as afwTable
 import lsst.daf.base as dafBase
 import lsst.pex.config as pexConfig
@@ -37,10 +36,22 @@ from ..simulator.loader import MakeDMExposure
 
 class DMMeasurementConfig(pexConfig.Config):
     "configuration"
-    detection = pexConfig.ConfigurableField(target=SourceDetectionTask, doc="Detect sources")
-    scaleVariance = pexConfig.ConfigurableField(target=ScaleVarianceTask, doc="Variance rescaling")
-    deblend = pexConfig.ConfigurableField(target=SourceDeblendTask, doc="Deblending")
-    measurement = pexConfig.ConfigurableField(target=SingleFrameMeasurementTask, doc="Measure sources")
+    detection = pexConfig.ConfigurableField(
+        target=SourceDetectionTask,
+        doc="Detect sources",
+    )
+    scaleVariance = pexConfig.ConfigurableField(
+        target=ScaleVarianceTask,
+        doc="Variance rescaling",
+    )
+    deblend = pexConfig.ConfigurableField(
+        target=SourceDeblendTask,
+        doc="Deblending",
+    )
+    measurement = pexConfig.ConfigurableField(
+        target=SingleFrameMeasurementTask,
+        doc="Measure sources",
+    )
     catalogCalculation = pexConfig.ConfigurableField(
         target=CatalogCalculationTask,
         doc="Subtask to run catalogCalculation plugins on catalog",

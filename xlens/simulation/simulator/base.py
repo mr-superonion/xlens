@@ -24,15 +24,28 @@ from copy import deepcopy
 import fitsio
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
-from descwl_shear_sims.psfs import make_fixed_psf
+from descwl_shear_sims.psfs import make_fixed_psf, make_ps_psf
 from descwl_shear_sims.shear import ShearRedshift
-from descwl_shear_sims.sim import make_sim
+from descwl_shear_sims.sim import get_se_dim, make_sim
 from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
 
 from .perturbation import ShearHalo, ShearKappa
 
 band_list = ["g", "r", "i", "z"]
+# band_list = ["i"]
 nband = len(band_list)
+
+default_config = {
+    "cosmic_rays": False,
+    "bad_columns": False,
+    "star_bleeds": False,
+    "draw_method": "auto",
+    "noise_factor": 0.0,
+    "draw_gals": True,
+    "draw_stars": False,
+    "draw_bright": False,
+    "star_catalog": None,
+}
 
 
 class SimulateBase(object):
@@ -72,12 +85,6 @@ class SimulateBase(object):
         # Whether do rotation or dithering
         self.rotate = cparser.getboolean("simulation", "rotate")
         self.dither = cparser.getboolean("simulation", "dither")
-        # version of the PSF simulation: 0 -- fixed PSF
-        self.psf_variation = cparser.getfloat(
-            "simulation",
-            "psf_variation",
-            fallback=0.0,
-        )
         # size of the exposure image
         self.coadd_dim = cparser.getint("simulation", "coadd_dim")
         # buffer length to avoid galaxies hitting the boundary of the exposure
@@ -102,10 +109,13 @@ class SimulateBase(object):
             "psf_e2",
             fallback=0.0,
         )
-        self.psf_obj = make_fixed_psf(
-            psf_type="moffat",
-            psf_fwhm=self.psf_fwhm,
-        ).shear(e1=self.psf_e1, e2=self.psf_e2)
+        # version of the PSF simulation: 0 -- fixed PSF
+        self.psf_variation = cparser.getfloat(
+            "simulation",
+            "psf_variation",
+            fallback=0.0,
+        )
+        assert self.psf_variation >= 0.0
 
         self.shear_comp_sim = cparser.get(
             "simulation",
@@ -128,12 +138,33 @@ class SimulateBase(object):
             out (list):     a list of file name
         """
         out = [
-            os.path.join(self.img_dir, "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid))
+            os.path.join(
+                self.img_dir, "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid)
+            )
             for fid in range(min_id, max_id)
             for gid in self.shear_mode_list
             for rid in range(self.nrot)
         ]
         return out
+
+    def get_psf_obj(self, rng, scale):
+        if self.psf_variation < 1e-5:
+            psf_obj = make_fixed_psf(
+                psf_type="moffat",
+                psf_fwhm=self.psf_fwhm,
+            ).shear(e1=self.psf_e1, e2=self.psf_e2)
+        else:
+            se_dim = get_se_dim(
+                coadd_scale=scale,
+                coadd_dim=self.coadd_dim,
+                se_scale=scale,
+                rotate=self.rotate,
+                dither=self.dither,
+            )
+            psf_obj = make_ps_psf(
+                rng=rng, dim=se_dim, variation_factor=self.psf_variation
+            )
+        return psf_obj
 
     def clear_image(self):
         if os.path.isdir(self.img_dir):
@@ -175,13 +206,15 @@ class SimulateBase(object):
         filename (str): Name of the file to save the regions.
         """
         header = "# Region file format: DS9 version 4.1\n"
-        header += "global color=green dashlist=8 3 width=1 font='helvetica 10 normal roman' "
-        header += "select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n"
+        header += "global color=green dashlist=8 3 width=1"
+        header += "font='helvetica 10 normal roman' "
+        header += "select=1 highlite=1 dash=0 fixed=0 edit=1"
+        header += "move=1 delete=1 include=1 source=1\n"
         header += "image\n"  # Coordinate system, using image pixels
         with open(filename, "w") as file:
             file.write(header)
             for x, y in xy:
-                file.write(f"point(%d,%d) # point=circle\n" % (x + 1, y + 1))
+                file.write("point(%d,%d) # point=circle\n" % (x + 1, y + 1))
         return
 
 
@@ -228,19 +261,14 @@ class SimulateImage(SimulateBase):
     def run(self, ifield):
         print("Simulating for field: %d" % ifield)
         rng = np.random.RandomState(ifield)
-
         scale = get_survey(
             gal_type="wldeblend",
             band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
             survey_name=self.survey_name,
         ).pixel_scale
+        psf_obj = self.get_psf_obj(rng, scale)
 
-        kargs = {
-            "cosmic_rays": False,
-            "bad_columns": False,
-            "star_bleeds": False,
-            "draw_method": "auto",
-        }
+        kargs = deepcopy(default_config)
 
         nfiles = len(glob.glob("%s/image-%05d_g1-*" % (self.img_dir, ifield)))
         if nfiles == self.nrot * self.nshear * nband:
@@ -268,17 +296,12 @@ class SimulateImage(SimulateBase):
                 sim_data = make_sim(
                     rng=rng,
                     galaxy_catalog=galaxy_catalog,
-                    star_catalog=None,
                     coadd_dim=self.coadd_dim,
                     shear_obj=shear_obj,
-                    psf=self.psf_obj,
-                    draw_gals=True,
-                    draw_stars=False,
-                    draw_bright=False,
+                    psf=psf_obj,
                     dither=self.dither,
                     rotate=self.rotate,
                     bands=bl,
-                    noise_factor=0.0,
                     theta0=self.rot_list[irot],
                     calib_mag_zero=self.calib_mag_zero,
                     survey_name=self.survey_name,
@@ -325,13 +348,9 @@ class SimulateImageKappa(SimulateBase):
             band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
             survey_name=self.survey_name,
         ).pixel_scale
+        psf_obj = self.get_psf_obj(rng, scale)
 
-        kargs = {
-            "cosmic_rays": False,
-            "bad_columns": False,
-            "star_bleeds": False,
-            "draw_method": "auto",
-        }
+        kargs = deepcopy(default_config)
 
         nfiles = len(glob.glob("%s/image-%05d_g1-*" % (self.img_dir, ifield)))
         if nfiles == self.nrot * self.nshear * nband:
@@ -359,17 +378,12 @@ class SimulateImageKappa(SimulateBase):
                 sim_data = make_sim(
                     rng=rng,
                     galaxy_catalog=galaxy_catalog,
-                    star_catalog=None,
                     coadd_dim=self.coadd_dim,
                     shear_obj=shear_obj,
-                    psf=self.psf_obj,
-                    draw_gals=True,
-                    draw_stars=False,
-                    draw_bright=False,
+                    psf=psf_obj,
                     dither=self.dither,
                     rotate=self.rotate,
                     bands=bl,
-                    noise_factor=0.0,
                     theta0=self.rot_list[irot],
                     calib_mag_zero=self.calib_mag_zero,
                     survey_name=self.survey_name,
@@ -413,13 +427,9 @@ class SimulateImageHalo(SimulateBase):
             band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
             survey_name=self.survey_name,
         ).pixel_scale
+        psf_obj = self.get_psf_obj(rng, scale)
 
-        kargs = {
-            "cosmic_rays": False,
-            "bad_columns": False,
-            "star_bleeds": False,
-            "draw_method": "auto",
-        }
+        kargs = deepcopy(default_config)
 
         # galaxy catalog; you can make your own
         galaxy_catalog = WLDeblendGalaxyCatalog(
@@ -442,17 +452,12 @@ class SimulateImageHalo(SimulateBase):
                 sim_data = make_sim(
                     rng=rng,
                     galaxy_catalog=galaxy_catalog,
-                    star_catalog=None,
                     coadd_dim=self.coadd_dim,
                     shear_obj=shear_obj,
-                    psf=self.psf_obj,
-                    draw_gals=True,
-                    draw_stars=False,
-                    draw_bright=False,
+                    psf=psf_obj,
                     dither=self.dither,
                     rotate=self.rotate,
                     bands=bl,
-                    noise_factor=0.0,
                     theta0=self.rot_list[irot],
                     calib_mag_zero=self.calib_mag_zero,
                     survey_name=self.survey_name,

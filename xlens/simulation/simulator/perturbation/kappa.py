@@ -1,6 +1,3 @@
-import galsim
-
-
 class ShearKappa(object):
     def __init__(self, mode, g_dist="g1", shear_value=0.02, kappa=0.05):
         """Shear distortion from halo

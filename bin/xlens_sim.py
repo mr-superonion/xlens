@@ -57,6 +57,8 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
     elif taskname.lower() == "measure_anacal":
         from xlens.simulation.measure import ProcessSimAnacal
 
+        # import fitsio
+
         worker = ProcessSimAnacal(cmd_args.config)
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for _ in pool.map(worker.run, input_list):
@@ -92,7 +94,9 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         neff = (0.26 / std) ** 2.0 / worker.area
         print("neff: %s" % neff)
     else:
-        raise ValueError("taskname cannot be set to %s, we only support %s" % (taskname, task_list))
+        raise ValueError(
+            "taskname cannot be set to %s, we only support %s" % (taskname, task_list)
+        )
     pool.close()
     sys.exit(0)
     return

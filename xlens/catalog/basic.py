@@ -129,11 +129,16 @@ def get_snr_local_background(catalog):
     and returns NaNs for invalid S/N values.
     """
     if "i_localbackground_fluxsigma" in catalog.dtype.names:  # s18
-        snrloc = catalog["i_localbackground_flux"] / catalog["i_localbackground_fluxsigma"]
+        snrloc = (
+            catalog["i_localbackground_flux"] / catalog["i_localbackground_fluxsigma"]
+        )
     elif "i_localbackground_fluxerr" in catalog.dtype.names:  # s19
         snrloc = catalog["i_localbackground_flux"] / catalog["i_localbackground_fluxerr"]
     elif "base_LocalBackground_instFlux" in catalog.dtype.names:  # pipe 7
-        snrloc = catalog["base_LocalBackground_instFlux"] / catalog["base_LocalBackground_instFluxErr"]
+        snrloc = (
+            catalog["base_LocalBackground_instFlux"]
+            / catalog["base_LocalBackground_instFluxErr"]
+        )
     else:
         snrloc = _nan_array(len(catalog))
     return snrloc
@@ -183,7 +188,9 @@ def get_imag_aperture10(catalog):
     if "i_apertureflux_10_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_10_mag"]
     elif "base_CircularApertureFlux_3_0_instFlux" in catalog.dtype.names:  # pipe 7
-        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_3_0_instFlux"]) + 30.0
+        magnitude = (
+            -2.5 * np.log10(catalog["base_CircularApertureFlux_3_0_instFlux"]) + 30.0
+        )
     else:
         magnitude = _nan_array(len(catalog))
     return magnitude
@@ -197,7 +204,9 @@ def get_imag_aperture15(catalog):
     if "i_apertureflux_15_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_15_mag"]
     elif "base_CircularApertureFlux_4_5_instFlux" in catalog.dtype.names:  # pipe 7
-        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_4_5_instFlux"]) + 30.0
+        magnitude = (
+            -2.5 * np.log10(catalog["base_CircularApertureFlux_4_5_instFlux"]) + 30.0
+        )
     else:
         magnitude = _nan_array(len(catalog))
     return magnitude
@@ -211,7 +220,9 @@ def get_imag_aperture20(catalog):
     if "i_apertureflux_20_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_20_mag"]
     elif "base_CircularApertureFlux_6_0_instFlux" in catalog.dtype.names:  # pipe 7
-        magnitude = -2.5 * np.log10(catalog["base_CircularApertureFlux_6_0_instFlux"]) + 30.0
+        magnitude = (
+            -2.5 * np.log10(catalog["base_CircularApertureFlux_6_0_instFlux"]) + 30.0
+        )
     else:
         magnitude = _nan_array(len(catalog))
     return magnitude
@@ -315,7 +326,9 @@ def get_npass(catalog, meas="cmodel"):
     r_mask = (r_snr >= min_multiband_snr_data) & (~np.isnan(r_snr) & (rcountinputs >= 2))
     z_mask = (z_snr >= min_multiband_snr_data) & (~np.isnan(z_snr) & (zcountinputs >= 2))
     y_mask = (y_snr >= min_multiband_snr_data) & (~np.isnan(y_snr) & (ycountinputs >= 2))
-    npass = g_mask.astype(int) + r_mask.astype(int) + z_mask.astype(int) + y_mask.astype(int)
+    npass = (
+        g_mask.astype(int) + r_mask.astype(int) + z_mask.astype(int) + y_mask.astype(int)
+    )
     return npass
 
 
@@ -331,10 +344,16 @@ def get_abs_ellip(catalog):
     if "absE" in catalog.dtype.names:
         absE = catalog["absE"]
     elif "i_hsmshaperegauss_e1" in catalog.dtype.names:  # For S18A
-        absE = catalog["i_hsmshaperegauss_e1"] ** 2.0 + catalog["i_hsmshaperegauss_e2"] ** 2.0
+        absE = (
+            catalog["i_hsmshaperegauss_e1"] ** 2.0
+            + catalog["i_hsmshaperegauss_e2"] ** 2.0
+        )
         absE = np.sqrt(absE)
     elif "ishape_hsm_regauss_e1" in catalog.dtype.names:  # For S16A
-        absE = catalog["ishape_hsm_regauss_e1"] ** 2.0 + catalog["ishape_hsm_regauss_e2"] ** 2.0
+        absE = (
+            catalog["ishape_hsm_regauss_e1"] ** 2.0
+            + catalog["ishape_hsm_regauss_e2"] ** 2.0
+        )
         absE = np.sqrt(absE)
     elif "ext_shapeHSM_HsmShapeRegauss_e1" in catalog.dtype.names:  # For pipe 7
         absE = (
@@ -643,9 +662,13 @@ def get_psf_ellip(catalog, return_shear=False, pixel_scale=0.168):
         raise ValueError("Input catalog does not have required coulmn name")
 
     if return_shear:
-        return (psf_mxx - psf_myy) / (psf_mxx + psf_myy) / 2.0, psf_mxy / (psf_mxx + psf_myy)
+        return (psf_mxx - psf_myy) / (psf_mxx + psf_myy) / 2.0, psf_mxy / (
+            psf_mxx + psf_myy
+        )
     else:
-        return (psf_mxx - psf_myy) / (psf_mxx + psf_myy), 2.0 * psf_mxy / (psf_mxx + psf_myy)
+        return (psf_mxx - psf_myy) / (psf_mxx + psf_myy), 2.0 * psf_mxy / (
+            psf_mxx + psf_myy
+        )
 
 
 def get_sdss_ellip(catalog, return_shear=False, pixel_scale=0.168):
@@ -667,9 +690,13 @@ def get_sdss_ellip(catalog, return_shear=False, pixel_scale=0.168):
     else:
         raise ValueError("Input catalog does not have required coulmn name")
     if return_shear:
-        return (psf_mxx - psf_myy) / (psf_mxx + psf_myy) / 2.0, psf_mxy / (psf_mxx + psf_myy)
+        return (psf_mxx - psf_myy) / (psf_mxx + psf_myy) / 2.0, psf_mxy / (
+            psf_mxx + psf_myy
+        )
     else:
-        return (psf_mxx - psf_myy) / (psf_mxx + psf_myy), 2.0 * psf_mxy / (psf_mxx + psf_myy)
+        return (psf_mxx - psf_myy) / (psf_mxx + psf_myy), 2.0 * psf_mxy / (
+            psf_mxx + psf_myy
+        )
 
 
 def get_wl_cuts(catalog):
@@ -716,7 +743,8 @@ def get_mask_visit_104994(data):
         d2_f64 = np.array(d2, dtype=np.float64) * np.pi / 180.0
         return (
             np.arccos(
-                np.cos(d1_f64) * np.cos(d2_f64) * np.cos(a1_f64 - a2_f64) + np.sin(d1_f64) * np.sin(d2_f64)
+                np.cos(d1_f64) * np.cos(d2_f64) * np.cos(a1_f64 - a2_f64)
+                + np.sin(d1_f64) * np.sin(d2_f64)
             )
             / np.pi
             * 180.0
