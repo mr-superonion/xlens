@@ -70,7 +70,7 @@ class ProcessSimAnacal(SimulateBase):
 
         self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
         self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
-        self.wdet_cut = cparser.getfloat("FPFS", "wdet_cut", fallback=0.00)
+        self.wdet_cut = cparser.getfloat("FPFS", "wdet_cut", fallback=0.05)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
 
         self.ncov_fname = cparser.get(
