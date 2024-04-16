@@ -72,6 +72,7 @@ class ProcessSimAnacal(SimulateBase):
         self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
         self.wdet_cut = cparser.getfloat("FPFS", "wdet_cut", fallback=0.05)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
+        self.klim_thres = cparser.getint("FPFS", "klim_thres", fallback=1e-12)
 
         self.ncov_fname = cparser.get(
             "FPFS",
@@ -112,6 +113,7 @@ class ProcessSimAnacal(SimulateBase):
             pix_scale=pixel_scale,
             sigma_arcsec=self.sigma_as,
             det_nrot=self.det_nrot,
+            klim_thres=self.klim_thres,
         )
         std_m00, std_v = dtask.get_stds(cov_elem)
         coords = dtask.run(
@@ -133,6 +135,7 @@ class ProcessSimAnacal(SimulateBase):
             pix_scale=pixel_scale,
             sigma_arcsec=self.sigma_as,
             det_nrot=self.det_nrot,
+            klim_thres=self.klim_thres,
         )
         src = mtask.run(gal_array=gal_array, det=coords)
         if noise_array is not None:
