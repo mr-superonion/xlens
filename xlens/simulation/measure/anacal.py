@@ -100,7 +100,7 @@ class ProcessSimAnacal(SimulateBase):
         self,
         gal_array,
         psf_array,
-        cov_elem,
+        cov_mat,
         pixel_scale,
         noise_array,
     ):
@@ -112,18 +112,16 @@ class ProcessSimAnacal(SimulateBase):
             psf_array=psf_array,
             pix_scale=pixel_scale,
             sigma_arcsec=self.sigma_as,
+            cov_mat=cov_mat,
             det_nrot=self.det_nrot,
             klim_thres=self.klim_thres,
         )
-        std_m00, std_v = dtask.get_stds(cov_elem)
         coords = dtask.run(
             gal_array=gal_array,
             fthres=8.5,
             pthres=self.pthres,
             pratio=self.pratio,
             bound=self.rcut + 5,
-            std_m00=std_m00,
-            std_v=std_v,
             noise_array=noise_array,
             wdet_cut=self.wdet_cut,
         )
@@ -187,12 +185,12 @@ class ProcessSimAnacal(SimulateBase):
                 )
         else:
             noise_array = None
-        cov_elem = fitsio.read(self.ncov_fname)
+        cov_mat = fitsio.read(self.ncov_fname)
         gc.collect()
         return {
             "gal_array": gal_array,
             "psf_array": psf_array,
-            "cov_elem": cov_elem,
+            "cov_mat": cov_mat,
             "pixel_scale": pixel_scale,
             "noise_array": noise_array,
         }
@@ -222,7 +220,7 @@ class ProcessSimAnacal(SimulateBase):
         det, src, noise = self.process_image(
             gal_array=data["gal_array"],
             psf_array=data["psf_array"],
-            cov_elem=data["cov_elem"],
+            cov_mat=data["cov_mat"],
             pixel_scale=data["pixel_scale"],
             noise_array=data["noise_array"],
         )
