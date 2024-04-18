@@ -155,9 +155,7 @@ class ProcessSimFpfs(SimulateBase):
                 pix_scale=pixel_scale,
                 det_nrot=self.det_nrot,
             )
-            noise_pow = (
-                np.ones((self.ngrid, self.ngrid)) * variance * 2.0 * self.ngrid**2.0
-            )  # variance times 2
+            noise_pow = np.ones((self.ngrid, self.ngrid)) * variance * self.ngrid**2.0
             cov_elem = noise_task.measure(noise_pow)
             fitsio.write(self.ncov_fname, np.asarray(cov_elem), overwrite=True)
             del noise_task
