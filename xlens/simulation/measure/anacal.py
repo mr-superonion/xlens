@@ -68,9 +68,9 @@ class ProcessSimAnacal(SimulateBase):
         if self.radial_n == 4:
             assert self.nord >= 6
 
-        self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
-        self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
-        self.wdet_cut = cparser.getfloat("FPFS", "wdet_cut", fallback=0.05)
+        self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.8)
+        self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.0)
+        self.pthres2 = cparser.getfloat("FPFS", "pthres2", fallback=0.012)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
         self.klim_thres = cparser.getint("FPFS", "klim_thres", fallback=1e-12)
 
@@ -100,7 +100,7 @@ class ProcessSimAnacal(SimulateBase):
         self,
         gal_array,
         psf_array,
-        cov_mat,
+        cov_matrix,
         pixel_scale,
         noise_array,
     ):
@@ -112,7 +112,7 @@ class ProcessSimAnacal(SimulateBase):
             psf_array=psf_array,
             pix_scale=pixel_scale,
             sigma_arcsec=self.sigma_as,
-            cov_mat=cov_mat,
+            cov_matrix=cov_matrix,
             det_nrot=self.det_nrot,
             klim_thres=self.klim_thres,
         )
@@ -121,9 +121,9 @@ class ProcessSimAnacal(SimulateBase):
             fthres=8.5,
             pthres=self.pthres,
             pratio=self.pratio,
+            pthres2=self.pthres2,
             bound=self.rcut + 5,
             noise_array=noise_array,
-            wdet_cut=self.wdet_cut,
         )
         del dtask
         print("pre-selected number of sources: %d" % len(coords))
@@ -185,12 +185,12 @@ class ProcessSimAnacal(SimulateBase):
                 )
         else:
             noise_array = None
-        cov_mat = fitsio.read(self.ncov_fname)
+        cov_matrix = fitsio.read(self.ncov_fname)
         gc.collect()
         return {
             "gal_array": gal_array,
             "psf_array": psf_array,
-            "cov_mat": cov_mat,
+            "cov_matrix": cov_matrix,
             "pixel_scale": pixel_scale,
             "noise_array": noise_array,
         }
@@ -220,13 +220,16 @@ class ProcessSimAnacal(SimulateBase):
         det, src, noise = self.process_image(
             gal_array=data["gal_array"],
             psf_array=data["psf_array"],
-            cov_mat=data["cov_mat"],
+            cov_matrix=data["cov_matrix"],
             pixel_scale=data["pixel_scale"],
             noise_array=data["noise_array"],
         )
         del data
         elapsed_time = time.time() - start_time
-        print("Elapsed time: %.2f seconds, number of gals: %d" % (elapsed_time, len(src)))
+        print(
+            "Elapsed time: %.2f seconds, number of gals: %d"
+            % (elapsed_time, len(src))
+        )
         fitsio.write(det_name, np.asarray(det))
         fitsio.write(src_name, np.asarray(src))
         if noise is not None:

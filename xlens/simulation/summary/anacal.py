@@ -21,7 +21,7 @@ from configparser import ConfigParser, ExtendedInterpolation
 import fitsio
 import jax
 import numpy as np
-from fpfs.catalog import fpfs_catalog
+from anacal.fpfs import FpfsCatalog
 
 from ..simulator.base import SimulateBatchBase
 
@@ -32,7 +32,7 @@ pf = {
 }
 
 
-class SummarySimFpfs(SimulateBatchBase):
+class SummarySimAnacal(SimulateBatchBase):
     def __init__(
         self,
         config_name,
@@ -55,11 +55,11 @@ class SummarySimFpfs(SimulateBatchBase):
         if self.radial_n == 4:
             assert self.nord >= 6
 
-        self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.0)
-        self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.02)
-        self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=8)
+        self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.8)
+        self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.0)
+        self.pthres2 = cparser.getfloat("FPFS", "pthres2", fallback=0.12)
+        self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
 
-        self.ratio = cparser.getfloat("FPFS", "ratio")
         self.c0 = cparser.getfloat("FPFS", "c0")
         self.c2 = cparser.getfloat("FPFS", "c2")
         self.alpha = cparser.getfloat("FPFS", "alpha")
@@ -68,8 +68,6 @@ class SummarySimFpfs(SimulateBatchBase):
         self.r2_min = cparser.getfloat("FPFS", "r2_min", fallback=0.05)
         rmax = cparser.getfloat("FPFS", "r_max", fallback=10000)
         self.rmax2 = rmax * rmax
-
-        self.noise_rev = cparser.getboolean("FPFS", "noise_rev", fallback=True)
 
         self.ncov_fname = cparser.get(
             "FPFS",
@@ -112,17 +110,17 @@ class SummarySimFpfs(SimulateBatchBase):
     def run(self, icore):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 4))
-        cat_obj = fpfs_catalog(
+        cat_obj = FpfsCatalog(
             cov_mat=self.cov_mat,
             snr_min=self.snr_min,
             r2_min=self.r2_min,
-            ratio=self.ratio,
             c0=self.c0,
             c2=self.c2,
             alpha=self.alpha,
             beta=self.beta,
             pthres=self.pthres,
             pratio=self.pratio,
+            pthres2=self.pthres2,
             det_nrot=self.det_nrot,
         )
         print("start core: %d, with id: %s" % (icore, id_range))
@@ -167,9 +165,9 @@ class SummarySimFpfs(SimulateBatchBase):
             func = cat_obj.measure_g2_renoise
         else:
             raise ValueError("g_comp_measure should be 1 or 2")
-        assert os.path.isfile(
-            mname
-        ), "Cannot find input galaxy shear catalogs : %s " % (mname)
+        assert os.path.isfile(mname), (
+            "Cannot find galaxy shear catalogs : %s " % mname
+        )
         mm = fitsio.read(mname)
         nname = mname.replace("src-", "noise-")
         if os.path.isfile(nname):

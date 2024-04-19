@@ -84,7 +84,9 @@ class DMMeasurementTask(pipeBase.PipelineTask):
         self.do_scale_variance = do_scale_variance
         if do_deblend:
             self.makeSubtask("deblend", schema=self.schema)
-        self.makeSubtask("measurement", schema=self.schema, algMetadata=self.algMetadata)
+        self.makeSubtask(
+            "measurement", schema=self.schema, algMetadata=self.algMetadata
+        )
         self.makeSubtask("catalogCalculation", schema=self.schema)
         if do_scale_variance:
             self.makeSubtask("scaleVariance")
@@ -133,7 +135,9 @@ class ProcessSimDM(MakeDMExposure):
 
     def run(self, file_name):
         out_name = os.path.join(self.output_dir, file_name.split("/")[-1])
-        out_name = out_name.replace("image-", "src-").replace("_xxx", "_%s" % self.bands)
+        out_name = out_name.replace("image-", "src-").replace(
+            "_xxx", "_%s" % self.bands
+        )
         if os.path.isfile(out_name):
             print("Already has the output file")
             return

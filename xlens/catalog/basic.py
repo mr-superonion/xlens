@@ -84,7 +84,10 @@ def get_snr(catalog):
     elif "i_cmodel_fluxerr" in catalog.dtype.names:  # s19
         snr = catalog["i_cmodel_flux"] / catalog["i_cmodel_fluxerr"]
     elif "modelfit_CModel_instFlux" in catalog.dtype.names:  # pipe 7
-        snr = catalog["modelfit_CModel_instFlux"] / catalog["modelfit_CModel_instFluxErr"]
+        snr = (
+            catalog["modelfit_CModel_instFlux"]
+            / catalog["modelfit_CModel_instFluxErr"]
+        )
     else:
         snr = _nan_array(len(catalog))
     return snr
@@ -96,14 +99,34 @@ def get_snr_apertures(catalog):
     S/N values.
     """
     if "i_apertureflux_10_fluxsigma" in catalog.dtype.names:  # s18
-        snr10 = catalog["i_apertureflux_10_flux"] / catalog["i_apertureflux_10_fluxsigma"]
-        snr15 = catalog["i_apertureflux_15_flux"] / catalog["i_apertureflux_15_fluxsigma"]
-        snr20 = catalog["i_apertureflux_20_flux"] / catalog["i_apertureflux_20_fluxsigma"]
+        snr10 = (
+            catalog["i_apertureflux_10_flux"]
+            / catalog["i_apertureflux_10_fluxsigma"]
+        )
+        snr15 = (
+            catalog["i_apertureflux_15_flux"]
+            / catalog["i_apertureflux_15_fluxsigma"]
+        )
+        snr20 = (
+            catalog["i_apertureflux_20_flux"]
+            / catalog["i_apertureflux_20_fluxsigma"]
+        )
     elif "i_apertureflux_10_fluxerr" in catalog.dtype.names:  # s19
-        snr10 = catalog["i_apertureflux_10_flux"] / catalog["i_apertureflux_10_fluxerr"]
-        snr15 = catalog["i_apertureflux_15_flux"] / catalog["i_apertureflux_15_fluxerr"]
-        snr20 = catalog["i_apertureflux_20_flux"] / catalog["i_apertureflux_20_fluxerr"]
-    elif "base_CircularApertureFlux_3_0_instFlux" in catalog.dtype.names:  # pipe 7
+        snr10 = (
+            catalog["i_apertureflux_10_flux"]
+            / catalog["i_apertureflux_10_fluxerr"]
+        )
+        snr15 = (
+            catalog["i_apertureflux_15_flux"]
+            / catalog["i_apertureflux_15_fluxerr"]
+        )
+        snr20 = (
+            catalog["i_apertureflux_20_flux"]
+            / catalog["i_apertureflux_20_fluxerr"]
+        )
+    elif (
+        "base_CircularApertureFlux_3_0_instFlux" in catalog.dtype.names
+    ):  # pipe 7
         snr10 = (
             catalog["base_CircularApertureFlux_3_0_instFlux"]
             / catalog["base_CircularApertureFlux_3_0_instFluxErr"]
@@ -130,10 +153,14 @@ def get_snr_local_background(catalog):
     """
     if "i_localbackground_fluxsigma" in catalog.dtype.names:  # s18
         snrloc = (
-            catalog["i_localbackground_flux"] / catalog["i_localbackground_fluxsigma"]
+            catalog["i_localbackground_flux"]
+            / catalog["i_localbackground_fluxsigma"]
         )
     elif "i_localbackground_fluxerr" in catalog.dtype.names:  # s19
-        snrloc = catalog["i_localbackground_flux"] / catalog["i_localbackground_fluxerr"]
+        snrloc = (
+            catalog["i_localbackground_flux"]
+            / catalog["i_localbackground_fluxerr"]
+        )
     elif "base_LocalBackground_instFlux" in catalog.dtype.names:  # pipe 7
         snrloc = (
             catalog["base_LocalBackground_instFlux"]
@@ -187,9 +214,12 @@ def get_imag_aperture10(catalog):
     """
     if "i_apertureflux_10_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_10_mag"]
-    elif "base_CircularApertureFlux_3_0_instFlux" in catalog.dtype.names:  # pipe 7
+    elif (
+        "base_CircularApertureFlux_3_0_instFlux" in catalog.dtype.names
+    ):  # pipe 7
         magnitude = (
-            -2.5 * np.log10(catalog["base_CircularApertureFlux_3_0_instFlux"]) + 30.0
+            -2.5 * np.log10(catalog["base_CircularApertureFlux_3_0_instFlux"])
+            + 30.0
         )
     else:
         magnitude = _nan_array(len(catalog))
@@ -203,9 +233,12 @@ def get_imag_aperture15(catalog):
     """
     if "i_apertureflux_15_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_15_mag"]
-    elif "base_CircularApertureFlux_4_5_instFlux" in catalog.dtype.names:  # pipe 7
+    elif (
+        "base_CircularApertureFlux_4_5_instFlux" in catalog.dtype.names
+    ):  # pipe 7
         magnitude = (
-            -2.5 * np.log10(catalog["base_CircularApertureFlux_4_5_instFlux"]) + 30.0
+            -2.5 * np.log10(catalog["base_CircularApertureFlux_4_5_instFlux"])
+            + 30.0
         )
     else:
         magnitude = _nan_array(len(catalog))
@@ -219,9 +252,12 @@ def get_imag_aperture20(catalog):
     """
     if "i_apertureflux_20_mag" in catalog.dtype.names:  # s18 s19
         magnitude = catalog["i_apertureflux_20_mag"]
-    elif "base_CircularApertureFlux_6_0_instFlux" in catalog.dtype.names:  # pipe 7
+    elif (
+        "base_CircularApertureFlux_6_0_instFlux" in catalog.dtype.names
+    ):  # pipe 7
         magnitude = (
-            -2.5 * np.log10(catalog["base_CircularApertureFlux_6_0_instFlux"]) + 30.0
+            -2.5 * np.log10(catalog["base_CircularApertureFlux_6_0_instFlux"])
+            + 30.0
         )
     else:
         magnitude = _nan_array(len(catalog))
@@ -322,12 +358,23 @@ def get_npass(catalog, meas="cmodel"):
 
     # Calculate npass
     min_multiband_snr_data = 5.0
-    g_mask = (g_snr >= min_multiband_snr_data) & (~np.isnan(g_snr) & (gcountinputs >= 2))
-    r_mask = (r_snr >= min_multiband_snr_data) & (~np.isnan(r_snr) & (rcountinputs >= 2))
-    z_mask = (z_snr >= min_multiband_snr_data) & (~np.isnan(z_snr) & (zcountinputs >= 2))
-    y_mask = (y_snr >= min_multiband_snr_data) & (~np.isnan(y_snr) & (ycountinputs >= 2))
+    g_mask = (g_snr >= min_multiband_snr_data) & (
+        ~np.isnan(g_snr) & (gcountinputs >= 2)
+    )
+    r_mask = (r_snr >= min_multiband_snr_data) & (
+        ~np.isnan(r_snr) & (rcountinputs >= 2)
+    )
+    z_mask = (z_snr >= min_multiband_snr_data) & (
+        ~np.isnan(z_snr) & (zcountinputs >= 2)
+    )
+    y_mask = (y_snr >= min_multiband_snr_data) & (
+        ~np.isnan(y_snr) & (ycountinputs >= 2)
+    )
     npass = (
-        g_mask.astype(int) + r_mask.astype(int) + z_mask.astype(int) + y_mask.astype(int)
+        g_mask.astype(int)
+        + r_mask.astype(int)
+        + z_mask.astype(int)
+        + y_mask.astype(int)
     )
     return npass
 
@@ -451,7 +498,9 @@ def get_res(catalog):
         res = catalog["i_hsmshaperegauss_resolution"]
     elif "ishape_hsm_regauss_resolution" in catalog.dtype.names:  # s15
         res = catalog["ishape_hsm_regauss_resolution"]
-    elif "ext_shapeHSM_HsmShapeRegauss_resolution" in catalog.dtype.names:  # pipe 7
+    elif (
+        "ext_shapeHSM_HsmShapeRegauss_resolution" in catalog.dtype.names
+    ):  # pipe 7
         res = catalog["ext_shapeHSM_HsmShapeRegauss_resolution"]
     else:
         res = _nan_array(len(catalog))
@@ -621,7 +670,10 @@ def get_gal_ellip(catalog):
     elif "i_hsmshaperegauss_e1" in catalog.dtype.names:  # catalog
         return catalog["i_hsmshaperegauss_e1"], catalog["i_hsmshaperegauss_e2"]
     elif "ishape_hsm_regauss_e1" in catalog.dtype.names:
-        return catalog["ishape_hsm_regauss_e1"], catalog["ishape_hsm_regauss_e2"]
+        return (
+            catalog["ishape_hsm_regauss_e1"],
+            catalog["ishape_hsm_regauss_e2"],
+        )
     elif "ext_shapeHSM_HsmShapeRegauss_e1" in catalog.dtype.names:  # S16A
         return (
             catalog["ext_shapeHSM_HsmShapeRegauss_e1"],

@@ -57,7 +57,9 @@ class ShearHalo(object):
                 z_source=redshift,
                 cosmo=self.cosmo,
             )
-            rs_angle, alpha_rs = lens_cosmo.nfw_physical2angle(M=self.mass, c=self.conc)
+            rs_angle, alpha_rs = lens_cosmo.nfw_physical2angle(
+                M=self.mass, c=self.conc
+            )
             kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
             f_xx, f_xy, f_yx, f_yy = self.lens.hessian(r.x, r.y, kwargs)
             gamma1 = 1.0 / 2 * (f_xx - f_yy)

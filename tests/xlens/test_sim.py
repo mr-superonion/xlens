@@ -3,7 +3,12 @@ import os
 import fitsio
 import numpy as np
 
-from xlens.simulation.measure import ProcessSimDM, ProcessSimFpfs, utils
+from xlens.simulation.measure import (
+    ProcessSimAnacal,
+    ProcessSimDM,
+    ProcessSimFpfs,
+    utils,
+)
 from xlens.simulation.neff import NeffSimFpfs
 from xlens.simulation.simulator.base import SimulateImage
 from xlens.simulation.simulator.loader import MakeDMExposure
@@ -95,6 +100,12 @@ def test_hsc():
 
     # FPFS measurement
     worker3 = ProcessSimFpfs(config_fname)
+    input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
+    for _ in input_list:
+        worker3.run(_)
+
+    # FPFS measurement
+    worker3 = ProcessSimAnacal(config_fname)
     input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
     for _ in input_list:
         worker3.run(_)
