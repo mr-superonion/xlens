@@ -155,7 +155,9 @@ class ProcessSimFpfs(SimulateBase):
                 pix_scale=pixel_scale,
                 det_nrot=self.det_nrot,
             )
-            noise_pow = np.ones((self.ngrid, self.ngrid)) * variance * self.ngrid**2.0
+            noise_pow = (
+                np.ones((self.ngrid, self.ngrid)) * variance * self.ngrid**2.0
+            )
             cov_elem = noise_task.measure(noise_pow)
             fitsio.write(self.ncov_fname, np.asarray(cov_elem), overwrite=True)
             del noise_task
@@ -197,7 +199,10 @@ class ProcessSimFpfs(SimulateBase):
         )
         del data
         elapsed_time = time.time() - start_time
-        print("Elapsed time: %.2f seconds, number of gals: %d" % (elapsed_time, len(src)))
+        print(
+            "Elapsed time: %.2f seconds, number of gals: %d"
+            % (elapsed_time, len(src))
+        )
         fitsio.write(det_name, np.asarray(det))
         fitsio.write(src_name, np.asarray(src))
         if noise is not None:

@@ -55,12 +55,12 @@ testpaths = [
 addopts = "-vv -s"
 
 [tool.black]
-line-length = 90
+line-length = 80
 target-version = ["py38"]
 
 [tool.isort]
 profile = "black"
-line_length = 90
+line_length = 80
 
 [tool.coverage.run]
 omit=["xlens/__version__.py"]

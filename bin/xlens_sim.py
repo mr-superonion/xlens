@@ -13,7 +13,9 @@ task_list = [
     "measure_dm",
     "measure_fpfs",
     "summary_fpfs",
+    "neff_fpfs",
     "measure_anacal",
+    "summary_anacal",
 ]
 
 
@@ -93,9 +95,25 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         print("std: %s" % std)
         neff = (0.26 / std) ** 2.0 / worker.area
         print("neff: %s" % neff)
+    elif taskname.lower() == "summary_anacal":
+        import fitsio
+
+        from xlens.simulation.summary import SummarySimAnacal
+
+        worker = SummarySimAnacal(
+            cmd_args.config,
+            min_id=min_id,
+            max_id=max_id,
+            ncores=ncores,
+        )
+        if not os.path.isfile(worker.ofname):
+            olist = pool.map(worker.run, np.arange(ncores))
+            fitsio.write(worker.ofname, np.vstack(list(olist)))
+        worker.display_result()
     else:
         raise ValueError(
-            "taskname cannot be set to %s, we only support %s" % (taskname, task_list)
+            "taskname cannot be set to %s, we only support %s"
+            % (taskname, task_list)
         )
     pool.close()
     sys.exit(0)

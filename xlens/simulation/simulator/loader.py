@@ -251,7 +251,9 @@ class MakeDMExposure(SimulateBase):
                 print("Simulated noise STD is: %.2f" % np.std(noise_array))
             else:
                 noise_array = 0.0
-            star_array = star_outcome["band_data"][band][0].getMaskedImage().image.array
+            star_array = (
+                star_outcome["band_data"][band][0].getMaskedImage().image.array
+            )
             msk_array = msk_array & (
                 star_outcome["band_data"][band][0].getMaskedImage().mask.array
             )

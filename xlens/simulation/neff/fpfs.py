@@ -85,7 +85,9 @@ class NeffSimFpfs(SimulateBatchBase):
         # neff
         coadd_dim = cparser.getint("simulation", "coadd_dim")
         buff = cparser.getint("simulation", "buff")
-        coadd_scale = cparser.getfloat("simulation", "coadd_scale", fallback=0.2)
+        coadd_scale = cparser.getfloat(
+            "simulation", "coadd_scale", fallback=0.2
+        )
         radius = ((coadd_dim + 10) / 2.0 - buff) * coadd_scale / 60.0
         self.area = np.pi * radius**2  # [arcmin^2]
         return
@@ -125,7 +127,8 @@ class NeffSimFpfs(SimulateBatchBase):
         for icount, ifield in enumerate(id_range):
             in_nm1 = os.path.join(
                 self.cat_dir,
-                "src-%05d_g1-%d_rot0_%s.fits" % (ifield, self.imode, self.bands),
+                "src-%05d_g1-%d_rot0_%s.fits"
+                % (ifield, self.imode, self.bands),
             )
             ell, e_r = self.get_obs_sum2(in_nm1, cat_obj)
             out[icount, 0] = ell
@@ -142,9 +145,9 @@ class NeffSimFpfs(SimulateBatchBase):
             func = lambda x: cat_obj.measure_g2_denoise(x, self.noise_rev)
         else:
             raise ValueError("g_comp_measure should be 1 or 2")
-        assert os.path.isfile(in_nm), "Cannot find input galaxy shear catalogs : %s " % (
+        assert os.path.isfile(
             in_nm
-        )
+        ), "Cannot find input galaxy shear catalogs : %s " % (in_nm)
         mm = fitsio.read(in_nm)
         sel = jax.lax.map(cat_obj._wdet, mm) > 1e-4
         mm = mm[sel]
@@ -158,9 +161,9 @@ class NeffSimFpfs(SimulateBatchBase):
             func = cat_obj.measure_g2_renoise
         else:
             raise ValueError("g_comp_measure should be 1 or 2")
-        assert os.path.isfile(mname), "Cannot find input galaxy shear catalogs : %s " % (
+        assert os.path.isfile(
             mname
-        )
+        ), "Cannot find input galaxy shear catalogs : %s " % (mname)
         nname = mname.replace("src-", "noise-")
         mm = fitsio.read(mname)
         nn = fitsio.read(nname)

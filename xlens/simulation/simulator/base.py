@@ -139,7 +139,8 @@ class SimulateBase(object):
         """
         out = [
             os.path.join(
-                self.img_dir, "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid)
+                self.img_dir,
+                "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid),
             )
             for fid in range(min_id, max_id)
             for gid in self.shear_mode_list
