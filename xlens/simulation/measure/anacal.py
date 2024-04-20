@@ -110,7 +110,7 @@ class ProcessSimAnacal(SimulateBase):
             nx=nn,
             ny=nn,
             psf_array=psf_array,
-            pix_scale=pixel_scale,
+            pixel_scale=pixel_scale,
             sigma_arcsec=self.sigma_as,
             cov_matrix=cov_matrix,
             det_nrot=self.det_nrot,
@@ -130,7 +130,7 @@ class ProcessSimAnacal(SimulateBase):
 
         mtask = anacal.fpfs.FpfsMeasure(
             psf_array=psf_array,
-            pix_scale=pixel_scale,
+            pixel_scale=pixel_scale,
             sigma_arcsec=self.sigma_as,
             det_nrot=self.det_nrot,
             klim_thres=self.klim_thres,
