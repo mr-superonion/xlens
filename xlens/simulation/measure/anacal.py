@@ -158,7 +158,8 @@ class ProcessSimAnacal(SimulateBase):
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         variance = np.average(exposure.getMaskedImage().variance.array)
         psf_array = np.asarray(get_psf_array(exposure, ngrid=self.ngrid))
-        anacal.fpfs.util.truncate_square(psf_array, self.psf_rcut)
+        if self.psf_rcut < self.rcut-1:
+            anacal.fpfs.util.truncate_square(psf_array, self.psf_rcut)
         gal_array = np.asarray(exposure.getMaskedImage().image.array)
         del exposure, dm_task
         ny = self.coadd_dim + 10
