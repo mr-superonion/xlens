@@ -23,27 +23,33 @@ import lsst.geom as lsst_geom
 import numpy as np
 
 
-def get_psf_array(exposure, ngrid):
+def get_psf_array(exposure, ngrid, dg, gcent=None):
     """This function returns the PSF model at the center of the exposure."""
+    if gcent is None:
+        gcent = dg //2
     bbox = exposure.getBBox()
     width, height = bbox.getWidth(), bbox.getHeight()
-    # Calculate the central point
-    x_array = np.linspace(0, width, 10, dtype=int)
-    y_array = np.linspace(0, height, 10, dtype=int)
-    x_grid, y_grid = np.meshgrid(x_array, y_array)
 
-    psf_array = np.zeros((ngrid, ngrid))
-    for xc, yc in zip(x_grid.ravel(), y_grid.ravel()):
-        tmp = np.zeros((ngrid, ngrid))
-        centroid = lsst_geom.Point2I(xc, yc)
-        data = exposure.getPsf().computeImage(centroid).getArray()
-        dx = data.shape[0]
-        if ngrid > dx:
-            shift = (ngrid - dx + 1) // 2
-            tmp[shift : shift + dx, shift : shift + dx] = data[:, :]
-        else:
-            shift = -(ngrid - dx) // 2
-            tmp[:, :] = data[shift : shift + ngrid, shift : shift + ngrid]
-        psf_array = psf_array + tmp
-    psf_array = psf_array / 100.0
-    return psf_array
+    width = (width // dgrid) * dgrid -1
+    height = (height // dgrid) * dgrid -1
+    # Calculate the central point
+    x_array = np.arange(0, width, dg, dtype=int) + gcent
+    y_array = np.arange(0, height, dg, dtype=int) + gcent
+    nx = len(x_array); ny = len(y_array)
+    out = np.zeros((ny, nx, ngrid, ngrid))
+
+    for j in range(ny):
+        yc = int(y_array[j])
+        for i in range(nx):
+            xc = int(x_array[i])
+            centroid = lsst_geom.Point2I(xc, yc)
+            data = exposure.getPsf().computeImage(centroid).getArray()
+            dx = data.shape[0]
+            assert dx == data.shape[1]
+            if ngrid > dx:
+                shift = (ngrid - dx + 1) // 2
+                out[j, i, shift : shift + dx, shift : shift + dx] = data
+            else:
+                shift = -(ngrid - dx) // 2
+                out[j, i] = data[shift : shift + ngrid, shift : shift + ngrid]
+    return out
