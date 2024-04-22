@@ -132,7 +132,9 @@ class ProcessSimFpfs(SimulateBase):
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         variance = np.average(exposure.getMaskedImage().variance.array)
         seed = dm_task.get_seed_from_fname(file_name, "i") + 1
-        psf_array = np.asarray(get_psf_array(exposure, ngrid=self.ngrid))
+        psf_array = get_psf_array(
+            exposure, ngrid=self.ngrid, psf_rcut=self.psf_rcut, dg=250
+        )
         fpfs.image.util.truncate_square(psf_array, self.psf_rcut)
         gal_array = jnp.asarray(exposure.getMaskedImage().image.array)
         del exposure, dm_task
