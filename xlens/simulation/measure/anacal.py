@@ -30,7 +30,7 @@ import numpy as np
 
 from ..simulator.base import SimulateBase
 from ..simulator.loader import MakeDMExposure
-from .utils import get_psf_array
+from .utils import get_gridpsf_obj, get_psf_array
 
 # from memory_profiler import profile
 
@@ -157,9 +157,12 @@ class ProcessSimAnacal(SimulateBase):
         exposure = dm_task.generate_exposure(file_name)
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         variance = np.average(exposure.getMaskedImage().variance.array)
-        psf_array = np.asarray(get_psf_array(exposure, ngrid=self.ngrid))
-        if self.psf_rcut < self.rcut-1:
-            anacal.fpfs.util.truncate_square(psf_array, self.psf_rcut)
+        psf_array = get_gridpsf_obj(
+            exposure,
+            ngrid=self.ngrid,
+            psf_rcut=self.psf_rcut,
+            dg=250,
+        )
         gal_array = np.asarray(exposure.getMaskedImage().image.array)
         del exposure, dm_task
         ny = self.coadd_dim + 10
