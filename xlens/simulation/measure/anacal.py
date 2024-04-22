@@ -103,6 +103,7 @@ class ProcessSimAnacal(SimulateBase):
         cov_matrix,
         pixel_scale,
         noise_array,
+        psf_obj,
     ):
         # Detection
         nn = self.coadd_dim + 10
@@ -135,9 +136,14 @@ class ProcessSimAnacal(SimulateBase):
             det_nrot=self.det_nrot,
             klim_thres=self.klim_thres,
         )
-        src = mtask.run(gal_array=gal_array, det=coords)
+        src = mtask.run(gal_array=gal_array, psf_obj=psf_obj, det=coords)
         if noise_array is not None:
-            noise = mtask.run(noise_array, det=coords, do_rotate=True)
+            noise = mtask.run(
+                noise_array,
+                psf_obj=psf_obj,
+                det=coords,
+                do_rotate=True,
+            )
             src = src + noise
         else:
             noise = None
@@ -157,7 +163,13 @@ class ProcessSimAnacal(SimulateBase):
         exposure = dm_task.generate_exposure(file_name)
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         variance = np.average(exposure.getMaskedImage().variance.array)
-        psf_array = get_gridpsf_obj(
+        psf_obj = get_gridpsf_obj(
+            exposure,
+            ngrid=self.ngrid,
+            psf_rcut=self.psf_rcut,
+            dg=250,
+        )
+        psf_array = get_psf_array(
             exposure,
             ngrid=self.ngrid,
             psf_rcut=self.psf_rcut,
@@ -197,6 +209,7 @@ class ProcessSimAnacal(SimulateBase):
             "cov_matrix": cov_matrix,
             "pixel_scale": pixel_scale,
             "noise_array": noise_array,
+            "psf_obj": psf_obj,
         }
 
     # @profile
@@ -227,6 +240,7 @@ class ProcessSimAnacal(SimulateBase):
             cov_matrix=data["cov_matrix"],
             pixel_scale=data["pixel_scale"],
             noise_array=data["noise_array"],
+            psf_obj=data["psf_obj"],
         )
         del data
         elapsed_time = time.time() - start_time
