@@ -64,3 +64,7 @@ line_length = 80
 
 [tool.coverage.run]
 omit=["xlens/__version__.py"]
+
+[tool.flake8]
+max-line-length = 80
+ignore = ["N801", "N803", "N816", "W503", "W504", "E731", "E203"]
