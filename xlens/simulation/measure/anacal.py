@@ -174,17 +174,24 @@ class ProcessSimAnacal(SimulateBase):
             ngrid=self.ngrid,
             psf_rcut=self.psf_rcut,
             dg=250,
+        ).astype(np.float64)
+        gal_array = np.asarray(
+            exposure.getMaskedImage().image.array,
+            dtype=np.float64,
         )
-        gal_array = np.asarray(exposure.getMaskedImage().image.array)
         del exposure, dm_task
         ny = self.coadd_dim + 10
         nx = self.coadd_dim + 10
         noise_std = np.sqrt(variance)
         if variance > 1e-8:
             if self.corr_fname is None:
-                noise_array = np.random.RandomState(seed).normal(
-                    scale=noise_std,
-                    size=(ny, nx),
+                noise_array = (
+                    np.random.RandomState(seed)
+                    .normal(
+                        scale=noise_std,
+                        size=(ny, nx),
+                    )
+                    .astype(np.float64)
                 )
             else:
                 noise_corr = fitsio.read(self.corr_fname)
@@ -196,7 +203,7 @@ class ProcessSimAnacal(SimulateBase):
                         nx=nx,
                         ny=ny,
                         scale=pixel_scale,
-                    )
+                    ).astype(np.float64)
                     * noise_std
                 )
         else:
