@@ -192,6 +192,7 @@ class MakeDMExposure(SimulateBase):
             "draw_bright": self.draw_bright,
             "draw_method": "auto",
             "noise_factor": 0.0,
+            "noise_factor_gsparams": 1.0,
             "g1": 0.0,
             "g2": 0.0,
             "draw_gals": False,
@@ -254,7 +255,7 @@ class MakeDMExposure(SimulateBase):
             star_array = (
                 star_outcome["band_data"][band][0].getMaskedImage().image.array
             )
-            msk_array = msk_array & (
+            msk_array = msk_array | (
                 star_outcome["band_data"][band][0].getMaskedImage().mask.array
             )
             gal_array = (
