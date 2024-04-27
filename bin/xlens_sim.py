@@ -10,6 +10,7 @@ import schwimmbad
 
 task_list = [
     "simulate_image",
+    "prepare_star",
     "measure_dm",
     "measure_fpfs",
     "summary_fpfs",
@@ -47,6 +48,17 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
 
         worker = ProcessSimDM(cmd_args.config)
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
+        for _ in pool.map(worker.run, input_list):
+            pass
+    elif taskname.lower() == "prepare_star":
+        from xlens.simulation.simulator.loader import MakeBrightInfo
+
+        worker = MakeBrightInfo(cmd_args.config)
+        input_list = worker.get_sim_fnames(
+            min_id=min_id,
+            max_id=max_id,
+            field_only=True,
+        )
         for _ in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "measure_fpfs":

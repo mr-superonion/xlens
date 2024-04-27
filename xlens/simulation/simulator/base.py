@@ -35,6 +35,14 @@ band_list = ["g", "r", "i", "z"]
 # band_list = ["i"]
 nband = len(band_list)
 
+_band_map = {
+    "g": 0,
+    "r": 1,
+    "i": 2,
+    "z": 3,
+    "a": 4,
+}
+
 default_config = {
     "cosmic_rays": False,
     "bad_columns": False,
@@ -45,6 +53,23 @@ default_config = {
     "draw_stars": False,
     "draw_bright": False,
     "star_catalog": None,
+}
+
+# all the standard deviations are normalized to magnitude zero point 30
+DEFAULT_ZERO_POINT = 30.0
+_nstd_map = {
+    "LSST": {
+        "g": 0.315,
+        "r": 0.371,
+        "i": 0.595,
+        "z": 1.155,
+    },
+    "HSC": {
+        "g": 0.964,
+        "r": 0.964,
+        "i": 0.964,
+        "z": 0.964,
+    },
 }
 
 
@@ -63,6 +88,19 @@ class SimulateBase(object):
             if cat_dm_dir is None and cat_dir is not None:
                 cat_dm_dir = cat_dir.replace("cat", "cat_dm")
             self.cat_dm_dir = os.path.join(self.root_dir, cat_dm_dir)
+        else:
+            self.cat_dir = None
+            self.cat_dm_dir = None
+
+        input_cat_dir = cparser.get(
+            "simulation",
+            "input_cat_dir",
+            fallback=None,
+        )
+        if input_cat_dir is not None:
+            self.input_cat_dir = os.path.join(self.root_dir, input_cat_dir)
+        else:
+            self.input_cat_dir = None
 
         # summary directory
         sum_dir = cparser.get("simulation", "sum_dir", fallback=None)
@@ -78,7 +116,7 @@ class SimulateBase(object):
         self.bands = cparser.get("simulation", "band")
 
         # magnitude zero point
-        self.calib_mag_zero = 30.0
+        self.calib_mag_zero = DEFAULT_ZERO_POINT
 
         # layout of the simulation (random, random_disk, or hex)
         self.layout = cparser.get("simulation", "layout")
@@ -126,26 +164,89 @@ class SimulateBase(object):
             cparser.get("simulation", "shear_mode_list"),
         )
         self.nshear = len(self.shear_mode_list)
+
+        # Systematics
+        self.cosmic_rays = cparser.getboolean(
+            "simulation",
+            "cosmic_rays",
+            fallback=False,
+        )
+        self.bad_columns = cparser.getboolean(
+            "simulation",
+            "bad_columns",
+            fallback=False,
+        )
+
+        # Stars
+        self.stellar_density = cparser.getfloat(
+            "simulation",
+            "stellar_density",
+            fallback=-1.0,
+        )
+        if self.stellar_density < -0.01:
+            self.stellar_density = None
+        self.draw_bright = cparser.getboolean(
+            "simulation",
+            "draw_bright",
+            fallback=False,
+        )
+        self.star_bleeds = cparser.getboolean(
+            "simulation",
+            "star_bleeds",
+            fallback=False,
+        )
+
+        # Noise
+        noise_std = cparser.getfloat(
+            "simulation",
+            "noise_std",
+            fallback=None,
+        )
+        if noise_std is None:
+            self.base_std = deepcopy(_nstd_map)[self.survey_name]
+        else:
+            dd = deepcopy(_nstd_map)[self.survey_name]
+            self.base_std = {key: noise_std for key in dd.keys()}
+        self.noise_ratio = cparser.getfloat(
+            "simulation",
+            "noise_ratio",
+            fallback=0.0,
+        )
+        self.corr_fname = cparser.get(
+            "simulation",
+            "noise_corr_fname",
+            fallback=None,
+        )
         return
 
-    def get_sim_fnames(self, min_id, max_id):
+    def get_sim_fnames(self, min_id, max_id, field_only=False):
         """Generate filename for simulations
         Args:
             ftype (str):    file type ('src' for gal, and 'image' for exposure
             min_id (int):   minimum id
             max_id (int):   maximum id
+            field_only (bool): only include filed number
         Returns:
             out (list):     a list of file name
         """
-        out = [
-            os.path.join(
-                self.img_dir,
-                "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid),
-            )
-            for fid in range(min_id, max_id)
-            for gid in self.shear_mode_list
-            for rid in range(self.nrot)
-        ]
+        if field_only:
+            out = [
+                os.path.join(
+                    self.img_dir,
+                    "image-%05d_xxx.fits" % (fid),
+                )
+                for fid in range(min_id, max_id)
+            ]
+        else:
+            out = [
+                os.path.join(
+                    self.img_dir,
+                    "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid),
+                )
+                for fid in range(min_id, max_id)
+                for gid in self.shear_mode_list
+                for rid in range(self.nrot)
+            ]
         return out
 
     def get_psf_obj(self, rng, scale):
@@ -166,6 +267,21 @@ class SimulateBase(object):
                 rng=rng, dim=se_dim, variation_factor=self.psf_variation
             )
         return psf_obj
+
+    def get_seed_from_fname(self, fname, band):
+        """This function returns the random seed for image noise simulation.
+        It makes sure that different sheared versions have the same seed.
+        But different rotated version, different bands have different seeds.
+        """
+        # field id
+        fid = int(fname.split("image-")[-1].split("_")[0]) + 212
+        # rotation id
+        rid = int(fname.split("rot")[1][0])
+        # band id
+        bm = deepcopy(_band_map)
+        bid = bm[band]
+        _nbands = len(bm.values())
+        return ((fid * self.nrot + rid) * _nbands + bid) * 3
 
     def clear_image(self):
         if os.path.isdir(self.img_dir):

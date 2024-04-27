@@ -50,6 +50,7 @@ class ProcessSimAnacal(SimulateBase):
         self.config_name = config_name
         if not os.path.isdir(self.img_dir):
             raise FileNotFoundError("Cannot find image directory")
+        assert self.cat_dir is not None
         if not os.path.isdir(self.cat_dir):
             os.makedirs(self.cat_dir, exist_ok=True)
 
@@ -221,6 +222,7 @@ class ProcessSimAnacal(SimulateBase):
 
     # @profile
     def run(self, file_name):
+        assert self.cat_dir is not None
         src_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
         src_name = src_name.replace(
             "image-",
@@ -231,9 +233,6 @@ class ProcessSimAnacal(SimulateBase):
         )
         det_name = src_name.replace("src-", "det-")
         noi_name = src_name.replace("src-", "noise-")
-
-        # dm_task = MakeDMExposure(self.config_name)
-        # seed = dm_task.get_seed_from_fname(file_name, "i") + 1
 
         if os.path.isfile(src_name) and os.path.isfile(det_name):
             print("Already has measurement for simulation: %s." % src_name)
