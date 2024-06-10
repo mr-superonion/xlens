@@ -72,7 +72,7 @@ if __name__ == "__main__":
     taskname = cmd_args.task_name
 
     if taskname.lower() == "simulate_image":
-        from xlens.simulation.simulator import SimulateImage
+        from xlens.simulation.simulator.base import SimulateImage
 
         input_list = list(range(min_id, max_id))
         worker = SimulateImage(cmd_args.config)
