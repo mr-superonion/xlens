@@ -27,12 +27,11 @@ from configparser import ConfigParser, ExtendedInterpolation
 import anacal
 import fitsio
 import numpy as np
+from numpy.typing import NDArray
 
 from ..simulator.base import SimulateBase
 from ..simulator.loader import MakeDMExposure
 from .utils import get_gridpsf_obj, get_psf_array
-
-# from memory_profiler import profile
 
 
 def rotate90(image):
@@ -60,30 +59,25 @@ class ProcessSimAnacal(SimulateBase):
         self.ngrid = 2 * self.rcut
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
         self.psf_rcut = min(psf_rcut, self.rcut)
-
-        self.radial_n = cparser.getint("FPFS", "radial_n", fallback=2)
         self.nord = cparser.getint("FPFS", "nord", fallback=4)
-        assert self.radial_n in [2, 4]
-        if self.radial_n == 2:
-            assert self.nord >= 4
-        if self.radial_n == 4:
-            assert self.nord >= 6
-
-        self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.8)
-        self.pratio = cparser.getfloat("FPFS", "pratio", fallback=0.0)
-        self.pthres2 = cparser.getfloat("FPFS", "pthres2", fallback=0.012)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
+        assert self.nord >= 4
+        assert self.det_nrot >= 4
+
+        self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.12)
         self.klim_thres = cparser.getint("FPFS", "klim_thres", fallback=1e-12)
 
+        # noise covariance matrix on basis modes
         self.ncov_fname = cparser.get(
             "FPFS",
             "ncov_fname",
-            fallback="",
+            fallback=None,
         )
-        if len(self.ncov_fname) == 0 or not os.path.isfile(self.ncov_fname):
+        if self.ncov_fname is None:
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
 
+        # pixel level noise correlation function
         self.corr_fname = cparser.get(
             "simulation",
             "noise_corr_fname",
@@ -95,23 +89,28 @@ class ProcessSimAnacal(SimulateBase):
             "center_name",
             fallback="deblend_peak_center",
         )
+        self.estimate_cov_matrix = True
         return
 
     def process_image(
         self,
-        gal_array,
-        psf_array,
-        cov_matrix,
-        pixel_scale,
-        noise_array,
+        gal_array: NDArray,
+        psf_array: NDArray,
+        cov_matrix: anacal.fpfs.table.FpfsCovariance,
+        pixel_scale: float,
+        noise_array: NDArray | None,
         psf_obj,
+        mask_array,
+        star_cat,
     ):
         # Detection
         nn = self.coadd_dim + 10
+        mag_zero = cov_matrix.mag_zero
         dtask = anacal.fpfs.FpfsDetect(
             nx=nn,
             ny=nn,
             psf_array=psf_array,
+            mag_zero=mag_zero,
             pixel_scale=pixel_scale,
             sigma_arcsec=self.sigma_as,
             cov_matrix=cov_matrix,
@@ -122,40 +121,47 @@ class ProcessSimAnacal(SimulateBase):
             gal_array=gal_array,
             fthres=8.5,
             pthres=self.pthres,
-            pratio=self.pratio,
-            pthres2=self.pthres2,
             bound=self.rcut + 5,
             noise_array=noise_array,
+            mask_array=mask_array,
+            star_cat=star_cat,
         )
         del dtask
         print("pre-selected number of sources: %d" % len(coords))
 
-        mtask = anacal.fpfs.FpfsMeasure(
+        mtask_s = anacal.fpfs.FpfsMeasure(
             psf_array=psf_array,
+            mag_zero=mag_zero,
             pixel_scale=pixel_scale,
             sigma_arcsec=self.sigma_as,
-            det_nrot=self.det_nrot,
             klim_thres=self.klim_thres,
+            nord=self.nord,
+            det_nrot=-1,
         )
-        src = mtask.run(gal_array=gal_array, psf_obj=psf_obj, det=coords)
-        if noise_array is not None:
-            noise = mtask.run(
-                noise_array,
-                psf_obj=psf_obj,
-                det=coords,
-                do_rotate=True,
-            )
-            src = src + noise
-        else:
-            noise = None
-        sel = (src[:, mtask.di["m00"]] + src[:, mtask.di["m20"]]) > 1e-5
-        coords = np.array(coords)[sel]
-        src = src[sel]
-        if noise is not None:
-            noise = noise[sel]
-        del mtask, sel
+        src_s = mtask_s.run(
+            gal_array=gal_array,
+            det=coords,
+            noise_array=noise_array,
+        )
+
+        mtask_d = anacal.fpfs.FpfsMeasure(
+            psf_array=psf_array,
+            mag_zero=mag_zero,
+            pixel_scale=pixel_scale,
+            sigma_arcsec=self.sigma_as,
+            klim_thres=self.klim_thres,
+            nord=-1,
+            det_nrot=self.det_nrot,
+        )
+        src_d = mtask_d.run(
+            gal_array=gal_array,
+            det=coords,
+            noise_array=noise_array,
+        )
+
+        del mtask_s, mtask_d
         gc.collect()
-        return coords, src, noise
+        return coords, src_s, src_d
 
     def prepare_data(self, file_name):
         dm_task = MakeDMExposure(self.config_name)
@@ -164,6 +170,10 @@ class ProcessSimAnacal(SimulateBase):
         exposure = dm_task.generate_exposure(file_name)
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         variance = np.average(exposure.getMaskedImage().variance.array)
+        mag_zero = (
+            np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude())
+            / 0.4
+        )
         psf_obj = get_gridpsf_obj(
             exposure,
             ngrid=self.ngrid,
@@ -179,6 +189,10 @@ class ProcessSimAnacal(SimulateBase):
         gal_array = np.asarray(
             exposure.getMaskedImage().image.array,
             dtype=np.float64,
+        )
+        mask_array = np.asanyarray(
+            exposure.getMaskedImage().mask.array,
+            dtype=np.int16,
         )
         del exposure, dm_task
         ny = self.coadd_dim + 10
@@ -209,7 +223,34 @@ class ProcessSimAnacal(SimulateBase):
                 )
         else:
             noise_array = None
-        cov_matrix = fitsio.read(self.ncov_fname)
+
+        assert self.ncov_fname is not None
+        if os.path.isfile(self.ncov_fname):
+            cov_matrix = anacal.fpfs.table.FpfsCovariance.from_file(
+                self.ncov_fname
+            )
+        else:
+            assert self.estimate_cov_matrix
+            cov_task = anacal.fpfs.FpfsNoiseCov(
+                psf_array=psf_array,
+                mag_zero=mag_zero,
+                pixel_scale=pixel_scale,
+                sigma_arcsec=self.sigma_as,
+                nord=self.nord,
+                det_nrot=self.det_nrot,
+                klim_thres=self.klim_thres,
+            )
+            cov_matrix = cov_task.measure(variance=variance)
+            cov_matrix.write(self.ncov_fname)
+
+        if self.input_cat_dir is not None:
+            field_id = int(file_name.split("image-")[-1].split("_")[0])
+            tmp_fname = "brightstar-%05d.fits" % field_id
+            tmp_fname = os.path.join(self.input_cat_dir, tmp_fname)
+            star_cat = fitsio.read(tmp_fname)[["x", "y", "r"]]
+            star_cat["r"] = star_cat["r"] * 1.0
+        else:
+            star_cat = None
         gc.collect()
         return {
             "gal_array": gal_array,
@@ -218,46 +259,53 @@ class ProcessSimAnacal(SimulateBase):
             "pixel_scale": pixel_scale,
             "noise_array": noise_array,
             "psf_obj": psf_obj,
+            "mask_array": mask_array,
+            "star_cat": star_cat,
         }
 
     # @profile
     def run(self, file_name):
         assert self.cat_dir is not None
-        src_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
-        src_name = src_name.replace(
+        srcs_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
+        srcs_name = srcs_name.replace(
             "image-",
-            "src-",
+            "src_s-",
         ).replace(
             "_xxx",
             "_%s" % self.bands,
         )
-        det_name = src_name.replace("src-", "det-")
-        noi_name = src_name.replace("src-", "noise-")
+        srcd_name = srcs_name.replace("src_s-", "src_d-")
+        det_name = srcs_name.replace("src_s-", "det-")
 
-        if os.path.isfile(src_name) and os.path.isfile(det_name):
-            print("Already has measurement for simulation: %s." % src_name)
+        if (
+            os.path.isfile(srcs_name)
+            and os.path.isfile(det_name)
+            and os.path.isfile(srcd_name)
+        ):
+            print("Already has measurement for simulation: %s." % file_name)
             return
 
         data = self.prepare_data(file_name)
         start_time = time.time()
-        det, src, noise = self.process_image(
+        det, src_s, src_d = self.process_image(
             gal_array=data["gal_array"],
             psf_array=data["psf_array"],
             cov_matrix=data["cov_matrix"],
             pixel_scale=data["pixel_scale"],
             noise_array=data["noise_array"],
             psf_obj=data["psf_obj"],
+            mask_array=data["mask_array"],
+            star_cat=data["star_cat"],
         )
         del data
         elapsed_time = time.time() - start_time
         print(
             "Elapsed time: %.2f seconds, number of gals: %d"
-            % (elapsed_time, len(src))
+            % (elapsed_time, len(src_s.array))
         )
-        fitsio.write(det_name, np.asarray(det))
-        fitsio.write(src_name, np.asarray(src))
-        if noise is not None:
-            fitsio.write(noi_name, np.asarray(noise))
-        del src, det, noise
+        fitsio.write(det_name, det)
+        src_s.write(srcs_name)
+        src_d.write(srcd_name)
+        del det, src_s, src_d
         gc.collect()
         return

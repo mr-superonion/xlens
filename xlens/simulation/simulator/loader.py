@@ -119,7 +119,14 @@ class MakeDMExposure(SimulateBase):
             survey_name=self.survey_name,
         ).pixel_scale
         psf_obj = self.get_psf_obj(rng, pixel_scale)
-        star_outcome = self.get_sim_info(rng, pixel_scale, psf_obj)
+        if self.input_cat_dir is None:
+            star_outcome = self.get_sim_info(rng, pixel_scale, psf_obj)
+        else:
+            assert os.path.isdir(self.input_cat_dir)
+            tmp_fname = "info-%05d.p" % field_id
+            tmp_fname = os.path.join(self.input_cat_dir, tmp_fname)
+            star_outcome = pickle.load(open(tmp_fname, "rb"))
+
         if self.bands != "a":
             bands = self.bands
         else:
@@ -191,7 +198,7 @@ class MakeDMExposure(SimulateBase):
         photo_calib = afw_image.makePhotoCalibFromCalibZeroPoint(zero_flux)
         exp.setPhotoCalib(photo_calib)
         psf_dim = star_outcome["psf_dims"][0]
-        se_wcs = star_outcome["se_wcs"][0]
+        se_wcs = star_outcome["se_wcs"][band][0]
         dm_psf = make_dm_psf(
             psf=psf_obj,
             psf_dim=psf_dim,
@@ -223,6 +230,9 @@ class MakeBrightInfo(MakeDMExposure):
         assert self.input_cat_dir is not None
         if not os.path.isdir(self.input_cat_dir):
             os.makedirs(self.input_cat_dir, exist_ok=True)
+        assert self.draw_bright
+        if self.stellar_density is not None:
+            assert self.stellar_density > 1e-5
         return
 
     def make_bright_catalog(self, file_name):
