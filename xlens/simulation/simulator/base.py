@@ -31,9 +31,7 @@ from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
 
 from .perturbation import ShearHalo, ShearKappa
 
-band_list = ["g", "r", "i", "z"]
-# band_list = ["i"]
-nband = len(band_list)
+band_list_json = "['i']"
 
 _band_map = {
     "g": 0,
@@ -217,6 +215,16 @@ class SimulateBase(object):
             "noise_corr_fname",
             fallback=None,
         )
+
+        # Bands
+        self.sim_band_list = json.loads(
+            cparser.get(
+                "simulation",
+                "sim_band_list",
+                fallback=band_list_json,
+            )
+        )
+        self.nband = len(self.sim_band_list)
         return
 
     def get_sim_fnames(self, min_id, max_id, field_only=False):
@@ -289,11 +297,18 @@ class SimulateBase(object):
         return
 
     def clear_catalog(self):
-        if os.path.isdir(self.cat_dir):
-            shutil.rmtree(self.cat_dir)
+        if self.cat_dir is not None:
+            if os.path.isdir(self.cat_dir):
+                shutil.rmtree(self.cat_dir)
 
-        if os.path.isdir(self.cat_dm_dir):
-            shutil.rmtree(self.cat_dm_dir)
+        if self.cat_dm_dir is not None:
+            if os.path.isdir(self.cat_dm_dir):
+                shutil.rmtree(self.cat_dm_dir)
+
+        if self.input_cat_dir is not None:
+            if os.path.isdir(self.input_cat_dir):
+                shutil.rmtree(self.input_cat_dir)
+
         return
 
     def clear_summary(self):
@@ -388,7 +403,7 @@ class SimulateImage(SimulateBase):
         kargs = deepcopy(default_config)
 
         nfiles = len(glob.glob("%s/image-%05d_g1-*" % (self.img_dir, ifield)))
-        if nfiles == self.nrot * self.nshear * nband:
+        if nfiles == self.nrot * self.nshear * self.nband:
             print("We aleady have all the images for this subfield.")
             return
 
@@ -400,7 +415,6 @@ class SimulateImage(SimulateBase):
             pixel_scale=scale,
             layout=self.layout,
         )
-        bl = deepcopy(band_list)
         print("Simulation has galaxies: %d" % len(galaxy_catalog))
         for shear_mode in self.shear_mode_list:
             shear_obj = ShearRedshift(
@@ -418,14 +432,14 @@ class SimulateImage(SimulateBase):
                     psf=psf_obj,
                     dither=self.dither,
                     rotate=self.rotate,
-                    bands=bl,
+                    bands=self.sim_band_list,
                     theta0=self.rot_list[irot],
                     calib_mag_zero=self.calib_mag_zero,
                     survey_name=self.survey_name,
                     **kargs,
                 )
                 # write galaxy images
-                for band_name in bl:
+                for band_name in self.sim_band_list:
                     gal_fname = "%s/image-%05d_%s-%d_rot%d_%s.fits" % (
                         self.img_dir,
                         ifield,
@@ -470,7 +484,7 @@ class SimulateImageKappa(SimulateBase):
         kargs = deepcopy(default_config)
 
         nfiles = len(glob.glob("%s/image-%05d_g1-*" % (self.img_dir, ifield)))
-        if nfiles == self.nrot * self.nshear * nband:
+        if nfiles == self.nrot * self.nshear * self.nband:
             print("We aleady have all the images for this subfield.")
             return
 
@@ -482,7 +496,6 @@ class SimulateImageKappa(SimulateBase):
             pixel_scale=scale,
             layout=self.layout,
         )
-        bl = deepcopy(band_list)
         print("Simulation has galaxies: %d" % len(galaxy_catalog))
         for shear_mode in self.shear_mode_list:
             shear_obj = ShearKappa(
@@ -500,14 +513,14 @@ class SimulateImageKappa(SimulateBase):
                     psf=psf_obj,
                     dither=self.dither,
                     rotate=self.rotate,
-                    bands=bl,
+                    bands=self.sim_band_list,
                     theta0=self.rot_list[irot],
                     calib_mag_zero=self.calib_mag_zero,
                     survey_name=self.survey_name,
                     **kargs,
                 )
                 # write galaxy images
-                for band_name in bl:
+                for band_name in self.sim_band_list:
                     gal_fname = "%s/image-%05d_%s-%d_rot%d_%s.fits" % (
                         self.img_dir,
                         ifield,
@@ -556,7 +569,6 @@ class SimulateImageHalo(SimulateBase):
             pixel_scale=scale,
             layout=self.layout,
         )
-        bl = deepcopy(band_list)
         print("Simulation has galaxies: %d" % len(galaxy_catalog))
         for shear_mode in self.shear_mode_list:
             par = [4e14, 6.0, 0.2]
@@ -574,14 +586,14 @@ class SimulateImageHalo(SimulateBase):
                     psf=psf_obj,
                     dither=self.dither,
                     rotate=self.rotate,
-                    bands=bl,
+                    bands=self.sim_band_list,
                     theta0=self.rot_list[irot],
                     calib_mag_zero=self.calib_mag_zero,
                     survey_name=self.survey_name,
                     **kargs,
                 )
                 # write galaxy images
-                for band_name in bl:
+                for band_name in self.sim_band_list:
                     gal_fname = "%s/image-%05d_g1-%d_rot%d_%s.fits" % (
                         self.img_dir,
                         ifield,

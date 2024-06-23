@@ -12,8 +12,6 @@ task_list = [
     "simulate_image",
     "prepare_star",
     "measure_dm",
-    "measure_fpfs",
-    "summary_fpfs",
     "neff_fpfs",
     "measure_anacal",
     "summary_anacal",
@@ -61,13 +59,6 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         )
         for _ in pool.map(worker.run, input_list):
             pass
-    elif taskname.lower() == "measure_fpfs":
-        from xlens.simulation.measure import ProcessSimFpfs
-
-        worker = ProcessSimFpfs(cmd_args.config)
-        input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
-        for _ in pool.map(worker.run, input_list):
-            pass
     elif taskname.lower() == "measure_anacal":
         from xlens.simulation.measure import ProcessSimAnacal
 
@@ -77,36 +68,6 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for _ in pool.map(worker.run, input_list):
             pass
-    elif taskname.lower() == "summary_fpfs":
-        import fitsio
-
-        from xlens.simulation.summary import SummarySimFpfs
-
-        worker = SummarySimFpfs(
-            cmd_args.config,
-            min_id=min_id,
-            max_id=max_id,
-            ncores=ncores,
-        )
-        if not os.path.isfile(worker.ofname):
-            olist = pool.map(worker.run, np.arange(ncores))
-            fitsio.write(worker.ofname, np.vstack(list(olist)))
-        worker.display_result()
-    elif taskname.lower() == "neff_fpfs":
-        from xlens.simulation.neff import NeffSimFpfs
-
-        worker = NeffSimFpfs(
-            cmd_args.config,
-            min_id=min_id,
-            max_id=max_id,
-            ncores=ncores,
-        )
-        olist = pool.map(worker.run, np.arange(ncores))
-        outcome = np.vstack(list(olist))
-        std = np.std(outcome[:, 0]) / np.average(outcome[:, 1])
-        print("std: %s" % std)
-        neff = (0.26 / std) ** 2.0 / worker.area
-        print("neff: %s" % neff)
     elif taskname.lower() == "summary_anacal":
         import fitsio
 
@@ -122,6 +83,21 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
             olist = pool.map(worker.run, np.arange(ncores))
             fitsio.write(worker.ofname, np.vstack(list(olist)))
         worker.display_result()
+    elif taskname.lower() == "neff_anacal":
+        from xlens.simulation.neff import NeffSimFpfs
+
+        worker = NeffSimFpfs(
+            cmd_args.config,
+            min_id=min_id,
+            max_id=max_id,
+            ncores=ncores,
+        )
+        olist = pool.map(worker.run, np.arange(ncores))
+        outcome = np.vstack(list(olist))
+        std = np.std(outcome[:, 0]) / np.average(outcome[:, 1])
+        print("std: %s" % std)
+        neff = (0.26 / std) ** 2.0 / worker.area
+        print("neff: %s" % neff)
     else:
         raise ValueError(
             "taskname cannot be set to %s, we only support %s"
