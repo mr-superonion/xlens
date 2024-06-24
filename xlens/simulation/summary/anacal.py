@@ -21,7 +21,7 @@ from configparser import ConfigParser, ExtendedInterpolation
 import fitsio
 import numpy as np
 from anacal.fpfs import CatalogTask
-from anacal.fpfs.table import FpfsCatalog, FpfsCovariance
+from anacal.fpfs.table import Catalog, Covariance
 
 from ..simulator.base import SimulateBatchBase
 
@@ -63,7 +63,7 @@ class SummarySimAnacal(SimulateBatchBase):
         if len(self.ncov_fname) == 0 or not os.path.isfile(self.ncov_fname):
             # estimate and write the noise covariance
             self.ncov_fname = os.path.join(self.cat_dir, "cov_matrix.fits")
-        self.cov_matrix = FpfsCovariance.from_file(self.ncov_fname)
+        self.cov_matrix = Covariance.from_fits(self.ncov_fname)
 
         # shear setup
         self.shear_value = cparser.getfloat("simulation", "shear_value")
@@ -114,11 +114,13 @@ class SummarySimAnacal(SimulateBatchBase):
                     ),
                 )
                 d_nm1 = s_nm1.replace("src_s", "src_d")
-                src_s1 = FpfsCatalog.from_file(s_nm1)
-                src_d1 = FpfsCatalog.from_file(d_nm1)
+                src_s1 = Catalog.from_fits(s_nm1)
+                src_d1 = Catalog.from_fits(d_nm1)
                 out1 = ctask.run(shapelet=src_s1, detection=src_d1)
-                e1_1 = np.sum(out1["e1"])
-                r1_1 = np.sum(out1["e1_g1"])
+                e1_1 = np.sum(out1["e1"] * out1["wdet"])
+                r1_1 = np.sum(
+                    out1["e1_g1"] * out1["wdet"] + out1["e1"] * out1["wdet_g1"]
+                )
 
                 s_nm2 = os.path.join(
                     self.cat_dir,
@@ -131,11 +133,13 @@ class SummarySimAnacal(SimulateBatchBase):
                     ),
                 )
                 d_nm2 = s_nm2.replace("src_s", "src_d")
-                src_s2 = FpfsCatalog.from_file(s_nm2)
-                src_d2 = FpfsCatalog.from_file(d_nm2)
+                src_s2 = Catalog.from_fits(s_nm2)
+                src_d2 = Catalog.from_fits(d_nm2)
                 out2 = ctask.run(shapelet=src_s2, detection=src_d2)
-                e1_2 = np.sum(out2["e1"])
-                r1_2 = np.sum(out2["e1_g1"])
+                e1_2 = np.sum(out2["e1"] * out2["wdet"])
+                r1_2 = np.sum(
+                    out2["e1_g1"] * out2["wdet"] + out2["e1"] * out2["wdet_g1"]
+                )
                 print(e1_2, r1_2)
 
                 out[icount, 0] = ifield
