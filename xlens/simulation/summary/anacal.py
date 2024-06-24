@@ -45,7 +45,9 @@ class SummarySimAnacal(SimulateBatchBase):
         super().__init__(cparser, min_id, max_id, ncores)
         assert self.cat_dir is not None
         if not os.path.isdir(self.cat_dir):
-            raise FileNotFoundError("Cannot find catalog directory")
+            raise FileNotFoundError(
+                "Cannot find catalog directory: %s" % self.cat_dir
+            )
 
         # FPFS parameters
         self.nord = cparser.getint("FPFS", "nord", fallback=4)
