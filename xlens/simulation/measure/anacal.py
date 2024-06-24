@@ -96,7 +96,7 @@ class ProcessSimAnacal(SimulateBase):
         self,
         gal_array: NDArray,
         psf_array: NDArray,
-        cov_matrix: anacal.fpfs.table.FpfsCovariance,
+        cov_matrix: anacal.fpfs.table.Covariance,
         pixel_scale: float,
         noise_array: NDArray | None,
         psf_obj,
@@ -226,9 +226,7 @@ class ProcessSimAnacal(SimulateBase):
 
         assert self.ncov_fname is not None
         if os.path.isfile(self.ncov_fname):
-            cov_matrix = anacal.fpfs.table.FpfsCovariance.from_file(
-                self.ncov_fname
-            )
+            cov_matrix = anacal.fpfs.table.Covariance.from_fits(self.ncov_fname)
         else:
             assert self.estimate_cov_matrix
             cov_task = anacal.fpfs.FpfsNoiseCov(
