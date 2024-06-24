@@ -99,9 +99,9 @@ class ProcessSimAnacal(SimulateBase):
         cov_matrix: anacal.fpfs.table.Covariance,
         pixel_scale: float,
         noise_array: NDArray | None,
-        psf_obj,
-        mask_array,
-        star_cat,
+        psf_obj: anacal.fpfs.BasePsf | None,
+        mask_array: NDArray,
+        star_cat: NDArray,
     ):
         # Detection
         nn = self.coadd_dim + 10
@@ -142,6 +142,7 @@ class ProcessSimAnacal(SimulateBase):
             gal_array=gal_array,
             det=coords,
             noise_array=noise_array,
+            psf=psf_obj,
         )
 
         mtask_d = anacal.fpfs.FpfsMeasure(
@@ -157,6 +158,7 @@ class ProcessSimAnacal(SimulateBase):
             gal_array=gal_array,
             det=coords,
             noise_array=noise_array,
+            psf=psf_obj,
         )
 
         del mtask_s, mtask_d

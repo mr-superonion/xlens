@@ -31,7 +31,7 @@ from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
 
 from .perturbation import ShearHalo, ShearKappa
 
-band_list_json = "['i']"
+band_list_json = '["i"]'
 
 _band_map = {
     "g": 0,
