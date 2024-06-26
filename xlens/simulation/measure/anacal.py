@@ -54,7 +54,12 @@ class ProcessSimAnacal(SimulateBase):
             os.makedirs(self.cat_dir, exist_ok=True)
 
         # setup FPFS task
-        self.sigma_as = cparser.getfloat("FPFS", "sigma_as")
+        self.sigma_arcsec = cparser.getfloat("FPFS", "sigma_arcsec")
+        self.sigma_arcsec2 = cparser.getfloat(
+            "FPFS",
+            "sigma_arcsec2",
+            fallback=None,
+        )
         self.rcut = cparser.getint("FPFS", "rcut", fallback=32)
         self.ngrid = 2 * self.rcut
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
@@ -92,6 +97,21 @@ class ProcessSimAnacal(SimulateBase):
         self.estimate_cov_matrix = True
         return
 
+    def get_file_names(self, file_name):
+        assert self.cat_dir is not None
+        srcs_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
+        self.srcs_name = srcs_name.replace(
+            "image-",
+            "src_s-",
+        ).replace(
+            "_xxx",
+            "_%s" % self.bands,
+        )
+        self.srcs2_name = self.srcs_name.replace("src_s-", "src_s2-")
+        self.srcd_name = self.srcs_name.replace("src_s-", "src_d-")
+        self.det_name = self.srcs_name.replace("src_s-", "det-")
+        return
+
     def process_image(
         self,
         gal_array: NDArray,
@@ -106,64 +126,108 @@ class ProcessSimAnacal(SimulateBase):
         # Detection
         nn = self.coadd_dim + 10
         mag_zero = cov_matrix.mag_zero
-        dtask = anacal.fpfs.FpfsDetect(
-            nx=nn,
-            ny=nn,
-            psf_array=psf_array,
-            mag_zero=mag_zero,
-            pixel_scale=pixel_scale,
-            sigma_arcsec=self.sigma_as,
-            cov_matrix=cov_matrix,
-            det_nrot=self.det_nrot,
-            klim_thres=self.klim_thres,
-        )
-        coords = dtask.run(
-            gal_array=gal_array,
-            fthres=8.5,
-            pthres=self.pthres,
-            bound=self.rcut + 5,
-            noise_array=noise_array,
-            mask_array=mask_array,
-            star_cat=star_cat,
-        )
-        del dtask
+        if os.path.isfile(self.det_name):
+            coords = fitsio.read(self.det_name)
+        else:
+            dtask = anacal.fpfs.FpfsDetect(
+                nx=nn,
+                ny=nn,
+                psf_array=psf_array,
+                mag_zero=mag_zero,
+                pixel_scale=pixel_scale,
+                sigma_arcsec=self.sigma_arcsec,
+                cov_matrix=cov_matrix,
+                det_nrot=self.det_nrot,
+                klim_thres=self.klim_thres,
+            )
+            coords = dtask.run(
+                gal_array=gal_array,
+                fthres=8.5,
+                pthres=self.pthres,
+                bound=self.rcut + 5,
+                noise_array=noise_array,
+                mask_array=mask_array,
+                star_cat=star_cat,
+            )
+            fitsio.write(self.det_name, coords)
+            del dtask
         print("pre-selected number of sources: %d" % len(coords))
 
-        mtask_s = anacal.fpfs.FpfsMeasure(
-            psf_array=psf_array,
-            mag_zero=mag_zero,
-            pixel_scale=pixel_scale,
-            sigma_arcsec=self.sigma_as,
-            klim_thres=self.klim_thres,
-            nord=self.nord,
-            det_nrot=-1,
-        )
-        src_s = mtask_s.run(
-            gal_array=gal_array,
-            det=coords,
-            noise_array=noise_array,
-            psf=psf_obj,
-        )
+        # Detection Modes
+        if not os.path.isfile(self.srcd_name):
+            print("Mesuring Detection modes")
+            mtask_d = anacal.fpfs.FpfsMeasure(
+                psf_array=psf_array,
+                mag_zero=mag_zero,
+                pixel_scale=pixel_scale,
+                sigma_arcsec=self.sigma_arcsec,
+                klim_thres=self.klim_thres,
+                nord=-1,
+                det_nrot=self.det_nrot,
+            )
+            src_d = mtask_d.run(
+                gal_array=gal_array,
+                det=coords,
+                noise_array=noise_array,
+                psf=psf_obj,
+            )
+            src_d.write(self.srcd_name)
+            del mtask_d, src_d
 
-        mtask_d = anacal.fpfs.FpfsMeasure(
-            psf_array=psf_array,
-            mag_zero=mag_zero,
-            pixel_scale=pixel_scale,
-            sigma_arcsec=self.sigma_as,
-            klim_thres=self.klim_thres,
-            nord=-1,
-            det_nrot=self.det_nrot,
-        )
-        src_d = mtask_d.run(
-            gal_array=gal_array,
-            det=coords,
-            noise_array=noise_array,
-            psf=psf_obj,
-        )
+        # Shapelet Modes
+        if not os.path.isfile(self.srcs_name):
+            print(
+                "Mesuring Shapelet modes with sigma_arcsec=%.2f arcsec"
+                % self.sigma_arcsec
+            )
+            mtask_s = anacal.fpfs.FpfsMeasure(
+                psf_array=psf_array,
+                mag_zero=mag_zero,
+                pixel_scale=pixel_scale,
+                sigma_arcsec=self.sigma_arcsec,
+                klim_thres=self.klim_thres,
+                nord=self.nord,
+                det_nrot=-1,
+            )
+            src_s = mtask_s.run(
+                gal_array=gal_array,
+                det=coords,
+                noise_array=noise_array,
+                psf=psf_obj,
+            )
+            src_s.write(self.srcs_name)
+            del mtask_s, src_s
 
-        del mtask_s, mtask_d
+        # Shapelet Modes
+        if (not os.path.isfile(self.srcs2_name)) and (
+            self.sigma_arcsec2 is not None
+        ):
+            print(
+                "Mesuring Shapelet modes with sigma_arcsec=%.2f arcsec"
+                % self.sigma_arcsec2
+            )
+            mtask_s2 = anacal.fpfs.FpfsMeasure(
+                psf_array=psf_array,
+                mag_zero=mag_zero,
+                pixel_scale=pixel_scale,
+                sigma_arcsec=self.sigma_arcsec2,
+                klim_thres=self.klim_thres,
+                nord=self.nord,
+                det_nrot=-1,
+            )
+            src_s2 = mtask_s2.run(
+                gal_array=gal_array,
+                det=coords,
+                noise_array=noise_array,
+                psf=psf_obj,
+            )
+            src_s2.write(self.srcs2_name)
+            del mtask_s2, src_s2
+
+        # Shapelet Modes (second scale)
+        del coords
         gc.collect()
-        return coords, src_s, src_d
+        return
 
     def prepare_data(self, file_name):
         dm_task = MakeDMExposure(self.config_name)
@@ -235,7 +299,7 @@ class ProcessSimAnacal(SimulateBase):
                 psf_array=psf_array,
                 mag_zero=mag_zero,
                 pixel_scale=pixel_scale,
-                sigma_arcsec=self.sigma_as,
+                sigma_arcsec=self.sigma_arcsec,
                 nord=self.nord,
                 det_nrot=self.det_nrot,
                 klim_thres=self.klim_thres,
@@ -265,29 +329,10 @@ class ProcessSimAnacal(SimulateBase):
 
     # @profile
     def run(self, file_name):
-        assert self.cat_dir is not None
-        srcs_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
-        srcs_name = srcs_name.replace(
-            "image-",
-            "src_s-",
-        ).replace(
-            "_xxx",
-            "_%s" % self.bands,
-        )
-        srcd_name = srcs_name.replace("src_s-", "src_d-")
-        det_name = srcs_name.replace("src_s-", "det-")
-
-        if (
-            os.path.isfile(srcs_name)
-            and os.path.isfile(det_name)
-            and os.path.isfile(srcd_name)
-        ):
-            print("Already has measurement for simulation: %s." % file_name)
-            return
-
         data = self.prepare_data(file_name)
+        self.get_file_names(file_name)
         start_time = time.time()
-        det, src_s, src_d = self.process_image(
+        self.process_image(
             gal_array=data["gal_array"],
             psf_array=data["psf_array"],
             cov_matrix=data["cov_matrix"],
@@ -299,13 +344,5 @@ class ProcessSimAnacal(SimulateBase):
         )
         del data
         elapsed_time = time.time() - start_time
-        print(
-            "Elapsed time: %.2f seconds, number of gals: %d"
-            % (elapsed_time, len(src_s.array))
-        )
-        fitsio.write(det_name, det)
-        src_s.write(srcs_name)
-        src_d.write(srcd_name)
-        del det, src_s, src_d
-        gc.collect()
+        print("Elapsed time: %.2f seconds" % elapsed_time)
         return
