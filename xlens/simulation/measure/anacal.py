@@ -129,6 +129,9 @@ class ProcessSimAnacal(SimulateBase):
         if os.path.isfile(self.det_name):
             coords = fitsio.read(self.det_name)
         else:
+            print(
+                "Running Detection with sigma_arcsec=%.2f" % self.sigma_arcsec
+            )
             dtask = anacal.fpfs.FpfsDetect(
                 nx=nn,
                 ny=nn,

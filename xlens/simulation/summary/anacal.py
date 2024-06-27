@@ -142,7 +142,6 @@ class SummarySimAnacal(SimulateBatchBase):
                 r1_2 = np.sum(
                     out2["e1_g1"] * out2["wdet"] + out2["e1"] * out2["wdet_g1"]
                 )
-                print(e1_2, r1_2)
 
                 out[icount, 0] = ifield
                 out[icount, 1] = out[icount, 1] + (e1_2 - e1_1)
