@@ -32,7 +32,7 @@ pf = {
 }
 
 
-class SummarySimAnacal(SimulateBatchBase):
+class SummarySimFpfs(SimulateBatchBase):
     def __init__(
         self,
         config_name,
@@ -56,6 +56,9 @@ class SummarySimAnacal(SimulateBatchBase):
         self.c0 = cparser.getfloat("FPFS", "c0")
         self.snr_min = cparser.getfloat("FPFS", "snr_min", fallback=10.0)
         self.r2_min = cparser.getfloat("FPFS", "r2_min", fallback=0.05)
+        self.ename = cparser.get("FPFS", "ename", fallback="e1")
+        assert int(self.ename[-1]) > 0
+        self.egname = self.ename + "_g" + self.ename[-1]
 
         self.ncov_fname = cparser.get(
             "FPFS",
@@ -77,13 +80,13 @@ class SummarySimAnacal(SimulateBatchBase):
         self.cut = getattr(self, self.test_obs)
         self.ofname = os.path.join(
             self.sum_dir,
-            "bin_%s_%02d.fits"
+            "bin_nord%d_%s_%02d.fits"
             % (
+                self.nord,
                 self.test_obs,
                 int(self.cut * pf[self.test_obs]),
             ),
         )
-        self.image_center = (self.coadd_dim + 10) / 2.0
         return
 
     def run(self, icore):
@@ -92,8 +95,7 @@ class SummarySimAnacal(SimulateBatchBase):
         ctask = CatalogTask(
             nord=self.nord,
             det_nrot=self.det_nrot,
-            cov_matrix_s=self.cov_matrix,
-            cov_matrix_d=self.cov_matrix,
+            cov_matrix=self.cov_matrix,
         )
         ctask.update_parameters(
             snr_min=self.snr_min,
@@ -103,11 +105,13 @@ class SummarySimAnacal(SimulateBatchBase):
         print("start core: %d, with id: %s" % (icore, id_range))
         start_time = time.time()
         assert self.cat_dir is not None
+        en = self.ename
+        egn = self.egname
         for icount, ifield in enumerate(id_range):
             for irot in range(self.nrot):
-                s_nm1 = os.path.join(
+                nm1 = os.path.join(
                     self.cat_dir,
-                    "src_s-%05d_%s-0_rot%d_%s.fits"
+                    "src_1-%05d_%s-0_rot%d_%s.fits"
                     % (
                         ifield,
                         self.shear_comp_sim,
@@ -115,38 +119,31 @@ class SummarySimAnacal(SimulateBatchBase):
                         self.bands,
                     ),
                 )
-                d_nm1 = s_nm1.replace("src_s", "src_d")
-                src_s1 = Catalog.from_fits(s_nm1)
-                src_d1 = Catalog.from_fits(d_nm1)
-                out1 = ctask.run(shapelet=src_s1, detection=src_d1)
-                e1_1 = np.sum(out1["e1"] * out1["wdet"])
-                r1_1 = np.sum(
-                    out1["e1_g1"] * out1["wdet"] + out1["e1"] * out1["wdet_g1"]
+                src1 = Catalog.from_fits(nm1)
+                mom1 = ctask.run(catalog=src1)
+                nm2 = os.path.join(
+                    self.cat_dir,
+                    "src_1-%05d_%s-1_rot%d_%s.fits"
+                    % (
+                        ifield,
+                        self.shear_comp_sim,
+                        irot,
+                        self.bands,
+                    ),
                 )
+                src2 = Catalog.from_fits(nm2)
+                mom2 = ctask.run(catalog=src2)
 
-                s_nm2 = os.path.join(
-                    self.cat_dir,
-                    "src_s-%05d_%s-1_rot%d_%s.fits"
-                    % (
-                        ifield,
-                        self.shear_comp_sim,
-                        irot,
-                        self.bands,
-                    ),
-                )
-                d_nm2 = s_nm2.replace("src_s", "src_d")
-                src_s2 = Catalog.from_fits(s_nm2)
-                src_d2 = Catalog.from_fits(d_nm2)
-                out2 = ctask.run(shapelet=src_s2, detection=src_d2)
-                e1_2 = np.sum(out2["e1"] * out2["wdet"])
-                r1_2 = np.sum(
-                    out2["e1_g1"] * out2["wdet"] + out2["e1"] * out2["wdet_g1"]
-                )
+                e1m = np.sum(mom1[en] * mom1["w"])
+                e1p = np.sum(mom2[en] * mom2["w"])
+                r1m = np.sum(mom1[egn] * mom1["w"] + mom1[en] * mom1["w_g1"])
+                r1p = np.sum(mom2[egn] * mom2["w"] + mom2[en] * mom2["w_g1"])
 
                 out[icount, 0] = ifield
-                out[icount, 1] = out[icount, 1] + (e1_2 - e1_1)
-                out[icount, 2] = out[icount, 2] + (e1_1 + e1_2) / 2.0
-                out[icount, 3] = out[icount, 3] + (r1_1 + r1_2) / 2.0
+                out[icount, 1] = out[icount, 1] + (e1p - e1m)
+                out[icount, 2] = out[icount, 2] + (e1m + e1p) / 2.0
+                out[icount, 3] = out[icount, 3] + (r1m + r1p) / 2.0
+                del src1, mom1, src2, mom2
         end_time = time.time()
         elapsed_time = (end_time - start_time) / 4.0
         print("elapsed time: %.2f seconds" % elapsed_time)
@@ -158,7 +155,7 @@ class SummarySimAnacal(SimulateBatchBase):
         else:
             cname = test_obs
 
-        spt = "bin_%s_" % cname
+        spt = "bin_nord%d_%s_" % (self.nord, cname)
         flist = glob.glob("%s/%s*.fits" % (self.sum_dir, spt))
         res = []
         for fname in flist:
@@ -166,9 +163,9 @@ class SummarySimAnacal(SimulateBatchBase):
             obs = obs / float(pf[cname])
             print("%s is: %s" % (cname, obs))
             a = fitsio.read(fname)
-            rave = np.average(a[:, 3])
-            msk = (a[:, 3] >= 100) & (a[:, 3] < rave * 2.0)
-            a = a[msk]
+            # rave = np.average(a[:, 3])
+            # msk = (a[:, 3] >= 100) & (a[:, 3] < rave * 2.0)
+            # a = a[msk]
             a = a[np.argsort(a[:, 0])]
             nsim = a.shape[0]
             b = np.average(a, axis=0)
@@ -179,7 +176,7 @@ class SummarySimAnacal(SimulateBatchBase):
             )
             merr = (
                 np.std(a[:, 1])
-                / np.average(a[:, 3])
+                / np.abs(np.average(a[:, 3]))
                 / self.shear_value
                 / 2.0
                 / np.sqrt(nsim)
@@ -190,7 +187,7 @@ class SummarySimAnacal(SimulateBatchBase):
             )
             cbias = b[2] / b[3]
             print("additive bias:", cbias)
-            cerr = np.std(a[:, 2]) / np.average(a[:, 3]) / np.sqrt(nsim)
+            cerr = np.std(a[:, 2]) / np.abs(np.average(a[:, 3])) / np.sqrt(nsim)
             print(
                 "1-sigma error:",
                 cerr,

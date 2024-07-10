@@ -40,7 +40,7 @@ def rotate90(image):
     return rotated_image
 
 
-class ProcessSimAnacal(SimulateBase):
+class ProcessSimFpfs(SimulateBase):
     # @profile
     def __init__(self, config_name):
         cparser = ConfigParser(interpolation=ExtendedInterpolation())
@@ -107,8 +107,8 @@ class ProcessSimAnacal(SimulateBase):
             "_xxx",
             "_%s" % self.bands,
         )
-        self.srcs2_name = self.srcs_name.replace("src_s-", "src_s2-")
-        self.srcd_name = self.srcs_name.replace("src_s-", "src_d-")
+        self.srcs2_name = self.srcs_name.replace("src_s-", "src_2-")
+        self.srcd_name = self.srcs_name.replace("src_s-", "src_1-")
         self.det_name = self.srcs_name.replace("src_s-", "det-")
         return
 
@@ -145,7 +145,7 @@ class ProcessSimAnacal(SimulateBase):
             )
             coords = dtask.run(
                 gal_array=gal_array,
-                fthres=8.5,
+                fthres=8.0,
                 pthres=self.pthres,
                 bound=self.rcut + 5,
                 noise_array=noise_array,
@@ -155,53 +155,31 @@ class ProcessSimAnacal(SimulateBase):
             fitsio.write(self.det_name, coords)
             del dtask
         print("pre-selected number of sources: %d" % len(coords))
+        gc.collect()
 
-        # Detection Modes
+        # First Measurement
         if not os.path.isfile(self.srcd_name):
             print("Mesuring Detection modes")
-            mtask_d = anacal.fpfs.FpfsMeasure(
-                psf_array=psf_array,
-                mag_zero=mag_zero,
-                pixel_scale=pixel_scale,
-                sigma_arcsec=self.sigma_arcsec,
-                klim_thres=self.klim_thres,
-                nord=-1,
-                det_nrot=self.det_nrot,
-            )
-            src_d = mtask_d.run(
-                gal_array=gal_array,
-                det=coords,
-                noise_array=noise_array,
-                psf=psf_obj,
-            )
-            src_d.write(self.srcd_name)
-            del mtask_d, src_d
-
-        # Shapelet Modes
-        if not os.path.isfile(self.srcs_name):
-            print(
-                "Mesuring Shapelet modes with sigma_arcsec=%.2f arcsec"
-                % self.sigma_arcsec
-            )
-            mtask_s = anacal.fpfs.FpfsMeasure(
+            mtask_1 = anacal.fpfs.FpfsMeasure(
                 psf_array=psf_array,
                 mag_zero=mag_zero,
                 pixel_scale=pixel_scale,
                 sigma_arcsec=self.sigma_arcsec,
                 klim_thres=self.klim_thres,
                 nord=self.nord,
-                det_nrot=-1,
+                det_nrot=self.det_nrot,
             )
-            src_s = mtask_s.run(
+            src_1 = mtask_1.run(
                 gal_array=gal_array,
                 det=coords,
                 noise_array=noise_array,
                 psf=psf_obj,
             )
-            src_s.write(self.srcs_name)
-            del mtask_s, src_s
+            src_1.write(self.srcd_name)
+            del mtask_1, src_1
+        gc.collect()
 
-        # Shapelet Modes
+        # Second Measurement
         if (not os.path.isfile(self.srcs2_name)) and (
             self.sigma_arcsec2 is not None
         ):
@@ -209,7 +187,7 @@ class ProcessSimAnacal(SimulateBase):
                 "Mesuring Shapelet modes with sigma_arcsec=%.2f arcsec"
                 % self.sigma_arcsec2
             )
-            mtask_s2 = anacal.fpfs.FpfsMeasure(
+            mtask_2 = anacal.fpfs.FpfsMeasure(
                 psf_array=psf_array,
                 mag_zero=mag_zero,
                 pixel_scale=pixel_scale,
@@ -218,15 +196,14 @@ class ProcessSimAnacal(SimulateBase):
                 nord=self.nord,
                 det_nrot=-1,
             )
-            src_s2 = mtask_s2.run(
+            src_2 = mtask_2.run(
                 gal_array=gal_array,
                 det=coords,
                 noise_array=noise_array,
                 psf=psf_obj,
             )
-            src_s2.write(self.srcs2_name)
-            del mtask_s2, src_s2
-
+            src_2.write(self.srcs2_name)
+            del mtask_2, src_2
         # Shapelet Modes (second scale)
         del coords
         gc.collect()
@@ -307,15 +284,14 @@ class ProcessSimAnacal(SimulateBase):
                 det_nrot=self.det_nrot,
                 klim_thres=self.klim_thres,
             )
-            cov_matrix = cov_task.measure(variance=variance)
+            # Since we have additional layer of noise
+            cov_matrix = cov_task.measure(variance=variance * 2.0)
             cov_matrix.write(self.ncov_fname)
-
         if self.input_cat_dir is not None:
             field_id = int(file_name.split("image-")[-1].split("_")[0])
             tmp_fname = "brightstar-%05d.fits" % field_id
             tmp_fname = os.path.join(self.input_cat_dir, tmp_fname)
             star_cat = fitsio.read(tmp_fname)[["x", "y", "r"]]
-            star_cat["r"] = star_cat["r"] * 1.0
         else:
             star_cat = None
         gc.collect()

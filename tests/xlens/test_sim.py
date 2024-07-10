@@ -3,11 +3,11 @@ import os
 import fitsio
 import numpy as np
 
-from xlens.simulation.measure import ProcessSimAnacal, ProcessSimDM, utils
+from xlens.simulation.measure import ProcessSimDM, ProcessSimFpfs, utils
 from xlens.simulation.neff import NeffSimFpfs
 from xlens.simulation.simulator.base import SimulateImage
 from xlens.simulation.simulator.loader import MakeDMExposure
-from xlens.simulation.summary import SummarySimAnacal
+from xlens.simulation.summary import SummarySimFpfs
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -39,7 +39,7 @@ def test_lsst():
     np.testing.assert_allclose(psf_array, psf_target, atol=1e-5, rtol=1e-3)
 
     # Measurement
-    worker3 = ProcessSimAnacal(config_fname)
+    worker3 = ProcessSimFpfs(config_fname)
     input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
     for _ in input_list:
         worker3.run(_)
@@ -49,7 +49,7 @@ def test_lsst():
     for _ in input_list:
         worker4.run(_)
 
-    worker5 = SummarySimAnacal(
+    worker5 = SummarySimFpfs(
         config_fname,
         min_id=0,
         max_id=1,
@@ -95,7 +95,7 @@ def test_hsc():
     del psf_array, _name
 
     # Measurement
-    worker3 = ProcessSimAnacal(config_fname)
+    worker3 = ProcessSimFpfs(config_fname)
     input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
     for _ in input_list:
         worker3.run(_)
@@ -104,7 +104,7 @@ def test_hsc():
     for _ in input_list:
         worker4.run(_)
 
-    worker5 = SummarySimAnacal(
+    worker5 = SummarySimFpfs(
         config_fname,
         min_id=0,
         max_id=1,
