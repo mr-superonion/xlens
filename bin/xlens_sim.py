@@ -12,9 +12,9 @@ task_list = [
     "simulate_image",
     "prepare_star",
     "measure_dm",
+    "measure_fpfs",
+    "summary_fpfs",
     "neff_fpfs",
-    "measure_anacal",
-    "summary_anacal",
 ]
 
 
@@ -59,21 +59,21 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         )
         for _ in pool.map(worker.run, input_list):
             pass
-    elif taskname.lower() == "measure_anacal":
-        from xlens.simulation.measure import ProcessSimAnacal
+    elif taskname.lower() == "measure_fpfs":
+        from xlens.simulation.measure import ProcessSimFpfs
 
         # import fitsio
 
-        worker = ProcessSimAnacal(cmd_args.config)
+        worker = ProcessSimFpfs(cmd_args.config)
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for _ in pool.map(worker.run, input_list):
             pass
-    elif taskname.lower() == "summary_anacal":
+    elif taskname.lower() == "summary_fpfs":
         import fitsio
 
-        from xlens.simulation.summary import SummarySimAnacal
+        from xlens.simulation.summary import SummarySimFpfs
 
-        worker = SummarySimAnacal(
+        worker = SummarySimFpfs(
             cmd_args.config,
             min_id=min_id,
             max_id=max_id,
@@ -83,7 +83,7 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
             olist = pool.map(worker.run, np.arange(ncores))
             fitsio.write(worker.ofname, np.vstack(list(olist)))
         worker.display_result()
-    elif taskname.lower() == "neff_anacal":
+    elif taskname.lower() == "neff_fpfs":
         from xlens.simulation.neff import NeffSimFpfs
 
         worker = NeffSimFpfs(
@@ -94,7 +94,7 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         )
         olist = pool.map(worker.run, np.arange(ncores))
         outcome = np.vstack(list(olist))
-        std = np.std(outcome[:, 0]) / np.average(outcome[:, 1])
+        std = np.std(outcome[:, 0]) / np.abs(np.average(outcome[:, 1]))
         print("std: %s" % std)
         neff = (0.26 / std) ** 2.0 / worker.area
         print("neff: %s" % neff)

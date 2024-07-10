@@ -191,6 +191,8 @@ class MakeDMExposure(SimulateBase):
         masked_image = afw_image.MaskedImageF(ny, nx)
         masked_image.image.array[:, :] = gal_array / weight_sum
         masked_image.variance.array[:, :] = variance / (weight_sum) ** 2.0
+        std_final = np.sqrt(variance / (weight_sum) ** 2.0)
+        print("The final noise variance is %.2f" % std_final)
         masked_image.mask.array[:, :] = msk_array
         exp = afw_image.ExposureF(masked_image)
 
