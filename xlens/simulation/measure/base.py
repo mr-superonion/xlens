@@ -29,6 +29,7 @@ import lsst.pipe.base as pipeBase
 from lsst.meas.algorithms import ScaleVarianceTask, SourceDetectionTask
 from lsst.meas.base import CatalogCalculationTask, SingleFrameMeasurementTask
 from lsst.meas.deblender import SourceDeblendTask
+from lsst.utils import getPackageDir
 
 from ..simulator.loader import MakeDMExposure
 
@@ -66,8 +67,12 @@ class DMMeasurementConfig(pexConfig.Config):
         self.deblend.maxFootprintArea = 500 * 500
         self.deblend.maxFootprintSize = 600
 
-        # self.measurement.load(os.path.join(getPackageDir("obs_subaru"), "config", "hsm.py"))
-        # self.load(os.path.join(getPackageDir("obs_subaru"), "config", "cmodel.py"))
+        self.measurement.load(
+            os.path.join(getPackageDir("obs_subaru"), "config", "hsm.py"),
+        )
+        self.load(
+            os.path.join(getPackageDir("obs_subaru"), "config", "cmodel.py"),
+        )
 
 
 class DMMeasurementTask(pipeBase.PipelineTask):
@@ -99,16 +104,16 @@ class DMMeasurementTask(pipeBase.PipelineTask):
         table = afwTable.SourceTable.make(self.schema)
         sources = afwTable.SourceCatalog(table)
         table.setMetadata(self.algMetadata)
-        detRes = self.detection.run(
+        detection_res = self.detection.run(
             table=table,
             exposure=exposure,
             doSmooth=True,
         )
-        sources = detRes.sources
+        sources = detection_res.sources
         print("number of detections: %d" % len(sources))
         if self.do_scale_variance:
-            varScale = self.scaleVariance.run(exposure.maskedImage)
-            exposure.getMetadata().add("variance_scale", varScale)
+            scale_task = self.scaleVariance.run(exposure.maskedImage)
+            exposure.getMetadata().add("variance_scale", scale_task)
         if self.do_scale_variance:
             # do deblending
             self.deblend.run(exposure=exposure, sources=sources)
@@ -129,10 +134,12 @@ class ProcessSimDM(MakeDMExposure):
         super().__init__(config_name)
         self.dm_task = DMMeasurementTask()
         self.output_dir = self.cat_dm_dir
+        assert self.output_dir is not None
         if not os.path.isdir(self.output_dir):
             os.makedirs(self.output_dir, exist_ok=True)
 
     def run(self, file_name):
+        assert self.output_dir is not None
         out_name = os.path.join(self.output_dir, file_name.split("/")[-1])
         out_name = out_name.replace("image-", "src-").replace(
             "_xxx", "_%s" % self.bands

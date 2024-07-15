@@ -34,25 +34,25 @@ def get_processor_count(pool, args):
 
 # @profile
 def run(pool, cmd_args, taskname, min_id, max_id, ncores):
-    if taskname.lower() == "simulate_image":
-        from xlens.simulation.simulator.base import SimulateImage
+    from xlens.simulation.simulator.base import SimulateImage
 
+    w0 = SimulateImage(cmd_args.config)
+    if taskname.lower() == "simulate_image":
         input_list = list(range(min_id, max_id))
-        worker = SimulateImage(cmd_args.config)
-        for _ in pool.map(worker.run, input_list):
+        for _ in pool.map(w0.run, input_list):
             pass
     elif taskname.lower() == "measure_dm":
         from xlens.simulation.measure import ProcessSimDM
 
         worker = ProcessSimDM(cmd_args.config)
-        input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
+        input_list = w0.get_sim_fnames(min_id=min_id, max_id=max_id)
         for _ in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "prepare_star":
         from xlens.simulation.simulator.loader import MakeBrightInfo
 
         worker = MakeBrightInfo(cmd_args.config)
-        input_list = worker.get_sim_fnames(
+        input_list = w0.get_sim_fnames(
             min_id=min_id,
             max_id=max_id,
             field_only=True,
@@ -65,7 +65,7 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         # import fitsio
 
         worker = ProcessSimFpfs(cmd_args.config)
-        input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
+        input_list = w0.get_sim_fnames(min_id=min_id, max_id=max_id)
         for _ in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "summary_fpfs":

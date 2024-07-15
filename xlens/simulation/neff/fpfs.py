@@ -75,7 +75,6 @@ class NeffSimFpfs(SimulateBatchBase):
         )
         radius = ((coadd_dim + 10) / 2.0 - buff) * coadd_scale / 60.0
         self.area = np.pi * radius**2  # [arcmin^2]
-        self.imode = 0
         return
 
     def run(self, icore):
@@ -102,8 +101,7 @@ class NeffSimFpfs(SimulateBatchBase):
         for icount, ifield in enumerate(id_range):
             nm = os.path.join(
                 self.cat_dir,
-                "src_1-%05d_g1-%d_rot0_%s.fits"
-                % (ifield, self.imode, self.bands),
+                "src_1-%05d_g1-0_rot0_%s.fits" % (ifield, self.bands),
             )
 
             src = Catalog.from_fits(nm)
