@@ -153,16 +153,6 @@ class SimulateBase(object):
         )
         assert self.psf_variation >= 0.0
 
-        self.shear_comp_sim = cparser.get(
-            "simulation",
-            "shear_component",
-            fallback="g1",
-        )
-        self.shear_mode_list = json.loads(
-            cparser.get("simulation", "shear_mode_list"),
-        )
-        self.nshear = len(self.shear_mode_list)
-
         # Systematics
         self.cosmic_rays = cparser.getboolean(
             "simulation",
@@ -226,36 +216,6 @@ class SimulateBase(object):
         )
         self.nband = len(self.sim_band_list)
         return
-
-    def get_sim_fnames(self, min_id, max_id, field_only=False):
-        """Generate filename for simulations
-        Args:
-            ftype (str):    file type ('src' for gal, and 'image' for exposure
-            min_id (int):   minimum id
-            max_id (int):   maximum id
-            field_only (bool): only include filed number
-        Returns:
-            out (list):     a list of file name
-        """
-        if field_only:
-            out = [
-                os.path.join(
-                    self.img_dir,
-                    "image-%05d_xxx.fits" % (fid),
-                )
-                for fid in range(min_id, max_id)
-            ]
-        else:
-            out = [
-                os.path.join(
-                    self.img_dir,
-                    "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid),
-                )
-                for fid in range(min_id, max_id)
-                for gid in self.shear_mode_list
-                for rid in range(self.nrot)
-            ]
-        return out
 
     def get_psf_obj(self, rng, scale):
         if self.psf_variation < 1e-5:
@@ -388,7 +348,46 @@ class SimulateImage(SimulateBase):
 
         self.z_bounds = json.loads(cparser.get("simulation", "z_bounds"))
         self.shear_value = cparser.getfloat("simulation", "shear_value")
+        self.shear_comp_sim = cparser.get(
+            "simulation",
+            "shear_component",
+            fallback="g1",
+        )
+        self.shear_mode_list = json.loads(
+            cparser.get("simulation", "shear_mode_list"),
+        )
+        self.nshear = len(self.shear_mode_list)
         return
+
+    def get_sim_fnames(self, min_id, max_id, field_only=False):
+        """Generate filename for simulations
+        Args:
+            ftype (str):    file type ('src' for gal, and 'image' for exposure
+            min_id (int):   minimum id
+            max_id (int):   maximum id
+            field_only (bool): only include filed number
+        Returns:
+            out (list):     a list of file name
+        """
+        if field_only:
+            out = [
+                os.path.join(
+                    self.img_dir,
+                    "image-%05d_xxx.fits" % (fid),
+                )
+                for fid in range(min_id, max_id)
+            ]
+        else:
+            out = [
+                os.path.join(
+                    self.img_dir,
+                    "image-%05d_g1-%d_rot%d_xxx.fits" % (fid, gid, rid),
+                )
+                for fid in range(min_id, max_id)
+                for gid in self.shear_mode_list
+                for rid in range(self.nrot)
+            ]
+        return out
 
     def run(self, ifield):
         print("Simulating for field: %d" % ifield)
@@ -458,7 +457,7 @@ class SimulateImage(SimulateBase):
         return
 
 
-class SimulateImageKappa(SimulateBase):
+class SimulateImageKappa(SimulateImage):
     def __init__(self, config_name):
         cparser = ConfigParser(interpolation=ExtendedInterpolation())
         cparser.read(config_name)
@@ -548,8 +547,15 @@ class SimulateImageHalo(SimulateBase):
             os.makedirs(self.img_dir, exist_ok=True)
         return
 
-    def run(self, ifield):
-        print("Simulating for field: %d" % ifield)
+    def run(self, ifield, src_halo):
+        """Simulate image lensed by NFW halo
+        ifield (int):   field id, different field for different source galaxies
+        src_halo (NDArray):   halo information (index, mass, conc, z)
+        """
+        print(
+            "Simulating for field: %d, and halo index %d"
+            % (ifield, src_halo["index"])
+        )
         rng = np.random.RandomState(ifield)
 
         scale = get_survey(
@@ -570,42 +576,43 @@ class SimulateImageHalo(SimulateBase):
             layout=self.layout,
         )
         print("Simulation has galaxies: %d" % len(galaxy_catalog))
-        for shear_mode in self.shear_mode_list:
-            par = [4e14, 6.0, 0.2]
-            shear_obj = ShearHalo(
-                mass=par[0],
-                conc=par[1],
-                z_lens=par[2],
+        # par = [4e14, 6.0, 0.2]
+        shear_obj = ShearHalo(
+            mass=src_halo["mass"],
+            conc=src_halo["conc"],
+            z_lens=src_halo["z_lens"],
+        )
+        # This is for ring test
+        # rotating galaxy shape and position by 90 degrees
+        for irot in range(self.nrot):
+            sim_data = make_sim(
+                rng=rng,
+                galaxy_catalog=galaxy_catalog,
+                coadd_dim=self.coadd_dim,
+                shear_obj=shear_obj,
+                psf=psf_obj,
+                dither=self.dither,
+                rotate=self.rotate,
+                bands=self.sim_band_list,
+                theta0=self.rot_list[irot],
+                calib_mag_zero=self.calib_mag_zero,
+                survey_name=self.survey_name,
+                **kargs,
             )
-            for irot in range(self.nrot):
-                sim_data = make_sim(
-                    rng=rng,
-                    galaxy_catalog=galaxy_catalog,
-                    coadd_dim=self.coadd_dim,
-                    shear_obj=shear_obj,
-                    psf=psf_obj,
-                    dither=self.dither,
-                    rotate=self.rotate,
-                    bands=self.sim_band_list,
-                    theta0=self.rot_list[irot],
-                    calib_mag_zero=self.calib_mag_zero,
-                    survey_name=self.survey_name,
-                    **kargs,
+            # write galaxy images
+            for band_name in self.sim_band_list:
+                gal_fname = "%s/image-%05d_nfw-%03d_rot%d_%s.fits" % (
+                    self.img_dir,
+                    ifield,
+                    src_halo["index"],
+                    irot,
+                    band_name,
                 )
-                # write galaxy images
-                for band_name in self.sim_band_list:
-                    gal_fname = "%s/image-%05d_g1-%d_rot%d_%s.fits" % (
-                        self.img_dir,
-                        ifield,
-                        shear_mode,
-                        irot,
-                        band_name,
-                    )
-                    mi = sim_data["band_data"][band_name][0].getMaskedImage()
-                    gdata = mi.getImage().getArray()
-                    fitsio.write(gal_fname, gdata)
-                    del mi, gdata, gal_fname
-                del sim_data
-                gc.collect()
+                mi = sim_data["band_data"][band_name][0].getMaskedImage()
+                gdata = mi.getImage().getArray()
+                fitsio.write(gal_fname, gdata)
+                del mi, gdata, gal_fname
+            del sim_data
+            gc.collect()
         del galaxy_catalog
         return

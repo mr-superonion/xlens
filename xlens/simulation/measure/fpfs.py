@@ -100,16 +100,15 @@ class ProcessSimFpfs(SimulateBase):
     def get_file_names(self, file_name):
         assert self.cat_dir is not None
         srcs_name = os.path.join(self.cat_dir, file_name.split("/")[-1])
-        self.srcs_name = srcs_name.replace(
+        self.det_name = srcs_name.replace(
             "image-",
-            "src_s-",
+            "det-",
         ).replace(
             "_xxx",
             "_%s" % self.bands,
         )
-        self.srcs2_name = self.srcs_name.replace("src_s-", "src_2-")
-        self.srcd_name = self.srcs_name.replace("src_s-", "src_1-")
-        self.det_name = self.srcs_name.replace("src_s-", "det-")
+        self.src1_name = self.det_name.replace("det-", "src_1-")
+        self.src2_name = self.det_name.replace("det-", "src_2-")
         return
 
     def process_image(
@@ -158,7 +157,7 @@ class ProcessSimFpfs(SimulateBase):
         gc.collect()
 
         # First Measurement
-        if not os.path.isfile(self.srcd_name):
+        if not os.path.isfile(self.src1_name):
             print("Mesuring Detection modes")
             mtask_1 = anacal.fpfs.FpfsMeasure(
                 psf_array=psf_array,
@@ -175,12 +174,12 @@ class ProcessSimFpfs(SimulateBase):
                 noise_array=noise_array,
                 psf=psf_obj,
             )
-            src_1.write(self.srcd_name)
+            src_1.write(self.src1_name)
             del mtask_1, src_1
         gc.collect()
 
         # Second Measurement
-        if (not os.path.isfile(self.srcs2_name)) and (
+        if (not os.path.isfile(self.src2_name)) and (
             self.sigma_arcsec2 is not None
         ):
             print(
@@ -202,7 +201,7 @@ class ProcessSimFpfs(SimulateBase):
                 noise_array=noise_array,
                 psf=psf_obj,
             )
-            src_2.write(self.srcs2_name)
+            src_2.write(self.src2_name)
             del mtask_2, src_2
         # Shapelet Modes (second scale)
         del coords

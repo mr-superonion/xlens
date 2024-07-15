@@ -49,6 +49,11 @@ class SummarySimFpfs(SimulateBatchBase):
                 "Cannot find catalog directory: %s" % self.cat_dir
             )
 
+        self.shear_comp_sim = cparser.get(
+            "simulation",
+            "shear_component",
+            fallback="g1",
+        )
         # FPFS parameters
         self.nord = cparser.getint("FPFS", "nord", fallback=4)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)

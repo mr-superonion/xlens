@@ -16,10 +16,10 @@ def test_lsst():
     config_fname = os.path.join(this_dir, "./config1.ini")
     worker1 = SimulateImage(config_fname)
     worker1.run(0)
+    fname_list = worker1.get_sim_fnames(min_id=0, max_id=1)
 
     # File name
     worker2 = MakeDMExposure(config_fname)
-    fname_list = worker2.get_sim_fnames(min_id=0, max_id=1)
     assert len(fname_list) == 3
 
     # pixel scale
@@ -40,13 +40,11 @@ def test_lsst():
 
     # Measurement
     worker3 = ProcessSimFpfs(config_fname)
-    input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
-    for _ in input_list:
+    for _ in fname_list:
         worker3.run(_)
 
     worker4 = ProcessSimDM(config_fname)
-    input_list = worker4.get_sim_fnames(min_id=0, max_id=1)
-    for _ in input_list:
+    for _ in fname_list:
         worker4.run(_)
 
     worker5 = SummarySimFpfs(
@@ -72,11 +70,11 @@ def test_lsst():
 def test_hsc():
     config_fname = os.path.join(this_dir, "./config2.ini")
     worker1 = SimulateImage(config_fname)
+    fname_list = worker1.get_sim_fnames(min_id=0, max_id=1)
     worker1.run(0)
 
     # File name
     worker2 = MakeDMExposure(config_fname)
-    fname_list = worker2.get_sim_fnames(min_id=0, max_id=1)
     assert len(fname_list) == 3
 
     # pixel scale
@@ -96,12 +94,11 @@ def test_hsc():
 
     # Measurement
     worker3 = ProcessSimFpfs(config_fname)
-    input_list = worker3.get_sim_fnames(min_id=0, max_id=1)
-    for _ in input_list:
+    for _ in fname_list:
         worker3.run(_)
 
     worker4 = ProcessSimDM(config_fname)
-    for _ in input_list:
+    for _ in fname_list:
         worker4.run(_)
 
     worker5 = SummarySimFpfs(
