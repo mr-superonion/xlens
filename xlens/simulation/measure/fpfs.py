@@ -123,7 +123,7 @@ class ProcessSimFpfs(SimulateBase):
         star_cat: NDArray,
     ):
         # Detection
-        nn = self.coadd_dim + 10
+        # nn = self.coadd_dim + 10
         mag_zero = cov_matrix.mag_zero
         if os.path.isfile(self.det_name):
             coords = fitsio.read(self.det_name)
@@ -132,21 +132,19 @@ class ProcessSimFpfs(SimulateBase):
                 "Running Detection with sigma_arcsec=%.2f" % self.sigma_arcsec
             )
             dtask = anacal.fpfs.FpfsDetect(
-                nx=nn,
-                ny=nn,
-                psf_array=psf_array,
                 mag_zero=mag_zero,
+                psf_array=psf_array,
                 pixel_scale=pixel_scale,
                 sigma_arcsec=self.sigma_arcsec,
                 cov_matrix=cov_matrix,
                 det_nrot=self.det_nrot,
                 klim_thres=self.klim_thres,
+                bound=self.rcut + 5,
             )
             coords = dtask.run(
                 gal_array=gal_array,
                 fthres=8.0,
                 pthres=self.pthres,
-                bound=self.rcut + 5,
                 noise_array=noise_array,
                 mask_array=mask_array,
                 star_cat=star_cat,
@@ -160,8 +158,8 @@ class ProcessSimFpfs(SimulateBase):
         if not os.path.isfile(self.src1_name):
             print("Mesuring Detection modes")
             mtask_1 = anacal.fpfs.FpfsMeasure(
-                psf_array=psf_array,
                 mag_zero=mag_zero,
+                psf_array=psf_array,
                 pixel_scale=pixel_scale,
                 sigma_arcsec=self.sigma_arcsec,
                 klim_thres=self.klim_thres,
@@ -286,10 +284,10 @@ class ProcessSimFpfs(SimulateBase):
             # Since we have additional layer of noise
             cov_matrix = cov_task.measure(variance=variance * 2.0)
             cov_matrix.write(self.ncov_fname)
-        if self.input_cat_dir is not None:
+        if self.input_star_dir is not None:
             field_id = int(file_name.split("image-")[-1].split("_")[0])
             tmp_fname = "brightstar-%05d.fits" % field_id
-            tmp_fname = os.path.join(self.input_cat_dir, tmp_fname)
+            tmp_fname = os.path.join(self.input_star_dir, tmp_fname)
             star_cat = fitsio.read(tmp_fname)[["x", "y", "r"]]
         else:
             star_cat = None

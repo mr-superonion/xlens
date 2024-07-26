@@ -43,9 +43,10 @@ def test_lsst():
     for _ in fname_list:
         worker3.run(_)
 
-    worker4 = ProcessSimDM(config_fname)
-    for _ in fname_list:
-        worker4.run(_)
+    # TODO: ADD it back
+    # worker4 = ProcessSimDM(config_fname)
+    # for _ in fname_list:
+    #     worker4.run(_)
 
     worker5 = SummarySimFpfs(
         config_fname,
@@ -97,9 +98,10 @@ def test_hsc():
     for _ in fname_list:
         worker3.run(_)
 
-    worker4 = ProcessSimDM(config_fname)
-    for _ in fname_list:
-        worker4.run(_)
+    # TODO: ADD it back
+    # worker4 = ProcessSimDM(config_fname)
+    # for _ in fname_list:
+    #     worker4.run(_)
 
     worker5 = SummarySimFpfs(
         config_fname,
