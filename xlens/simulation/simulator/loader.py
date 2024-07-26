@@ -119,12 +119,12 @@ class MakeDMExposure(SimulateBase):
             survey_name=self.survey_name,
         ).pixel_scale
         psf_obj = self.get_psf_obj(rng, pixel_scale)
-        if self.input_cat_dir is None:
+        if self.input_star_dir is None:
             star_outcome = self.get_sim_info(rng, pixel_scale, psf_obj)
         else:
-            assert os.path.isdir(self.input_cat_dir)
+            assert os.path.isdir(self.input_star_dir)
             tmp_fname = "info-%05d.p" % field_id
-            tmp_fname = os.path.join(self.input_cat_dir, tmp_fname)
+            tmp_fname = os.path.join(self.input_star_dir, tmp_fname)
             star_outcome = pickle.load(open(tmp_fname, "rb"))
 
         if self.bands != "a":
@@ -229,9 +229,9 @@ class MakeBrightInfo(MakeDMExposure):
         assert "random" in self.layout
         if not os.path.isdir(self.img_dir):
             raise FileNotFoundError("Cannot find image directory")
-        assert self.input_cat_dir is not None
-        if not os.path.isdir(self.input_cat_dir):
-            os.makedirs(self.input_cat_dir, exist_ok=True)
+        assert self.input_star_dir is not None
+        if not os.path.isdir(self.input_star_dir):
+            os.makedirs(self.input_star_dir, exist_ok=True)
         assert self.draw_bright
         if self.stellar_density is not None:
             assert self.stellar_density > 1e-5
@@ -277,9 +277,9 @@ class MakeBrightInfo(MakeDMExposure):
         return out, star_outcome
 
     def run(self, file_name):
-        assert self.input_cat_dir is not None
+        assert self.input_star_dir is not None
         src_name = os.path.join(
-            self.input_cat_dir,
+            self.input_star_dir,
             file_name.split("/")[-1],
         )
         src_name = src_name.replace(
@@ -296,7 +296,7 @@ class MakeBrightInfo(MakeDMExposure):
         fitsio.write(src_name, star_cat)
 
         pname = os.path.join(
-            self.input_cat_dir,
+            self.input_star_dir,
             file_name.split("/")[-1],
         )
         pname = (

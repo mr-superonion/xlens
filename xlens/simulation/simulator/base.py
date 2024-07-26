@@ -79,26 +79,47 @@ class SimulateBase(object):
         self.img_dir = os.path.join(self.root_dir, self.sim_name)
 
         # catalog directory
+        # output ANACAL catalog
         cat_dir = cparser.get("simulation", "cat_dir", fallback=None)
         if cat_dir is not None:
             self.cat_dir = os.path.join(self.root_dir, cat_dir)
-            cat_dm_dir = cparser.get("simulation", "cat_dm_dir", fallback=None)
-            if cat_dm_dir is None and cat_dir is not None:
-                cat_dm_dir = cat_dir.replace("cat", "cat_dm")
-            self.cat_dm_dir = os.path.join(self.root_dir, cat_dm_dir)
         else:
             self.cat_dir = None
+
+        # output DM catalog
+        cat_dm_dir = cparser.get("simulation", "cat_dm_dir", fallback=None)
+        if cat_dm_dir is not None:
+            self.cat_dm_dir = os.path.join(self.root_dir, cat_dm_dir)
+            if not os.path.isdir(self.cat_dm_dir):
+                os.makedirs(self.cat_dm_dir, exist_ok=True)
+        else:
             self.cat_dm_dir = None
 
-        input_cat_dir = cparser.get(
+        # input catalog (galaxy)
+        input_gal_dir = cparser.get(
             "simulation",
-            "input_cat_dir",
+            "input_gal_dir",
             fallback=None,
         )
-        if input_cat_dir is not None:
-            self.input_cat_dir = os.path.join(self.root_dir, input_cat_dir)
+        if input_gal_dir is not None:
+            self.input_gal_dir = os.path.join(self.root_dir, input_gal_dir)
+            if not os.path.isdir(self.input_gal_dir):
+                os.makedirs(self.input_gal_dir, exist_ok=True)
         else:
-            self.input_cat_dir = None
+            self.input_gal_dir = None
+
+        # input catalog (star)
+        input_star_dir = cparser.get(
+            "simulation",
+            "input_star_dir",
+            fallback=None,
+        )
+        if input_star_dir is not None:
+            self.input_star_dir = os.path.join(self.root_dir, input_star_dir)
+            if not os.path.isdir(self.input_star_dir):
+                os.makedirs(self.input_star_dir, exist_ok=True)
+        else:
+            self.input_star_dir = None
 
         # summary directory
         sum_dir = cparser.get("simulation", "sum_dir", fallback=None)
@@ -190,11 +211,13 @@ class SimulateBase(object):
             "noise_std",
             fallback=None,
         )
+        noise_stds_default = deepcopy(_nstd_map)[self.survey_name]
         if noise_std is None:
-            self.base_std = deepcopy(_nstd_map)[self.survey_name]
+            self.base_std = noise_stds_default
         else:
-            dd = deepcopy(_nstd_map)[self.survey_name]
-            self.base_std = {key: noise_std for key in dd.keys()}
+            self.base_std = {
+                key: noise_std for key in noise_stds_default.keys()
+            }
         self.noise_ratio = cparser.getfloat(
             "simulation",
             "noise_ratio",
@@ -265,9 +288,13 @@ class SimulateBase(object):
             if os.path.isdir(self.cat_dm_dir):
                 shutil.rmtree(self.cat_dm_dir)
 
-        if self.input_cat_dir is not None:
-            if os.path.isdir(self.input_cat_dir):
-                shutil.rmtree(self.input_cat_dir)
+        if self.input_gal_dir is not None:
+            if os.path.isdir(self.input_gal_dir):
+                shutil.rmtree(self.input_gal_dir)
+
+        if self.input_star_dir is not None:
+            if os.path.isdir(self.input_star_dir):
+                shutil.rmtree(self.input_star_dir)
 
         return
 
@@ -362,12 +389,13 @@ class SimulateImage(SimulateBase):
     def get_sim_fnames(self, min_id, max_id, field_only=False):
         """Generate filename for simulations
         Args:
-            ftype (str):    file type ('src' for gal, and 'image' for exposure
-            min_id (int):   minimum id
-            max_id (int):   maximum id
-            field_only (bool): only include filed number
+        ftype (str):    file type ('src' for gal, and 'image' for exposure
+        min_id (int):   minimum id
+        max_id (int):   maximum id
+        field_only (bool): only include filed number
+
         Returns:
-            out (list):     a list of file name
+        out (list):     a list of file name
         """
         if field_only:
             out = [
@@ -451,6 +479,15 @@ class SimulateImage(SimulateBase):
                     gdata = mi.getImage().getArray()
                     fitsio.write(gal_fname, gdata)
                     del mi, gdata, gal_fname
+                if self.input_gal_dir is not None:
+                    input_gal_fname = "%s/src-%05d_%s-%d_rot%d.fits" % (
+                        self.input_gal_dir,
+                        ifield,
+                        self.shear_comp_sim,
+                        shear_mode,
+                        irot,
+                    )
+                    fitsio.write(input_gal_fname, sim_data["truth_info"])
                 del sim_data
                 gc.collect()
         del galaxy_catalog
