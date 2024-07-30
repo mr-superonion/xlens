@@ -142,6 +142,7 @@ class MakeDMExposure(SimulateBase):
         nx = self.coadd_dim + 10
         gal_array = np.zeros((ny, nx))
         msk_array = np.zeros((ny, nx), dtype=int)
+        band = None
         for i, band in enumerate(self.blist):
             print("reading %s band" % band)
             # Add noise

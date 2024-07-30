@@ -87,7 +87,11 @@ class SimulateBase(object):
             self.cat_dir = None
 
         # output DM catalog
-        cat_dm_dir = cparser.get("simulation", "cat_dm_dir", fallback=None)
+        cat_dm_dir = cparser.get(
+            "simulation",
+            "cat_dm_dir",
+            fallback=None,
+        )
         if cat_dm_dir is not None:
             self.cat_dm_dir = os.path.join(self.root_dir, cat_dm_dir)
             if not os.path.isdir(self.cat_dm_dir):
