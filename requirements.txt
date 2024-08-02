@@ -9,6 +9,8 @@ matplotlib
 schwimmbad
 descwl_shear_sims
 metadetect
+anacal
+fpfs
 
 flake8
 black
