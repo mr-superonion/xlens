@@ -7,6 +7,8 @@ galsim
 lenstronomy
 matplotlib
 schwimmbad
+descwl_shear_sims
+metadetect
 
 flake8
 black
