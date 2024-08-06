@@ -29,7 +29,7 @@ from descwl_shear_sims.shear import ShearRedshift
 from descwl_shear_sims.sim import get_se_dim, make_sim
 from descwl_shear_sims.surveys import DEFAULT_SURVEY_BANDS, get_survey
 
-from .perturbation import ShearHalo, ShearKappa
+from .perturbation import DcrDistort, ShearHalo, ShearKappa
 
 band_list_json = '["i"]'
 
@@ -655,5 +655,74 @@ class SimulateImageHalo(SimulateBase):
                 del mi, gdata, gal_fname
             del sim_data
             gc.collect()
+        del galaxy_catalog
+        return
+
+
+class SimulateImageDCR(SimulateBase):
+    def __init__(self, config_name):
+        cparser = ConfigParser(interpolation=ExtendedInterpolation())
+        cparser.read(config_name)
+        super().__init__(cparser)
+        if not os.path.isdir(self.img_dir):
+            os.makedirs(self.img_dir, exist_ok=True)
+        return
+
+    def run(self, ifield, distort_func):
+        """Simulate image lensed by NFW halo
+        ifield (int):   field id, different field for different source galaxies
+        src_halo (NDArray):   halo information (index, mass, conc, z)
+        """
+        rng = np.random.RandomState(ifield)
+
+        scale = get_survey(
+            gal_type="wldeblend",
+            band=deepcopy(DEFAULT_SURVEY_BANDS)[self.survey_name],
+            survey_name=self.survey_name,
+        ).pixel_scale
+        psf_obj = self.get_psf_obj(rng, scale)
+
+        kargs = deepcopy(default_config)
+
+        # galaxy catalog; you can make your own
+        galaxy_catalog = WLDeblendGalaxyCatalog(
+            rng=rng,
+            coadd_dim=self.coadd_dim,
+            buff=self.buff,
+            pixel_scale=scale,
+            layout=self.layout,
+        )
+        print("Simulation has galaxies: %d" % len(galaxy_catalog))
+        # par = [4e14, 6.0, 0.2]
+        distort_obj = DcrDistort(distort_func)
+        # This is for ring test
+        # rotating galaxy shape and position by 90 degrees
+        sim_data = make_sim(
+            rng=rng,
+            galaxy_catalog=galaxy_catalog,
+            coadd_dim=self.coadd_dim,
+            shear_obj=distort_obj,
+            psf=psf_obj,
+            dither=self.dither,
+            rotate=self.rotate,
+            bands=self.sim_band_list,
+            theta0=0.0,
+            calib_mag_zero=self.calib_mag_zero,
+            survey_name=self.survey_name,
+            **kargs,
+        )
+        # write galaxy images
+        for band_name in self.sim_band_list:
+            gal_fname = "%s/image-%05d_%s.fits" % (
+                self.img_dir,
+                ifield,
+                band_name,
+            )
+            mi = sim_data["band_data"][band_name][0].getMaskedImage()
+            gdata = mi.getImage().getArray()
+            fitsio.write(gal_fname, gdata)
+            del mi, gdata, gal_fname
+        del sim_data
+        gc.collect()
         del galaxy_catalog
         return
