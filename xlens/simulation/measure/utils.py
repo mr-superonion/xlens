@@ -63,14 +63,16 @@ def get_psf_array(exposure, ngrid, psf_rcut=26, dg=250, gcent=None):
                 dx == data.shape[1]
             ), f"The PSF from exposure is not square: dx: {dx}, dy: {data.shape[1]}"
 
-            # if the size of the output grid is larger than the PSF, we need to shift the PSF
+            # if the size of the output grid is larger than the PSF, we need 
+            # to shift the PSF
             # to the center of the output grid
             if ngrid > dx:
                 shift = (ngrid - dx + 1) // 2
                 out[shift : shift + dx, shift : shift + dx] = (
                     out[shift : shift + dx, shift : shift + dx] + data
                 )
-            # if the size of the output grid is smaller than the PSF, we need to truncate the PSF
+            # if the size of the output grid is smaller than the PSF, we need 
+            # to truncate the PSF
             else:
                 shift = -(ngrid - dx) // 2
                 out = out + data[shift : shift + ngrid, shift : shift + ngrid]
@@ -95,7 +97,8 @@ def get_gridpsf_obj(exposure, ngrid, psf_rcut=26, dg=250, gcent=None):
         anacal.psf.GridPsf: PSF model object
     """
 
-    # TODO: we can probably factor out the common code between get_psf_array and get_gridpsf_obj
+    # TODO: we can probably factor out the common code between get_psf_array 
+    # and get_gridpsf_obj
 
     if gcent is None:
         gcent = dg // 2
