@@ -55,7 +55,7 @@ class SummarySimFpfs(SimulateBatchBase):
             fallback="g1",
         )
         # FPFS parameters
-        self.nord = cparser.getint("FPFS", "nord", fallback=4)
+        self.norder = cparser.getint("FPFS", "norder", fallback=4)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
         self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.12)
         self.c0 = cparser.getfloat("FPFS", "c0")
@@ -85,9 +85,9 @@ class SummarySimFpfs(SimulateBatchBase):
         self.cut = getattr(self, self.test_obs)
         self.ofname = os.path.join(
             self.sum_dir,
-            "bin_nord%d_%s_%02d.fits"
+            "bin_norder%d_%s_%02d.fits"
             % (
-                self.nord,
+                self.norder,
                 self.test_obs,
                 int(self.cut * pf[self.test_obs]),
             ),
@@ -98,7 +98,7 @@ class SummarySimFpfs(SimulateBatchBase):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 4))
         ctask = CatalogTask(
-            nord=self.nord,
+            norder=self.norder,
             det_nrot=self.det_nrot,
             cov_matrix=self.cov_matrix,
         )
@@ -160,7 +160,7 @@ class SummarySimFpfs(SimulateBatchBase):
         else:
             cname = test_obs
 
-        spt = "bin_nord%d_%s_" % (self.nord, cname)
+        spt = "bin_nord%d_%s_" % (self.norder, cname)
         flist = glob.glob("%s/%s*.fits" % (self.sum_dir, spt))
         res = []
         for fname in flist:

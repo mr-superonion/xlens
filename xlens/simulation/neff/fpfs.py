@@ -43,7 +43,7 @@ class NeffSimFpfs(SimulateBatchBase):
             )
 
         # FPFS parameters
-        self.nord = cparser.getint("FPFS", "nord", fallback=4)
+        self.norder = cparser.getint("FPFS", "norder", fallback=4)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
         self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.12)
         self.c0 = cparser.getfloat("FPFS", "c0")
@@ -81,7 +81,7 @@ class NeffSimFpfs(SimulateBatchBase):
         id_range = self.get_range(icore)
         out = np.zeros((len(id_range), 2))
         ctask = CatalogTask(
-            nord=self.nord,
+            norder=self.norder,
             det_nrot=self.det_nrot,
             cov_matrix=self.cov_matrix,
         )
