@@ -64,13 +64,13 @@ class ProcessSimFpfs(SimulateBase):
         self.ngrid = 2 * self.rcut
         psf_rcut = cparser.getint("FPFS", "psf_rcut", fallback=22)
         self.psf_rcut = min(psf_rcut, self.rcut)
-        self.nord = cparser.getint("FPFS", "nord", fallback=4)
+        self.norder = cparser.getint("FPFS", "norder", fallback=4)
         self.det_nrot = cparser.getint("FPFS", "det_nrot", fallback=4)
-        assert self.nord >= 4
+        assert self.norder >= 4
         assert self.det_nrot >= 4
 
         self.pthres = cparser.getfloat("FPFS", "pthres", fallback=0.12)
-        self.klim_thres = cparser.getint("FPFS", "klim_thres", fallback=1e-12)
+        self.kmax_thres = cparser.getint("FPFS", "klim_thres", fallback=1e-12)
 
         # noise covariance matrix on basis modes
         self.ncov_fname = cparser.get(
@@ -133,12 +133,12 @@ class ProcessSimFpfs(SimulateBase):
             )
             dtask = anacal.fpfs.FpfsDetect(
                 mag_zero=mag_zero,
-                psf_array=psf_array,
                 pixel_scale=pixel_scale,
                 sigma_arcsec=self.sigma_arcsec,
                 cov_matrix=cov_matrix,
                 det_nrot=self.det_nrot,
-                klim_thres=self.klim_thres,
+                psf_array=psf_array,
+                kmax_thres=self.kmax_thres,
                 bound=self.rcut + 5,
             )
             coords = dtask.run(
@@ -162,8 +162,8 @@ class ProcessSimFpfs(SimulateBase):
                 psf_array=psf_array,
                 pixel_scale=pixel_scale,
                 sigma_arcsec=self.sigma_arcsec,
-                klim_thres=self.klim_thres,
-                nord=self.nord,
+                kmax_thres=self.kmax_thres,
+                norder=self.norder,
                 det_nrot=self.det_nrot,
             )
             src_1 = mtask_1.run(
@@ -189,8 +189,8 @@ class ProcessSimFpfs(SimulateBase):
                 mag_zero=mag_zero,
                 pixel_scale=pixel_scale,
                 sigma_arcsec=self.sigma_arcsec2,
-                klim_thres=self.klim_thres,
-                nord=self.nord,
+                kmax_thres=self.kmax_thres,
+                norder=self.norder,
                 det_nrot=-1,
             )
             src_2 = mtask_2.run(
@@ -273,13 +273,13 @@ class ProcessSimFpfs(SimulateBase):
         else:
             assert self.estimate_cov_matrix
             cov_task = anacal.fpfs.FpfsNoiseCov(
-                psf_array=psf_array,
                 mag_zero=mag_zero,
                 pixel_scale=pixel_scale,
                 sigma_arcsec=self.sigma_arcsec,
-                nord=self.nord,
+                norder=self.norder,
                 det_nrot=self.det_nrot,
-                klim_thres=self.klim_thres,
+                psf_array=psf_array,
+                kmax_thres=self.kmax_thres,
             )
             # Since we have additional layer of noise
             cov_matrix = cov_task.measure(variance=variance * 2.0)
