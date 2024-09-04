@@ -44,7 +44,7 @@ class McBiasMultibandPipeConnections(
     dimensions=("skymap", "band"),
     defaultTemplates={
         "inputCoaddName": "deep",
-        "dataType": "test",
+        "dataType": "",
     },
 ):
     src00List = cT.Input(
@@ -155,7 +155,15 @@ class McBiasMultibandPipe(PipelineTask):
             up1.append(ep - em)
             up2.append((em + ep) / 2.0)
             down.append((rm + rp) / 2.0)
-        denom = np.sum(down)
-        print(np.sum(up1) / denom)
-        print(np.sum(up2) / denom)
+        denom = np.average(down)
+        print(
+            "Multiplicative bias:",
+            np.average(up1) / denom, "+-",
+            np.std(up1) / denom / np.sqrt(len(up1)),
+        )
+        print(
+            "Additive bias:",
+            np.average(up2) / denom, "+-",
+            np.std(up2) / denom / np.sqrt(len(up2)),
+        )
         return
