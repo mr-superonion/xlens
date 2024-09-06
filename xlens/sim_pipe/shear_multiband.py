@@ -107,8 +107,6 @@ class MultibandSimShearPipeConfig(
             raise ValidationError("connection.psfType is incorrect")
 
     def setDefaults(self):
-        print("Configuration starts")
-
         super().setDefaults()
         self.simulator.irot = int(self.connections.irot)
         self.simulator.mode = int(self.connections.mode)

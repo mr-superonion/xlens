@@ -24,10 +24,12 @@ import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
 from descwl_shear_sims.shear import ShearRedshift
 from descwl_shear_sims.sim import make_sim
+from descwl_shear_sims.wcs import make_dm_wcs
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from lsst.pipe.base import Struct
 from numpy.typing import NDArray
 
+from ..processor.utils import resize_array
 from ..simulator.perturbation import ShearHalo
 from .base import SimBaseTask
 from .multiband_defaults import (
@@ -180,6 +182,7 @@ class MultibandSimBaseTask(SimBaseTask):
             "draw_bright": False,
             "draw_noise": False,
         }
+
         res = make_sim(
             rng=rng,
             galaxy_catalog=galaxy_catalog,
@@ -195,7 +198,10 @@ class MultibandSimBaseTask(SimBaseTask):
         # write galaxy images
         image = res["band_data"][band][0].getMaskedImage().image.array
         truth = res["truth_info"]
-        return image, truth
+
+        se_wcs = res["se_wcs"][band][0]
+        dm_wcs = make_dm_wcs(se_wcs)
+        return image, truth, dm_wcs
 
     def run(
         self,
@@ -247,6 +253,7 @@ class MultibandSimBaseTask(SimBaseTask):
             psf_array = psf_galsim.drawImage(
                 nx=sys_npix,
                 ny=sys_npix,
+                scale=pixel_scale,
                 wcs=None,
             ).array
             psfImage = afwImage.ImageF(sys_npix, sys_npix)
@@ -269,21 +276,13 @@ class MultibandSimBaseTask(SimBaseTask):
         kernel = afwMath.FixedKernel(psfImage.convertD())
         kernelPSF = meaAlg.KernelPsf(kernel)
 
-        outputExposure = afwImage.ExposureF(boundaryBox)
-        outputExposure.setPhotoCalib(photo_calib)
-        outputExposure.setPsf(kernelPSF)
-        outputExposure.setWcs(wcs)
-        outputExposure.getMaskedImage().variance.array[:, :] = variance
-
         dim = int(max(width, height) * self.config.extend_ratio)
         galaxy_catalog = self.prpare_galaxy_catalog(rng, dim, pixel_scale)
         if dim % 2 == 1:
             dim = dim + 1
         coadd_dim = dim - 10
-        ns_width = int((dim - width) // 2)
-        ns_height = int((dim - height) // 2)
         shear_obj = self.get_perturbation_object()
-        data, truth_catalog = self.simulate_images(
+        data, truth_catalog, dm_wcs = self.simulate_images(
             rng=rng,
             galaxy_catalog=galaxy_catalog,
             shear_obj=shear_obj,
@@ -293,10 +292,18 @@ class MultibandSimBaseTask(SimBaseTask):
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
         )
+        data = resize_array(
+            data,
+            (height, width),
+        )
 
-        outputExposure.getMaskedImage().image.array[:, :] = data[
-            ns_height : ns_height + height, ns_width : ns_width + width
-        ]
+        outputExposure = afwImage.ExposureF(boundaryBox)
+        outputExposure.getMaskedImage().image.array[:, :] = data
+        outputExposure.setPhotoCalib(photo_calib)
+        outputExposure.setPsf(kernelPSF)
+        outputExposure.setWcs(dm_wcs)
+        outputExposure.getMaskedImage().variance.array[:, :] = variance
+
 
         if self.config.draw_image_noise:
             noise_array = self.get_noise_array(

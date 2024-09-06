@@ -136,6 +136,7 @@ class McBiasMultibandPipe(PipelineTask):
         up1 = []
         up2 = []
         down = []
+        print(len(src00List))
         for src00, src01, src10, src11 in zip(
             src00List, src01List, src10List, src11List
         ):
@@ -158,8 +159,8 @@ class McBiasMultibandPipe(PipelineTask):
         denom = np.average(down)
         print(
             "Multiplicative bias:",
-            np.average(up1) / denom, "+-",
-            np.std(up1) / denom / np.sqrt(len(up1)),
+            np.average(up1) / denom / 0.02 / 2.0 - 1, "+-",
+            np.std(up1) / denom / np.sqrt(len(up1)) / 0.02 / 2.0,
         )
         print(
             "Additive bias:",

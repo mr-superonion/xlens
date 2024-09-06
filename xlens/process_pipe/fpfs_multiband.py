@@ -83,7 +83,7 @@ class FpfsMultibandPipeConfig(
     PipelineTaskConfig,
     pipelineConnections=FpfsMultibandPipeConnections,
 ):
-    do_detection = Field[bool](
+    do_dm_detection = Field[bool](
         doc="whether to do detection",
         default=False,
     )
@@ -130,7 +130,7 @@ class FpfsMultibandPipe(PipelineTask):
             config=config, log=log, initInputs=initInputs, **kwargs
         )
         assert isinstance(self.config, FpfsMultibandPipeConfig)
-        if self.config.do_detection:
+        if self.config.do_dm_detection:
             self.schema = afwTable.SourceTable.makeMinimalSchema()
             self.algMetadata = dafBase.PropertyList()
             self.makeSubtask("detection", schema=self.schema)
