@@ -7,7 +7,6 @@ galsim
 lenstronomy
 matplotlib
 schwimmbad
-descwl_shear_sims
 metadetect
 anacal
 
