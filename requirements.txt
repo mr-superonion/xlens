@@ -9,6 +9,11 @@ matplotlib
 schwimmbad
 metadetect
 anacal
+pydantic
+hexalattice
+# stackvana (if not on mac)
+lsstdesc.weaklensingdeblending
+lsstdesc-wl-shear-sims
 
 flake8
 black
