@@ -11,10 +11,11 @@ metadetect
 anacal
 pydantic
 hexalattice
-# stackvana (if not on mac)
+stackvana
 lsstdesc.weaklensingdeblending
 lsstdesc-wl-shear-sims
 
 flake8
 black
 pytest
+nbval
