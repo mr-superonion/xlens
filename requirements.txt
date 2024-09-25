@@ -7,10 +7,15 @@ galsim
 lenstronomy
 matplotlib
 schwimmbad
-descwl_shear_sims
 metadetect
 anacal
+pydantic
+hexalattice
+stackvana
+lsstdesc.weaklensingdeblending
+lsstdesc-wl-shear-sims
 
 flake8
 black
 pytest
+nbval
