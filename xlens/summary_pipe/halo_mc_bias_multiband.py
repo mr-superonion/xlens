@@ -80,14 +80,13 @@ class HaloMcBiasMultibandPipeConfig(
 
     xname = Field[str](
         doc="detection coordinate row name",
-        default="e1",
+        default="x",
     )
 
     yname = Field[str](
         doc="detection coordinate column name",
-        default="e1",
+        default="y",
     )
-
 
     def validate(self):
         super().validate()
@@ -123,41 +122,46 @@ class McBiasMultibandPipe(PipelineTask):
         self.run(**inputs)
         return
 
-    def run(self, src00List, src01List, src10List, src11List):
+    def run(self, src00List, src01List):
+
         en = self.ename
         egn = self.egname
-        up1 = []
-        up2 = []
-        down = []
-        print(len(src00List))
-        for src00, src01, src10, src11 in zip(
-            src00List, src01List, src10List, src11List
-        ):
+        xn = self.xname
+        yn = self.yname
+
+        pixel_scale = 0.2  # arcsec per pixel
+        image_dim = 5100
+        max_pixel = np.sqrt(2) * image_dim
+        n_bins = 4
+        pixel_bins_edges = np.linspace(0, max_pixel, n_bins + 1)
+        # angular_bins_edges = pixel_bins_edges * pixel_scale
+
+        shear_in_radial_bin = np.empty((len(src00List), n_bins))
+
+        for i_realization, (src00, src01) in zip(src00List, src01List):
+            # loop though all realizations
             src00 = src00.get()
             src01 = src01.get()
-            src10 = src10.get()
-            src11 = src11.get()
-            em = np.sum(src00[en] * src00["w"]) + np.sum(src01[en] * src01["w"])
-            ep = np.sum(src10[en] * src10["w"]) + np.sum(src11[en] * src11["w"])
-            rm = np.sum(
-                src00[egn] * src00["w"] + src00[en] * src00["w_g1"]
-            ) + np.sum(src01[egn] * src01["w"] + src01[en] * src01["w_g1"])
-            rp = np.sum(
-                src10[egn] * src10["w"] + src10[en] * src10["w_g1"]
-            ) + np.sum(src11[egn] * src11["w"] + src11[en] * src11["w_g1"])
+            src00_dist = np.sqrt(src00[xn] ** 2 + src00[yn] ** 2)
+            src01_dist = np.sqrt(src01[xn] ** 2 + src01[yn] ** 2)
 
-            up1.append(ep - em)
-            up2.append((em + ep) / 2.0)
-            down.append((rm + rp) / 2.0)
-        denom = np.average(down)
-        print(
-            "Multiplicative bias:",
-            np.average(up1) / denom / 0.02 / 2.0 - 1, "+-",
-            np.std(up1) / denom / np.sqrt(len(up1)) / 0.02 / 2.0,
-        )
-        print(
-            "Additive bias:",
-            np.average(up2) / denom, "+-",
-            np.std(up2) / denom / np.sqrt(len(up2)),
-        )
+            for (i_bin,) in range(len(pixel_bins_edges) - 1):
+                mask_00 = (src00_dist > pixel_bins_edges[i]) & (
+                    src00_dist < pixel_bins_edges[i_bin + 1]
+                )
+                mask_01 = (src01_dist > pixel_bins_edges[i]) & (
+                    src01_dist < pixel_bins_edges[i_bin + 1]
+                )
+                src00, src01 = src00[mask_00], src01[mask_01]
+
+                e = np.sum(src00[en] * src00["w"]) + np.sum(
+                    src01[en] * src01["w"]
+                )
+                r = np.sum(
+                    src00[egn] * src00["w"] + src00[en] * src00["w_g1"]
+                ) + np.sum(src01[egn] * src01["w"] + src01[en] * src01["w_g1"])
+                shear_in_radial_bin[i_realization, i_bin] = e / r
+
+        print(np.mean(shear_in_radial_bin, axis=0))
+
         return
