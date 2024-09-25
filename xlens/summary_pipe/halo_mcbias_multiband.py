@@ -20,9 +20,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 __all__ = [
-    "McBiasMultibandPipeConfig",
-    "McBiasMultibandPipe",
-    "McBiasMultibandPipeConnections",
+    "HaloMcBiasMultibandPipeConfig",
+    "HaloMcBiasMultibandPipe",
+    "HaloMcBiasMultibandPipeConnections",
 ]
 
 import logging
@@ -94,7 +94,7 @@ class HaloMcBiasMultibandPipeConfig(
             raise ValueError("connections.dataTape missing")
 
 
-class McBiasMultibandPipe(PipelineTask):
+class HaloMcBiasMultibandPipe(PipelineTask):
     _DefaultName = "FpfsTask"
     ConfigClass = HaloMcBiasMultibandPipeConfig
 
@@ -113,6 +113,8 @@ class McBiasMultibandPipe(PipelineTask):
 
         self.ename = self.config.ename
         self.egname = self.ename + "_g" + self.ename[-1]
+        self.xname = self.config.xname
+        self.yname = self.config.yname
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -136,32 +138,39 @@ class McBiasMultibandPipe(PipelineTask):
         pixel_bins_edges = np.linspace(0, max_pixel, n_bins + 1)
         # angular_bins_edges = pixel_bins_edges * pixel_scale
 
-        shear_in_radial_bin = np.empty((len(src00List), n_bins))
+        shear_list = []
 
-        for i_realization, (src00, src01) in zip(src00List, src01List):
+        i_realization = 0
+        for src00, src01 in zip(src00List, src01List):
             # loop though all realizations
+            i_realization += 1
             src00 = src00.get()
             src01 = src01.get()
             src00_dist = np.sqrt(src00[xn] ** 2 + src00[yn] ** 2)
             src01_dist = np.sqrt(src01[xn] ** 2 + src01[yn] ** 2)
 
-            for (i_bin,) in range(len(pixel_bins_edges) - 1):
-                mask_00 = (src00_dist > pixel_bins_edges[i]) & (
+            ind_shear = np.empty(n_bins)
+            for i_bin in range(len(pixel_bins_edges) - 1):
+                mask_00 = (src00_dist >= pixel_bins_edges[i_bin]) & (
                     src00_dist < pixel_bins_edges[i_bin + 1]
                 )
-                mask_01 = (src01_dist > pixel_bins_edges[i]) & (
+                mask_01 = (src01_dist >= pixel_bins_edges[i_bin]) & (
                     src01_dist < pixel_bins_edges[i_bin + 1]
                 )
-                src00, src01 = src00[mask_00], src01[mask_01]
 
-                e = np.sum(src00[en] * src00["w"]) + np.sum(
-                    src01[en] * src01["w"]
+                e = np.sum(src00[en][mask_00] * src00["w"][mask_00]) + np.sum(
+                    src01[en][mask_01] * src01["w"][mask_01]
                 )
                 r = np.sum(
-                    src00[egn] * src00["w"] + src00[en] * src00["w_g1"]
-                ) + np.sum(src01[egn] * src01["w"] + src01[en] * src01["w_g1"])
-                shear_in_radial_bin[i_realization, i_bin] = e / r
+                    src00[egn][mask_00] * src00["w"][mask_00]
+                    + src00[en][mask_00] * src00["w_g1"][mask_00]
+                ) + np.sum(
+                    src01[egn][mask_01] * src01["w"][mask_01]
+                    + src01[en][mask_01] * src01["w_g1"][mask_01]
+                )
+                ind_shear[i_bin] = e / r
+            shear_list.append(ind_shear)
 
-        print(np.mean(shear_in_radial_bin, axis=0))
+        print(np.mean(np.array(shear_list), axis=0))
 
         return
