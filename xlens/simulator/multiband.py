@@ -409,6 +409,10 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
         doc="halo dec [arcsec]",
         default=0.0,
     )
+    z_source = Field[float](
+        doc="source redshift",
+        default=None,
+    )
 
     def validate(self):
         super().validate()
@@ -423,6 +427,12 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
                 self.__class__.z_lens,
                 self,
                 "halo redshift is wrong",
+            )
+        if self.z_lens > self.z_source:
+            raise FieldValidationError(
+                self.__class__.z_lens,
+                self,
+                "halo redshift is larger than source redshift",
             )
 
     def setDefaults(self):
@@ -445,4 +455,5 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             z_lens=self.config.z_lens,
             ra_lens=self.config.ra_lens,
             dec_lens=self.config.dec_lens,
+            z_source=self.config.z_source,
         )
