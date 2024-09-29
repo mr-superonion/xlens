@@ -37,6 +37,7 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
 )
 from lsst.utils.logging import LsstLogAdapter
+from lsst.skymap import BaseSkyMap
 
 
 class HaloMcBiasMultibandPipeConnections(
@@ -47,6 +48,12 @@ class HaloMcBiasMultibandPipeConnections(
         "dataType": "",
     },
 ):
+    skymap = cT.Input(
+        doc="SkyMap to use in processing",
+        name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
+        storageClass="SkyMap",
+        dimensions=("skymap",),
+    )
     src00List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
         name="{inputCoaddName}Coadd_anacal_meas{dataType}_0_rot0",
@@ -124,16 +131,19 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         self.run(**inputs)
         return
 
-    def run(self, src00List, src01List):
+    def run(self, skymap, src00List, src01List):
 
         en = self.ename
         egn = self.egname
         xn = self.xname
         yn = self.yname
+        
+        print("skymap is passed",skymap)
+        
 
-        pixel_scale = 0.2  # arcsec per pixel
-        image_dim = 5100
+        pixel_scale = skymap.config.pixelScale # arcsec per pixel
         max_pixel = np.sqrt(2) * image_dim
+        image_dim = skymap.config.patchInnerDimensions[0] # in pixels
         n_bins = 4
         pixel_bins_edges = np.linspace(0, max_pixel, n_bins + 1)
         # angular_bins_edges = pixel_bins_edges * pixel_scale
