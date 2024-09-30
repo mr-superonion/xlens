@@ -12,7 +12,6 @@ class ShearHalo(object):
         z_lens,
         ra_lens=0.0,
         dec_lens=0.0,
-        z_source=None,
         halo_profile="NFW",
         cosmo=None,
     ):
@@ -24,7 +23,6 @@ class ShearHalo(object):
         z_lens (float):             lens redshift
         ra_lens (float):            ra of halo position [arcsec]
         dec_lens (float):           dec of halo position [arcsec]
-        z_source (float):           source redshift
         halo_profile (str):         halo profile name
         cosmo (astropy.cosmology):  cosmology object
         """
@@ -36,8 +34,6 @@ class ShearHalo(object):
         self.conc = conc
         self.lens = LensModel(lens_model_list=[halo_profile])
         self.pos_lens = galsim.PositionD(ra_lens, dec_lens)
-        if z_source:
-            self.z_source = z_source
         return
 
     def distort_galaxy(self, gso, shift, redshift):
@@ -53,9 +49,6 @@ class ShearHalo(object):
         gso, shift:
             distorted galaxy object and shift
         """
-        if self.z_source:
-            redshift = self.z_source
-        
         if redshift > self.z_lens:
             r = shift - self.pos_lens
 
