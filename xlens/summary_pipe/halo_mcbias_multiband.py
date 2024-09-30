@@ -286,15 +286,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # get all res first
             sr_00_res = src00.get()
             sr_01_res = src01.get()
-            e1 = sr_00_res[e1n] + sr_01_res[e1n]
-            e2 = sr_00_res[e2n] + sr_01_res[e2n]
-            x = sr_00_res[xn] + sr_01_res[xn]
-            y = sr_00_res[yn] + sr_01_res[yn]
-            e1_g1 = sr_00_res[e1g1n] + sr_01_res[e1g1n]
-            e2_g2 = sr_00_res[e2g2n] + sr_01_res[e2g2n]
-            w = sr_00_res["w"] + sr_01_res["w"]
-            w_g1 = sr_00_res["w_g1"] + sr_01_res["w_g1"]
-            w_g2 = sr_00_res["w_g2"] + sr_01_res["w_g2"]
+            e1 = np.concatenate([sr_00_res[e1n], sr_01_res[e1n]])
+            e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
+            e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
+            e2_g2 = np.concatenate([sr_00_res[e2g2n], sr_01_res[e2g2n]])
+            w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
+            w_g1 = np.concatenate([sr_00_res["w_g1"], sr_01_res["w_g1"]])
+            w_g2 = np.concatenate([sr_00_res["w_g2"], sr_01_res["w_g2"]])
+            x = np.concatenate([sr_00_res[xn], sr_01_res[xn]])
+            y = np.concatenate([sr_00_res[yn], sr_01_res[yn]])
             
             angle = self._get_angle_from_pixel(x, y, image_dim / 2, image_dim / 2)
             # negative since we are rotating axes
