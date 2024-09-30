@@ -216,7 +216,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return np.array(shear_list)
 
     def run(self, skymap, src00List, src01List):
-        
+
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0]  # in pixels
 
@@ -279,6 +279,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         xn = self.xname
         yn = self.yname
 
+        print("The length of source list is", len(src00List), len(src01List))
+
         shear_list = np.empty((len(src00List), n_bins))
 
         for i, src in enumerate(zip(src00List, src01List)):
@@ -295,8 +297,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             w_g2 = np.concatenate([sr_00_res["w_g2"], sr_01_res["w_g2"]])
             x = np.concatenate([sr_00_res[xn], sr_01_res[xn]])
             y = np.concatenate([sr_00_res[yn], sr_01_res[yn]])
-            
-            angle = self._get_angle_from_pixel(x, y, image_dim / 2, image_dim / 2)
+
+            angle = self._get_angle_from_pixel(
+                x, y, image_dim / 2, image_dim / 2
+            )
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2(e1, e2, -angle)
             # another negaive since we are rotating derivative
@@ -304,17 +308,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # w are scalar so no need to rotate
             dist = np.sqrt(x**2 + y**2)
 
-            shear_list[i,:] = self._get_radial_shear(
+            shear_list[i, :] = self._get_radial_shear(
                 eT, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, pixel_bin_edges
             )
 
-        
-
         m_bias_array = shear_list / true_gt - 1
         mean_m_bias = np.mean(m_bias_array, axis=0)
-        std_m_bias = np.std(m_bias_array, axis=0)  
+        std_m_bias = np.std(m_bias_array, axis=0)
         print("m_bias", mean_m_bias, "+-", std_m_bias)
-        
 
         # i_realization += 1
         # src00 = src00.get()
