@@ -216,67 +216,18 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return np.array(shear_list)
 
     def run(self, skymap, src00List, src01List):
-
-        en = self.ename
-        e1n = en + "1"
-        e2n = en + "2"
-
-        e1g1n = self.egname(1, 1)
-        e2g2n = self.egname(2, 2)
-
-        xn = self.xname
-        yn = self.yname
-
+        
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0]  # in pixels
 
         max_pixel = np.sqrt(2) * image_dim
-
-        src00_res = []
-        src01_res = []
-        for src00, src01 in zip(src00List, src01List):
-            # get all res first
-            src00_res.append(src00.get())
-            src01_res.append(src01.get())
-
-        def _join_list(src00_res, src01_res, key):
-            return np.concatenate(
-                [src00[key] for src00 in src00_res]
-                + [src01[key] for src01 in src01_res]
-            )
-
-        e1 = _join_list(src00_res, src01_res, e1n)
-        e2 = _join_list(src00_res, src01_res, e2n)
-        x = _join_list(src00_res, src01_res, xn)
-        y = _join_list(src00_res, src01_res, yn)
-        e1_g1 = _join_list(src00_res, src01_res, e1g1n)
-        e2_g2 = _join_list(src00_res, src01_res, e2g2n)
-        w = _join_list(src00_res, src01_res, "w")
-        w_g1 = _join_list(src00_res, src01_res, "w_g1")
-        w_g2 = _join_list(src00_res, src01_res, "w_g2")
-
-        print(e1.shape, e2.shape, x.shape, y.shape)
-
-        angle = self._get_angle_from_pixel(x, y, image_dim / 2, image_dim / 2)
-        # negative since we are rotating axes
-        eT, eX = self._rotate_spin_2(e1, e2, -angle)
-        # another negaive since we are rotating derivative
-        # w_gT, w_gX = self._rotate_spin_2(w_g1, w_g2, angle)
-        # w are scalar so no need to rotate
-
-        dist = np.sqrt(x**2 + y**2)
 
         n_bins = 10
         pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
 
-        shear_list = self._get_radial_shear(
-            eT, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, pixel_bin_edges
-        )
-
-        print(shear_list)
-
+        # get theory shear
         def _get_gt(mass, conc, z_lens, z_source, angular_dist, cosmo):
             lens = LensModel(lens_model_list=["NFW"])
             lens_cosmo = LensCosmo(
@@ -318,8 +269,51 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         true_gt = np.array(true_gt)
         true_gx = np.array(true_gx)
 
-        m_bias = shear_list / true_gt
-        print("m_bias", m_bias)
+        en = self.ename
+        e1n = en + "1"
+        e2n = en + "2"
+
+        e1g1n = self.egname(1, 1)
+        e2g2n = self.egname(2, 2)
+
+        xn = self.xname
+        yn = self.yname
+
+        shear_list = np.empty((len(src00List), n_bins))
+
+        for i, src in enumerate(zip(src00List, src01List)):
+            src00, src01 = src[0], src[1]
+            # get all res first
+            sr_00_res = src00.get()
+            sr_01_res = src01.get()
+            e1 = sr_00_res[e1n] + sr_01_res[e1n]
+            e2 = sr_00_res[e2n] + sr_01_res[e2n]
+            x = sr_00_res[xn] + sr_01_res[xn]
+            y = sr_00_res[yn] + sr_01_res[yn]
+            e1_g1 = sr_00_res[e1g1n] + sr_01_res[e1g1n]
+            e2_g2 = sr_00_res[e2g2n] + sr_01_res[e2g2n]
+            w = sr_00_res["w"] + sr_01_res["w"]
+            w_g1 = sr_00_res["w_g1"] + sr_01_res["w_g1"]
+            w_g2 = sr_00_res["w_g2"] + sr_01_res["w_g2"]
+            
+            angle = self._get_angle_from_pixel(x, y, image_dim / 2, image_dim / 2)
+            # negative since we are rotating axes
+            eT, eX = self._rotate_spin_2(e1, e2, -angle)
+            # another negaive since we are rotating derivative
+            # w_gT, w_gX = self._rotate_spin_2(w_g1, w_g2, angle)
+            # w are scalar so no need to rotate
+            dist = np.sqrt(x**2 + y**2)
+
+            shear_list[i,:] = self._get_radial_shear(
+                eT, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, pixel_bin_edges
+            )
+
+        
+
+        m_bias_array = shear_list / true_gt - 1
+        mean_m_bias = np.mean(m_bias_array, axis=0)
+        std_m_bias = np.std(m_bias_array, axis=0)  
+        print("m_bias", mean_m_bias, "+-", std_m_bias)
         
 
         # i_realization += 1
