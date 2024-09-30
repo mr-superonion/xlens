@@ -145,6 +145,12 @@ class MultibandSimBaseTask(SimBaseTask):
             pixel_scale=pixel_scale,
             layout=self.config.layout,
         )
+        
+        # for fix source redshift 
+        if "z_source" in self.config.keys() and self.config.z_source is not None:
+            #TODO: need to write a method to set redshift
+            galaxy_catalog._wldeblend_cat['redshift'] = self.config.z_source
+        
         return galaxy_catalog
 
     def get_noise_seed(self, seed, irot):
