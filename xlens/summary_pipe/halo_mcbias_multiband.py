@@ -39,6 +39,11 @@ from lsst.pipe.base import (
 from lsst.utils.logging import LsstLogAdapter
 from lsst.skymap import BaseSkyMap
 
+import galsim
+from astropy.cosmology import Planck18
+from lenstronomy.Cosmo.lens_cosmo import LensCosmo
+from lenstronomy.LensModel.lens_model import LensModel
+
 
 class HaloMcBiasMultibandPipeConnections(
     PipelineTaskConnections,
@@ -94,6 +99,25 @@ class HaloMcBiasMultibandPipeConfig(
         doc="detection coordinate column name",
         default="y",
     )
+    mass = Field[float](
+        doc="halo mass",
+        default=5e-14,
+    )
+
+    conc = Field[float](
+        doc="halo concertration",
+        default=1.0,
+    )
+
+    z_lens = Field[float](
+        doc="halo redshift",
+        default=1.0,
+    )
+
+    z_source = Field[float](
+        doc="source redshift",
+        default=None,
+    )
 
     def validate(self):
         super().validate()
@@ -102,7 +126,7 @@ class HaloMcBiasMultibandPipeConfig(
 
 
 class HaloMcBiasMultibandPipe(PipelineTask):
-    _DefaultName = "FpfsTask"
+    _DefaultName = "HaloMcTask"
     ConfigClass = HaloMcBiasMultibandPipeConfig
 
     def __init__(
@@ -234,7 +258,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         print(e1.shape, e2.shape, x.shape, y.shape)
 
         angle = self._get_angle_from_pixel(x, y, image_dim / 2, image_dim / 2)
-        angle = angle - np.pi / 2  # need the tangential shear to be positive
         # negative since we are rotating axes
         eT, eX = self._rotate_spin_2(e1, e2, -angle)
         # another negaive since we are rotating derivative
@@ -243,15 +266,61 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         dist = np.sqrt(x**2 + y**2)
 
-        n_bins = 4
+        n_bins = 10
         pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
+        angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
 
         shear_list = self._get_radial_shear(
-            eT, w, e1, e2, e1, e2, w_g1, w_g2, dist, pixel_bin_edges
+            eT, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, pixel_bin_edges
         )
 
         print(shear_list)
+
+        def _get_gt(mass, conc, z_lens, z_source, angular_dist, cosmo):
+            lens = LensModel(lens_model_list=["NFW"])
+            lens_cosmo = LensCosmo(
+                z_lens=z_lens, z_source=z_source, cosmo=cosmo
+            )
+            pos_lens = galsim.PositionD(0, 0)
+            r = galsim.PositionD(angular_dist, 0) - pos_lens
+            rs_angle, alpha_rs = lens_cosmo.nfw_physical2angle(M=mass, c=conc)
+            kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
+            f_xx, f_xy, f_yx, f_yy = lens.hessian(r.x, r.y, kwargs)
+            gamma1 = 1.0 / 2 * (f_xx - f_yy)
+            gamma2 = f_xy
+            kappa = 1.0 / 2 * (f_xx + f_yy)
+
+            g1 = gamma1 / (1 - kappa)
+            g2 = gamma2 / (1 - kappa)
+            mu = 1.0 / ((1 - kappa) ** 2 - gamma1**2 - gamma2**2)
+
+            return g1, g2
+            # if g1**2.0 + g2**2.0 > 0.95:
+            #     return gso, shift
+            # dra, ddec = self.lens.alpha(r.x, r.y, kwargs)
+            # gso = gso.lens(g1=g1, g2=g2, mu=mu)
+            # shift = shift + galsim.PositionD(dra, ddec)
+
+        true_gt = []
+        true_gx = []
+        for bin_mid in angular_bin_mids:
+            gt, gx = _get_gt(
+                mass=self.config.mass,
+                conc=self.config.conc,
+                z_lens=self.config.z_lens,
+                z_source=self.config.z_source,
+                angular_dist=bin_mid,
+                cosmo=Planck18,
+            )
+            true_gt.append(gt)
+            true_gx.append(gx)
+        true_gt = np.array(true_gt)
+        true_gx = np.array(true_gx)
+
+        m_bias = shear_list / true_gt
+        print("m_bias", m_bias)
+        
 
         # i_realization += 1
         # src00 = src00.get()
