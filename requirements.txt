@@ -6,9 +6,9 @@ galsim
 lenstronomy
 matplotlib
 metadetect
-anacal=0.4.0
+anacal==0.4.0
 pydantic
 hexalattice
 stackvana
 lsstdesc.weaklensingdeblending
-lsstdesc-wl-shear-sims=0.4.3
+lsstdesc-wl-shear-sims==0.4.3
