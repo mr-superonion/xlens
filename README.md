@@ -7,3 +7,17 @@
 
 
 ## Installation
+Users can clone this repository and install the latest package by
+```shell
+git clone https://github.com/mr-superonion/xlens.git
+cd AnaCal
+# install required softwares
+conda install -c conda-forge --file requirements.txt
+# install required softwares for unit tests (if necessary)
+conda install -c conda-forge --file requirements_test.txt
+pip install . --user
+```
+or install stable verion from pypi
+```
+pip install xlens
+```

@@ -304,7 +304,6 @@ class MultibandSimBaseTask(SimBaseTask):
         outputExposure.setWcs(dm_wcs)
         outputExposure.getMaskedImage().variance.array[:, :] = variance
 
-
         if self.config.draw_image_noise:
             noise_array = self.get_noise_array(
                 seed_noise=seed_noise,
