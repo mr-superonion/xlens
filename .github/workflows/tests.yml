@@ -27,21 +27,23 @@ jobs:
       run: |
         wget https://www.cosmo.bnl.gov/www/esheldon/data/catsim.tar.gz
         tar xvfz catsim.tar.gz
-        export CATSIM_DIR=$(realpath catsim)
-
+        echo "CATSIM_DIR=$(realpath catsim)" >> $GITHUB_ENV
 
     - name: Install system dependencies
+      shell: bash -l {0}
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential
         sudo apt-get install -y fftw3-dev
 
     - name: Git checkout currect repo
+      shell: bash -l {0}
       uses: actions/checkout@v3
       with:
         submodules: 'recursive'
 
     - name: Set up Python ${{ matrix.python-version }}
+      shell: bash -l {0}
       uses: conda-incubator/setup-miniconda@v2
       with:
         python-version: ${{ matrix.python-version }}
