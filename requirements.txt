@@ -1,3 +1,4 @@
+healpy
 astropy
 fitsio
 lenstronomy
@@ -5,3 +6,4 @@ matplotlib
 metadetect
 anacal==0.4.0
 lsstdesc-wl-shear-sims==0.4.3
+
