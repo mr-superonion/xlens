@@ -1,16 +1,7 @@
-healpy>=1.17.3
-numpy>=1.24
-scipy
-fitsio
 astropy
 fitsio
-galsim
 lenstronomy
 matplotlib
 metadetect
 anacal==0.4.0
-pydantic
-hexalattice
-stackvana
-lsstdesc.weaklensingdeblending
 lsstdesc-wl-shear-sims==0.4.3
