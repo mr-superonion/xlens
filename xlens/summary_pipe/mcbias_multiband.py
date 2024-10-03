@@ -159,12 +159,14 @@ class McBiasMultibandPipe(PipelineTask):
         denom = np.average(down)
         print(
             "Multiplicative bias:",
-            np.average(up1) / denom / 0.02 / 2.0 - 1, "+-",
+            np.average(up1) / denom / 0.02 / 2.0 - 1,
+            "+-",
             np.std(up1) / denom / np.sqrt(len(up1)) / 0.02 / 2.0,
         )
         print(
             "Additive bias:",
-            np.average(up2) / denom, "+-",
+            np.average(up2) / denom,
+            "+-",
             np.std(up2) / denom / np.sqrt(len(up2)),
         )
         return
