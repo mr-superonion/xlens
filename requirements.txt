@@ -1,5 +1,6 @@
+healpy>=1.17.3
 numpy>=1.24
-scipy<=1.12
+scipy
 fitsio
 astropy
 fitsio
