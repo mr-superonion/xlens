@@ -191,29 +191,73 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return np.arctan2(y - y_cen, x - x_cen)
 
     @staticmethod
-    def _get_radial_shear(
-        eT, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, radial_bin_edges
+    def _get_eT_eX_rT_sum(
+        eT, eX, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, radial_bin_edges
     ):
-        """
-        Get the radial shear profile
-        """
-
         n_bins = len(radial_bin_edges) - 1
-        shear_list = []
+        eT_list = []
+        eX_list = []
+        rT_list = []
         for i_bin in range(n_bins):
             mask = (dist >= radial_bin_edges[i_bin]) & (
                 dist < radial_bin_edges[i_bin + 1]
             )
-            e = np.sum(eT[mask] * w[mask])
+            eT_sum = np.sum(eT[mask] * w[mask])
+            eX_sum = np.sum(eX[mask] * w[mask])
             # we use the mean of R11 and R22 as an estimator of Rt
             r11 = np.sum(e1_g1[mask] * w[mask] + e1[mask] * w_g1[mask])
             r22 = np.sum(e2_g2[mask] * w[mask] + e2[mask] * w_g2[mask])
-            r_t = (r11 + r22) / 2
-            shear_list.append(e / r_t)
+            rT_sum = (r11 + r22) / 2
+            eT_list.append(eT_sum)
+            eX_list.append(eX_sum)
+            rT_list.append(rT_sum)
 
-        assert ~np.any(np.isnan(shear_list)), "shear_list contains NaN values"
+        return np.array(eT_list), np.array(eX_list), np.array(rT_list)
 
-        return np.array(shear_list)
+    @staticmethod
+    def _get_theory_gt(mass, conc, z_lens, z_source, angular_dist, cosmo):
+        lens = LensModel(lens_model_list=["NFW"])
+        lens_cosmo = LensCosmo(z_lens=z_lens, z_source=z_source, cosmo=cosmo)
+        pos_lens = galsim.PositionD(0, 0)
+        r = galsim.PositionD(angular_dist, 0) - pos_lens
+        rs_angle, alpha_rs = lens_cosmo.nfw_physical2angle(M=mass, c=conc)
+        kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
+        f_xx, f_xy, f_yx, f_yy = lens.hessian(r.x, r.y, kwargs)
+        gamma1 = 1.0 / 2 * (f_xx - f_yy)
+        gamma2 = f_xy
+        kappa = 1.0 / 2 * (f_xx + f_yy)
+
+        g1 = gamma1 / (1 - kappa)
+        g2 = gamma2 / (1 - kappa)
+        # mu = 1.0 / ((1 - kappa) ** 2 - gamma1**2 - gamma2**2)
+
+        return g1, g2
+
+    @staticmethod
+    def _run_boostrap(rT, eT, eX, true_gt, n_boot=500):
+        rng = np.random.RandomState(seed=100)
+
+        mvals = np.empty((n_boot, len(true_gt)))
+        cvals = np.empty((n_boot, len(true_gt)))
+
+        for i, _ in enumerate(range(n_boot)):
+            ind = rng.choice(len(rT), replace=True, size=len(rT))
+
+            rT_boot = rT[ind]
+            eT_boot = eT[ind]
+            eX_boot = eX[ind]
+            shear_boot = np.mean(eT_boot, axis=0) / np.mean(rT_boot, axis=0)
+            c_boot = np.mean(eX_boot, axis=0)
+
+            cvals[i, :] = c_boot
+            mvals[i, :] = (shear_boot - c_boot) / true_gt - 1
+
+        return (
+            np.mean(mvals, axis=0),
+            np.std(mvals, axis=0),
+            np.mean(cvals, axis=0),
+            np.std(cvals, axis=0),
+        )
 
     def run(self, skymap, src00List, src01List):
 
@@ -227,36 +271,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
 
-        # get theory shear
-        def _get_gt(mass, conc, z_lens, z_source, angular_dist, cosmo):
-            lens = LensModel(lens_model_list=["NFW"])
-            lens_cosmo = LensCosmo(
-                z_lens=z_lens, z_source=z_source, cosmo=cosmo
-            )
-            pos_lens = galsim.PositionD(0, 0)
-            r = galsim.PositionD(angular_dist, 0) - pos_lens
-            rs_angle, alpha_rs = lens_cosmo.nfw_physical2angle(M=mass, c=conc)
-            kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
-            f_xx, f_xy, f_yx, f_yy = lens.hessian(r.x, r.y, kwargs)
-            gamma1 = 1.0 / 2 * (f_xx - f_yy)
-            gamma2 = f_xy
-            kappa = 1.0 / 2 * (f_xx + f_yy)
-
-            g1 = gamma1 / (1 - kappa)
-            g2 = gamma2 / (1 - kappa)
-            mu = 1.0 / ((1 - kappa) ** 2 - gamma1**2 - gamma2**2)
-
-            return g1, g2
-            # if g1**2.0 + g2**2.0 > 0.95:
-            #     return gso, shift
-            # dra, ddec = self.lens.alpha(r.x, r.y, kwargs)
-            # gso = gso.lens(g1=g1, g2=g2, mu=mu)
-            # shift = shift + galsim.PositionD(dra, ddec)
-
         true_gt = []
         true_gx = []
         for bin_mid in angular_bin_mids:
-            gt, gx = _get_gt(
+            gt, gx = self._get_theory_gt(
                 mass=self.config.mass,
                 conc=self.config.conc,
                 z_lens=self.config.z_lens,
@@ -281,7 +299,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         print("The length of source list is", len(src00List), len(src01List))
 
-        shear_list = np.empty((len(src00List), n_bins))
+        rT_ensemble = np.empty((len(src00List), n_bins))
+        eT_ensemble = np.empty((len(src00List), n_bins))
+        eX_ensemble = np.empty((len(src00List), n_bins))
 
         for i, src in enumerate(zip(src00List, src01List)):
             src00, src01 = src[0], src[1]
@@ -303,46 +323,33 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             )
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2(e1, e2, -angle)
-            # another negaive since we are rotating derivative
-            # w_gT, w_gX = self._rotate_spin_2(w_g1, w_g2, angle)
             # w are scalar so no need to rotate
             dist = np.sqrt(x**2 + y**2)
 
-            shear_list[i, :] = self._get_radial_shear(
-                eT, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, pixel_bin_edges
+            eT_list, eX_list, rT_list = self._get_eT_eX_rT_sum(
+                eT,
+                eX,
+                w,
+                e1,
+                e2,
+                e1_g1,
+                e2_g2,
+                w_g1,
+                w_g2,
+                dist,
+                pixel_bin_edges,
             )
+            rT_ensemble[i, :] = rT_list
+            eT_ensemble[i, :] = eT_list
+            eX_ensemble[i, :] = eX_list
 
-        m_bias_array = shear_list / true_gt - 1
-        mean_m_bias = np.mean(m_bias_array, axis=0)
-        std_m_bias = np.std(m_bias_array, axis=0)
-        print("m_bias", mean_m_bias, "+-", std_m_bias)
+        shear_list = np.mean(eT_list, axis=0) / np.mean(rT_list, axis=0)
 
-        # i_realization += 1
-        # src00 = src00.get()
-        # src01 = src01.get()
-        # src00_dist = np.sqrt(src00[xn] ** 2 + src00[yn] ** 2)
-        # src01_dist = np.sqrt(src01[xn] ** 2 + src01[yn] ** 2)
-
-        # ind_shear = np.empty(n_bins)
-        # for i_bin in range(len(pixel_bins_edges) - 1):
-        #     mask_00 = (src00_dist >= pixel_bins_edges[i_bin]) & (
-        #         src00_dist < pixel_bins_edges[i_bin + 1]
-        #     )
-        #     mask_01 = (src01_dist >= pixel_bins_edges[i_bin]) & (
-        #         src01_dist < pixel_bins_edges[i_bin + 1]
-        #     )
-
-        #     e = np.sum(src00[en][mask_00] * src00["w"][mask_00]) + np.sum(
-        #         src01[en][mask_01] * src01["w"][mask_01]
-        #     )
-        #     r = np.sum(
-        #         src00[egn][mask_00] * src00["w"][mask_00]
-        #         + src00[en][mask_00] * src00["w_g1"][mask_00]
-        #     ) + np.sum(
-        #         src01[egn][mask_01] * src01["w"][mask_01]
-        #         + src01[en][mask_01] * src01["w_g1"][mask_01]
-        #     )
-        #     ind_shear[i_bin] = e / r
-        # shear_list.append(ind_shear)
+        mvals, mstd, cvals, cstd = self._run_boostrap(
+            rT_ensemble, eT_ensemble, eX_ensemble, true_gt, n_boot=500
+        )
+        
+        print(f"m = {mvals} +/- {mstd}")
+        print(f"c = {cvals} +/- {cstd}")
 
         return
