@@ -29,7 +29,7 @@ parsl_config:
     job_name: shear_test
     nodes: 2
     cores_per_node: 64
-    walltime: '5:00:00'
-    qos: regular
+    walltime: '00:30:00'
+    qos: debug
     scheduler_options: |
       #SBATCH --constraint=cpu
