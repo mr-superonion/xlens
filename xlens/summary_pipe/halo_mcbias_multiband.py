@@ -305,11 +305,11 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         for i, src in enumerate(zip(src00List, src01List)):
             src00, src01 = src[0], src[1]
-            # get all res first
             sr_00_res = src00.get()
             sr_01_res = src01.get()
             e1 = np.concatenate([sr_00_res[e1n], sr_01_res[e1n]])
             e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
+            print(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
             e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
             e2_g2 = np.concatenate([sr_00_res[e2g2n], sr_01_res[e2g2n]])
             w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
@@ -344,12 +344,23 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             eX_ensemble[i, :] = eX_list
 
         shear_list = np.mean(eT_list, axis=0) / np.mean(rT_list, axis=0)
+        m_vals_simp = shear_list / true_gt - 1
+        m_std_simp = (
+            np.std(eT_list, axis=0)
+            / np.mean(rT_list, axis=0)
+            / np.sqrt(eT_list.shape[0])
+        )
+        c_vals_simp = np.mean(eX_list, axis=0)
+        c_std_simp = np.std(eX_list, axis=0) / np.sqrt(eX_list.shape[0])
+
+        print(f"simple: m = {m_vals_simp} +/- {m_std_simp}")
+        print(f"simple: c = {c_vals_simp} +/- {c_std_simp}")
 
         mvals, mstd, cvals, cstd = self._run_boostrap(
             rT_ensemble, eT_ensemble, eX_ensemble, true_gt, n_boot=500
         )
-        
-        print(f"m = {mvals} +/- {mstd}")
-        print(f"c = {cvals} +/- {cstd}")
+
+        print(f"bootstrap: m = {mvals} +/- {mstd}")
+        print(f"bootstrap: c = {cvals} +/- {cstd}")
 
         return
