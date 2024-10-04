@@ -6,7 +6,7 @@ tasks:
     class: xlens.sim_pipe.halo_multiband.MultibandSimHaloPipe
     config:
       connections.psfType: moffat
-      connections.simType: test
+      connections.simType: _test_halo
       connections.mode: 0
       connections.irot: 0
       simulator.mass: 8e14
@@ -20,7 +20,7 @@ tasks:
     class: xlens.sim_pipe.halo_multiband.MultibandSimHaloPipe
     config:
       connections.psfType: moffat
-      connections.simType: test
+      connections.simType: _test_halo
       connections.mode: 0
       connections.irot: 1
       simulator.mass: 8e14
@@ -36,7 +36,7 @@ tasks:
       do_dm_detection: False
       fpfs.use_average_psf: True
       fpfs.do_adding_noise: False
-      connections.dataType: _test_0_rot0
+      connections.dataType: _test_halo_0_rot0
       
   FpfsTask2:
     class: xlens.process_pipe.fpfs_multiband.FpfsMultibandPipe
@@ -44,12 +44,12 @@ tasks:
       do_dm_detection: False
       fpfs.use_average_psf: True
       fpfs.do_adding_noise: False
-      connections.dataType: _test_0_rot1
+      connections.dataType: _test_halo_0_rot1
 
   SummaryTask:
     class: xlens.summary_pipe.halo_mcbias_multiband.HaloMcBiasMultibandPipe
     config:
-      connections.dataType: _test
+      connections.dataType: _test_halo
       mass: 8e14
       z_lens: 0.25
       z_source: 1.0
