@@ -236,27 +236,30 @@ class HaloMcBiasMultibandPipe(PipelineTask):
     @staticmethod
     def _run_boostrap(rT, eT, eX, true_gt, n_boot=500):
         rng = np.random.RandomState(seed=100)
+        
+        n_halo = rT.shape[0]
+        n_radial = rT.shape[1]
 
-        mvals = np.empty((n_boot, len(true_gt)))
-        cvals = np.empty((n_boot, len(true_gt)))
+        m_bars = np.empty((n_boot, n_radial))
+        c_bars = np.empty((n_boot, n_radial))
 
         for i, _ in enumerate(range(n_boot)):
-            ind = rng.choice(len(rT), replace=True, size=len(rT))
+            ind = rng.choice(n_halo,replace=True, size=n_halo)
 
             rT_boot = rT[ind]
             eT_boot = eT[ind]
             eX_boot = eX[ind]
             shear_boot = np.mean(eT_boot, axis=0) / np.mean(rT_boot, axis=0)
-            c_boot = np.mean(eX_boot, axis=0)
 
-            cvals[i, :] = c_boot
-            mvals[i, :] = (shear_boot - c_boot) / true_gt - 1
+            c_boot = np.mean(eX_boot, axis=0)
+            c_bars[i, :] = c_boot
+            m_bars[i, :] = shear_boot / true_gt - 1
 
         return (
-            np.mean(mvals, axis=0),
-            np.std(mvals, axis=0),
-            np.mean(cvals, axis=0),
-            np.std(cvals, axis=0),
+            np.mean(m_bars, axis=0),
+            np.std(m_bars, axis=0),
+            np.mean(c_bars, axis=0),
+            np.std(c_bars, axis=0),
         )
 
     def run(self, skymap, src00List, src01List):
@@ -343,15 +346,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             eT_ensemble[i, :] = eT_list
             eX_ensemble[i, :] = eX_list
 
-        shear_list = np.mean(eT_list, axis=0) / np.mean(rT_list, axis=0)
+        shear_list = np.mean(eT_ensemble, axis=0) / np.mean(rT_ensemble, axis=0)
         m_vals_simp = shear_list / true_gt - 1
         m_std_simp = (
-            np.std(eT_list, axis=0)
-            / np.mean(rT_list, axis=0)
-            / np.sqrt(eT_list.shape[0])
+            np.std(eT_ensemble, axis=0)
+            / np.mean(rT_ensemble, axis=0)
+            / np.sqrt(eT_ensemble.shape[0])
         )
-        c_vals_simp = np.mean(eX_list, axis=0)
-        c_std_simp = np.std(eX_list, axis=0) / np.sqrt(eX_list.shape[0])
+        c_vals_simp = np.mean(eX_ensemble, axis=0)
+        c_std_simp = np.std(eX_ensemble, axis=0) / np.sqrt(eX_ensemble.shape[0])
 
         print(f"simple: m = {m_vals_simp} +/- {m_std_simp}")
         print(f"simple: c = {c_vals_simp} +/- {c_std_simp}")
