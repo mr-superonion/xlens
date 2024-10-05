@@ -194,10 +194,32 @@ class HaloMcBiasMultibandPipe(PipelineTask):
     def _get_eT_eX_rT_sum(
         eT, eX, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, radial_bin_edges
     ):
+        """calculate the sum of eT, eX, and rT in each radial bin for a single halo
+
+        Args:
+            eT (array): tangential shear
+            eX (array): cross shear
+            w (weight): ancal weight
+            e1 (array): shape in x direction
+            e2 (array): shape in y direction
+            e1_g1 (array): partial derivative of e1 with respect to g1
+            e2_g2 (array): partial derivative of e2 with respect to g2 
+            w_g1 (array): partial derivative of w with respect to g1
+            w_g2 (array): partial derivative of w with respect to g2
+            dist (array): pixel distance from the halo center
+            radial_bin_edges (array): radial bin edges in pixel
+
+        Returns:
+            eT(array): sum of eT in each radial bin 
+            eX(array): sum of eX in each radial bin
+            rT(array): sum of resposne in each radial bin
+        """
+
         n_bins = len(radial_bin_edges) - 1
         eT_list = []
         eX_list = []
         rT_list = []
+
         for i_bin in range(n_bins):
             mask = (dist >= radial_bin_edges[i_bin]) & (
                 dist < radial_bin_edges[i_bin + 1]
@@ -269,7 +291,12 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         max_pixel = np.sqrt(2) * image_dim
 
-        n_bins = 10
+        print("pixel scale", pixel_scale)
+        print("image dim", image_dim)
+        print("max pixel", max_pixel)
+        print("max pixel in arcsec", max_pixel * pixel_scale)
+
+        n_bins = 3
         pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
@@ -355,6 +382,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         )
         c_vals_simp = np.mean(eX_ensemble, axis=0)
         c_std_simp = np.std(eX_ensemble, axis=0) / np.sqrt(eX_ensemble.shape[0])
+
+        print("radial bin edges in arcsec", angular_bin_edges)
+        print("anacal shear", shear_list)
+        print("true gt", true_gt)
 
         print(f"simple: m = {m_vals_simp} +/- {m_std_simp}")
         print(f"simple: c = {c_vals_simp} +/- {c_std_simp}")
