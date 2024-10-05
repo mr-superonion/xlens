@@ -156,17 +156,32 @@ class McBiasMultibandPipe(PipelineTask):
             up1.append(ep - em)
             up2.append((em + ep) / 2.0)
             down.append((rm + rp) / 2.0)
+        nsim = len(src00List)
         denom = np.average(down)
         print(
             "Multiplicative bias:",
             np.average(up1) / denom / 0.02 / 2.0 - 1,
             "+-",
-            np.std(up1) / denom / np.sqrt(len(up1)) / 0.02 / 2.0,
+            np.std(up1) / denom / np.sqrt(nsim) / 0.02 / 2.0,
         )
         print(
             "Additive bias:",
             np.average(up2) / denom,
             "+-",
-            np.std(up2) / denom / np.sqrt(len(up2)),
+            np.std(up2) / denom / np.sqrt(nsim),
+        )
+        tmp = np.array(up1) / 2.0 + np.array(up2)
+        print(
+            "Positive shear:",
+            np.average(tmp) / denom,
+            "+-",
+            np.std(tmp) / denom / np.sqrt(nsim),
+        )
+        tmp = -np.array(up1) / 2.0 + np.array(up2)
+        print(
+            "Negative shear:",
+            np.average(tmp) / denom,
+            "+-",
+            np.std(tmp) / denom / np.sqrt(nsim),
         )
         return
