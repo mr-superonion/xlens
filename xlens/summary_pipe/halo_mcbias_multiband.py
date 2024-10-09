@@ -77,6 +77,24 @@ class HaloMcBiasMultibandPipeConnections(
         deferLoad=True,
     )
 
+    truth00List = cT.Input(
+        doc="input truth catalog",
+        name="{inputCoaddName}Coadd_truthCatalog{dataType}_0_rot0",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap", "band", "tract", "patch"),
+        multiple=True,
+        deferLoad=True,
+    )
+
+    truth01List = cT.Input(
+        doc="input truth catalog",
+        name="{inputCoaddName}Coadd_truthCatalog{dataType}_0_rot1",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap", "band", "tract", "patch"),
+        multiple=True,
+        deferLoad=True,
+    )
+
     def __init__(self, *, config=None):
         super().__init__(config=config)
 
@@ -284,7 +302,11 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             np.std(c_bars, axis=0),
         )
 
-    def run(self, skymap, src00List, src01List):
+    def run(self, skymap, src00List, src01List, truth00List, truth01List):
+
+        print("load truth list")
+        print(f"len truth00List: {len(truth00List)}")
+        print(f"len truth01List: {len(truth01List)}")
 
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0]  # in pixels
