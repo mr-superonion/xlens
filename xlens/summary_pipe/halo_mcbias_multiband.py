@@ -43,6 +43,7 @@ import galsim
 from astropy.cosmology import Planck18
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel
+from scipy.spatial.distance import cdist
 
 
 class HaloMcBiasMultibandPipeConnections(
@@ -210,7 +211,19 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
     @staticmethod
     def _get_eT_eX_rT_sum(
-        eT, eX, w, e1, e2, e1_g1, e2_g2, w_g1, w_g2, dist, radial_bin_edges
+        eT,
+        eX,
+        w,
+        e1,
+        e2,
+        e1_g1,
+        e2_g2,
+        w_g1,
+        w_g2,
+        gT_true,
+        gX_true,
+        dist,
+        radial_bin_edges,
     ):
         """calculate the sum of eT, eX, and rT in each radial bin for a single halo
 
@@ -221,14 +234,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             e1 (array): shape in x direction
             e2 (array): shape in y direction
             e1_g1 (array): partial derivative of e1 with respect to g1
-            e2_g2 (array): partial derivative of e2 with respect to g2 
+            e2_g2 (array): partial derivative of e2 with respect to g2
             w_g1 (array): partial derivative of w with respect to g1
             w_g2 (array): partial derivative of w with respect to g2
             dist (array): pixel distance from the halo center
             radial_bin_edges (array): radial bin edges in pixel
 
         Returns:
-            eT(array): sum of eT in each radial bin 
+            eT(array): sum of eT in each radial bin
             eX(array): sum of eX in each radial bin
             rT(array): sum of resposne in each radial bin
         """
@@ -237,6 +250,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         eT_list = []
         eX_list = []
         rT_list = []
+        gT_true_list = []
+        gX_true_list = []
 
         for i_bin in range(n_bins):
             mask = (dist >= radial_bin_edges[i_bin]) & (
@@ -276,7 +291,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
     @staticmethod
     def _run_boostrap(rT, eT, eX, true_gt, n_boot=500):
         rng = np.random.RandomState(seed=100)
-        
+
         n_halo = rT.shape[0]
         n_radial = rT.shape[1]
 
@@ -284,7 +299,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         c_bars = np.empty((n_boot, n_radial))
 
         for i, _ in enumerate(range(n_boot)):
-            ind = rng.choice(n_halo,replace=True, size=n_halo)
+            ind = rng.choice(n_halo, replace=True, size=n_halo)
 
             rT_boot = rT[ind]
             eT_boot = eT[ind]
@@ -302,6 +317,20 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             np.std(c_bars, axis=0),
         )
 
+    @staticmethod
+    def _match_input_to_det(true_x, true_y, det_x, det_y):
+        input_coord = np.array([true_x, true_y]).T
+        det_coord = np.array([det_x, det_y]).T
+        # the shape of distance is len(det_coord), len(gal_coord),
+        # each column is the distance between one det_coord and all gal_coord
+        distance = cdist(det_coord, input_coord)
+        # for each det_coord, find the index of the closest gal_coord
+        idx = np.argmin(distance, axis=1)
+        assert np.all(
+            distance[np.arange(len(distance)), idx] <= 10
+        ), f"distance is too large, max distance is {np.max(distance[np.arange(len(distance)), idx])}"
+        return idx
+
     def run(self, skymap, src00List, src01List, truth00List, truth01List):
 
         print("load truth list")
@@ -318,7 +347,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         print("max pixel", max_pixel)
         print("max pixel in arcsec", max_pixel * pixel_scale)
 
-        n_bins = 3
+        n_bins = 10
         pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
@@ -355,10 +384,43 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         eT_ensemble = np.empty((len(src00List), n_bins))
         eX_ensemble = np.empty((len(src00List), n_bins))
 
-        for i, src in enumerate(zip(src00List, src01List)):
-            src00, src01 = src[0], src[1]
+        for i, cats in enumerate(
+            zip(src00List, src01List, truth00List, truth01List)
+        ):
+            src00, src01, truth00, truth01 = cats[0], cats[1], cats[2], cats[3]
             sr_00_res = src00.get()
             sr_01_res = src01.get()
+            truth_00_res = truth00.get()
+            truth_01_res = truth01.get()
+
+            idx_00 = self._match_input_to_det(
+                truth_00_res["image_x"],
+                truth_00_res["image_y"],
+                sr_00_res["x"],
+                sr_00_res["y"],
+            )
+
+            idx_01 = self._match_input_to_det(
+                truth_01_res["image_x"],
+                truth_01_res["image_y"],
+                sr_01_res["x"],
+                sr_01_res["y"],
+            )
+
+            print(idx_01)
+
+            true_gamma1 = np.concatenate(
+                [truth_00_res["gamma1"][idx_00], truth_01_res["gamma1"][idx_01]]
+            )
+            true_gamma2 = np.concatenate(
+                [truth_00_res["gamma2"][idx_00], truth_01_res["gamma2"][idx_01]]
+            )
+            true_kappa = np.concatenate(
+                [truth_00_res["kappa"][idx_00], truth_01_res["kappa"][idx_01]]
+            )
+            g1_true = true_gamma1 / (1 - true_kappa)
+            g2_true = true_gamma2 / (1 - true_kappa)
+
             e1 = np.concatenate([sr_00_res[e1n], sr_01_res[e1n]])
             e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
             print(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
@@ -375,6 +437,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             )
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2(e1, e2, -angle)
+            gT_true, gX_true = self._rotate_spin_2(g1_true, g2_true, -angle)
             # w are scalar so no need to rotate
             dist = np.sqrt(x**2 + y**2)
 
@@ -388,6 +451,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 e2_g2,
                 w_g1,
                 w_g2,
+                gT_true,
+                gX_true,
                 dist,
                 pixel_bin_edges,
             )
