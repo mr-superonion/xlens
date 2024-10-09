@@ -74,5 +74,5 @@ class ShearHalo(object):
                 return gso, shift
             dra, ddec = self.lens.alpha(r.x, r.y, kwargs)
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
-            shift = shift + galsim.PositionD(dra, ddec)
-        return gso, shift
+            lensed_shift = shift + galsim.PositionD(dra, ddec)
+        return gso, lensed_shift, shift, gamma1, gamma2, kappa
