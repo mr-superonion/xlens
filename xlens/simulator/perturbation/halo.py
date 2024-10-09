@@ -71,7 +71,8 @@ class ShearHalo(object):
             mu = 1.0 / ((1 - kappa) ** 2 - gamma1**2 - gamma2**2)
 
             if g1**2.0 + g2**2.0 > 0.95:
-                return gso, shift
+                return gso, shift, shift, gamma1, gamma2, kappa
+
             dra, ddec = self.lens.alpha(r.x, r.y, kwargs)
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
             lensed_shift = shift + galsim.PositionD(dra, ddec)
