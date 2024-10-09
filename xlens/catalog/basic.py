@@ -602,7 +602,7 @@ def get_sigma_e(catalog):
     return sigma_e
 
 
-def get_psf_size(catalog, dtype="fwhm", pixel_scale=0.168):
+def get_psf_size(catalog, dtype="fwhm", band="i", pixel_scale=0.168):
     """This utility gets the PSF size from a data or sims catalog using the
     specified size definition from the second moments matrix.
 
@@ -610,6 +610,8 @@ def get_psf_size(catalog, dtype="fwhm", pixel_scale=0.168):
     catalog (ndarray):  Simulation or data catalog
     dtype (str):        Type of psf size measurement in ['trace', 'det',
                         'fwhm'] (default: 'fwhm')
+    band (str):         bnad g, r, i, z etc
+    pixel_scale:        pixel scale of image [arcsec]
     Returns:
     size (ndarray):     PSF size
     """
@@ -617,14 +619,14 @@ def get_psf_size(catalog, dtype="fwhm", pixel_scale=0.168):
         psf_mxx = catalog["base_SdssShape_psf_xx"] * pixel_scale**2.0
         psf_myy = catalog["base_SdssShape_psf_yy"] * pixel_scale**2.0
         psf_mxy = catalog["base_SdssShape_psf_xy"] * pixel_scale**2.0
-    elif "i_sdssshape_psf_shape11" in catalog.dtype.names:
-        psf_mxx = catalog["i_sdssshape_psf_shape11"]
-        psf_myy = catalog["i_sdssshape_psf_shape22"]
-        psf_mxy = catalog["i_sdssshape_psf_shape12"]
-    elif "ishape_sdss_psf_ixx" in catalog.dtype.names:
-        psf_mxx = catalog["ishape_sdss_psf_ixx"]
-        psf_myy = catalog["ishape_sdss_psf_iyy"]
-        psf_mxy = catalog["ishape_sdss_psf_ixy"]
+    elif f"{band}_sdssshape_psf_shape11" in catalog.dtype.names:
+        psf_mxx = catalog[f"{band}_sdssshape_psf_shape11"]
+        psf_myy = catalog[f"{band}_sdssshape_psf_shape22"]
+        psf_mxy = catalog[f"{band}_sdssshape_psf_shape12"]
+    elif f"{band}shape_sdss_psf_{band}xx" in catalog.dtype.names:
+        psf_mxx = catalog[f"{band}shape_sdss_psf_ixx"]
+        psf_myy = catalog[f"{band}shape_sdss_psf_iyy"]
+        psf_mxy = catalog[f"{band}shape_sdss_psf_ixy"]
     else:
         psf_mxx = _nan_array(len(catalog))
         psf_myy = _nan_array(len(catalog))
