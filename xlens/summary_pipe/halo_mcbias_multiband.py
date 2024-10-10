@@ -419,7 +419,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         gX_true_ensemble = np.empty((len(src00List), n_bins))
         r_weighted_gT_ensemble = np.empty((len(src00List), n_bins))
         r_weighted_gX_ensemble = np.empty((len(src00List), n_bins))
-        kappa_true_enemble = np.empty((len(src00List), n_bins))
+        kappa_true_ensemble = np.empty((len(src00List), n_bins))
+        ngal_in_bin_ensemble = np.empty((len(src00List), n_bins))
 
         for i, cats in enumerate(
             zip(src00List, src01List, truth00List, truth01List)
@@ -513,7 +514,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             gX_true_ensemble[i, :] = gX_true_list
             r_weighted_gT_ensemble[i, :] = r_weighted_gT_list
             r_weighted_gX_ensemble[i, :] = r_weighted_gX_list
-            kappa_true_enemble[i, :] = kappa_true_list
+            kappa_true_ensemble[i, :] = kappa_true_list
+            ngal_in_bin_ensemble[i, :] = ngal_in_bin
 
         shear_list = np.mean(eT_ensemble, axis=0) / np.mean(rT_ensemble, axis=0)
         m_vals_simp = shear_list / true_gt - 1
@@ -545,8 +547,11 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ("angular_bin_right", "f8"),
                 ("ngal_in_bin", "i4"),
                 ("eT", "f8"),
+                ("eT_std", "f8"),
                 ("eX", "f8"),
+                ("eX_std", "f8"),
                 ("rT", "f8"),
+                ("rT_std", "f8"),
                 ("gT_true", "f8"),
                 ("gX_true", "f8"),
                 ("kappa_true", "f8"),
@@ -558,13 +563,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         summary_stats = get_summary_struct(len(angular_bin_edges) - 1)
         summary_stats["angular_bin_left"] = angular_bin_edges[:-1]
         summary_stats["angular_bin_right"] = angular_bin_edges[1:]
-        summary_stats["ngal_in_bin"] = ngal_in_bin
+        summary_stats["ngal_in_bin"] = np.mean(ngal_in_bin_ensemble, axis=0)
         summary_stats["eT"] = np.mean(eT_ensemble, axis=0)
+        summary_stats["eT_std"] = np.std(eT_ensemble, axis=0)
         summary_stats["eX"] = np.mean(eX_ensemble, axis=0)
+        summary_stats["eX_std"] = np.std(eX_ensemble, axis=0)
         summary_stats["rT"] = np.mean(rT_ensemble, axis=0)
         summary_stats["gT_true"] = np.mean(gT_true_ensemble, axis=0)
         summary_stats["gX_true"] = np.mean(gX_true_ensemble, axis=0)
-        summary_stats["kappa_true"] = np.mean(kappa_true_enemble, axis=0)
+        summary_stats["kappa_true"] = np.mean(kappa_true_ensemble, axis=0)
         summary_stats["r_weighted_gT"] = np.mean(r_weighted_gT_ensemble, axis=0)
         summary_stats["r_weighted_gX"] = np.mean(r_weighted_gX_ensemble, axis=0)
 
