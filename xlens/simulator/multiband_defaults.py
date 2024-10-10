@@ -9,8 +9,26 @@ pixel_scale_defaults = {
 }
 
 psf_fwhm_defaults = {
-    "lsst": 0.8,
-    "hsc": 0.6,
+    "g": {
+        "lsst": 0.8,
+        "hsc": 0.798,
+    },
+    "r": {
+        "lsst": 0.8,
+        "hsc": 0.749,
+    },
+    "i": {
+        "lsst": 0.8,
+        "hsc": 0.617,
+    },
+    "z": {
+        "lsst": 0.8,
+        "hsc": 0.697,
+    },
+    "y": {
+        "lsst": 0.8,
+        "hsc": 0.688,
+    },
 }
 
 sys_npix = 49
@@ -18,18 +36,22 @@ sys_npix = 49
 noise_variance_defaults = {
     "g": {
         "lsst": 0.315,
-        "hsc": 7e-3,
+        "hsc": 1.4e-3,
     },
     "r": {
         "lsst": 0.371,
-        "hsc": 7e-3,
+        "hsc": 2.9e-3,
     },
     "i": {
         "lsst": 0.595,
-        "hsc": 7e-3,
+        "hsc": 4.7 - 3,
     },
     "z": {
         "lsst": 1.155,
-        "hsc": 7e-3,
+        "hsc": 19e-3,
+    },
+    "y": {
+        "lsst": 1.2,
+        "hsc": 85e-3,
     },
 }

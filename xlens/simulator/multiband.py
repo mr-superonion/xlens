@@ -253,7 +253,7 @@ class MultibandSimBaseTask(SimBaseTask):
         noise_std = np.sqrt(variance)
         # Obtain PSF object for Galsim
         if psfImage is None:
-            psf_fwhm = psf_fwhm_defaults[survey_name]
+            psf_fwhm = psf_fwhm_defaults[band][survey_name]
             psf_galsim = galsim.Moffat(fwhm=psf_fwhm, beta=2.5)
             psf_array = psf_galsim.drawImage(
                 nx=sys_npix,
