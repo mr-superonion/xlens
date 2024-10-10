@@ -465,8 +465,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
             w_g1 = np.concatenate([sr_00_res["w_g1"], sr_01_res["w_g1"]])
             w_g2 = np.concatenate([sr_00_res["w_g2"], sr_01_res["w_g2"]])
-            x = np.concatenate([sr_00_res[xn], sr_01_res[xn]])
-            y = np.concatenate([sr_00_res[yn], sr_01_res[yn]])
+            x = np.concatenate([truth_00_res['original_image_x'],truth_01_res['original_image_x']]) 
+            y = np.concatenate([truth_00_res["original_image_y"], truth_01_res["original_image_y"]])
 
             angle = self._get_angle_from_pixel(
                 x, y, image_dim / 2, image_dim / 2
