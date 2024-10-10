@@ -35,6 +35,7 @@ from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
+    Struct
 )
 from lsst.utils.logging import LsstLogAdapter
 from lsst.skymap import BaseSkyMap
@@ -94,6 +95,13 @@ class HaloMcBiasMultibandPipeConnections(
         dimensions=("skymap", "band", "tract", "patch"),
         multiple=True,
         deferLoad=True,
+    )
+
+    outputSummary = cT.Output(
+        doc="Summary statistics",
+        name="{inputCoaddName}summary_stats{dataType}",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap",),
     )
 
     def __init__(self, *, config=None):
@@ -171,7 +179,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         assert isinstance(self.config, HaloMcBiasMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
-        self.run(**inputs)
+        outputs = self.run(**inputs)
+        butlerQC.put(outputs, outputRefs)
         return
 
     @staticmethod
@@ -222,6 +231,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         w_g2,
         gT_true,
         gX_true,
+        kappa_true,
         dist,
         radial_bin_edges,
     ):
@@ -252,6 +262,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         rT_list = []
         gT_true_list = []
         gX_true_list = []
+        kappa_true_list = []
 
         for i_bin in range(n_bins):
             mask = (dist >= radial_bin_edges[i_bin]) & (
@@ -263,11 +274,23 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             r11 = np.sum(e1_g1[mask] * w[mask] + e1[mask] * w_g1[mask])
             r22 = np.sum(e2_g2[mask] * w[mask] + e2[mask] * w_g2[mask])
             rT_sum = (r11 + r22) / 2
+
+            gT_true_list.append(np.sum(gT_true[mask]))
+            gX_true_list.append(np.sum(gX_true[mask]))
+            kappa_true_list.append(np.sum(kappa_true[mask]))
+
             eT_list.append(eT_sum)
             eX_list.append(eX_sum)
             rT_list.append(rT_sum)
 
-        return np.array(eT_list), np.array(eX_list), np.array(rT_list)
+        return (
+            np.array(eT_list),
+            np.array(eX_list),
+            np.array(rT_list),
+            np.array(gT_true_list),
+            np.array(gX_true_list),
+            np.array(kappa_true_list),
+        )
 
     @staticmethod
     def _get_theory_gt(mass, conc, z_lens, z_source, angular_dist, cosmo):
@@ -441,7 +464,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # w are scalar so no need to rotate
             dist = np.sqrt(x**2 + y**2)
 
-            eT_list, eX_list, rT_list = self._get_eT_eX_rT_sum(
+            (
+                eT_list,
+                eX_list,
+                rT_list,
+                gT_true_list,
+                gX_true_list,
+                kappa_true_list,
+            ) = self._get_eT_eX_rT_sum(
                 eT,
                 eX,
                 w,
@@ -484,4 +514,28 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         print(f"bootstrap: m = {mvals} +/- {mstd}")
         print(f"bootstrap: c = {cvals} +/- {cstd}")
 
-        return
+
+        def get_summary_struct():
+            dt = [
+                ("angular_bin_left", "f8"),
+                ("angular_bin_right", "f8"),
+                ("eT", "f8")
+                ("eX", "f8")
+                ("rT", "f8")
+                ("gT_true", "f8")
+                ("gX_true", "f8")
+                ("kappa_true", "f8")
+            ]
+            return np.zeros(1, dtype=dt)
+
+        summary_stats = get_summary_struct()
+        summary_stats["angular_bin_left"] = angular_bin_edges[:-1]
+        summary_stats["angular_bin_right"] = angular_bin_edges[1:]
+        summary_stats["eT"] = np.mean(eT_ensemble, axis=0)
+        summary_stats["eX"] = np.mean(eX_ensemble, axis=0)
+        summary_stats["rT"] = np.mean(rT_ensemble, axis=0)
+        summary_stats["gT_true"] = np.mean(gT_true_list, axis=0)
+        summary_stats["gX_true"] = np.mean(gX_true_list, axis=0)
+        summary_stats["kappa_true"] = np.mean(kappa_true_list, axis=0)
+
+        return Struct(outputSummary=summary_stats)
