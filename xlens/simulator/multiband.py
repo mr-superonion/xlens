@@ -145,11 +145,11 @@ class MultibandSimBaseTask(SimBaseTask):
             pixel_scale=pixel_scale,
             layout=self.config.layout,
         )
-        
-        # for fix source redshift 
+
+        # for fix source redshift
         if "z_source" in self.config.keys() and self.config.z_source is not None:
             galaxy_catalog._wldeblend_cat['redshift'] = self.config.z_source
-        
+
         return galaxy_catalog
 
     def get_noise_seed(self, seed, irot):
@@ -297,9 +297,10 @@ class MultibandSimBaseTask(SimBaseTask):
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
         )
-        data = resize_array(
+        data, truth_catalog = resize_array(
             data,
             (height, width),
+            truth_catalog,
         )
 
         outputExposure = afwImage.ExposureF(boundaryBox)
