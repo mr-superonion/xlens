@@ -205,8 +205,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         sin_2angle = np.sin(2 * angle)
 
         # Apply the rotation for each e1, e2 pair
-        output[0] = cos_2angle * e1 - sin_2angle * e2  # Rotated e1
-        output[1] = sin_2angle * e1 + cos_2angle * e2  # Rotated e2
+        # invert the sign of output so the tangential shear is positive
+        - output[0] = cos_2angle * e1 - sin_2angle * e2  # Rotated e1
+        - output[1] = sin_2angle * e1 + cos_2angle * e2  # Rotated e2
 
         return output
 
@@ -465,8 +466,19 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
             w_g1 = np.concatenate([sr_00_res["w_g1"], sr_01_res["w_g1"]])
             w_g2 = np.concatenate([sr_00_res["w_g2"], sr_01_res["w_g2"]])
-            x = np.concatenate([truth_00_res['original_image_x'],truth_01_res['original_image_x']]) 
-            y = np.concatenate([truth_00_res["original_image_y"], truth_01_res["original_image_y"]])
+            # use the prelensed location 
+            x = np.concatenate(
+                [
+                    truth_00_res["original_image_x"],
+                    truth_01_res["original_image_x"],
+                ]
+            )
+            y = np.concatenate(
+                [
+                    truth_00_res["original_image_y"],
+                    truth_01_res["original_image_y"],
+                ]
+            )
 
             angle = self._get_angle_from_pixel(
                 x, y, image_dim / 2, image_dim / 2
