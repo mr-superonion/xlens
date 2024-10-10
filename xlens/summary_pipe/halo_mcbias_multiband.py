@@ -44,7 +44,7 @@ import galsim
 from astropy.cosmology import Planck18
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel
-from scipy.spatial.distance import cdist
+from scipy.spatial import cKDTree
 
 
 class HaloMcBiasMultibandPipeConnections(
@@ -354,14 +354,12 @@ class HaloMcBiasMultibandPipe(PipelineTask):
     def _match_input_to_det(true_x, true_y, det_x, det_y):
         input_coord = np.array([true_x, true_y]).T
         det_coord = np.array([det_x, det_y]).T
-        # the shape of distance is len(det_coord), len(gal_coord),
-        # each column is the distance between one det_coord and all gal_coord
-        distance = cdist(det_coord, input_coord)
-        # for each det_coord, find the index of the closest gal_coord
-        idx = np.argmin(distance, axis=1)
-        assert np.all(
-            distance[np.arange(len(distance)), idx] <= 10
-        ), f"distance is too large, max distance is {np.max(distance[np.arange(len(distance)), idx])}"
+        # Create a cKDTree for input_coord
+        tree = cKDTree(input_coord)
+        # Query the nearest neighbors in the tree for each point in det_coord
+        distance, idx = tree.query(det_coord, distance_upper_bound=10)
+        # Check if all distances are within the threshold
+        assert np.all(distance <= 10), f"distance is too large, max distance is {np.max(distance)}"
         return idx
 
     def run(self, skymap, src00List, src01List, truth00List, truth01List):
@@ -469,14 +467,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # use the prelensed location
             x = np.concatenate(
                 [
-                    truth_00_res["original_image_x"],
-                    truth_01_res["original_image_x"],
+                    truth_00_res["original_image_x"][idx_00],
+                    truth_01_res["original_image_x"][idx_01],
                 ]
             )
             y = np.concatenate(
                 [
-                    truth_00_res["original_image_y"],
-                    truth_01_res["original_image_y"],
+                    truth_00_res["original_image_y"][idx_00],
+                    truth_01_res["original_image_y"][idx_01],
                 ]
             )
 
