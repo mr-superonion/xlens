@@ -359,7 +359,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         # Query the nearest neighbors in the tree for each point in det_coord
         distance, idx = tree.query(det_coord, distance_upper_bound=10)
         # Check if all distances are within the threshold
-        assert np.all(distance <= 10), f"distance is too large, max distance is {np.max(distance)}"
+        assert np.all(
+            distance <= 10
+        ), f"distance is too large, max distance is {np.max(distance)}"
         return idx
 
     def run(self, skymap, src00List, src01List, truth00List, truth01List):
@@ -485,7 +487,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             eT, eX = self._rotate_spin_2(e1, e2, -angle)
             gT_true, gX_true = self._rotate_spin_2(g1_true, g2_true, -angle)
             # w are scalar so no need to rotate
-            dist = np.sqrt(x**2 + y**2)
+            dist = np.sqrt((x - image_dim / 2) ** 2 + (y - image_dim / 2) ** 2)
 
             print(gT_true)
             print(gX_true)
