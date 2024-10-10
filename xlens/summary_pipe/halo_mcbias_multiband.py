@@ -265,6 +265,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         kappa_true_list = []
         r_weighted_gT_list = []
         r_weighted_gX_list = []
+        ngal_in_bin = []
 
         for i_bin in range(n_bins):
             mask = (dist >= radial_bin_edges[i_bin]) & (
@@ -280,12 +281,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             gT_true_list.append(np.sum(gT_true[mask]))
             gX_true_list.append(np.sum(gX_true[mask]))
             kappa_true_list.append(np.sum(kappa_true[mask]))
-            r_weighted_gT_list.append(
-                np.sum(gT_true[mask] * 0.5 * (r11 + r22)[mask])
-            )
-            r_weighted_gX_list.append(
-                np.sum(gX_true[mask] * 0.5 * (r11 + r22)[mask])
-            )
+            r_weighted_gT_list.append(np.sum(gT_true[mask] * 0.5 * (r11 + r22)))
+            r_weighted_gX_list.append(np.sum(gX_true[mask] * 0.5 * (r11 + r22)))
+            ngal_in_bin.append(np.sum(mask))
 
             eT_list.append(eT_sum)
             eX_list.append(eX_sum)
@@ -300,6 +298,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             np.array(kappa_true_list),
             np.array(r_weighted_gT_list),
             np.array(r_weighted_gX_list),
+            np.array(ngal_in_bin),
         )
 
     @staticmethod
@@ -416,6 +415,11 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         rT_ensemble = np.empty((len(src00List), n_bins))
         eT_ensemble = np.empty((len(src00List), n_bins))
         eX_ensemble = np.empty((len(src00List), n_bins))
+        gT_true_ensemble = np.empty((len(src00List), n_bins))
+        gX_true_ensemble = np.empty((len(src00List), n_bins))
+        r_weighted_gT_ensemble = np.empty((len(src00List), n_bins))
+        r_weighted_gX_ensemble = np.empty((len(src00List), n_bins))
+        kappa_true_enemble = np.empty((len(src00List), n_bins))
 
         for i, cats in enumerate(
             zip(src00List, src01List, truth00List, truth01List)
@@ -440,19 +444,17 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 sr_01_res["y"],
             )
 
-            print(idx_01)
-
-            true_gamma1 = np.concatenate(
+            gamma1_true = np.concatenate(
                 [truth_00_res["gamma1"][idx_00], truth_01_res["gamma1"][idx_01]]
             )
-            true_gamma2 = np.concatenate(
+            gamma2_true = np.concatenate(
                 [truth_00_res["gamma2"][idx_00], truth_01_res["gamma2"][idx_01]]
             )
-            true_kappa = np.concatenate(
+            kappa_true = np.concatenate(
                 [truth_00_res["kappa"][idx_00], truth_01_res["kappa"][idx_01]]
             )
-            g1_true = true_gamma1 / (1 - true_kappa)
-            g2_true = true_gamma2 / (1 - true_kappa)
+            g1_true = gamma1_true / (1 - kappa_true)
+            g2_true = gamma2_true / (1 - kappa_true)
 
             e1 = np.concatenate([sr_00_res[e1n], sr_01_res[e1n]])
             e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
@@ -474,6 +476,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # w are scalar so no need to rotate
             dist = np.sqrt(x**2 + y**2)
 
+            print(gT_true)
+            print(gX_true)
+            print(kappa_true)
+
             (
                 eT_list,
                 eX_list,
@@ -482,7 +488,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 gX_true_list,
                 kappa_true_list,
                 r_weighted_gT_list,
-                r_weighted_gX_list
+                r_weighted_gX_list,
+                ngal_in_bin,
             ) = self._get_eT_eX_rT_sum(
                 eT,
                 eX,
@@ -495,12 +502,18 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 w_g2,
                 gT_true,
                 gX_true,
+                kappa_true,
                 dist,
                 pixel_bin_edges,
             )
             rT_ensemble[i, :] = rT_list
             eT_ensemble[i, :] = eT_list
             eX_ensemble[i, :] = eX_list
+            gT_true_ensemble[i, :] = gT_true_list
+            gX_true_ensemble[i, :] = gX_true_list
+            r_weighted_gT_ensemble[i, :] = r_weighted_gT_list
+            r_weighted_gX_ensemble[i, :] = r_weighted_gX_list
+            kappa_true_enemble[i, :] = kappa_true_list
 
         shear_list = np.mean(eT_ensemble, axis=0) / np.mean(rT_ensemble, axis=0)
         m_vals_simp = shear_list / true_gt - 1
@@ -526,11 +539,13 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         print(f"bootstrap: m = {mvals} +/- {mstd}")
         print(f"bootstrap: c = {cvals} +/- {cstd}")
 
-        def get_summary_struct():
+        def get_summary_struct(n_bins):
             dt = [
                 ("angular_bin_left", "f8"),
                 ("angular_bin_right", "f8"),
-                ("eT", "f8")("eX", "f8"),
+                ("ngal_in_bin", "i4"),
+                ("eT", "f8"),
+                ("eX", "f8"),
                 ("rT", "f8"),
                 ("gT_true", "f8"),
                 ("gX_true", "f8"),
@@ -538,18 +553,19 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ("r_weighted_gT", "f8"),
                 ("r_weighted_gX", "f8"),
             ]
-            return np.zeros(1, dtype=dt)
+            return np.zeros(n_bins, dtype=dt)
 
-        summary_stats = get_summary_struct()
+        summary_stats = get_summary_struct(len(angular_bin_edges) - 1)
         summary_stats["angular_bin_left"] = angular_bin_edges[:-1]
         summary_stats["angular_bin_right"] = angular_bin_edges[1:]
+        summary_stats["ngal_in_bin"] = ngal_in_bin
         summary_stats["eT"] = np.mean(eT_ensemble, axis=0)
         summary_stats["eX"] = np.mean(eX_ensemble, axis=0)
         summary_stats["rT"] = np.mean(rT_ensemble, axis=0)
-        summary_stats["gT_true"] = np.mean(gT_true_list, axis=0)
-        summary_stats["gX_true"] = np.mean(gX_true_list, axis=0)
-        summary_stats["kappa_true"] = np.mean(kappa_true_list, axis=0)
-        summary_stats["r_weighted_gT"] = np.mean(r_weighted_gT_list, axis=0)
-        summary_stats["r_weighted_gX"] = np.mean(r_weighted_gX_list, axis=0)
+        summary_stats["gT_true"] = np.mean(gT_true_ensemble, axis=0)
+        summary_stats["gX_true"] = np.mean(gX_true_ensemble, axis=0)
+        summary_stats["kappa_true"] = np.mean(kappa_true_enemble, axis=0)
+        summary_stats["r_weighted_gT"] = np.mean(r_weighted_gT_ensemble, axis=0)
+        summary_stats["r_weighted_gX"] = np.mean(r_weighted_gX_ensemble, axis=0)
 
         return Struct(outputSummary=summary_stats)
