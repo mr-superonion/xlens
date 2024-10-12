@@ -20,9 +20,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 __all__ = [
-    "FpfsMultibandPipeConfig",
-    "FpfsMultibandPipe",
-    "FpfsMultibandPipeConnections",
+    "JointDetectPipeConfig",
+    "JointDetectPipe",
+    "JointDetectPipeConnections",
 ]
 
 import logging
@@ -46,7 +46,7 @@ from lsst.utils.logging import LsstLogAdapter
 from ..processor.fpfs import FpfsMeasurementTask
 
 
-class FpfsMultibandPipeConnections(
+class JointDetectPipeConnections(
     PipelineTaskConnections,
     dimensions=("tract", "patch", "band", "skymap"),
     defaultTemplates={
@@ -62,18 +62,10 @@ class FpfsMultibandPipeConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=False,
     )
-    detection = cT.Input(
-        doc="Source catalog with detection",
+    detection = cT.Output(
+        doc="Source catalog with all the measurement generated in this task",
         name="{outputCoaddName}Coadd_anacal_detection{dataType}",
         dimensions=("skymap", "tract", "patch"),
-        storageClass="ArrowAstropy",
-        minimum=0,
-        multiple=False,
-    )
-    outputCatalog = cT.Output(
-        doc="Source catalog with all the measurement generated in this task",
-        name="{outputCoaddName}Coadd_anacal_meas{dataType}",
-        dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
     )
 
@@ -81,10 +73,18 @@ class FpfsMultibandPipeConnections(
         super().__init__(config=config)
 
 
-class FpfsMultibandPipeConfig(
+class JointDetectPipeConfig(
     PipelineTaskConfig,
-    pipelineConnections=FpfsMultibandPipeConnections,
+    pipelineConnections=JointDetectPipeConnections,
 ):
+    do_dm_detection = Field[bool](
+        doc="whether to do detection",
+        default=False,
+    )
+    detection = ConfigurableField(
+        target=SourceDetectionTask,
+        doc="Detect Sources Task",
+    )
     deblend = ConfigurableField(
         target=SourceDeblendTask,
         doc="Deblending Task",
@@ -107,15 +107,20 @@ class FpfsMultibandPipeConfig(
                     "Only set fpfs.do_adding_noise=False on simulation"
                 )
 
+    def setDefaults(self):
+        super().setDefaults()
+        self.fpfs.sigma_arcsec1 = -1
+        self.fpfs.sigma_arcsec2 = -1
 
-class FpfsMultibandPipe(PipelineTask):
-    _DefaultName = "FpfsMultibandPipe"
-    ConfigClass = FpfsMultibandPipeConfig
+
+class JointDetectPipe(PipelineTask):
+    _DefaultName = "JointDetectPipe"
+    ConfigClass = JointDetectPipeConfig
 
     def __init__(
         self,
         *,
-        config: FpfsMultibandPipeConfig | None = None,
+        config: JointDetectPipeConfig | None = None,
         log: logging.Logger | LsstLogAdapter | None = None,
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -123,15 +128,20 @@ class FpfsMultibandPipe(PipelineTask):
         super().__init__(
             config=config, log=log, initInputs=initInputs, **kwargs
         )
-        assert isinstance(self.config, FpfsMultibandPipeConfig)
+        assert isinstance(self.config, JointDetectPipeConfig)
+        if self.config.do_dm_detection:
+            self.schema = afwTable.SourceTable.makeMinimalSchema()
+            self.algMetadata = dafBase.PropertyList()
+            self.makeSubtask("detection", schema=self.schema)
+            self.makeSubtask("deblend", schema=self.schema)
         self.makeSubtask("fpfs")
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
-        assert isinstance(self.config, FpfsMultibandPipeConfig)
+        assert isinstance(self.config, JointDetectPipeConfig)
         # Retrieve the filename of the input exposure
         data = self.prepare_data(butlerQC=butlerQC, inputRefs=inputRefs)
-        outputs = Struct(outputCatalog=self.fpfs.run(**data))
+        outputs = Struct(detection=self.fpfs.run(**data))
         butlerQC.put(outputs, outputRefs)
         return
 
@@ -141,7 +151,7 @@ class FpfsMultibandPipe(PipelineTask):
         butlerQC,
         inputRefs,
     ):
-        assert isinstance(self.config, FpfsMultibandPipeConfig)
+        assert isinstance(self.config, JointDetectPipeConfig)
 
         inputs = butlerQC.get(inputRefs)
 
@@ -153,5 +163,6 @@ class FpfsMultibandPipe(PipelineTask):
         # should really be used as the IDs all come from the input catalog.
         idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
         inputs["seed"] = idGenerator.catalog_id
+        inputs["detection"] = None
         inputs["noise_corr"] = None
         return self.fpfs.prepare_data(**inputs)

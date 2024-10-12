@@ -292,9 +292,10 @@ class MultibandSimBaseTask(SimBaseTask):
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
         )
-        data = resize_array(
+        data, truth_catalog = resize_array(
             data,
             (height, width),
+            truth_catalog,
         )
 
         outputExposure = afwImage.ExposureF(boundaryBox)
