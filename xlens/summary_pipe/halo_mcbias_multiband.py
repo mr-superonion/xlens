@@ -184,7 +184,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return
 
     @staticmethod
-    def _rotate_spin_2(e1, e2, angle):
+    def _rotate_spin_2_vec(e1, e2, angle):
         """
         Rotate a spin-2 field by an array of angles (one per e1, e2 pair)
         """
@@ -212,6 +212,25 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return output
 
     @staticmethod
+    def _rotate_spin_2_matrix(R11, R22, angle):
+        # off diagonal terms are assumed to be zero
+        # R is active rotation matrix
+
+        output = np.zeros((2, len(R11)))
+
+        output[0] = np.cos(2 * angle) ** 2 * R11 + np.sin(2 * angle) ** 2 * R22
+        output[1] = np.sin(2 * angle) ** 2 * R11 + np.cos(2 * angle) ** 2 * R22
+
+        return output
+
+    @staticmethod
+    def _get_response_from_w_and_der(e1, e2, w, e1_g1, e2_g2, w_g1, w_g2):
+        r11 = e1_g1 * w + e1 * w_g1
+        r22 = e2_g2 * w + e2 * w_g2
+
+        return r11, r22
+
+    @staticmethod
     def _get_angle_from_pixel(x, y, x_cen, y_cen):
         """
         Get the angle from the pixel coordinates
@@ -220,16 +239,12 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return np.arctan2(y - y_cen, x - x_cen)
 
     @staticmethod
-    def _get_eT_eX_rT_sum(
+    def _get_eT_eX_rT_rX_sum(
         eT,
         eX,
         w,
-        e1,
-        e2,
-        e1_g1,
-        e2_g2,
-        w_g1,
-        w_g2,
+        rT,
+        rX,
         gT_true,
         gX_true,
         kappa_true,
@@ -261,12 +276,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         eT_list = []
         eX_list = []
         rT_list = []
+        rX_list = []
         gT_true_list = []
         gX_true_list = []
         kappa_true_list = []
         r_weighted_gT_list = []
         r_weighted_gX_list = []
         ngal_in_bin = []
+        eT_std_list = []
+        eX_std_list = []
 
         for i_bin in range(n_bins):
             mask = (dist >= radial_bin_edges[i_bin]) & (
@@ -275,31 +293,38 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             eT_sum = np.sum(eT[mask] * w[mask])
             eX_sum = np.sum(eX[mask] * w[mask])
             # we use the mean of R11 and R22 as an estimator of Rt
-            r11 = e1_g1[mask] * w[mask] + e1[mask] * w_g1[mask]
-            r22 = e2_g2[mask] * w[mask] + e2[mask] * w_g2[mask]
-            rT_sum = (np.sum(r11) + np.sum(r22)) / 2
+
+            rT_sum = np.sum(rT[mask])
+            rX_sum = np.sum(rX[mask])
 
             gT_true_list.append(np.sum(gT_true[mask]))
             gX_true_list.append(np.sum(gX_true[mask]))
             kappa_true_list.append(np.sum(kappa_true[mask]))
-            r_weighted_gT_list.append(np.sum(gT_true[mask] * 0.5 * (r11 + r22)))
-            r_weighted_gX_list.append(np.sum(gX_true[mask] * 0.5 * (r11 + r22)))
+            r_weighted_gT_list.append(np.sum(gT_true[mask] * 0.5 * rT[mask]))
+            r_weighted_gX_list.append(np.sum(gX_true[mask] * 0.5 * rX[mask]))
             ngal_in_bin.append(np.sum(mask))
 
             eT_list.append(eT_sum)
             eX_list.append(eX_sum)
             rT_list.append(rT_sum)
+            rX_list.append(rX_sum)
+
+            eT_std_list = np.std(eT[mask])
+            eX_std_list = np.std(eX[mask])
 
         return (
             np.array(eT_list),
             np.array(eX_list),
             np.array(rT_list),
+            np.array(rX_list),
             np.array(gT_true_list),
             np.array(gX_true_list),
             np.array(kappa_true_list),
             np.array(r_weighted_gT_list),
             np.array(r_weighted_gX_list),
             np.array(ngal_in_bin),
+            np.array(eT_std_list),
+            np.array(eX_std_list),
         )
 
     @staticmethod
@@ -373,7 +398,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0]  # in pixels
 
-        max_pixel = np.sqrt(2) * image_dim
+        max_pixel = (image_dim - 40) / 2
 
         print("pixel scale", pixel_scale)
         print("image dim", image_dim)
@@ -412,8 +437,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         yn = self.yname
 
         print("The length of source list is", len(src00List), len(src01List))
+        n_realization = len(src00List)
 
         rT_ensemble = np.empty((len(src00List), n_bins))
+        rX_ensemble = np.empty((len(src00List), n_bins))
         eT_ensemble = np.empty((len(src00List), n_bins))
         eX_ensemble = np.empty((len(src00List), n_bins))
         gT_true_ensemble = np.empty((len(src00List), n_bins))
@@ -422,6 +449,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         r_weighted_gX_ensemble = np.empty((len(src00List), n_bins))
         kappa_true_ensemble = np.empty((len(src00List), n_bins))
         ngal_in_bin_ensemble = np.empty((len(src00List), n_bins))
+        eT_std_ensemble = np.empty((len(src00List), n_bins))
+        eX_std_ensemble = np.empty((len(src00List), n_bins))
 
         for i, cats in enumerate(
             zip(src00List, src01List, truth00List, truth01List)
@@ -484,10 +513,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 x, y, image_dim / 2, image_dim / 2
             )
             # negative since we are rotating axes
-            eT, eX = self._rotate_spin_2(e1, e2, -angle)
+            eT, eX = self._rotate_spin_2_vec(e1, e2, -angle)
             gT_true, gX_true = self._rotate_spin_2(g1_true, g2_true, -angle)
             # w are scalar so no need to rotate
             dist = np.sqrt((x - image_dim / 2) ** 2 + (y - image_dim / 2) ** 2)
+
+            r11, r22 = self._get_response_from_w_and_der(
+                e1, e2, w, e1_g1, e2_g2, w_g1, w_g2)
+            rT, rX = self._rotate_spin_2_matrix(r11, r22, angle)
 
             print(gT_true)
             print(gX_true)
@@ -497,22 +530,21 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 eT_list,
                 eX_list,
                 rT_list,
+                rX_list,
                 gT_true_list,
                 gX_true_list,
                 kappa_true_list,
                 r_weighted_gT_list,
                 r_weighted_gX_list,
                 ngal_in_bin,
-            ) = self._get_eT_eX_rT_sum(
+                eT_std_list,
+                eX_std_list,
+            ) = self._get_eT_eX_rT_rX_sum(
                 eT,
                 eX,
                 w,
-                e1,
-                e2,
-                e1_g1,
-                e2_g2,
-                w_g1,
-                w_g2,
+                rT,
+                rX,
                 gT_true,
                 gX_true,
                 kappa_true,
@@ -520,6 +552,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 pixel_bin_edges,
             )
             rT_ensemble[i, :] = rT_list
+            rX_ensemble[i, :] = rX_list
             eT_ensemble[i, :] = eT_list
             eX_ensemble[i, :] = eX_list
             gT_true_ensemble[i, :] = gT_true_list
@@ -528,8 +561,11 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             r_weighted_gX_ensemble[i, :] = r_weighted_gX_list
             kappa_true_ensemble[i, :] = kappa_true_list
             ngal_in_bin_ensemble[i, :] = ngal_in_bin
+            eT_std_ensemble[i, :] = eT_std_list / np.sqrt(ngal_in_bin)
+            eX_std_ensemble[i, :] = eX_std_list / np.sqrt(ngal_in_bin)
 
-        shear_list = np.mean(eT_ensemble, axis=0) / np.mean(rT_ensemble, axis=0)
+        shear_list = np.mean(eT_ensemble, axis=0) / \
+            np.mean(rT_ensemble, axis=0)
         m_vals_simp = shear_list / true_gt - 1
         m_std_simp = (
             np.std(eT_ensemble, axis=0)
@@ -537,7 +573,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             / np.sqrt(eT_ensemble.shape[0])
         )
         c_vals_simp = np.mean(eX_ensemble, axis=0)
-        c_std_simp = np.std(eX_ensemble, axis=0) / np.sqrt(eX_ensemble.shape[0])
+        c_std_simp = np.std(eX_ensemble, axis=0) / \
+            np.sqrt(eX_ensemble.shape[0])
 
         print("radial bin edges in arcsec", angular_bin_edges)
         print("anacal shear", shear_list)
@@ -564,6 +601,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ("eX_std", "f8"),
                 ("rT", "f8"),
                 ("rT_std", "f8"),
+                ("rX", "f8"),
+                ("rX_std", "f8"),
                 ("gT_true", "f8"),
                 ("gX_true", "f8"),
                 ("kappa_true", "f8"),
@@ -577,14 +616,34 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         summary_stats["angular_bin_right"] = angular_bin_edges[1:]
         summary_stats["ngal_in_bin"] = np.mean(ngal_in_bin_ensemble, axis=0)
         summary_stats["eT"] = np.mean(eT_ensemble, axis=0)
-        summary_stats["eT_std"] = np.std(eT_ensemble, axis=0)
+        # law of total variance
+        summary_stats["eT_std"] = np.mean(
+            eT_std_ensemble**2
+            + (
+                eT_ensemble / ngal_in_bin_ensemble
+                - np.mean(eT_ensemble / ngal_in_bin_ensemble, axis=0)
+            )
+            ** 2,
+            axis=0,
+        ) / np.sqrt(np.sum(ngal_in_bin_ensemble, axis=0))
         summary_stats["eX"] = np.mean(eX_ensemble, axis=0)
-        summary_stats["eX_std"] = np.std(eX_ensemble, axis=0)
+        summary_stats["eX_std"] = np.mean(
+            eX_std_ensemble**2
+            + (
+                eX_ensemble / ngal_in_bin_ensemble
+                - np.mean(eX_ensemble / ngal_in_bin_ensemble, axis=0)
+            )
+            ** 2,
+            axis=0,
+        ) / np.sqrt(np.sum(ngal_in_bin_ensemble, axis=0))
         summary_stats["rT"] = np.mean(rT_ensemble, axis=0)
+        summary_stats["rX"] = np.mean(rX_ensemble, axis=0)
         summary_stats["gT_true"] = np.mean(gT_true_ensemble, axis=0)
         summary_stats["gX_true"] = np.mean(gX_true_ensemble, axis=0)
         summary_stats["kappa_true"] = np.mean(kappa_true_ensemble, axis=0)
-        summary_stats["r_weighted_gT"] = np.mean(r_weighted_gT_ensemble, axis=0)
-        summary_stats["r_weighted_gX"] = np.mean(r_weighted_gX_ensemble, axis=0)
+        summary_stats["r_weighted_gT"] = np.mean(
+            r_weighted_gT_ensemble, axis=0)
+        summary_stats["r_weighted_gX"] = np.mean(
+            r_weighted_gX_ensemble, axis=0)
 
         return Struct(outputSummary=summary_stats)
