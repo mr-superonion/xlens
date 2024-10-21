@@ -300,8 +300,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             gT_true_list.append(np.sum(gT_true[mask]))
             gX_true_list.append(np.sum(gX_true[mask]))
             kappa_true_list.append(np.sum(kappa_true[mask]))
-            r_weighted_gT_list.append(np.sum(gT_true[mask] * 0.5 * rT[mask]))
-            r_weighted_gX_list.append(np.sum(gX_true[mask] * 0.5 * rX[mask]))
+            r_weighted_gT_list.append(np.sum(gT_true[mask] * rT[mask]))
+            r_weighted_gX_list.append(np.sum(gX_true[mask] * rX[mask]))
             ngal_in_bin.append(np.sum(mask))
 
             eT_list.append(eT_sum)
@@ -309,8 +309,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             rT_list.append(rT_sum)
             rX_list.append(rX_sum)
 
-            eT_std_list = np.std(eT[mask])
-            eX_std_list = np.std(eX[mask])
+            eT_std_list.append(np.std(eT[mask]))
+            eX_std_list.append(np.std(eX[mask]))
 
         return (
             np.array(eT_list),
@@ -374,6 +374,21 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             np.mean(c_bars, axis=0),
             np.std(c_bars, axis=0),
         )
+
+    @staticmethod
+    def _get_boostrap_mean_and_std(ensemble, n_boot=500):
+        rng = np.random.RandomState(seed=100)
+
+        n_halo = ensemble.shape[0]
+        n_radial = ensemble.shape[1]
+        bars = np.empty((n_boot, n_radial))
+
+        for i, _ in enumerate(range(n_boot)):
+            ind = rng.choice(n_halo, replace=True, size=n_halo)
+            boot = ensemble[ind]
+            bars[i, :] = np.mean(boot, axis=0)
+
+        return np.mean(bars, axis=0), np.std(bars, axis=0)
 
     @staticmethod
     def _match_input_to_det(true_x, true_y, det_x, det_y):
@@ -514,9 +529,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             )
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, -angle)
-            gT_true, gX_true = self._rotate_spin_2(g1_true, g2_true, -angle)
+            gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, -angle)
             # w are scalar so no need to rotate
             dist = np.sqrt((x - image_dim / 2) ** 2 + (y - image_dim / 2) ** 2)
+            
 
             r11, r22 = self._get_response_from_w_and_der(
                 e1, e2, w, e1_g1, e2_g2, w_g1, w_g2)
@@ -590,60 +606,44 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         print(f"bootstrap: m = {mvals} +/- {mstd}")
         print(f"bootstrap: c = {cvals} +/- {cstd}")
 
-        def get_summary_struct(n_bins):
+        def get_summary_struct(n_halos, n_bins):
             dt = [
-                ("angular_bin_left", "f8"),
-                ("angular_bin_right", "f8"),
-                ("ngal_in_bin", "i4"),
-                ("eT", "f8"),
-                ("eT_std", "f8"),
-                ("eX", "f8"),
-                ("eX_std", "f8"),
-                ("rT", "f8"),
-                ("rT_std", "f8"),
-                ("rX", "f8"),
-                ("rX_std", "f8"),
-                ("gT_true", "f8"),
-                ("gX_true", "f8"),
-                ("kappa_true", "f8"),
-                ("r_weighted_gT", "f8"),
-                ("r_weighted_gX", "f8"),
+                ("angular_bin_left", f"({n_bins},)f8"),
+                ("angular_bin_right", f"({n_bins},)f8"),
+                ("ngal_in_bin", f"({n_bins},)i4"),
+                ("eT", f"({n_bins},)f8"),
+                ("eT_std", f"({n_bins},)f8"),
+                ("eX", f"({n_bins},)f8"),
+                ("eX_std", f"({n_bins},)f8"),
+                ("rT", f"({n_bins},)f8"),
+                ("rT_std", f"({n_bins},)f8"),
+                ("rX", f"({n_bins},)f8"),
+                ("rX_std", f"({n_bins},)f8"),
+                ("gT_true", f"({n_bins},)f8"),
+                ("gX_true", f"({n_bins},)f8"),
+                ("kappa_true", f"({n_bins},)f8"),
+                ("r_weighted_gT", f"({n_bins},)f8"),
+                ("r_weighted_gX", f"({n_bins},)f8"),
             ]
-            return np.zeros(n_bins, dtype=dt)
+            return np.zeros(n_halos, dtype=dt)
 
-        summary_stats = get_summary_struct(len(angular_bin_edges) - 1)
-        summary_stats["angular_bin_left"] = angular_bin_edges[:-1]
-        summary_stats["angular_bin_right"] = angular_bin_edges[1:]
-        summary_stats["ngal_in_bin"] = np.mean(ngal_in_bin_ensemble, axis=0)
-        summary_stats["eT"] = np.mean(eT_ensemble, axis=0)
-        # law of total variance
-        summary_stats["eT_std"] = np.mean(
-            eT_std_ensemble**2
-            + (
-                eT_ensemble / ngal_in_bin_ensemble
-                - np.mean(eT_ensemble / ngal_in_bin_ensemble, axis=0)
-            )
-            ** 2,
-            axis=0,
-        ) / np.sqrt(np.sum(ngal_in_bin_ensemble, axis=0))
-        summary_stats["eX"] = np.mean(eX_ensemble, axis=0)
-        summary_stats["eX_std"] = np.mean(
-            eX_std_ensemble**2
-            + (
-                eX_ensemble / ngal_in_bin_ensemble
-                - np.mean(eX_ensemble / ngal_in_bin_ensemble, axis=0)
-            )
-            ** 2,
-            axis=0,
-        ) / np.sqrt(np.sum(ngal_in_bin_ensemble, axis=0))
-        summary_stats["rT"] = np.mean(rT_ensemble, axis=0)
-        summary_stats["rX"] = np.mean(rX_ensemble, axis=0)
-        summary_stats["gT_true"] = np.mean(gT_true_ensemble, axis=0)
-        summary_stats["gX_true"] = np.mean(gX_true_ensemble, axis=0)
-        summary_stats["kappa_true"] = np.mean(kappa_true_ensemble, axis=0)
-        summary_stats["r_weighted_gT"] = np.mean(
-            r_weighted_gT_ensemble, axis=0)
-        summary_stats["r_weighted_gX"] = np.mean(
-            r_weighted_gX_ensemble, axis=0)
+
+        summary_stats = get_summary_struct(n_realization, len(angular_bin_edges) - 1)
+        
+        # Populate the structured array directly with the ensemble variables
+        summary_stats["angular_bin_left"] = np.tile(angular_bin_edges[:-1], (n_realization, 1))
+        summary_stats["angular_bin_right"] = np.tile(angular_bin_edges[1:], (n_realization, 1))
+        summary_stats["ngal_in_bin"] = ngal_in_bin_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["eT"] = eT_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["eT_std"] = eT_std_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["eX"] = eX_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["eX_std"] = eX_std_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["rT"] = rT_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["rX"] = rX_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["gT_true"] = gT_true_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["gX_true"] = gX_true_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["kappa_true"] = kappa_true_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["r_weighted_gT"] = r_weighted_gT_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["r_weighted_gX"] = r_weighted_gX_ensemble  # Shape (n_halos, n_bins)
 
         return Struct(outputSummary=summary_stats)
