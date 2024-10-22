@@ -319,6 +319,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             lensed_shift_list.append(np.mean(lensed_shift[mask]))
             radial_lensed_shift_list.append(np.mean(radial_lensed_shift[mask]))
 
+
         return (
             np.array(eT_list),
             np.array(eX_list),
@@ -548,6 +549,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                     truth_01_res["image_y"][idx_01],
                 ]
             )
+
+            assert np.mean(lensed_x - (image_dim) / 2) < 3, "mean x should be close to the center"
+            assert np.mean(lensed_y - (image_dim) / 2) < 3, "mean y should be close to the center"
 
             lensed_shift = np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             radial_dist_lensed = np.sqrt((lensed_x - (image_dim) / 2) ** 2 + (lensed_y - (image_dim) / 2) ** 2)
