@@ -249,6 +249,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         gX_true,
         kappa_true,
         dist,
+        lensed_shift,
+        radial_lensed_shift,
         radial_bin_edges,
     ):
         """calculate the sum of eT, eX, and rT in each radial bin for a single halo
@@ -285,6 +287,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         ngal_in_bin = []
         eT_std_list = []
         eX_std_list = []
+        lensed_shift_list = []
+        radial_lensed_shift_list = []
 
         for i_bin in range(n_bins):
             mask = (dist >= radial_bin_edges[i_bin]) & (
@@ -311,6 +315,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             eT_std_list.append(np.std(eT[mask]))
             eX_std_list.append(np.std(eX[mask]))
+            
+            lensed_shift_list.append(np.mean(lensed_shift[mask]))
+            radial_lensed_shift_list.append(np.mean(radial_lensed_shift[mask]))
 
         return (
             np.array(eT_list),
@@ -320,6 +327,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             np.array(gT_true_list),
             np.array(gX_true_list),
             np.array(kappa_true_list),
+            np.array(lensed_shift_list),
+            np.array(radial_lensed_shift_list),
             np.array(r_weighted_gT_list),
             np.array(r_weighted_gX_list),
             np.array(ngal_in_bin),
@@ -411,7 +420,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         print(f"len truth01List: {len(truth01List)}")
 
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
-        image_dim = skymap.config.patchInnerDimensions[0]  # in pixels
+        image_dim = skymap.config.patchInnerDimensions[0] + skymap.config.patchBorder # in pixels
 
         max_pixel = (image_dim - 40) / 2
 
@@ -466,6 +475,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         ngal_in_bin_ensemble = np.empty((len(src00List), n_bins))
         eT_std_ensemble = np.empty((len(src00List), n_bins))
         eX_std_ensemble = np.empty((len(src00List), n_bins))
+        lensed_shift_ensemble = np.empty((len(src00List), n_bins))
+        radial_lensed_shift_ensemble = np.empty((len(src00List), n_bins))
 
         for i, cats in enumerate(
             zip(src00List, src01List, truth00List, truth01List)
@@ -510,7 +521,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
             w_g1 = np.concatenate([sr_00_res["w_g1"], sr_01_res["w_g1"]])
             w_g2 = np.concatenate([sr_00_res["w_g2"], sr_01_res["w_g2"]])
-            # use the prelensed location
+
+            # use the prelensed location in binning
             x = np.concatenate(
                 [
                     truth_00_res["original_image_x"][idx_00],
@@ -524,14 +536,32 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ]
             )
 
+            lensed_x = np.concatenate(
+                [
+                    truth_00_res["image_x"][idx_00],
+                    truth_01_res["image_x"][idx_01],
+                ]
+            )
+            lensed_y = np.concatenate(
+                [
+                    truth_00_res["image_y"][idx_00],
+                    truth_01_res["image_y"][idx_01],
+                ]
+            )
+
+            lensed_shift = np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
+            radial_dist_lensed = np.sqrt((lensed_x - (image_dim) / 2) ** 2 + (lensed_y - (image_dim) / 2) ** 2)
+            radial_dist = np.sqrt((x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2)
+            radial_lensed_shift = radial_dist_lensed - radial_dist
+
             angle = self._get_angle_from_pixel(
-                x, y, image_dim / 2, image_dim / 2
+                x, y, (image_dim) / 2, (image_dim) / 2
             )
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, -angle)
             gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, -angle)
             # w are scalar so no need to rotate
-            dist = np.sqrt((x - image_dim / 2) ** 2 + (y - image_dim / 2) ** 2)
+            dist = np.sqrt((x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2)
             
 
             r11, r22 = self._get_response_from_w_and_der(
@@ -550,6 +580,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 gT_true_list,
                 gX_true_list,
                 kappa_true_list,
+                lensed_shift_list,
+                radial_lensed_shift_list,
                 r_weighted_gT_list,
                 r_weighted_gX_list,
                 ngal_in_bin,
@@ -565,6 +597,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 gX_true,
                 kappa_true,
                 dist,
+                lensed_shift,
+                radial_lensed_shift, 
                 pixel_bin_edges,
             )
             rT_ensemble[i, :] = rT_list
@@ -576,6 +610,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             r_weighted_gT_ensemble[i, :] = r_weighted_gT_list
             r_weighted_gX_ensemble[i, :] = r_weighted_gX_list
             kappa_true_ensemble[i, :] = kappa_true_list
+            lensed_shift_ensemble[i, :] = lensed_shift_list
+            radial_lensed_shift_ensemble[i, :] = radial_lensed_shift_list
             ngal_in_bin_ensemble[i, :] = ngal_in_bin
             eT_std_ensemble[i, :] = eT_std_list / np.sqrt(ngal_in_bin)
             eX_std_ensemble[i, :] = eX_std_list / np.sqrt(ngal_in_bin)
@@ -622,6 +658,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ("gT_true", f"({n_bins},)f8"),
                 ("gX_true", f"({n_bins},)f8"),
                 ("kappa_true", f"({n_bins},)f8"),
+                ("lensed_shift", f"({n_bins},)f8"),
+                ("radial_lensed_shift", f"({n_bins},)f8"),
                 ("r_weighted_gT", f"({n_bins},)f8"),
                 ("r_weighted_gX", f"({n_bins},)f8"),
             ]
@@ -643,6 +681,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         summary_stats["gT_true"] = gT_true_ensemble  # Shape (n_halos, n_bins)
         summary_stats["gX_true"] = gX_true_ensemble  # Shape (n_halos, n_bins)
         summary_stats["kappa_true"] = kappa_true_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["lensed_shift"] = lensed_shift_ensemble  # Shape (n_halos, n_bins)
         summary_stats["r_weighted_gT"] = r_weighted_gT_ensemble  # Shape (n_halos, n_bins)
         summary_stats["r_weighted_gX"] = r_weighted_gX_ensemble  # Shape (n_halos, n_bins)
 
