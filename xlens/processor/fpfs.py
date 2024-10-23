@@ -27,8 +27,13 @@ class FpfsMeasurementConfig(Config):
         doc="Shapelet's Gaussian kernel size for detection",
         default=0.52,
     )
-    sigma_arcsec2 = Field[float](
+    sigma_arcsec1 = Field[float](
         doc="Shapelet's Gaussian kernel size for measurement",
+        optional=True,
+        default=-1,
+    )
+    sigma_arcsec2 = Field[float](
+        doc="Shapelet's Gaussian kernel size for the second measurement",
         optional=True,
         default=-1,
     )
@@ -48,6 +53,10 @@ class FpfsMeasurementConfig(Config):
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
     )
+    do_compute_detect_weight = Field[bool](
+        doc="whether to compute detection mode",
+        default=True,
+    )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
         default=["BAD", "SAT", "CR"],  # I keep CR here
@@ -59,11 +68,23 @@ class FpfsMeasurementConfig(Config):
             raise FieldValidationError(
                 self.__class__.norder, self, "we only support n = 4 or 6"
             )
-        if self.sigma_arcsec < 0.0 or self.sigma_arcsec > 2.0:
+        if self.sigma_arcsec > 2.0:
             raise FieldValidationError(
                 self.__class__.sigma_arcsec,
                 self,
                 "sigma_arcsec in a wrong range",
+            )
+        if self.sigma_arcsec1 > 2.0:
+            raise FieldValidationError(
+                self.__class__.sigma_arcsec1,
+                self,
+                "sigma_arcsec1 in a wrong range",
+            )
+        if self.sigma_arcsec2 > 2.0:
+            raise FieldValidationError(
+                self.__class__.sigma_arcsec2,
+                self,
+                "sigma_arcsec2 in a wrong range",
             )
 
     def setDefaults(self):
@@ -84,6 +105,7 @@ class FpfsMeasurementTask(MeasBaseTask):
             norder=self.config.norder,
             kmax_thres=self.config.kmax_thres,
             sigma_arcsec=self.config.sigma_arcsec,
+            sigma_arcsec1=self.config.sigma_arcsec1,
             sigma_arcsec2=self.config.sigma_arcsec2,
             pthres=self.config.pthres,
             bound=self.config.bound,
@@ -104,6 +126,7 @@ class FpfsMeasurementTask(MeasBaseTask):
         psf_object: utils.LsstPsf | None,
         **kwargs,
     ):
+        assert isinstance(self.config, FpfsMeasurementConfig)
         return anacal.fpfs.process_image(
             fpfs_config=self.fpfs_config,
             pixel_scale=pixel_scale,
@@ -115,6 +138,7 @@ class FpfsMeasurementTask(MeasBaseTask):
             noise_array=noise_array,
             detection=detection,
             psf_object=psf_object,
+            do_compute_detect_weight=self.config.do_compute_detect_weight,
         )
 
     def prepare_data(
@@ -130,8 +154,8 @@ class FpfsMeasurementTask(MeasBaseTask):
         Args:
         exposure (ExposureF):   LSST exposure
         seed (int):  random seed
-        noise_corr (NDArray):  image noise correlation function
-        detection (NDArray | None):  external detection catalog
+        noise_corr (NDArray):  image noise correlation function (None)
+        detection (NDArray | None):  external detection catalog (None)
 
         Returns:
             (dict)
@@ -201,7 +225,9 @@ class FpfsMeasurementTask(MeasBaseTask):
         else:
             noise_array = None
         if detection is not None:
-            pass
+            detection = np.array(
+                detection[["y", "x", "is_peak", "mask_value"]]
+            )
 
         if not self.config.use_average_psf:
             psf_object = utils.LsstPsf(psf=lsst_psf, npix=self.config.npix)
