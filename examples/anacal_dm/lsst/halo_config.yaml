@@ -33,7 +33,6 @@ tasks:
   FpfsTask1:
     class: xlens.process_pipe.fpfs_multiband.FpfsMultibandPipe
     config:
-      do_dm_detection: False
       fpfs.use_average_psf: True
       fpfs.do_adding_noise: False
       connections.dataType: _test_halo_0_rot0
@@ -41,7 +40,6 @@ tasks:
   FpfsTask2:
     class: xlens.process_pipe.fpfs_multiband.FpfsMultibandPipe
     config:
-      do_dm_detection: False
       fpfs.use_average_psf: True
       fpfs.do_adding_noise: False
       connections.dataType: _test_halo_0_rot1
