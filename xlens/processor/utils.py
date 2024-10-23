@@ -65,8 +65,11 @@ def subpixel_shift(image: NDArray, shift_x: int, shift_y: int):
 
     return shifted_image
 
-
-def resize_array(array: NDArray[Any], target_shape: tuple[int, int] = (64, 64), truth_catalog=None):
+def resize_array(
+    array: NDArray[Any],
+    target_shape: tuple[int, int] = (64, 64),
+    truth_catalog=None,
+):
     """This is a util function to resize array to the target shape
     Args:
     array (NDArray): input array

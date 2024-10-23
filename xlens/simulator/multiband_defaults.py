@@ -44,7 +44,7 @@ noise_variance_defaults = {
     },
     "i": {
         "lsst": 0.595,
-        "hsc": 4.7 - 3,
+        "hsc": 4.7e-3,
     },
     "z": {
         "lsst": 1.155,
