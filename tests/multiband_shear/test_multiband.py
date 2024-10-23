@@ -31,6 +31,9 @@ def test_pipetask_run():
     # Assert that the command executed successfully
     assert result.returncode == 0, f"Command failed with error: {result.stderr}"
 
+    command = ["sh", os.path.join(this_dir, "butler_clear.sh")]
+    subprocess.run(command, capture_output=False, text=False)
+
 
 if __name__ == "__main__":
     test_pipetask_run()

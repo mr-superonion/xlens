@@ -53,7 +53,7 @@ testpaths = [
     "tests/",
     "examples/anacal/"
 ]
-addopts = "--nbval --nbval-lax --current-env -vv -s"
+addopts = "--nbval --nbval-lax --nbval-current-env -vv -s"
 
 [tool.black]
 line-length = 80
