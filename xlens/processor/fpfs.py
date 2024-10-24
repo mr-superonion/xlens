@@ -53,7 +53,7 @@ class FpfsMeasurementConfig(Config):
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
     )
-    do_compute_detect_mode = Field[bool](
+    do_compute_detection_mode = Field[bool](
         doc="whether to compute detection mode",
         default=True,
     )
@@ -138,7 +138,7 @@ class FpfsMeasurementTask(MeasBaseTask):
             noise_array=noise_array,
             detection=detection,
             psf_object=psf_object,
-            do_compute_detect_mode=self.config.do_compute_detect_mode,
+            do_compute_detection_mode=self.config.do_compute_detection_mode,
         )
 
     def prepare_data(
