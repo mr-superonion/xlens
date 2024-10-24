@@ -207,7 +207,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         # Apply the rotation for each e1, e2 pair
         # invert the sign of output so the tangential shear is positive
         output[0] = (cos_2angle * e1 - sin_2angle * e2) * (-1)  # Rotated e1
-        output[1] = sin_2angle * e1 + cos_2angle * e2 * (-1)  # Rotated e2
+        output[1] = (sin_2angle * e1 + cos_2angle * e2) * (-1)  # Rotated e2
 
         return output
 
@@ -523,7 +523,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             w_g1 = np.concatenate([sr_00_res["w_g1"], sr_01_res["w_g1"]])
             w_g2 = np.concatenate([sr_00_res["w_g2"], sr_01_res["w_g2"]])
 
-            # use the prelensed location in binning
+            # use the prelensed location in binning and calculating angle
             x = np.concatenate(
                 [
                     truth_00_res["original_image_x"][idx_00],
