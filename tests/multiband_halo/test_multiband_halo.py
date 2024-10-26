@@ -22,7 +22,7 @@ def test_pipetask_shear():
         "-o",
         "run",
         "-p",
-        os.path.join(this_dir, "shear_config.yaml"),
+        os.path.join(this_dir, "halo_config.yaml"),
         "-d",
         "skymap='hsc_sim' AND tract=0 AND patch=0 AND band='i'",
         "--register-dataset-types",
