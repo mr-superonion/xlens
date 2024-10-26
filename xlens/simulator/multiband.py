@@ -419,6 +419,11 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
         default=None,
     )
 
+    no_kappa = Field[bool](
+        doc="whether to exclude kappa field",
+        default=False,
+    )
+
     def validate(self):
         super().validate()
         if self.mass < 1e8:
@@ -460,4 +465,5 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             z_lens=self.config.z_lens,
             ra_lens=self.config.ra_lens,
             dec_lens=self.config.dec_lens,
+            no_kappa=self.config.no_kappa,
         )
