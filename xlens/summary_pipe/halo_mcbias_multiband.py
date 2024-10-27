@@ -465,14 +465,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # use the prelensed location in binning and calculating angle
             x = np.concatenate(
                 [
-                    truth_00_res["original_image_x"][idx_00],
-                    truth_01_res["original_image_x"][idx_01],
+                    truth_00_res["prelensed_image_x"][idx_00],
+                    truth_01_res["prelensed_image_x"][idx_01],
                 ]
             ) 
             y = np.concatenate(
                 [
-                    truth_00_res["original_image_y"][idx_00],
-                    truth_01_res["original_image_y"][idx_01],
+                    truth_00_res["prelensed_image_y"][idx_00],
+                    truth_01_res["prelensed_image_y"][idx_01],
                 ]
             )
             
