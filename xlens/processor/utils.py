@@ -89,13 +89,13 @@ def resize_array(
         array = array[start_h : start_h + target_height, :]
         if truth_catalog is not None:
             truth_catalog["image_y"] = truth_catalog["image_y"] - start_h
-            truth_catalog["original_image_y"] = truth_catalog["original_image_y"] - start_h
+            truth_catalog["prelensed_image_y"] = truth_catalog["prelensed_image_y"] - start_h
     if input_width > target_width:
         start_w = (input_width - target_width) // 2
         array = array[:, start_w : start_w + target_width]
         if truth_catalog is not None:
             truth_catalog["image_x"] = truth_catalog["image_x"] - start_w
-            truth_catalog["original_image_x"] = truth_catalog["original_image_x"] - start_w
+            truth_catalog["prelensed_image_x"] = truth_catalog["prelensed_image_x"] - start_w
 
     # Pad with zeros if smaller
     if input_height < target_height:
