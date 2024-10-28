@@ -190,9 +190,7 @@ class McBiasMultibandPipe(PipelineTask):
             up2.append((em + ep) / 2.0)
             down.append((rm + rp) / 2.0)
 
-            #['y', 'x', 'is_peak', 'mask_value', 'e1', 'e1_g1', 'e2', 'e2_g2', 'q1', 'q1_g1', 'q2', 'q2_g2', 'w', 'w_g1', 'w_g2', 'm00', 'm00_g1', 'm00_g2', 'm20', 'm20_g1', 'm20_g2']
-
-            g1_00 = src00["e1"] * src00["w"] / np.average(src00["e1_g1"] * src00["w"] + src00["e1"] * src00["w_g1"])
+            g1_00 = src00["e1"].value * src00["w"] / np.average(src00["e1_g1"] * src00["w"] + src00["e1"] * src00["w_g1"])
             g2_00 = src00["e2"] * src00["w"] / np.average(src00["e2_g2"] * src00["w"] + src00["e2"] * src00["w_g2"])
             theta_00 = np.arctan2(src00["y"], src00["x"])
             gt_00 = g1_00 * np.cos(2.0 * theta_00) + g2_00 * np.sin(2.0 * theta_00)
@@ -202,8 +200,7 @@ class McBiasMultibandPipe(PipelineTask):
             theta_01 = np.arctan2(src01["y"], src01["x"])
             gt_01 = g1_01 * np.cos(2.0 * theta_01) + g2_01 * np.sin(2.0 * theta_01)
 
-            gt1.append(gt_00)
-            gt1.extend(gt_01)
+            gt1.append(np.average(np.concatenate([gt_00, gt_01])))
 
             g1_10 = src10["e1"] * src10["w"] / np.average(src10["e1_g1"] * src10["w"] + src10["e1"] * src10["w_g1"])
             g2_10 = src10["e2"] * src10["w"] / np.average(src10["e2_g2"] * src10["w"] + src10["e2"] * src10["w_g2"])
@@ -215,13 +212,13 @@ class McBiasMultibandPipe(PipelineTask):
             theta_11 = np.arctan2(src11["y"], src11["x"])
             gt_11 = g1_11 * np.cos(2.0 * theta_11) + g2_11 * np.sin(2.0 * theta_11)
 
-            gt2.append(gt_10)
-            gt2.extend(gt_11)
+            gt2.append(np.average(np.concatenate([gt_10, gt_11])))
 
 
         nsim = len(src00List)
         denom = np.average(down)
         tmp = np.array(up1) / 2.0 + np.array(up2)
+        print(gt1)
         gt1 = np.array(gt1)
         gt2 = np.array(gt2)
         print(
@@ -256,8 +253,8 @@ class McBiasMultibandPipe(PipelineTask):
         )
         print(
                 "Tangential shear+:",
-                np.average(gt1),
+                np.average(gt1, axis=0),
                 "Tangetial shear-:",
-                np.average(gt2),
+                np.average(gt2, axis=0),
                 )
         return
