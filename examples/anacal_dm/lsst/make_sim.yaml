@@ -1,0 +1,47 @@
+description: The pipeline specialized for testing image simulation.
+instrument: lsst.obs.lsst.LsstCam
+
+tasks:
+  MutibandSim1:
+    class: xlens.sim_pipe.shear_tancross.MultibandSimShearTanCrossPipe
+    config:
+      simulator.survey_name: lsst
+      connections.psfType: moffat
+      connections.simType: _test
+      connections.mode: 0
+      connections.irot: 0
+      simulator.mode: 0
+      simulator.irot: 0
+
+  MutibandSim2:
+    class: xlens.sim_pipe.shear_tancross.MultibandSimShearTanCrossPipe
+    config:
+      simulator.survey_name: lsst
+      connections.psfType: moffat
+      connections.simType: _test
+      connections.mode: 0
+      connections.irot: 1
+      simulator.mode: 0
+      simulator.irot: 1
+
+  MutibandSim3:
+    class: xlens.sim_pipe.shear_tancross.MultibandSimShearTanCrossPipe
+    config:
+      simulator.survey_name: lsst
+      connections.psfType: moffat
+      connections.simType: _test
+      connections.mode: 1
+      connections.irot: 0
+      simulator.mode: 1
+      simulator.irot: 0
+
+  MutibandSim4:
+    class: xlens.sim_pipe.shear_tancross.MultibandSimShearTanCrossPipe
+    config:
+      simulator.survey_name: lsst
+      connections.psfType: moffat
+      connections.simType: _test
+      connections.mode: 1
+      connections.irot: 1
+      simulator.mode: 1
+      simulator.irot: 1
