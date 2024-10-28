@@ -67,7 +67,7 @@ class FpfsMultibandPipeConnections(
         name="{outputCoaddName}Coadd_anacal_detection{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
-        minimum=0,
+        # minimum=0,
         multiple=False,
     )
     outputCatalog = cT.Output(

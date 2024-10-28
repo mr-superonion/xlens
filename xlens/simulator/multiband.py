@@ -30,7 +30,7 @@ from lsst.pipe.base import Struct
 from numpy.typing import NDArray
 
 from ..processor.utils import resize_array
-from ..simulator.perturbation import ShearHalo
+from ..simulator.perturbation import ShearHalo, ShearTanCross
 from .base import SimBaseTask
 from .multiband_defaults import (
     mag_zero_defaults,
@@ -449,4 +449,55 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             z_lens=self.config.z_lens,
             ra_lens=self.config.ra_lens,
             dec_lens=self.config.dec_lens,
+        )
+
+
+class MultibandSimShearTanCrossTaskConfig(MultibandSimBaseConfig):
+    mode = Field[int](
+        doc="number of rotations",
+        default=0,
+    )
+    test_target = Field[str](
+        doc="the shear component to test",
+        default="gt",
+    )
+    test_value = Field[float](
+        doc="absolute value of the shear",
+        default=0.02,
+    )
+
+    def validate(self):
+        super().validate()
+
+        if self.test_target not in ["gt", "gx"]:
+            raise FieldValidationError(
+                self.__class__.test_target,
+                self,
+                "test target can only be 'gt' or 'gx'",
+            )
+
+        if self.test_value < 0.0 or self.test_value > 0.10:
+            raise FieldValidationError(
+                self.__class__.test_value,
+                self,
+                "test_value should be in [0.00, 0.10]",
+            )
+
+    def setDefaults(self):
+        super().setDefaults()
+
+
+class MultibandSimShearTanCrossTask(MultibandSimBaseTask):
+    _DefaultName = "MultibandSimShearTanCrossTask"
+    ConfigClass = MultibandSimShearTanCrossTaskConfig
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+
+    def get_perturbation_object(self, **kwargs: Any):
+        assert isinstance(self.config, MultibandSimShearTanCrossTaskConfig)
+        return ShearTanCross(
+            mode=self.config.mode,
+            g_dist=self.config.test_target,
+            shear_value=self.config.test_value,
         )

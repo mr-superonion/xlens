@@ -1,30 +1,30 @@
-pipelineYaml: "shear_config.yaml"
+pipelineYaml: "make_sim.yaml"
 
 wmsServiceClass: lsst.ctrl.bps.parsl.ParslService
 project: shear
 campaign: test
-computeSite: Torque
+computeSite: Slurm
 
 # Make sure these values correspond to ones in the bin/run_demo.sh's
 # pipetask command line.
 payload:
   payloadName: shear_test
-  butlerConfig: /work/xiangchong.li/work/hsc_s23b_sim/tests_dm_lsst/butler.yaml
+  butlerConfig: /hildafs/projects/phy200017p/andypark/xlens/examples/anacal_dm/lsst/butler.yaml
   inCollection: skymaps
-  outputRun: run
-  dataQuery: skymap='lsst_sim' AND tract=0 AND patch in (0..999) AND band='i'
+  outputRun: tans
+  dataQuery: skymap='lsst_sim' AND tract=0 AND patch in (0..1) AND band='i'
   command: --register-dataset-types
 
 
 parsl_config:
   retries: 1
-  provider: Torque
+  provider: Slurm
 
-.site.Torque:
-    class: lsst.ctrl.bps.parsl.sites.Torque
+.site.Slurm:
+    class: lsst.ctrl.bps.parsl.sites.Slurm
     job_name: shear_test
-    nodes: 20
+    nodes: 4
     tasks_per_node: 25
     walltime: "20:00:00"
     queue: large
-    worker_init: "source /work/xiangchong.li/setupIm.sh"
+    worker_init: "source /hildafs/projects/phy200017p/share/ana/setupLsstim1.sh"
