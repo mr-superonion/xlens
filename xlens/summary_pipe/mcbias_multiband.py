@@ -167,6 +167,8 @@ class McBiasMultibandPipe(PipelineTask):
         up1 = []
         up2 = []
         down = []
+        gt1 = []
+        gt2 = []
         print(len(src00List))
         for src00, src01, src10, src11 in zip(
             src00List, src01List, src10List, src11List
@@ -187,9 +189,41 @@ class McBiasMultibandPipe(PipelineTask):
             up1.append(ep - em)
             up2.append((em + ep) / 2.0)
             down.append((rm + rp) / 2.0)
+
+            #['y', 'x', 'is_peak', 'mask_value', 'e1', 'e1_g1', 'e2', 'e2_g2', 'q1', 'q1_g1', 'q2', 'q2_g2', 'w', 'w_g1', 'w_g2', 'm00', 'm00_g1', 'm00_g2', 'm20', 'm20_g1', 'm20_g2']
+
+            g1_00 = src00["e1"] * src00["w"] / np.average(src00["e1_g1"] * src00["w"] + src00["e1"] * src00["w_g1"])
+            g2_00 = src00["e2"] * src00["w"] / np.average(src00["e2_g2"] * src00["w"] + src00["e2"] * src00["w_g2"])
+            theta_00 = np.arctan2(src00["y"], src00["x"])
+            gt_00 = g1_00 * np.cos(2.0 * theta_00) + g2_00 * np.sin(2.0 * theta_00)
+
+            g1_01 = src01["e1"] * src01["w"] / np.average(src01["e1_g1"] * src01["w"] + src01["e1"] * src01["w_g1"])
+            g2_01 = src01["e2"] * src01["w"] / np.average(src01["e2_g2"] * src01["w"] + src01["e2"] * src01["w_g2"])
+            theta_01 = np.arctan2(src01["y"], src01["x"])
+            gt_01 = g1_01 * np.cos(2.0 * theta_01) + g2_01 * np.sin(2.0 * theta_01)
+
+            gt1.append(gt_00)
+            gt1.extend(gt_01)
+
+            g1_10 = src10["e1"] * src10["w"] / np.average(src10["e1_g1"] * src10["w"] + src10["e1"] * src10["w_g1"])
+            g2_10 = src10["e2"] * src10["w"] / np.average(src10["e2_g2"] * src10["w"] + src10["e2"] * src10["w_g2"])
+            theta_10 = np.arctan2(src10["y"], src10["x"])
+            gt_10 = g1_10 * np.cos(2.0 * theta_10) + g2_10 * np.sin(2.0 * theta_10)
+
+            g1_11 = src11["e1"] * src11["w"] / np.average(src11["e1_g1"] * src11["w"] + src11["e1"] * src11["w_g1"])
+            g2_11 = src11["e2"] * src11["w"] / np.average(src11["e2_g2"] * src11["w"] + src11["e2"] * src11["w_g2"])
+            theta_11 = np.arctan2(src11["y"], src11["x"])
+            gt_11 = g1_11 * np.cos(2.0 * theta_11) + g2_11 * np.sin(2.0 * theta_11)
+
+            gt2.append(gt_10)
+            gt2.extend(gt_11)
+
+
         nsim = len(src00List)
         denom = np.average(down)
         tmp = np.array(up1) / 2.0 + np.array(up2)
+        gt1 = np.array(gt1)
+        gt2 = np.array(gt2)
         print(
             "Positive shear:",
             np.average(tmp) / denom,
@@ -220,4 +254,10 @@ class McBiasMultibandPipe(PipelineTask):
             "+-",
             np.std(up2) / denom / np.sqrt(nsim),
         )
+        print(
+                "Tangential shear+:",
+                np.average(gt1),
+                "Tangetial shear-:",
+                np.average(gt2),
+                )
         return
