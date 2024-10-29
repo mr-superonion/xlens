@@ -22,7 +22,7 @@ import lsst.afw.math as afwMath
 import lsst.meas.algorithms as meaAlg
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
-from descwl_shear_sims.shear import ShearRedshift
+from descwl_shear_sims.shear import ShearRedshift, ShearHalo
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.wcs import make_dm_wcs
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
@@ -30,7 +30,6 @@ from lsst.pipe.base import Struct
 from numpy.typing import NDArray
 
 from ..processor.utils import resize_array
-from ..simulator.perturbation import ShearHalo
 from .base import SimBaseTask
 from .multiband_defaults import (
     mag_zero_defaults,
