@@ -2,7 +2,7 @@ import os
 import subprocess
 
 
-def test_pipetask_run():
+def test_pipetask_shear():
     # setup butler
     this_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(this_dir)
@@ -36,4 +36,4 @@ def test_pipetask_run():
 
 
 if __name__ == "__main__":
-    test_pipetask_run()
+    test_pipetask_shear()

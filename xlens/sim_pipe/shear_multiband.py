@@ -96,7 +96,7 @@ class MultibandSimShearPipeConfig(
 ):
     simulator = ConfigurableField(
         target=MultibandSimShearTask,
-        doc="Fpfs Source Measurement Task",
+        doc="Simulation task for shear test",
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
