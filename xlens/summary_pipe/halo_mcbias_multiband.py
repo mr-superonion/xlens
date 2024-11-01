@@ -427,6 +427,11 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             truth_00_res = truth00.get()
             truth_01_res = truth01.get()
 
+            print(f"truth 00 x residual is {np.mean(truth_00_res['image_x'] - (image_dim) / 2)}")
+            print(f"truth 00 y residual is {np.mean(truth_00_res['image_y'] - (image_dim) / 2)}")
+            print(f"truth 01 x residual is {np.mean(truth_01_res['image_x'] - (image_dim) / 2)}")
+            print(f"truth 01 y residual is {np.mean(truth_01_res['image_y'] - (image_dim) / 2)}")
+
             idx_00, match_dist_00 = self._match_input_to_det(
                 truth_00_res["image_x"],
                 truth_00_res["image_y"],
@@ -490,11 +495,12 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                     truth_01_res["image_y"][idx_01],
                 ]
             )
-
             assert np.mean(lensed_x - (image_dim) / 2) < 100, f"mean x should be close to the center, distance is {np.mean(lensed_x - (image_dim) / 2)}, index is {i}"
             assert np.mean(lensed_y - (image_dim) / 2) < 100, f"mean y should be close to the center, distance is {np.mean(lensed_y - (image_dim) / 2)}, index is {i}"
 
-            print(f"mean x: {np.mean(lensed_x - (image_dim) / 2)}, mean y: {np.mean(lensed_y - (image_dim) / 2)}")
+            print(f"lensed mean x offset: {np.mean(lensed_x - (image_dim) / 2)}, lensed mean y: {np.mean(lensed_y - (image_dim) / 2)}")
+            print(f"prelensed mean x offset: {np.mean(x - (image_dim) / 2)}, prelensed mean y: {np.mean(y - (image_dim) / 2)}")
+
             lensed_shift = np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             radial_dist_lensed = np.sqrt((lensed_x - (image_dim) / 2) ** 2 + (lensed_y - (image_dim) / 2) ** 2)
             radial_dist = np.sqrt((x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2)
@@ -503,13 +509,13 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             print(f"mean radial lensed shift: {np.mean(radial_lensed_shift)}")
 
             angle = self._get_angle_from_pixel(
-                x, y, (image_dim) / 2, (image_dim) / 2
+                lensed_x, lensed_y, (image_dim) / 2, (image_dim) / 2
             )
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, -angle)
             gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, -angle)
             # w are scalar so no need to rotate
-            dist = np.sqrt((x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2)
+            dist = np.sqrt((lensed_x - (image_dim) / 2) ** 2 + (lensed_y - (image_dim) / 2) ** 2)
             
 
             r11, r22 = self._get_response_from_w_and_der(
