@@ -8,4 +8,5 @@ config.skyMap["discrete"].pixelScale = 0.168  # arcsec/pixel
 config.skyMap["discrete"].patchInnerDimensions = [1000, 1000]  # in pixels
 config.skyMap["discrete"].projection = "TAN"
 config.skyMap["discrete"].tractOverlap = 0
+config.skyMap['discrete'].patchBorder = 0
 config.name = "hsc_sim"

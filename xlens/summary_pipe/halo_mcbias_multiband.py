@@ -367,12 +367,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
     def run(self, skymap, src00List, src01List, truth00List, truth01List):
 
+        assert skymap.config.patchBorder == 0, "patch border must be zero"
+
         print("load truth list")
         print(f"len truth00List: {len(truth00List)}")
         print(f"len truth01List: {len(truth01List)}")
 
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
-        image_dim = skymap.config.patchInnerDimensions[0] + skymap.config.patchBorder # in pixels
+        image_dim = skymap.config.patchInnerDimensions[0] # in pixels
         print("image dim", image_dim)
 
         max_pixel = (image_dim - 40) / 2
