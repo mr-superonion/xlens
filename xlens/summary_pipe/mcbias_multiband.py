@@ -167,6 +167,9 @@ class McBiasMultibandPipe(PipelineTask):
         up1 = []
         up2 = []
         down = []
+        up1_t = []
+        up2_t = []
+        down_t = []
         gt1 = []
         gt2 = []
         print(len(src00List))
@@ -190,37 +193,48 @@ class McBiasMultibandPipe(PipelineTask):
             up2.append((em + ep) / 2.0)
             down.append((rm + rp) / 2.0)
 
-            g1_00 = src00["e1"].value * src00["w"] / np.average(src00["e1_g1"] * src00["w"] + src00["e1"] * src00["w_g1"])
-            g2_00 = src00["e2"] * src00["w"] / np.average(src00["e2_g2"] * src00["w"] + src00["e2"] * src00["w_g2"])
             theta_00 = np.arctan2(src00["y"], src00["x"])
-            gt_00 = g1_00 * np.cos(2.0 * theta_00) + g2_00 * np.sin(2.0 * theta_00)
-
-            g1_01 = src01["e1"] * src01["w"] / np.average(src01["e1_g1"] * src01["w"] + src01["e1"] * src01["w_g1"])
-            g2_01 = src01["e2"] * src01["w"] / np.average(src01["e2_g2"] * src01["w"] + src01["e2"] * src01["w_g2"])
             theta_01 = np.arctan2(src01["y"], src01["x"])
-            gt_01 = g1_01 * np.cos(2.0 * theta_01) + g2_01 * np.sin(2.0 * theta_01)
-
-            gt1.append(np.average(np.concatenate([gt_00, gt_01])))
-
-            g1_10 = src10["e1"] * src10["w"] / np.average(src10["e1_g1"] * src10["w"] + src10["e1"] * src10["w_g1"])
-            g2_10 = src10["e2"] * src10["w"] / np.average(src10["e2_g2"] * src10["w"] + src10["e2"] * src10["w_g2"])
             theta_10 = np.arctan2(src10["y"], src10["x"])
-            gt_10 = g1_10 * np.cos(2.0 * theta_10) + g2_10 * np.sin(2.0 * theta_10)
-
-            g1_11 = src11["e1"] * src11["w"] / np.average(src11["e1_g1"] * src11["w"] + src11["e1"] * src11["w_g1"])
-            g2_11 = src11["e2"] * src11["w"] / np.average(src11["e2_g2"] * src11["w"] + src11["e2"] * src11["w_g2"])
             theta_11 = np.arctan2(src11["y"], src11["x"])
-            gt_11 = g1_11 * np.cos(2.0 * theta_11) + g2_11 * np.sin(2.0 * theta_11)
 
-            gt2.append(np.average(np.concatenate([gt_10, gt_11])))
+            et_00 = src00["e1"] * np.cos(2.0 * theta_00) + src00["e2"] * np.sin(2.0 * theta_00)
+            et_01 = src01["e1"] * np.cos(2.0 * theta_01) + src01["e2"] * np.sin(2.0 * theta_01)
+            et_10 = src10["e1"] * np.cos(2.0 * theta_10) + src10["e2"] * np.sin(2.0 * theta_10)
+            et_11 = src11["e1"] * np.cos(2.0 * theta_11) + src11["e2"] * np.sin(2.0 * theta_11)
 
+            et_m = np.sum(et_00 * src00["w"]) + np.sum(et_01 * src01["w"])
+            et_p = np.sum(et_10 * src10["w"]) + np.sum(et_11 * src11["w"])
+
+            rm_00_1 = src00["e1_g1"] * src00["w"] + src00["e1"] * src00["w_g1"]
+            rm_00_2 = src00["e2_g2"] * src00["w"] + src00["e2"] * src00["w_g2"]
+            rm_00 = np.sum(rm_00_1 * np.cos(2.0 * theta_00) + rm_00_2 * np.sin(2.0 * theta_00))
+
+            rm_01_1 = src01["e1_g1"] * src01["w"] + src01["e1"] * src01["w_g1"]
+            rm_01_2 = src01["e2_g2"] * src01["w"] + src01["e2"] * src01["w_g2"]
+            rm_01 = np.sum(rm_01_1 * np.cos(2.0 * theta_01) + rm_01_2 * np.sin(2.0 * theta_01))
+
+            rm_t = rm_00 + rm_01
+
+            rp_10_1 = src10["e1_g1"] * src10["w"] + src10["e1"] * src10["w_g1"]
+            rp_10_2 = src10["e2_g2"] * src10["w"] + src10["e2"] * src10["w_g2"]
+            rp_10 = np.sum(rp_10_1 * np.cos(2.0 * theta_10) + rp_10_2 * np.sin(2.0 * theta_10))
+
+            rp_11_1 = src11["e1_g1"] * src11["w"] + src11["e1"] * src11["w_g1"]
+            rp_11_2 = src11["e2_g2"] * src11["w"] + src11["e2"] * src11["w_g2"]
+            rp_11 = np.sum(rp_11_1 * np.cos(2.0 * theta_11) + rp_11_2 * np.sin(2.0 * theta_11))
+
+            rp_t = rp_10 + rp_11
+
+            up1_t.append(et_p - et_m)
+            up2_t.append((et_m + et_p) / 2.0)
+            down_t.append((rm_t + rp_t) / 2.0)
 
         nsim = len(src00List)
         denom = np.average(down)
         tmp = np.array(up1) / 2.0 + np.array(up2)
-        print(gt1)
-        gt1 = np.array(gt1)
-        gt2 = np.array(gt2)
+        tmp_t = np.array(up1_t) / 2.0 + np.array(up2_t)
+        denom_t = np.average(down_t)
         print(
             "Positive shear:",
             np.average(tmp) / denom,
@@ -253,8 +267,10 @@ class McBiasMultibandPipe(PipelineTask):
         )
         print(
                 "Tangential shear+:",
-                np.average(gt1, axis=0),
+                np.average(tmp_t) / denom_t,
                 "Tangetial shear-:",
-                np.average(gt2, axis=0),
+                np.average(-np.array(up1_t) / 2.0 + np.array(up2_t)) / denom_t
                 )
+        print("MC:",
+              np.average(up1_t) / denom_t / 0.5 / 2.0 - 1)
         return
