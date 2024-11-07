@@ -2,54 +2,37 @@ description: The pipeline specialized for testing image simulation.
 instrument: lsst.obs.lsst.LsstCam
 
 tasks:
-  MutibandSim1:
-    class: xlens.sim_pipe.shear_multiband.MultibandSimShearPipe
+  DetectionTask1:
+    class: xlens.process_pipe.jointdetect.JointDetectPipe
     config:
-      simulator.survey_name: lsst
-      connections.psfType: moffat
-      connections.simType: _test
-      connections.mode: 0
-      connections.irot: 0
-      simulator.mode: 0
-      simulator.irot: 0
+      fpfs.use_average_psf: True
+      fpfs.do_adding_noise: False
+      connections.dataType: _test_0_rot0
 
-  MutibandSim2:
-    class: xlens.sim_pipe.shear_multiband.MultibandSimShearPipe
+  DetectionTask2:
+    class: xlens.process_pipe.jointdetect.JointDetectPipe
     config:
-      simulator.survey_name: lsst
-      connections.psfType: moffat
-      connections.simType: _test
-      connections.mode: 0
-      connections.irot: 1
-      simulator.mode: 0
-      simulator.irot: 1
+      fpfs.use_average_psf: True
+      fpfs.do_adding_noise: False
+      connections.dataType: _test_0_rot1
 
-  MutibandSim3:
-    class: xlens.sim_pipe.shear_multiband.MultibandSimShearPipe
+  DetectionTask3:
+    class: xlens.process_pipe.jointdetect.JointDetectPipe
     config:
-      simulator.survey_name: lsst
-      connections.psfType: moffat
-      connections.simType: _test
-      connections.mode: 1
-      connections.irot: 0
-      simulator.mode: 1
-      simulator.irot: 0
+      fpfs.use_average_psf: True
+      fpfs.do_adding_noise: False
+      connections.dataType: _test_1_rot0
 
-  MutibandSim4:
-    class: xlens.sim_pipe.shear_multiband.MultibandSimShearPipe
+  DetectionTask4:
+    class: xlens.process_pipe.jointdetect.JointDetectPipe
     config:
-      simulator.survey_name: lsst
-      connections.psfType: moffat
-      connections.simType: _test
-      connections.mode: 1
-      connections.irot: 1
-      simulator.mode: 1
-      simulator.irot: 1
+      fpfs.use_average_psf: True
+      fpfs.do_adding_noise: False
+      connections.dataType: _test_1_rot1
 
   FpfsTask1:
     class: xlens.process_pipe.fpfs_multiband.FpfsMultibandPipe
     config:
-      do_dm_detection: False
       fpfs.use_average_psf: True
       fpfs.do_adding_noise: False
       connections.dataType: _test_0_rot0
@@ -57,7 +40,6 @@ tasks:
   FpfsTask2:
     class: xlens.process_pipe.fpfs_multiband.FpfsMultibandPipe
     config:
-      do_dm_detection: False
       fpfs.use_average_psf: True
       fpfs.do_adding_noise: False
       connections.dataType: _test_0_rot1
@@ -65,7 +47,6 @@ tasks:
   FpfsTask3:
     class: xlens.process_pipe.fpfs_multiband.FpfsMultibandPipe
     config:
-      do_dm_detection: False
       fpfs.use_average_psf: True
       fpfs.do_adding_noise: False
       connections.dataType: _test_1_rot0
@@ -73,7 +54,6 @@ tasks:
   FpfsTask4:
     class: xlens.process_pipe.fpfs_multiband.FpfsMultibandPipe
     config:
-      do_dm_detection: False
       fpfs.use_average_psf: True
       fpfs.do_adding_noise: False
       connections.dataType: _test_1_rot1
