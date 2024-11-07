@@ -231,17 +231,12 @@ class McBiasMultibandPipe(PipelineTask):
             "+-",
             np.std(tmp) / denom / np.sqrt(nsim),
         )
-        if self.sname[-1] == self.ename[-1]:
-            print(
-                "Multiplicative bias:",
-                np.average(up1) / denom / self.svalue / 2.0 - 1,
-                "+-",
-                np.std(up1) / denom / np.sqrt(nsim) / self.svalue / 2.0,
-            )
-        else:
-            print(
-                "We do not estimate multiplicative bias:",
-            )
+        print(
+            "Multiplicative bias:",
+            np.average(up1) / denom / self.svalue / 2.0 - 1,
+            "+-",
+            np.std(up1) / denom / np.sqrt(nsim) / self.svalue / 2.0,
+        )
         print(
             "Additive bias:",
             np.average(up2) / denom,
