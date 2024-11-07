@@ -177,14 +177,6 @@ class McBiasMultibandPipe(PipelineTask):
             src01 = src01.get()
             src10 = src10.get()
             src11 = src11.get()
-            em = np.sum(src00[en] * src00["w"]) + np.sum(src01[en] * src01["w"])
-            ep = np.sum(src10[en] * src10["w"]) + np.sum(src11[en] * src11["w"])
-            rm = np.sum(
-                src00[egn] * src00["w"] + src00[en] * src00["w_g1"]
-            ) + np.sum(src01[egn] * src01["w"] + src01[en] * src01["w_g1"])
-            rp = np.sum(
-                src10[egn] * src10["w"] + src10[en] * src10["w_g1"]
-            ) + np.sum(src11[egn] * src11["w"] + src11[en] * src11["w_g1"])
 
             theta_00 = np.arctan2(src00["y"], src00["x"])
             theta_01 = np.arctan2(src01["y"], src01["x"])
@@ -219,15 +211,13 @@ class McBiasMultibandPipe(PipelineTask):
 
             rp = rp_10 + rp_11
 
-            up1_t.append(et_p - et_m)
-            up2_t.append((et_m + et_p) / 2.0)
-            down_t.append((rm_t + rp_t) / 2.0)
+            up1.append(ep - em)
+            up2.append((em + ep) / 2.0)
+            down.append((rm + rp) / 2.0)
 
         nsim = len(src00List)
         denom = np.average(down)
         tmp = np.array(up1) / 2.0 + np.array(up2)
-        tmp_t = np.array(up1_t) / 2.0 + np.array(up2_t)
-        denom_t = np.average(down_t)
         print(
             "Positive shear:",
             np.average(tmp) / denom,
@@ -258,14 +248,6 @@ class McBiasMultibandPipe(PipelineTask):
             "+-",
             np.std(up2) / denom / np.sqrt(nsim),
         )
-        print(
-                "Tangential shear+:",
-                np.average(tmp_t) / denom_t,
-                "Tangetial shear-:",
-                np.average(-np.array(up1_t) / 2.0 + np.array(up2_t)) / denom_t
-                )
-        print("MC:",
-              np.average(up1_t) / denom_t / 0.5 / 2.0 - 1)
         return
 
     def run_12(self, src00List, src01List, src10List, src11List):
