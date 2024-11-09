@@ -99,7 +99,7 @@ class HaloMcBiasMultibandPipeConnections(
 
     outputSummary = cT.Output(
         doc="Summary statistics",
-        name="{inputCoaddName}summary_stats{dataType}",
+        name="{inputCoaddName}_halo_mc_summary_stats{dataType}",
         storageClass="ArrowAstropy",
         dimensions=("skymap",),
     )
@@ -276,7 +276,20 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         Returns:
             eT(array): sum of eT in each radial bin
             eX(array): sum of eX in each radial bin
-            rT(array): sum of resposne in each radial bin
+            rT(array): sum of tangential resposne in each radial bin
+            rX(array): sum of radial response in each radial bin
+            gT_true(array): sum of true tangential shear in each radial bin
+            gX_true(array): sum of true cross shear in each radial bin
+            kappa_true(array): sum of true convergence in each radial bin
+            lensed_shift(array): mean of lensed shift in each radial bin
+            radial_lensed_shift(array): mean of lensed shift in each radial bin, projected on the radial direction
+            r_weighted_gT(array): sum of tangential shear weighted by rT in each radial bin
+            r_weighted_gX(array): sum of cross shear weighted by rX in each radial bin
+            ngal_in_bin(array): number of galaxies in each radial bin
+            eT_std_list(array): per galaxy standard deviation of eT in each radial bin
+            eX_std_list(array): per galaxy standard deviation of eX in each radial bin
+            median_match_dist_list(array): median of the match distance in each radial bin, expected to be around 0.5
+            match_failure_rate_list(array): fraction of match distance larger than 2 in each radial bin
         """
 
         n_bins = len(radial_bin_edges) - 1
@@ -364,6 +377,32 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         assert np.median(distance) <= 5, f"distance is too large, max distance is {np.max(distance)}"
 
         return idx, distance
+    
+    @staticmethod
+    def get_summary_struct(n_halos, n_bins):
+        dt = [
+            ("angular_bin_left", f"({n_bins},)f8"),
+            ("angular_bin_right", f"({n_bins},)f8"),
+            ("ngal_in_bin", f"({n_bins},)i4"),
+            ("eT", f"({n_bins},)f8"),
+            ("eT_std", f"({n_bins},)f8"),
+            ("eX", f"({n_bins},)f8"),
+            ("eX_std", f"({n_bins},)f8"),
+            ("rT", f"({n_bins},)f8"),
+            ("rT_std", f"({n_bins},)f8"),
+            ("rX", f"({n_bins},)f8"),
+            ("rX_std", f"({n_bins},)f8"),
+            ("gT_true", f"({n_bins},)f8"),
+            ("gX_true", f"({n_bins},)f8"),
+            ("kappa_true", f"({n_bins},)f8"),
+            ("lensed_shift", f"({n_bins},)f8"),
+            ("radial_lensed_shift", f"({n_bins},)f8"),
+            ("r_weighted_gT", f"({n_bins},)f8"),
+            ("r_weighted_gX", f"({n_bins},)f8"),
+            ("median_match_dist", f"({n_bins},)f8"),
+            ("match_failure_rate", f"({n_bins},)f8"),
+        ]
+        return np.zeros(n_halos, dtype=dt)
 
     def run(self, skymap, src00List, src01List, truth00List, truth01List):
 
@@ -573,30 +612,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             median_match_dist_ensemble[i, :] = median_match_dist
             match_failure_rate_ensemble[i, :] = match_failure_rate
 
-        def get_summary_struct(n_halos, n_bins):
-            dt = [
-                ("angular_bin_left", f"({n_bins},)f8"),
-                ("angular_bin_right", f"({n_bins},)f8"),
-                ("ngal_in_bin", f"({n_bins},)i4"),
-                ("eT", f"({n_bins},)f8"),
-                ("eT_std", f"({n_bins},)f8"),
-                ("eX", f"({n_bins},)f8"),
-                ("eX_std", f"({n_bins},)f8"),
-                ("rT", f"({n_bins},)f8"),
-                ("rT_std", f"({n_bins},)f8"),
-                ("rX", f"({n_bins},)f8"),
-                ("rX_std", f"({n_bins},)f8"),
-                ("gT_true", f"({n_bins},)f8"),
-                ("gX_true", f"({n_bins},)f8"),
-                ("kappa_true", f"({n_bins},)f8"),
-                ("lensed_shift", f"({n_bins},)f8"),
-                ("radial_lensed_shift", f"({n_bins},)f8"),
-                ("r_weighted_gT", f"({n_bins},)f8"),
-                ("r_weighted_gX", f"({n_bins},)f8"),
-                ("median_match_dist", f"({n_bins},)f8"),
-                ("match_failure_rate", f"({n_bins},)f8"),
-            ]
-            return np.zeros(n_halos, dtype=dt)
+
 
 
         summary_stats = get_summary_struct(n_realization, len(angular_bin_edges) - 1)
