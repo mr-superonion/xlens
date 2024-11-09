@@ -26,6 +26,7 @@ __all__ = [
 ]
 
 import logging
+logger = logging.getLogger(__name__)
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
@@ -408,21 +409,20 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         assert skymap.config.patchBorder == 0, "patch border must be zero"
 
-        print("load truth list")
-        print(f"len truth00List: {len(truth00List)}")
-        print(f"len truth01List: {len(truth01List)}")
+        logger.info("load truth list")
+        logger.info(f"len truth00List: {len(truth00List)}")
+        logger.info(f"len truth01List: {len(truth01List)}")
 
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0] # in pixels
-        print("image dim", image_dim)
 
         max_pixel = (image_dim - 40) / 2
-        print("pixel scale", pixel_scale)
 
-        print("pixel scale", pixel_scale)
-        print("image dim", image_dim)
-        print("max pixel", max_pixel)
-        print("max pixel in arcsec", max_pixel * pixel_scale)
+        logger.info("image dim", image_dim)
+        logger.info("pixel scale", pixel_scale)
+
+        logger.info("max pixel", max_pixel)
+        logger.info("max pixel in arcsec", max_pixel * pixel_scale)
 
         n_bins = 10
         pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
@@ -539,15 +539,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             assert np.mean(lensed_x - (image_dim) / 2) < 100, f"mean x should be close to the center, distance is {np.mean(lensed_x - (image_dim) / 2)}, index is {i}"
             assert np.mean(lensed_y - (image_dim) / 2) < 100, f"mean y should be close to the center, distance is {np.mean(lensed_y - (image_dim) / 2)}, index is {i}"
 
-            print(f"lensed mean x offset: {np.mean(lensed_x - (image_dim) / 2)}, lensed mean y: {np.mean(lensed_y - (image_dim) / 2)}")
-            print(f"prelensed mean x offset: {np.mean(x - (image_dim) / 2)}, prelensed mean y: {np.mean(y - (image_dim) / 2)}")
+            logger.info(f"lensed mean x offset: {np.mean(lensed_x - (image_dim) / 2)}, lensed mean y: {np.mean(lensed_y - (image_dim) / 2)}")
+            logger.info(f"prelensed mean x offset: {np.mean(x - (image_dim) / 2)}, prelensed mean y: {np.mean(y - (image_dim) / 2)}")
 
             lensed_shift = np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             radial_dist_lensed = np.sqrt((lensed_x - (image_dim) / 2) ** 2 + (lensed_y - (image_dim) / 2) ** 2)
             radial_dist = np.sqrt((x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2)
             radial_lensed_shift = (radial_dist_lensed - radial_dist) * pixel_scale
 
-            print(f"mean radial lensed shift: {np.mean(radial_lensed_shift)}")
+            logger.info(f"mean radial lensed shift: {np.mean(radial_lensed_shift)}")
 
             angle = self._get_angle_from_pixel(
                 lensed_x, lensed_y, (image_dim) / 2, (image_dim) / 2
@@ -612,10 +612,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             median_match_dist_ensemble[i, :] = median_match_dist
             match_failure_rate_ensemble[i, :] = match_failure_rate
 
-
-
-
-        summary_stats = get_summary_struct(n_realization, len(angular_bin_edges) - 1)
+        summary_stats = self.get_summary_struct(n_realization, len(angular_bin_edges) - 1)
         
         # Populate the structured array directly with the ensemble variables
         summary_stats["angular_bin_left"] = np.tile(angular_bin_edges[:-1], (n_realization, 1))
