@@ -26,6 +26,7 @@ __all__ = [
 ]
 
 import logging
+logger = logging.getLogger(__name__)
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
@@ -99,7 +100,7 @@ class HaloMcBiasMultibandPipeConnections(
 
     outputSummary = cT.Output(
         doc="Summary statistics",
-        name="{inputCoaddName}summary_stats{dataType}",
+        name="{inputCoaddName}_halo_mc_summary_stats{dataType}",
         storageClass="ArrowAstropy",
         dimensions=("skymap",),
     )
@@ -276,7 +277,20 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         Returns:
             eT(array): sum of eT in each radial bin
             eX(array): sum of eX in each radial bin
-            rT(array): sum of resposne in each radial bin
+            rT(array): sum of tangential resposne in each radial bin
+            rX(array): sum of radial response in each radial bin
+            gT_true(array): sum of true tangential shear in each radial bin
+            gX_true(array): sum of true cross shear in each radial bin
+            kappa_true(array): sum of true convergence in each radial bin
+            lensed_shift(array): mean of lensed shift in each radial bin
+            radial_lensed_shift(array): mean of lensed shift in each radial bin, projected on the radial direction
+            r_weighted_gT(array): sum of tangential shear weighted by rT in each radial bin
+            r_weighted_gX(array): sum of cross shear weighted by rX in each radial bin
+            ngal_in_bin(array): number of galaxies in each radial bin
+            eT_std_list(array): per galaxy standard deviation of eT in each radial bin
+            eX_std_list(array): per galaxy standard deviation of eX in each radial bin
+            median_match_dist_list(array): median of the match distance in each radial bin, expected to be around 0.5
+            match_failure_rate_list(array): fraction of match distance larger than 2 in each radial bin
         """
 
         n_bins = len(radial_bin_edges) - 1
@@ -364,22 +378,51 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         assert np.median(distance) <= 5, f"distance is too large, max distance is {np.max(distance)}"
 
         return idx, distance
+    
+    @staticmethod
+    def get_summary_struct(n_halos, n_bins):
+        dt = [
+            ("angular_bin_left", f"({n_bins},)f8"),
+            ("angular_bin_right", f"({n_bins},)f8"),
+            ("ngal_in_bin", f"({n_bins},)i4"),
+            ("eT", f"({n_bins},)f8"),
+            ("eT_std", f"({n_bins},)f8"),
+            ("eX", f"({n_bins},)f8"),
+            ("eX_std", f"({n_bins},)f8"),
+            ("rT", f"({n_bins},)f8"),
+            ("rT_std", f"({n_bins},)f8"),
+            ("rX", f"({n_bins},)f8"),
+            ("rX_std", f"({n_bins},)f8"),
+            ("gT_true", f"({n_bins},)f8"),
+            ("gX_true", f"({n_bins},)f8"),
+            ("kappa_true", f"({n_bins},)f8"),
+            ("lensed_shift", f"({n_bins},)f8"),
+            ("radial_lensed_shift", f"({n_bins},)f8"),
+            ("r_weighted_gT", f"({n_bins},)f8"),
+            ("r_weighted_gX", f"({n_bins},)f8"),
+            ("median_match_dist", f"({n_bins},)f8"),
+            ("match_failure_rate", f"({n_bins},)f8"),
+        ]
+        return np.zeros(n_halos, dtype=dt)
 
     def run(self, skymap, src00List, src01List, truth00List, truth01List):
 
-        print("load truth list")
-        print(f"len truth00List: {len(truth00List)}")
-        print(f"len truth01List: {len(truth01List)}")
+        assert skymap.config.patchBorder == 0, "patch border must be zero"
+
+        logger.info("load truth list")
+        logger.info(f"len truth00List: {len(truth00List)}")
+        logger.info(f"len truth01List: {len(truth01List)}")
 
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
-        image_dim = skymap.config.patchInnerDimensions[0] + skymap.config.patchBorder # in pixels
+        image_dim = skymap.config.patchInnerDimensions[0] # in pixels
 
         max_pixel = (image_dim - 40) / 2
 
-        print("pixel scale", pixel_scale)
-        print("image dim", image_dim)
-        print("max pixel", max_pixel)
-        print("max pixel in arcsec", max_pixel * pixel_scale)
+        logger.info("image dim", image_dim)
+        logger.info("pixel scale", pixel_scale)
+
+        logger.info("max pixel", max_pixel)
+        logger.info("max pixel in arcsec", max_pixel * pixel_scale)
 
         n_bins = 10
         pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
@@ -424,6 +467,11 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             sr_01_res = src01.get()
             truth_00_res = truth00.get()
             truth_01_res = truth01.get()
+
+            print(f"truth 00 x residual is {np.mean(truth_00_res['image_x'] - (image_dim) / 2)}")
+            print(f"truth 00 y residual is {np.mean(truth_00_res['image_y'] - (image_dim) / 2)}")
+            print(f"truth 01 x residual is {np.mean(truth_01_res['image_x'] - (image_dim) / 2)}")
+            print(f"truth 01 y residual is {np.mean(truth_01_res['image_y'] - (image_dim) / 2)}")
 
             idx_00, match_dist_00 = self._match_input_to_det(
                 truth_00_res["image_x"],
@@ -488,26 +536,27 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                     truth_01_res["image_y"][idx_01],
                 ]
             )
-
             assert np.mean(lensed_x - (image_dim) / 2) < 100, f"mean x should be close to the center, distance is {np.mean(lensed_x - (image_dim) / 2)}, index is {i}"
             assert np.mean(lensed_y - (image_dim) / 2) < 100, f"mean y should be close to the center, distance is {np.mean(lensed_y - (image_dim) / 2)}, index is {i}"
 
-            print(f"mean x: {np.mean(lensed_x - (image_dim) / 2)}, mean y: {np.mean(lensed_y - (image_dim) / 2)}")
+            logger.info(f"lensed mean x offset: {np.mean(lensed_x - (image_dim) / 2)}, lensed mean y: {np.mean(lensed_y - (image_dim) / 2)}")
+            logger.info(f"prelensed mean x offset: {np.mean(x - (image_dim) / 2)}, prelensed mean y: {np.mean(y - (image_dim) / 2)}")
+
             lensed_shift = np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             radial_dist_lensed = np.sqrt((lensed_x - (image_dim) / 2) ** 2 + (lensed_y - (image_dim) / 2) ** 2)
             radial_dist = np.sqrt((x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2)
             radial_lensed_shift = (radial_dist_lensed - radial_dist) * pixel_scale
 
-            print(f"mean radial lensed shift: {np.mean(radial_lensed_shift)}")
+            logger.info(f"mean radial lensed shift: {np.mean(radial_lensed_shift)}")
 
             angle = self._get_angle_from_pixel(
-                x, y, (image_dim) / 2, (image_dim) / 2
+                lensed_x, lensed_y, (image_dim) / 2, (image_dim) / 2
             )
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, -angle)
             gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, -angle)
             # w are scalar so no need to rotate
-            dist = np.sqrt((x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2)
+            dist = np.sqrt((lensed_x - (image_dim) / 2) ** 2 + (lensed_y - (image_dim) / 2) ** 2)
             
 
             r11, r22 = self._get_response_from_w_and_der(
@@ -563,33 +612,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             median_match_dist_ensemble[i, :] = median_match_dist
             match_failure_rate_ensemble[i, :] = match_failure_rate
 
-        def get_summary_struct(n_halos, n_bins):
-            dt = [
-                ("angular_bin_left", f"({n_bins},)f8"),
-                ("angular_bin_right", f"({n_bins},)f8"),
-                ("ngal_in_bin", f"({n_bins},)i4"),
-                ("eT", f"({n_bins},)f8"),
-                ("eT_std", f"({n_bins},)f8"),
-                ("eX", f"({n_bins},)f8"),
-                ("eX_std", f"({n_bins},)f8"),
-                ("rT", f"({n_bins},)f8"),
-                ("rT_std", f"({n_bins},)f8"),
-                ("rX", f"({n_bins},)f8"),
-                ("rX_std", f"({n_bins},)f8"),
-                ("gT_true", f"({n_bins},)f8"),
-                ("gX_true", f"({n_bins},)f8"),
-                ("kappa_true", f"({n_bins},)f8"),
-                ("lensed_shift", f"({n_bins},)f8"),
-                ("radial_lensed_shift", f"({n_bins},)f8"),
-                ("r_weighted_gT", f"({n_bins},)f8"),
-                ("r_weighted_gX", f"({n_bins},)f8"),
-                ("median_match_dist", f"({n_bins},)f8"),
-                ("match_failure_rate", f"({n_bins},)f8"),
-            ]
-            return np.zeros(n_halos, dtype=dt)
-
-
-        summary_stats = get_summary_struct(n_realization, len(angular_bin_edges) - 1)
+        summary_stats = self.get_summary_struct(n_realization, len(angular_bin_edges) - 1)
         
         # Populate the structured array directly with the ensemble variables
         summary_stats["angular_bin_left"] = np.tile(angular_bin_edges[:-1], (n_realization, 1))
