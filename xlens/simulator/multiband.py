@@ -13,6 +13,8 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
+import logging
+logger = logging.getLogger(__name__)
 from typing import Any
 
 import anacal
@@ -296,6 +298,8 @@ class MultibandSimBaseTask(SimBaseTask):
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
         )
+        logger.debug(f"current shape of data is {data.shape}")
+        logger.debug(f"resizing data to {height} x {width}")
         data, truth_catalog = resize_array(
             data,
             (height, width),
