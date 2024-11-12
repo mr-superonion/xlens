@@ -35,23 +35,23 @@ sys_npix = 49
 
 noise_variance_defaults = {
     "g": {
-        "lsst": 0.315,
+        "lsst": 0.099,
         "hsc": 1.4e-3,
     },
     "r": {
-        "lsst": 0.371,
+        "lsst": 0.138,
         "hsc": 2.9e-3,
     },
     "i": {
-        "lsst": 0.595,
+        "lsst": 0.354,
         "hsc": 4.7e-3,
     },
     "z": {
-        "lsst": 1.155,
+        "lsst": 1.334,
         "hsc": 19e-3,
     },
     "y": {
-        "lsst": 1.2,
+        "lsst": 1.41,
         "hsc": 85e-3,
     },
 }

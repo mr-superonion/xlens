@@ -11,10 +11,6 @@ from .base import MeasBaseTask
 
 
 class FpfsMeasurementConfig(Config):
-    norder = Field[int](
-        doc="The maximum radial number of shapelets used in anacal.fpfs",
-        default=4,
-    )
     npix = Field[int](
         doc="number of pixels in stamp",
         default=64,
@@ -36,6 +32,16 @@ class FpfsMeasurementConfig(Config):
         doc="Shapelet's Gaussian kernel size for the second measurement",
         optional=True,
         default=-1,
+    )
+    snr_min = Field[float](
+        doc="Shapelet's Gaussian kernel size for the second measurement",
+        optional=True,
+        default=12.0,
+    )
+    r2_min = Field[float](
+        doc="Shapelet's Gaussian kernel size for the second measurement",
+        optional=True,
+        default=0.1,
     )
     pthres = Field[float](
         doc="peak detection threshold",
@@ -64,10 +70,6 @@ class FpfsMeasurementConfig(Config):
 
     def validate(self):
         super().validate()
-        if self.norder not in [4, 6]:
-            raise FieldValidationError(
-                self.__class__.norder, self, "we only support n = 4 or 6"
-            )
         if self.sigma_arcsec > 2.0:
             raise FieldValidationError(
                 self.__class__.sigma_arcsec,
@@ -102,13 +104,14 @@ class FpfsMeasurementTask(MeasBaseTask):
         assert isinstance(self.config, FpfsMeasurementConfig)
         self.fpfs_config = anacal.fpfs.FpfsConfig(
             npix=self.config.npix,
-            norder=self.config.norder,
             kmax_thres=self.config.kmax_thres,
             sigma_arcsec=self.config.sigma_arcsec,
             sigma_arcsec1=self.config.sigma_arcsec1,
             sigma_arcsec2=self.config.sigma_arcsec2,
             pthres=self.config.pthres,
             bound=self.config.bound,
+            snr_min=self.config.snr_min,
+            r2_min=self.config.r2_min,
         )
         return
 
@@ -124,6 +127,7 @@ class FpfsMeasurementTask(MeasBaseTask):
         noise_array: NDArray | None,
         detection: NDArray | None,
         psf_object: utils.LsstPsf | None,
+        base_column_name: str | None,
         **kwargs,
     ):
         assert isinstance(self.config, FpfsMeasurementConfig)
@@ -139,6 +143,7 @@ class FpfsMeasurementTask(MeasBaseTask):
             detection=detection,
             psf_object=psf_object,
             do_compute_detect_weight=self.config.do_compute_detect_weight,
+            base_column_name=base_column_name,
         )
 
     def prepare_data(
@@ -148,6 +153,7 @@ class FpfsMeasurementTask(MeasBaseTask):
         seed: int,
         noise_corr: NDArray | None = None,
         detection: NDArray | None = None,
+        band: str | None = None,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -225,14 +231,17 @@ class FpfsMeasurementTask(MeasBaseTask):
         else:
             noise_array = None
         if detection is not None:
-            detection = np.array(
-                detection[["y", "x", "is_peak", "mask_value"]]
-            )
+            detection = np.array(detection[["y", "x", "is_peak", "mask_value"]])
 
         if not self.config.use_average_psf:
             psf_object = utils.LsstPsf(psf=lsst_psf, npix=self.config.npix)
         else:
             psf_object = None
+
+        if band is None:
+            base_column_name = None
+        else:
+            base_column_name = band + "_"
         return {
             "pixel_scale": pixel_scale,
             "mag_zero": mag_zero,
@@ -243,4 +252,5 @@ class FpfsMeasurementTask(MeasBaseTask):
             "noise_array": noise_array,
             "detection": detection,
             "psf_object": psf_object,
+            "base_column_name": base_column_name,
         }

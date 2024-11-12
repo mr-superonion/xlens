@@ -28,10 +28,7 @@ __all__ = [
 import logging
 from typing import Any
 
-import lsst.afw.table as afwTable
-import lsst.daf.base as dafBase
 import lsst.pipe.base.connectionTypes as cT
-from lsst.meas.algorithms import SourceDetectionTask
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.meas.deblender import SourceDeblendTask
 from lsst.pex.config import ConfigurableField, Field
@@ -106,6 +103,9 @@ class FpfsMultibandPipeConfig(
                 raise ValueError(
                     "Only set fpfs.do_adding_noise=False on simulation"
                 )
+
+    def setDefaults(self):
+        super().setDefaults()
 
 
 class FpfsMultibandPipe(PipelineTask):
