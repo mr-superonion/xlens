@@ -139,6 +139,10 @@ class SelBiasMultibandPipeConfig(
             )
 
 
+def name_add_d(ename, nchars):
+    return ename[:-nchars] + "d" + ename[-nchars:]
+
+
 class SelBiasMultibandPipe(PipelineTask):
     _DefaultName = "FpfsSelBiasTask"
     ConfigClass = SelBiasMultibandPipeConfig
@@ -160,16 +164,13 @@ class SelBiasMultibandPipe(PipelineTask):
         self.svalue = self.config.shear_value
         self.ename = self.config.shape_name
         ins = "_dg" + self.ename[-1]
-        self.egname = self.name_add_d(self.ename, 2) + ins
+        self.egname = name_add_d(self.ename, 2) + ins
         self.wname = "fpfs_w"
-        self.wgname = self.name_add_d(self.wname, 1) + ins
+        self.wgname = name_add_d(self.wname, 1) + ins
         self.fname = self.config.m00_name
-        self.fgname = self.name_add_d(self.fname, 3) + ins
+        self.fgname = name_add_d(self.fname, 3) + ins
         self.cuts = self.config.m00_cuts
         return
-
-    def name_add_d(self, ename, nchars):
-        return ename[:-nchars] + "d" + ename[-nchars:]
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, SelBiasMultibandPipeConfig)
