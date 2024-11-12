@@ -20,16 +20,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 __all__ = [
-    "JointDetectPipeConfig",
-    "JointDetectPipe",
-    "JointDetectPipeConnections",
+    "FpfsJointPipeConfig",
+    "FpfsJointPipe",
+    "FpfsJointPipeConnections",
 ]
 
 import logging
 from typing import Any
 
-import lsst.afw.table as afwTable
-import lsst.daf.base as dafBase
+import lsst.afw.table as afwtable
+import lsst.daf.base as dafbase
 import lsst.pipe.base.connectionTypes as cT
 from lsst.meas.algorithms import SourceDetectionTask
 from lsst.meas.base import SkyMapIdGeneratorConfig
@@ -46,7 +46,7 @@ from lsst.utils.logging import LsstLogAdapter
 from ..processor.fpfs import FpfsMeasurementTask
 
 
-class JointDetectPipeConnections(
+class FpfsJointPipeConnections(
     PipelineTaskConnections,
     dimensions=("tract", "patch", "band", "skymap"),
     defaultTemplates={
@@ -73,9 +73,9 @@ class JointDetectPipeConnections(
         super().__init__(config=config)
 
 
-class JointDetectPipeConfig(
+class FpfsJointPipeConfig(
     PipelineTaskConfig,
-    pipelineConnections=JointDetectPipeConnections,
+    pipelineConnections=FpfsJointPipeConnections,
 ):
     do_dm_detection = Field[bool](
         doc="whether to do detection",
@@ -93,11 +93,11 @@ class JointDetectPipeConfig(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
     )
-    psfCache = Field[int](
-        doc="Size of psfCache",
+    psf_cache = Field[int](
+        doc="Size of PSF cache",
         default=100,
     )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
+    id_generator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
         super().validate()
@@ -111,16 +111,17 @@ class JointDetectPipeConfig(
         super().setDefaults()
         self.fpfs.sigma_arcsec1 = -1
         self.fpfs.sigma_arcsec2 = -1
+        self.fpfs.do_compute_detect_weight = True
 
 
-class JointDetectPipe(PipelineTask):
-    _DefaultName = "JointDetectPipe"
-    ConfigClass = JointDetectPipeConfig
+class FpfsJointPipe(PipelineTask):
+    _DefaultName = "FpfsJointPipe"
+    ConfigClass = FpfsJointPipeConfig
 
     def __init__(
         self,
         *,
-        config: JointDetectPipeConfig | None = None,
+        config: FpfsJointPipeConfig | None = None,
         log: logging.Logger | LsstLogAdapter | None = None,
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -128,17 +129,17 @@ class JointDetectPipe(PipelineTask):
         super().__init__(
             config=config, log=log, initInputs=initInputs, **kwargs
         )
-        assert isinstance(self.config, JointDetectPipeConfig)
+        assert isinstance(self.config, FpfsJointPipeConfig)
         if self.config.do_dm_detection:
-            self.schema = afwTable.SourceTable.makeMinimalSchema()
-            self.algMetadata = dafBase.PropertyList()
+            self.schema = afwtable.SourceTable.makeMinimalSchema()
+            self.algMetadata = dafbase.PropertyList()
             self.makeSubtask("detection", schema=self.schema)
             self.makeSubtask("deblend", schema=self.schema)
         self.makeSubtask("fpfs")
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
-        assert isinstance(self.config, JointDetectPipeConfig)
+        assert isinstance(self.config, FpfsJointPipeConfig)
         # Retrieve the filename of the input exposure
         data = self.prepare_data(butlerQC=butlerQC, inputRefs=inputRefs)
         outputs = Struct(detection=self.fpfs.run(**data))
@@ -151,18 +152,18 @@ class JointDetectPipe(PipelineTask):
         butlerQC,
         inputRefs,
     ):
-        assert isinstance(self.config, JointDetectPipeConfig)
+        assert isinstance(self.config, FpfsJointPipeConfig)
 
         inputs = butlerQC.get(inputRefs)
 
-        # Set psfCache
+        # Set psf_cache
         # move this to run after gen2 deprecation
-        inputs["exposure"].getPsf().setCacheCapacity(self.config.psfCache)
+        inputs["exposure"].getPsf().setCacheCapacity(self.config.psf_cache)
 
         # Get unique integer ID for IdFactory and RNG seeds; only the latter
         # should really be used as the IDs all come from the input catalog.
-        idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
-        inputs["seed"] = idGenerator.catalog_id
+        id_generator = self.config.id_generator.apply(butlerQC.quantum.dataId)
+        inputs["seed"] = id_generator.catalog_id
         inputs["detection"] = None
         inputs["noise_corr"] = None
         return self.fpfs.prepare_data(**inputs)

@@ -41,7 +41,7 @@ from lsst.utils.logging import LsstLogAdapter
 
 class McBiasMultibandPipeConnections(
     PipelineTaskConnections,
-    dimensions=("skymap", "band"),
+    dimensions=(),
     defaultTemplates={
         "inputCoaddName": "deep",
         "dataType": "",
@@ -49,8 +49,8 @@ class McBiasMultibandPipeConnections(
 ):
     src00List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_meas{dataType}_0_rot0",
-        dimensions=("skymap", "band", "tract", "patch"),
+        name="{inputCoaddName}Coadd_anacal_{dataType}_0_rot0",
+        dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
@@ -58,8 +58,8 @@ class McBiasMultibandPipeConnections(
 
     src01List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_meas{dataType}_0_rot1",
-        dimensions=("skymap", "band", "tract", "patch"),
+        name="{inputCoaddName}Coadd_anacal_{dataType}_0_rot1",
+        dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
@@ -67,8 +67,8 @@ class McBiasMultibandPipeConnections(
 
     src10List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_meas{dataType}_1_rot0",
-        dimensions=("skymap", "band", "tract", "patch"),
+        name="{inputCoaddName}Coadd_anacal_{dataType}_1_rot0",
+        dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
@@ -76,8 +76,8 @@ class McBiasMultibandPipeConnections(
 
     src11List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_meas{dataType}_1_rot1",
-        dimensions=("skymap", "band", "tract", "patch"),
+        name="{inputCoaddName}Coadd_anacal_{dataType}_1_rot1",
+        dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
@@ -107,20 +107,13 @@ class McBiasMultibandPipeConfig(
     def validate(self):
         super().validate()
         if len(self.connections.dataType) == 0:
-            raise ValueError("connections.dataTape missing")
+            raise ValueError("connections.dataType missing")
 
         if self.shear_name not in ["g1", "g2"]:
             raise FieldValidationError(
                 self.__class__.shear_name,
                 self,
                 "shear_name can only be 'g1' or 'g2'",
-            )
-
-        if self.shape_name not in ["q1", "q2", "e1", "e2"]:
-            raise FieldValidationError(
-                self.__class__.shear_name,
-                self,
-                "shape_name can only be 'e1', 'e2', 'q1' or 'q2'",
             )
 
         if self.shear_value < 0.0 or self.shear_value > 0.10:
@@ -167,7 +160,6 @@ class McBiasMultibandPipe(PipelineTask):
         up1 = []
         up2 = []
         down = []
-        print(len(src00List))
         for src00, src01, src10, src11 in zip(
             src00List, src01List, src10List, src11List
         ):
