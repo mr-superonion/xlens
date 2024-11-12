@@ -207,7 +207,7 @@ class McBiasMultibandPipe(PipelineTask):
 
             rp_11_1 = src11["e1_g1"] * src11["w"] + src11["e1"] * src11["w_g1"]
             rp_11_2 = src11["e2_g2"] * src11["w"] + src11["e2"] * src11["w_g2"]
-            rp_11 = np.sum(rp_11_1 * np.cos(2.0 * theta_11)**2 + rp_11_2 * np.sin(2.0 * theta_11))**2
+            rp_11 = np.sum(rp_11_1 * np.cos(2.0 * theta_11)**2 + rp_11_2 * np.sin(2.0 * theta_11)**2)
 
             rp = rp_10 + rp_11
 
