@@ -165,6 +165,7 @@ class McBiasMultibandPipe(PipelineTask):
         return
 
     def run_tx(self, src00List, src01List, src10List, src11List):
+        print('running tx')
         up1 = []
         up2 = []
         down = []
@@ -176,10 +177,10 @@ class McBiasMultibandPipe(PipelineTask):
             src10 = src10.get()
             src11 = src11.get()
 
-            theta_00 = np.arctan2(src00["y"], src00["x"])
-            theta_01 = np.arctan2(src01["y"], src01["x"])
-            theta_10 = np.arctan2(src10["y"], src10["x"])
-            theta_11 = np.arctan2(src11["y"], src11["x"])
+            theta_00 = np.arctan2(src00["y"] - 2550, src00["x"] - 2550)
+            theta_01 = np.arctan2(src01["y"] - 2550, src01["x"] - 2550)
+            theta_10 = np.arctan2(src10["y"] - 2550, src10["x"] - 2550)
+            theta_11 = np.arctan2(src11["y"] - 2550, src11["x"] - 2550)
 
             et_00 = src00["e1"] * np.cos(2.0 * theta_00) + src00["e2"] * np.sin(2.0 * theta_00)
             et_01 = src01["e1"] * np.cos(2.0 * theta_01) + src01["e2"] * np.sin(2.0 * theta_01)
@@ -192,7 +193,7 @@ class McBiasMultibandPipe(PipelineTask):
             rm_00_1 = src00["e1_g1"] * src00["w"] + src00["e1"] * src00["w_g1"]
             rm_00_2 = src00["e2_g2"] * src00["w"] + src00["e2"] * src00["w_g2"]
             rm_00 = np.sum(rm_00_1 * np.cos(2.0 * theta_00)**2 + rm_00_2 * np.sin(2.0 * theta_00)**2)
-            print(rm_00_1, rm_00_2, rm00)
+            print(np.sum(rm_00_1), np.sum(rm_00_2), rm_00)
 
             rm_01_1 = src01["e1_g1"] * src01["w"] + src01["e1"] * src01["w_g1"]
             rm_01_2 = src01["e2_g2"] * src01["w"] + src01["e2"] * src01["w_g2"]
