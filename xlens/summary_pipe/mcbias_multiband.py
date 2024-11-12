@@ -41,43 +41,43 @@ from lsst.utils.logging import LsstLogAdapter
 
 class McBiasMultibandPipeConnections(
     PipelineTaskConnections,
-    dimensions=(),
+    dimensions=("skymap", "band"),
     defaultTemplates={
         "inputCoaddName": "deep",
         "dataType": "",
     },
 ):
-    src00List = cT.Input(
+    src00_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
         name="{inputCoaddName}Coadd_anacal_{dataType}_0_rot0",
-        dimensions=("skymap", "tract", "patch"),
+        dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
     )
 
-    src01List = cT.Input(
+    src01_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
         name="{inputCoaddName}Coadd_anacal_{dataType}_0_rot1",
-        dimensions=("skymap", "tract", "patch"),
+        dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
     )
 
-    src10List = cT.Input(
+    src10_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
         name="{inputCoaddName}Coadd_anacal_{dataType}_1_rot0",
-        dimensions=("skymap", "tract", "patch"),
+        dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
     )
 
-    src11List = cT.Input(
+    src11_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
         name="{inputCoaddName}Coadd_anacal_{dataType}_1_rot1",
-        dimensions=("skymap", "tract", "patch"),
+        dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
@@ -93,7 +93,7 @@ class McBiasMultibandPipeConfig(
 ):
     shape_name = Field[str](
         doc="ellipticity column name",
-        default="e1",
+        default="fpfs_e1",
     )
     shear_name = Field[str](
         doc="the shear component to test",
@@ -124,6 +124,10 @@ class McBiasMultibandPipeConfig(
             )
 
 
+def name_add_d(ename, nchars):
+    return ename[:-nchars] + "d" + ename[-nchars:]
+
+
 class McBiasMultibandPipe(PipelineTask):
     _DefaultName = "FpfsTask"
     ConfigClass = McBiasMultibandPipeConfig
@@ -141,10 +145,13 @@ class McBiasMultibandPipe(PipelineTask):
         )
         assert isinstance(self.config, McBiasMultibandPipeConfig)
 
-        self.ename = self.config.shape_name
-        self.sname = self.config.shear_name
         self.svalue = self.config.shear_value
-        self.egname = self.ename + "_g" + self.ename[-1]
+        self.sname = self.config.shear_name
+        self.ename = self.config.shape_name
+        ins = "_dg" + self.ename[-1]
+        self.egname = name_add_d(self.ename, 2) + ins
+        self.wname = "fpfs_w"
+        self.wgname = name_add_d(self.wname, 1) + ins
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -154,32 +161,34 @@ class McBiasMultibandPipe(PipelineTask):
         self.run(**inputs)
         return
 
-    def run(self, src00List, src01List, src10List, src11List):
+    def run(self, src00_list, src01_list, src10_list, src11_list):
         en = self.ename
         egn = self.egname
+        wn = self.wname
+        wgn = self.wgname
         up1 = []
         up2 = []
         down = []
         for src00, src01, src10, src11 in zip(
-            src00List, src01List, src10List, src11List
+            src00_list, src01_list, src10_list, src11_list
         ):
             src00 = src00.get()
             src01 = src01.get()
             src10 = src10.get()
             src11 = src11.get()
-            em = np.sum(src00[en] * src00["w"]) + np.sum(src01[en] * src01["w"])
-            ep = np.sum(src10[en] * src10["w"]) + np.sum(src11[en] * src11["w"])
+            em = np.sum(src00[en] * src00[wn]) + np.sum(src01[en] * src01[wn])
+            ep = np.sum(src10[en] * src10[wn]) + np.sum(src11[en] * src11[wn])
             rm = np.sum(
-                src00[egn] * src00["w"] + src00[en] * src00["w_g1"]
-            ) + np.sum(src01[egn] * src01["w"] + src01[en] * src01["w_g1"])
+                src00[egn] * src00[wn] + src00[en] * src00[wgn]
+            ) + np.sum(src01[egn] * src01[wn] + src01[en] * src01[wgn])
             rp = np.sum(
-                src10[egn] * src10["w"] + src10[en] * src10["w_g1"]
-            ) + np.sum(src11[egn] * src11["w"] + src11[en] * src11["w_g1"])
+                src10[egn] * src10[wn] + src10[en] * src10[wgn]
+            ) + np.sum(src11[egn] * src11[wn] + src11[en] * src11[wgn])
 
             up1.append(ep - em)
             up2.append((em + ep) / 2.0)
             down.append((rm + rp) / 2.0)
-        nsim = len(src00List)
+        nsim = len(src00_list)
         denom = np.average(down)
         tmp = np.array(up1) / 2.0 + np.array(up2)
         print(

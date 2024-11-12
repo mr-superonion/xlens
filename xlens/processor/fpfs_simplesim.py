@@ -153,9 +153,10 @@ class FpfsSimpleSimTask(Task):
                         irot=irot,
                         data=res,
                     )
-                up[mode] = up[mode] + np.sum(res["e1"] * res["w"])
+                up[mode] = up[mode] + np.sum(res["fpfs_e1"] * res["fpfs_w"])
                 down[mode] = down[mode] + np.sum(
-                    res["e1"] * res["w_g1"] + res["e1_g1"] * res["w"]
+                    res["fpfs_e1"] * res["fpfs_dw_dg1"]
+                    + res["fpfs_de1_dg1"] * res["fpfs_w"]
                 )
         out[0] = (up[1] - up[0]) / 2.0 / self.config.simulator.test_value
         out[1] = (up[1] + up[0]) / 2.0

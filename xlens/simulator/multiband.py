@@ -13,6 +13,9 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Any
 
 import anacal
@@ -22,7 +25,7 @@ import lsst.afw.math as afwMath
 import lsst.meas.algorithms as meaAlg
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
-from descwl_shear_sims.shear import ShearRedshift
+from descwl_shear_sims.shear import ShearHalo, ShearRedshift
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.wcs import make_dm_wcs
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
@@ -30,7 +33,6 @@ from lsst.pipe.base import Struct
 from numpy.typing import NDArray
 
 from ..processor.utils import resize_array
-from ..simulator.perturbation import ShearHalo
 from .base import SimBaseTask
 from .multiband_defaults import (
     mag_zero_defaults,
@@ -145,6 +147,14 @@ class MultibandSimBaseTask(SimBaseTask):
             pixel_scale=pixel_scale,
             layout=self.config.layout,
         )
+
+        # for fix source redshift
+        if (
+            "z_source" in self.config.keys()
+            and self.config.z_source is not None
+        ):
+            galaxy_catalog._wldeblend_cat["redshift"] = self.config.z_source
+
         return galaxy_catalog
 
     def get_noise_seed(self, seed, irot):
@@ -292,6 +302,8 @@ class MultibandSimBaseTask(SimBaseTask):
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
         )
+        logger.debug(f"current shape of data is {data.shape}")
+        logger.debug(f"resizing data to {height} x {width}")
         data, truth_catalog = resize_array(
             data,
             (height, width),
@@ -414,6 +426,11 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
         default=None,
     )
 
+    no_kappa = Field[bool](
+        doc="whether to exclude kappa field",
+        default=False,
+    )
+
     def validate(self):
         super().validate()
         if self.mass < 1e8:
@@ -427,6 +444,12 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
                 self.__class__.z_lens,
                 self,
                 "halo redshift is wrong",
+            )
+        if self.z_lens > self.z_source:
+            raise FieldValidationError(
+                self.__class__.z_lens,
+                self,
+                "halo redshift is larger than source redshift",
             )
 
     def setDefaults(self):
@@ -449,4 +472,5 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             z_lens=self.config.z_lens,
             ra_lens=self.config.ra_lens,
             dec_lens=self.config.dec_lens,
+            no_kappa=self.config.no_kappa,
         )
