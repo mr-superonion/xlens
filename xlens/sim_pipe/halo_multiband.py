@@ -96,7 +96,7 @@ class MultibandSimHaloPipeConfig(
 ):
     simulator = ConfigurableField(
         target=MultibandSimHaloTask,
-        doc="Fpfs Source Measurement Task",
+        doc="Multiband Halo Simulation Task",
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
