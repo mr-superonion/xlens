@@ -37,6 +37,7 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
 )
 from lsst.utils.logging import LsstLogAdapter
+from lsst.skymap import BaseSkyMap
 
 
 class McBiasMultibandPipeConnections(
@@ -47,6 +48,12 @@ class McBiasMultibandPipeConnections(
         "dataType": "",
     },
 ):
+    skymap = cT.Input(
+        doc="SkyMap to use in processing",
+        name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
+        storageClass="SkyMap",
+        dimensions=("skymap",),
+    )
     src00List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
         name="{inputCoaddName}Coadd_anacal_meas{dataType}_0_rot0",
@@ -164,7 +171,38 @@ class McBiasMultibandPipe(PipelineTask):
             self.run_12(**inputs)
         return
 
-    def run_tx(self, src00List, src01List, src10List, src11List):
+    @staticmethod
+    def _rotate_spin_2_vec(e1, e2, angle):
+        e1 = np.asarray(e1)
+        e2 = np.asarray(e2)
+        angle = np.asarray(angle)
+
+        output = np.zeros((2, len(e1)))
+        cos_2angle = np.cos(2*angle)
+        sin_2angle = np.sin(2*angle)
+        output[0] = (cos_2angle * e1 - sin_2angle * e2) * (-1)
+        output[1] = (sin_2angle * e1 + cos_2angle * e2) * (-1)
+        return output
+    
+    @staticmethod
+    def _get_angle_from_pixel(x, y, x_cen, y_cen):
+        return np.arctan2(y - y_cen, x - x_cen)
+
+    @staticmethod
+    def _get_response_from_w_and_der(e1, e2, w, e1_g1, e2_g2, w_g1, w_g2):
+        R11 = e1_g1 * w + e1 * w_g1
+        R22 = e2_g2 * w + e2 * w_g2
+        return R11, R22
+
+    @staticmethod
+    def _rotate_spin_2_matrix(R11, R22, angle):
+        output = np.zeros((2, len(R11)))
+        output[0] = np.cos(2*angle) ** 2 * R11 + np.sin(2*angle) ** 2 * R22
+        output[1] = np.sin(2*angle) ** 2 * R11 + np.cos(2*angle) ** 2 * R22
+        return output
+
+    def run_tx(self, skymap, src00List, src01List, src10List, src11List):
+        image_dim = skymap.config.patchInnerDimensions[0] # in pixels
         print('running tx')
         up1 = []
         up2 = []
@@ -177,43 +215,53 @@ class McBiasMultibandPipe(PipelineTask):
             src10 = src10.get()
             src11 = src11.get()
 
-            theta_00 = np.arctan2(src00["y"] - 2550, src00["x"] - 2550)
-            theta_01 = np.arctan2(src01["y"] - 2550, src01["x"] - 2550)
-            theta_10 = np.arctan2(src10["y"] - 2550, src10["x"] - 2550)
-            theta_11 = np.arctan2(src11["y"] - 2550, src11["x"] - 2550)
+            xp = np.concatenate([src00["x"], src01["x"]])
+            yp = np.concatenate([src00["y"], src01["y"]])
+            anglep = self._get_angle_from_pixel(xp, yp, image_dim/2, image_dim/2)
+            e1p = np.concatenate([src00["e1"], src01["e1"]])
+            e2p = np.concatenate([src00["e2"], src01["e2"]])
+            e1_g1p = np.concatenate([src00["e1_g1"], src01["e1_g1"]])
+            e2_g2p = np.concatenate([src00["e2_g2"], src01["e2_g2"]])
+            wp = np.concatenate([src00["w"], src01["w"]])
+            w_g1p = np.concatenate([src00["w_g1"], src01["w_g1"]])
+            w_g2p = np.concatenate([src00["w_g2"], src01["w_g2"]])
 
-            et_00 = src00["e1"] * np.cos(2.0 * theta_00) + src00["e2"] * np.sin(2.0 * theta_00)
-            et_01 = src01["e1"] * np.cos(2.0 * theta_01) + src01["e2"] * np.sin(2.0 * theta_01)
-            et_10 = src10["e1"] * np.cos(2.0 * theta_10) + src10["e2"] * np.sin(2.0 * theta_10)
-            et_11 = src11["e1"] * np.cos(2.0 * theta_11) + src11["e2"] * np.sin(2.0 * theta_11)
+            eTp, eXp = self._rotate_spin_2_vec(e1p, e2p, -anglep)
+            R1p, R2p = self._get_response_from_w_and_der(
+                    e1p, e2p, wp, e1_g1p, e2_g2p, w_g1p, w_g2p
+                    )
+            RTp, RXp = self._rotate_spin_2_matrix(R1p, R2p, anglep)
 
-            em = np.sum(et_00 * src00["w"]) + np.sum(et_01 * src01["w"])
-            ep = np.sum(et_10 * src10["w"]) + np.sum(et_11 * src11["w"])
+            eTp_sum = np.sum(eTp * wp)
+            eXp_sum = np.sum(eXp * wp)
+            RTp_sum = np.sum(RTp)
+            RXp_sum = np.sum(RXp)
 
-            rm_00_1 = src00["e1_g1"] * src00["w"] + src00["e1"] * src00["w_g1"]
-            rm_00_2 = src00["e2_g2"] * src00["w"] + src00["e2"] * src00["w_g2"]
-            rm_00 = np.sum(rm_00_1 * np.cos(2.0 * theta_00)**2 + rm_00_2 * np.sin(2.0 * theta_00)**2)
-            print(np.sum(rm_00_1), np.sum(rm_00_2), rm_00)
+            xm = np.concatenate([src10["x"], src11["x"]])
+            ym = np.concatenate([src10["y"], src11["y"]])
+            anglem = self._get_angle_from_pixel(xm, ym, image_dim/2, image_dim/2)
+            e1m = np.concatenate([src10["e1"], src11["e1"]])
+            e2m = np.concatenate([src10["e2"], src11["e2"]])
+            e1_g1m = np.concatenate([src10["e1_g1"], src11["e1_g1"]])
+            e2_g2m = np.concatenate([src10["e2_g2"], src11["e2_g2"]])
+            wm = np.concatenate([src10["w"], src11["w"]])
+            w_g1m = np.concatenate([src10["w_g1"], src11["w_g1"]])
+            w_g2m = np.concatenate([src10["w_g2"], src11["w_g2"]])
 
-            rm_01_1 = src01["e1_g1"] * src01["w"] + src01["e1"] * src01["w_g1"]
-            rm_01_2 = src01["e2_g2"] * src01["w"] + src01["e2"] * src01["w_g2"]
-            rm_01 = np.sum(rm_01_1 * np.cos(2.0 * theta_01)**2 + rm_01_2 * np.sin(2.0 * theta_01)**2)
+            eTm, eXm = self._rotate_spin_2_vec(e1m, e2m, -anglem)
+            R1m, R2m = self._get_response_from_w_and_der(
+                    e1m, e2m, wm, e1_g1m, e2_g2m, w_g1m, w_g2m
+                    )
+            RTm, RXm = self._rotate_spin_2_matrix(R1m, R2m, anglem)
 
-            rm = rm_00 + rm_01
+            eTm_sum = np.sum(eTm * wm)
+            eXm_sum = np.sum(eXm * wm)
+            RTm_sum = np.sum(RTm)
+            RXm_sum = np.sum(RXm)
 
-            rp_10_1 = src10["e1_g1"] * src10["w"] + src10["e1"] * src10["w_g1"]
-            rp_10_2 = src10["e2_g2"] * src10["w"] + src10["e2"] * src10["w_g2"]
-            rp_10 = np.sum(rp_10_1 * np.cos(2.0 * theta_10)**2 + rp_10_2 * np.sin(2.0 * theta_10)**2)
-
-            rp_11_1 = src11["e1_g1"] * src11["w"] + src11["e1"] * src11["w_g1"]
-            rp_11_2 = src11["e2_g2"] * src11["w"] + src11["e2"] * src11["w_g2"]
-            rp_11 = np.sum(rp_11_1 * np.cos(2.0 * theta_11)**2 + rp_11_2 * np.sin(2.0 * theta_11)**2)
-
-            rp = rp_10 + rp_11
-
-            up1.append(ep - em)
-            up2.append((em + ep) / 2.0)
-            down.append((rm + rp) / 2.0)
+            up1.append(eTp_sum - eTm_sum)
+            up2.append((eTm_sum + eTp_sum) / 2.0)
+            down.append((RTm_sum + RTp_sum) / 2.0)
 
         nsim = len(src00List)
         denom = np.average(down)
@@ -245,7 +293,7 @@ class McBiasMultibandPipe(PipelineTask):
         )
         return
 
-    def run_12(self, src00List, src01List, src10List, src11List):
+    def run_12(self, skymap, src00List, src01List, src10List, src11List):
         en = self.ename
         egn = self.egname
         up1 = []
