@@ -25,8 +25,6 @@ __all__ = [
     "HaloMcBiasMultibandPipeConnections",
 ]
 
-import logging
-logger = logging.getLogger(__name__)
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
@@ -161,7 +159,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         self,
         *,
         config: HaloMcBiasMultibandPipeConfig | None = None,
-        log: logging.Logger | LsstLogAdapter | None = None,
+        log: logging.self.log | LsstLogAdapter | None = None,
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
@@ -409,20 +407,20 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         assert skymap.config.patchBorder == 0, "patch border must be zero"
 
-        logger.info("load truth list")
-        logger.info(f"len truth00List: {len(truth00List)}")
-        logger.info(f"len truth01List: {len(truth01List)}")
+        self.log.info("load truth list")
+        self.log.info(f"len truth00List: {len(truth00List)}")
+        self.log.info(f"len truth01List: {len(truth01List)}")
 
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0] # in pixels
 
         max_pixel = (image_dim - 64) / 2
 
-        logger.info("image dim", image_dim)
-        logger.info("pixel scale", pixel_scale)
+        self.log.info("image dim", image_dim)
+        self.log.info("pixel scale", pixel_scale)
 
-        logger.info("max pixel", max_pixel)
-        logger.info("max pixel in arcsec", max_pixel * pixel_scale)
+        self.log.info("max pixel", max_pixel)
+        self.log.info("max pixel in arcsec", max_pixel * pixel_scale)
 
         n_bins = 10
         pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
@@ -439,7 +437,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         xn = self.xname
         yn = self.yname
 
-        print("The length of source list is", len(src00List), len(src01List))
+        self.log.info("The length of source list is", len(src00List), len(src01List))
         n_realization = len(src00List)
 
         rT_ensemble = np.empty((len(src00List), n_bins))
@@ -468,10 +466,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             truth_00_res = truth00.get()
             truth_01_res = truth01.get()
 
-            print(f"truth 00 x residual is {np.mean(truth_00_res['image_x'] - (image_dim) / 2)}")
-            print(f"truth 00 y residual is {np.mean(truth_00_res['image_y'] - (image_dim) / 2)}")
-            print(f"truth 01 x residual is {np.mean(truth_01_res['image_x'] - (image_dim) / 2)}")
-            print(f"truth 01 y residual is {np.mean(truth_01_res['image_y'] - (image_dim) / 2)}")
+            self.log.info(f"truth 00 x residual is {np.mean(truth_00_res['image_x'] - (image_dim) / 2)}")
+            self.log.info(f"truth 00 y residual is {np.mean(truth_00_res['image_y'] - (image_dim) / 2)}")
+            self.log.info(f"truth 01 x residual is {np.mean(truth_01_res['image_x'] - (image_dim) / 2)}")
+            self.log.info(f"truth 01 y residual is {np.mean(truth_01_res['image_y'] - (image_dim) / 2)}")
 
             idx_00, match_dist_00 = self._match_input_to_det(
                 truth_00_res["image_x"],
@@ -503,7 +501,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             e1 = np.concatenate([sr_00_res[e1n], sr_01_res[e1n]])
             e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
-            print(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
+            self.log.info(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
             e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
             e2_g2 = np.concatenate([sr_00_res[e2g2n], sr_01_res[e2g2n]])
             w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
@@ -539,15 +537,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             assert np.mean(lensed_x - (image_dim) / 2) < 100, f"mean x should be close to the center, distance is {np.mean(lensed_x - (image_dim) / 2)}, index is {i}"
             assert np.mean(lensed_y - (image_dim) / 2) < 100, f"mean y should be close to the center, distance is {np.mean(lensed_y - (image_dim) / 2)}, index is {i}"
 
-            logger.info(f"lensed mean x offset: {np.mean(lensed_x - (image_dim) / 2)}, lensed mean y: {np.mean(lensed_y - (image_dim) / 2)}")
-            logger.info(f"prelensed mean x offset: {np.mean(x - (image_dim) / 2)}, prelensed mean y: {np.mean(y - (image_dim) / 2)}")
+            self.log.info(f"lensed mean x offset: {np.mean(lensed_x - (image_dim) / 2)}, lensed mean y: {np.mean(lensed_y - (image_dim) / 2)}")
+            self.log.info(f"prelensed mean x offset: {np.mean(x - (image_dim) / 2)}, prelensed mean y: {np.mean(y - (image_dim) / 2)}")
 
             lensed_shift = np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             radial_dist_lensed = np.sqrt((lensed_x - (image_dim) / 2) ** 2 + (lensed_y - (image_dim) / 2) ** 2)
             radial_dist = np.sqrt((x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2)
             radial_lensed_shift = (radial_dist_lensed - radial_dist) * pixel_scale
 
-            logger.info(f"mean radial lensed shift: {np.mean(radial_lensed_shift)}")
+            self.log.info(f"mean radial lensed shift: {np.mean(radial_lensed_shift)}")
 
             angle = self._get_angle_from_pixel(
                 lensed_x, lensed_y, (image_dim) / 2, (image_dim) / 2
