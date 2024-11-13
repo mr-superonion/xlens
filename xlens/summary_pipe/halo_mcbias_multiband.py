@@ -416,7 +416,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0] # in pixels
 
-        max_pixel = (image_dim - 40) / 2
+        max_pixel = (image_dim - 64) / 2
 
         logger.info("image dim", image_dim)
         logger.info("pixel scale", pixel_scale)
