@@ -75,6 +75,11 @@ class MultibandSimBaseConfig(Config):
         default=0,
     )
 
+    i_rng = Field[int](
+        doc="random seed index for halo",
+        default=0,
+    )
+
     def validate(self):
         super().validate()
         if self.irot >= self.nrot:
@@ -226,7 +231,7 @@ class MultibandSimBaseTask(SimBaseTask):
         # Prepare the random number generator and basic parameters
         irot = self.config.irot
         survey_name = self.config.survey_name
-        rng = np.random.RandomState(seed)
+        rng = np.random.RandomState(seed) + self.config.i_rng * 100_000
         seed_noise = self.get_noise_seed(seed, irot)
 
         # Get the pixel scale in arcseconds per pixel
@@ -426,7 +431,7 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
         doc="whether to exclude kappa field",
         default=False,
     )
-
+    
     def validate(self):
         super().validate()
         if self.mass < 1e8:
