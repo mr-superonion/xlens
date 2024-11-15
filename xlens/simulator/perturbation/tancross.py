@@ -47,4 +47,15 @@ class ShearTanCross(object):
         shear = galsim.Shear(g1=g1, g2=g2)
         gso = gso.shear(shear)
         shift = shift.shear(shear)
-        return gso, shift
+        return _get_shear_res_dict(gso, shift, gamma1=g1, gamma2=g2, kappa=0)
+
+def _get_shear_res_dict(gso, lensed_shift,
+                        gamma1=-1, gamma2=-1, kappa=-1):
+    shear_res_dict = {
+        "gso": gso,
+        "lensed_shift": lensed_shift,
+        "gamma1": gamma1,
+        "gamma2": gamma2,
+        "kappa": kappa,
+    }
+    return shear_res_dict
