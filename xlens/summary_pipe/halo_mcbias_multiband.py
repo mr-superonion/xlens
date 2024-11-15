@@ -26,6 +26,7 @@ __all__ = [
 ]
 
 import logging
+
 logger = logging.getLogger(__name__)
 from typing import Any
 
@@ -262,6 +263,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         radial_lensed_shift,
         radial_bin_edges,
         match_dist,
+        m00,
+        m20,
     ):
         """calculate the sum of eT, eX, and rT in each radial bin for a single halo
 
@@ -281,6 +284,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             radial_lensed_shift (array): distance between the lensed and prelensed position in radial direction
             radial_bin_edges (array): radial bin edges in pixel
             match_dist (array): the distance between detection and matched input
+            m00 (array): fpfs shapelet mode m00
+            m20 (array): fpfs shapelet mode m20
 
         Returns:
             eT(array): sum of eT in each radial bin
@@ -319,6 +324,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         radial_lensed_shift_list = []
         median_matched_dist_list = []
         match_failure_rate_list = []
+        m00_list = []
+        m20_list = []
 
         for i_bin in range(n_bins):
             mask = (dist >= radial_bin_edges[i_bin]) & (
@@ -354,6 +361,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 np.sum(match_dist[mask] > 2) / np.sum(mask)
             )
 
+            m00_list.append(np.mean(m00[mask]))
+            m20_list.append(np.mean(m20[mask]))
+
         return (
             np.array(eT_list),
             np.array(eX_list),
@@ -371,6 +381,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             np.array(eX_std_list),
             np.array(median_matched_dist_list),
             np.array(match_failure_rate_list),
+            np.array(m00_list),
+            np.array(m20_list),
         )
 
     @staticmethod
@@ -412,6 +424,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ("r_weighted_gX", f"({n_bins},)f8"),
             ("median_match_dist", f"({n_bins},)f8"),
             ("match_failure_rate", f"({n_bins},)f8"),
+            ("mean_m00", f"({n_bins},)f8"),
+            ("mean_m20", f"({n_bins},)f8"),
         ]
         return np.zeros(n_halos, dtype=dt)
 
@@ -604,6 +618,20 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         axes[5, 0].set_ylabel("Match failure rate (> 2 pixel)")
         axes[5, 0].set_ylim(0, 0.6)
 
+        axes[5, 1].errorbar(
+            angular_bin_mid,
+            np.mean(
+                summary_table["mean_m00"] + summary_table["mean_m20"], axis=0
+            ),
+            yerr=(
+                np.std(summary_table["mean_m00"], axis=0)
+                + np.std(summary_table["mean_m20"], axis=0)
+            )
+            / np.sqrt(len(summary_table)),
+        )
+        axes[5, 1].set_ylabel(rf"M_{00} + M_{20}")
+        axes[5, 1].legend()
+
         for ax in axes.flatten():
             ax.set_xlim(0, 10)
             ax.set_xlabel("Angular separation [arcmin]")
@@ -667,6 +695,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         radial_lensed_shift_ensemble = np.empty((len(src00List), n_bins))
         median_match_dist_ensemble = np.empty((len(src00List), n_bins))
         match_failure_rate_ensemble = np.empty((len(src00List), n_bins))
+        m00_ensemble = np.empty((len(src00List), n_bins))
+        m20_ensemble = np.empty((len(src00List), n_bins))
 
         for i, cats in enumerate(
             zip(src00List, src01List, truth00List, truth01List)
@@ -726,6 +756,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
             w_g1 = np.concatenate([sr_00_res["w_g1"], sr_01_res["w_g1"]])
             w_g2 = np.concatenate([sr_00_res["w_g2"], sr_01_res["w_g2"]])
+            m00 = np.concatenate([sr_00_res["m00"], sr_01_res["m00"]])
+            m20 = np.concatenate([sr_00_res["m20"], sr_01_res["m20"]])
 
             # use the prelensed location in binning and calculating angle
             x = np.concatenate(
@@ -819,6 +851,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 eX_std_list,
                 median_match_dist,
                 match_failure_rate,
+                m00_list,
+                m20_list,
             ) = self._get_eT_eX_rT_rX_sum(
                 eT,
                 eX,
@@ -833,6 +867,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 radial_lensed_shift,
                 pixel_bin_edges,
                 match_dist,
+                m00,
+                m20,
             )
             rT_ensemble[i, :] = rT_list
             rX_ensemble[i, :] = rX_list
@@ -850,6 +886,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             eX_std_ensemble[i, :] = eX_std_list / np.sqrt(ngal_in_bin)
             median_match_dist_ensemble[i, :] = median_match_dist
             match_failure_rate_ensemble[i, :] = match_failure_rate
+            m00_ensemble[i, :] = m00_list
+            m20_ensemble[i, :] = m20_list
 
         summary_stats = self.get_summary_struct(
             n_realization, len(angular_bin_edges) - 1
@@ -897,6 +935,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         summary_stats["match_failure_rate"] = (
             match_failure_rate_ensemble  # Shape (n_halos, n_bins)
         )
+
+        summary_stats["mean_m00"] = m00_ensemble
+        summary_stats["mean_m20"] = m20_ensemble
 
         summary_plot = self.generate_summary_plot(summary_stats)
 
