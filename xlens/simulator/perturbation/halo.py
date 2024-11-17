@@ -3,6 +3,7 @@ from astropy.cosmology import Planck18
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel
 
+
 class ShearHalo(object):
     def __init__(
         self,
