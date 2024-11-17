@@ -10,7 +10,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
-    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
 ]
 dynamic = ["version"]
 dependencies = [
@@ -20,32 +20,16 @@ dependencies = [
 [project.urls]
 "Source Code" = "https://github.com/mr-superonion/xlens"
 
-# On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov", # Used to report total code coverage
-    "pre-commit", # Used to run checks before finalizing a git commit
-    "sphinx", # Used to automatically generate documentation
-    "sphinx-rtd-theme", # Used to render documentation
-    "sphinx-autoapi", # Used to automatically generate api documentation
-    "pylint", # Used for static linting of files
-    # if you add dependencies here while experimenting in a notebook and you
-    # want that notebook to render in your documentation, please add the
-    # dependencies to ./docs/requirements.txt as well.
-    "nbconvert", # Needed for pre-commit check to clear output from Python notebooks
-    "nbsphinx", # Used to integrate Python notebooks into Sphinx documentation
-    "ipython", # Also used in building notebooks into Sphinx
-]
-
 [build-system]
 requires = [
-    "setuptools>=62", # Used to build and package the Python project
-    "setuptools_scm>=6.2", # Gets release version from git. Makes it available programmatically
+    "setuptools>=62",
+    "setuptools_scm>=6.2",
 ]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "dirty-tag"
 write_to = "xlens/__version__.py"
 
 [tool.pytest.ini_options]
@@ -57,18 +41,19 @@ addopts = "--nbval --nbval-lax --nbval-current-env -vv -s"
 
 [tool.black]
 line-length = 80
-target-version = ["py38"]
+target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
 line_length = 80
 
+[tool.flake8]
+ignore = [
+    "N801", "N802", "N803", "N806", "N815", "N816", "W503", "W504",
+    "E133", "E203", "E303", "E731", "E226", "E228"
+]
+exclude = [".git", "__pycache__", "docs", "build", "dist"]
+max-line-length = 80
+
 [tool.coverage.run]
 omit=["xlens/__version__.py"]
-
-[tool.flake8]
-max-line-length = 80
-ignore = [
-    "N801", "N802", "N803", "N806", "N812", "N815", "N816",
-    "W503", "W504", "E133", "E203", "E226", "E228", "E303", "E731"
-]
