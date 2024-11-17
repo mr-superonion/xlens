@@ -13,9 +13,6 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
-import logging
-
-logger = logging.getLogger(__name__)
 from typing import Any
 
 import anacal
@@ -208,8 +205,8 @@ class MultibandSimBaseTask(SimBaseTask):
         # write galaxy images
         image = res["band_data"][band][0].getMaskedImage().image.array
         truth = res["truth_info"]
-
         se_wcs = res["se_wcs"][band][0]
+        del res
         dm_wcs = make_dm_wcs(se_wcs)
         return image, truth, dm_wcs
 
@@ -284,7 +281,7 @@ class MultibandSimBaseTask(SimBaseTask):
 
         # and psf kernel for the LSST exposure
         kernel = afwMath.FixedKernel(psfImage.convertD())
-        kernelPSF = meaAlg.KernelPsf(kernel)
+        kernel_psf = meaAlg.KernelPsf(kernel)
 
         dim = int(max(width, height) * self.config.extend_ratio)
         galaxy_catalog = self.prpare_galaxy_catalog(rng, dim, pixel_scale)
@@ -302,8 +299,8 @@ class MultibandSimBaseTask(SimBaseTask):
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
         )
-        logger.debug(f"current shape of data is {data.shape}")
-        logger.debug(f"resizing data to {height} x {width}")
+        self.log.debug(f"current shape of data is {data.shape}")
+        self.log.debug(f"resizing data to {height} x {width}")
         data, truth_catalog = resize_array(
             data,
             (height, width),
@@ -313,9 +310,10 @@ class MultibandSimBaseTask(SimBaseTask):
         outputExposure = afwImage.ExposureF(boundaryBox)
         outputExposure.getMaskedImage().image.array[:, :] = data
         outputExposure.setPhotoCalib(photo_calib)
-        outputExposure.setPsf(kernelPSF)
+        outputExposure.setPsf(kernel_psf)
         outputExposure.setWcs(dm_wcs)
         outputExposure.getMaskedImage().variance.array[:, :] = variance
+        del data, photo_calib, kernel_psf, dm_wcs
 
         if self.config.draw_image_noise:
             noise_array = self.get_noise_array(
@@ -329,6 +327,7 @@ class MultibandSimBaseTask(SimBaseTask):
                 outputExposure.getMaskedImage().image.array[:, :] + noise_array
             )
         outputExposure.getMaskedImage().mask.array[:, :] = mask_array
+        del mask_array
 
         outputs = Struct(
             outputExposure=outputExposure, outputTruthCatalog=truth_catalog

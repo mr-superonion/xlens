@@ -193,7 +193,7 @@ class SelBiasMultibandPipe(PipelineTask):
         res = np.sum(tmp[egn] * tmp[wname] + tmp[en] * tmp[wgname])
 
         if self.config.do_correct_selection_bias:
-            dg = 0.01
+            dg = 0.02
             # selection
             tmp = src[(src[fname] + dg * src[fgname]) > m00_min]
             ellp = np.sum(tmp[en] * tmp[wname])
