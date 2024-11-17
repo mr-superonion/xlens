@@ -30,8 +30,13 @@ import logging
 logger = logging.getLogger(__name__)
 from typing import Any
 
+import galsim
 import lsst.pipe.base.connectionTypes as cT
+import matplotlib.pyplot as plt
 import numpy as np
+from astropy.cosmology import Planck18
+from lenstronomy.Cosmo.lens_cosmo import LensCosmo
+from lenstronomy.LensModel.lens_model import LensModel
 from lsst.pex.config import Field
 from lsst.pipe.base import (
     PipelineTask,
@@ -39,15 +44,9 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
     Struct,
 )
-from lsst.utils.logging import LsstLogAdapter
 from lsst.skymap import BaseSkyMap
-
-import galsim
-from astropy.cosmology import Planck18
-from lenstronomy.Cosmo.lens_cosmo import LensCosmo
-from lenstronomy.LensModel.lens_model import LensModel
+from lsst.utils.logging import LsstLogAdapter
 from scipy.spatial import cKDTree
-import matplotlib.pyplot as plt
 
 
 class HaloMcBiasMultibandPipeConnections(
