@@ -46,6 +46,8 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "dirty-tag"
 write_to = "xlens/__version__.py"
 
 [tool.pytest.ini_options]

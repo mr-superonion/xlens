@@ -1,3 +1,4 @@
+from .__version__ import __version__ # noqa
 from . import (
     catalog,
     process_pipe,
