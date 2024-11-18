@@ -20,16 +20,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 __all__ = [
-    "SelBiasMultibandPipeConnections",
-    "SelBiasMultibandPipeConfig",
-    "SelBiasMultibandPipe",
-    "SelBiasSummaryMultibandPipeConnections",
-    "SelBiasSummaryMultibandPipeConfig",
-    "SelBiasSummaryMultibandPipe",
+    "SelBiasRfMultibandPipeConnections",
+    "SelBiasRfMultibandPipeConfig",
+    "SelBiasRfMultibandPipe",
+    "SelBiasRfSummaryMultibandPipeConnections",
+    "SelBiasRfSummaryMultibandPipeConfig",
+    "SelBiasRfSummaryMultibandPipe",
 ]
 
-import logging
 from typing import Any
+import pickle
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
@@ -43,7 +43,7 @@ from lsst.pipe.base import (
 from lsst.utils.logging import LsstLogAdapter
 
 
-class SelBiasMultibandPipeConnections(
+class SelBiasRfMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
     defaultTemplates={
@@ -81,7 +81,7 @@ class SelBiasMultibandPipeConnections(
 
     result = cT.Output(
         doc="Summary statistics",
-        name="{inputCoaddName}Coadd_anacal_selbias_{dataType}",
+        name="{inputCoaddName}Coadd_anacal_selbias_ranforest_{dataType}",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
@@ -90,9 +90,9 @@ class SelBiasMultibandPipeConnections(
         super().__init__(config=config)
 
 
-class SelBiasMultibandPipeConfig(
+class SelBiasRfMultibandPipeConfig(
     PipelineTaskConfig,
-    pipelineConnections=SelBiasMultibandPipeConnections,
+    pipelineConnections=SelBiasRfMultibandPipeConnections,
 ):
     do_correct_selection_bias = Field[bool](
         doc="Whether correct for selection bias",
@@ -110,13 +110,17 @@ class SelBiasMultibandPipeConfig(
         doc="absolute value of the shear",
         default=0.02,
     )
-    m00_cuts = ListField[float](
-        doc="lower limit of m00",
-        default=[6.0, 12.0, 18.0, 24.0, 30.0],
+    thresholds = ListField[float](
+        doc="upper limit of score",
+        default=[0.04, 0.08, 0.12, 0.16, 0.20],
     )
-    m00_name = Field[str](
-        doc="the column name of m00",
-        default="m00",
+    mag_zero = Field[float](
+        doc="calibration magnitude zero point",
+        default=30.0,
+    )
+    model_name = Field[str](
+        doc="random forest modle pickle file name",
+        default="simple_sim_RF.pkl",
     )
 
     def validate(self):
@@ -143,22 +147,22 @@ def name_add_d(ename, nchars):
     return ename[:-nchars] + "d" + ename[-nchars:]
 
 
-class SelBiasMultibandPipe(PipelineTask):
-    _DefaultName = "FpfsSelBiasTask"
-    ConfigClass = SelBiasMultibandPipeConfig
+class SelBiasRfMultibandPipe(PipelineTask):
+    _DefaultName = "FpfsSelBiasRfTask"
+    ConfigClass = SelBiasRfMultibandPipeConfig
 
     def __init__(
         self,
         *,
-        config: SelBiasMultibandPipeConfig | None = None,
-        log: logging.Logger | LsstLogAdapter | None = None,
+        config: SelBiasRfMultibandPipeConfig | None = None,
+        log: LsstLogAdapter | None = None,
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
         super().__init__(
             config=config, log=log, initInputs=initInputs, **kwargs
         )
-        assert isinstance(self.config, SelBiasMultibandPipeConfig)
+        assert isinstance(self.config, SelBiasRfMultibandPipeConfig)
 
         self.sname = self.config.shear_name
         self.svalue = self.config.shear_value
@@ -167,59 +171,85 @@ class SelBiasMultibandPipe(PipelineTask):
         self.egname = name_add_d(self.ename, 2) + ins
         self.wname = "fpfs_w"
         self.wgname = name_add_d(self.wname, 1) + ins
-        self.fname = self.config.m00_name
-        self.fgname = name_add_d(self.fname, 3) + ins
+        with open(self.config.model_name, "rb") as f:
+            self.clf = pickle.load(f)
         return
 
+    @staticmethod
+    def measure_distorted_photomoetry(*, src, dg, mag_zero):
+        phot = []
+        for band in "grizy":
+            phot.append(
+                mag_zero - np.log10(
+                    src[f"{band}_fpfs1_m00"]
+                    + dg * src[f"{band}_fpfs1_dm00_dg1"]
+                ) * 2.5
+            )
+
+        phot = np.vstack(phot).T
+        return phot
+
+    def measure_shear(self, *, src, dg, threshold):
+        assert isinstance(self.config, SelBiasRfMultibandPipeConfig)
+        en = self.ename
+        egn = self.egname
+        wname = self.wname
+        wgname = self.wgname
+        phot = self.measure_distorted_photomoetry(
+            src=src, dg=dg, mag_zero=self.config.mag_zero,
+        )
+        scores = self.clf.predict_proba(phot)[:, 1]
+        mask = scores < threshold
+        tmp = src[mask]
+        ell = np.sum(tmp[en] * tmp[wname])
+        res = np.sum(tmp[egn] * tmp[wname] + tmp[en] * tmp[wgname])
+        return {
+            "ellipticity": ell,
+            "response": res,
+        }
+
+    def measure_shear_ranforest(self, src, threshold):
+        assert isinstance(self.config, SelBiasRfMultibandPipeConfig)
+        result = self.measure_shear(src=src, dg=0.00, threshold=threshold)
+        ell = result["ellipticity"]
+        res = result["response"]
+
+        if self.config.do_correct_selection_bias:
+            dg = 0.01
+            ellp = self.measure_shear(
+                src=src, dg=dg, threshold=threshold,
+            )["ellipticity"]
+
+            ellm = self.measure_shear(
+                src=src, dg=-dg, threshold=threshold,
+            )["ellipticity"]
+
+            res_sel = (ellp - ellm) / 2.0 / dg
+        else:
+            res_sel = 0.0
+        return ell, (res + res_sel)
+
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
-        assert isinstance(self.config, SelBiasMultibandPipeConfig)
+        assert isinstance(self.config, SelBiasRfMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
         outputs = self.run(**inputs)
         butlerQC.put(outputs, outputRefs)
         return
 
-    def measure_shear_m00_cut(self, src, m00_min):
-        assert isinstance(self.config, SelBiasMultibandPipeConfig)
-        en = self.ename
-        egn = self.egname
-        wname = self.wname
-        wgname = self.wgname
-        fname = self.fname
-        fgname = self.fgname
-        tmp = src[src[fname] > m00_min]
-        ell = np.sum(tmp[en] * tmp[wname])
-        res = np.sum(tmp[egn] * tmp[wname] + tmp[en] * tmp[wgname])
-
-        if self.config.do_correct_selection_bias:
-            dg = 0.02
-            # selection
-            tmp = src[(src[fname] + dg * src[fgname]) > m00_min]
-            ellp = np.sum(tmp[en] * tmp[wname])
-            del tmp
-
-            # selection
-            tmp = src[(src[fname] - dg * src[fgname]) > m00_min]
-            ellm = np.sum(tmp[en] * tmp[wname])
-            res_sel = (ellp - ellm) / 2.0 / dg
-            del tmp
-        else:
-            res_sel = 0.0
-        return ell, (res + res_sel)
-
     def run(self, src00, src01, src10, src11):
-        assert isinstance(self.config, SelBiasMultibandPipeConfig)
-        ncuts = len(self.config.m00_cuts)
+        assert isinstance(self.config, SelBiasRfMultibandPipeConfig)
+        ncuts = len(self.config.thresholds)
         em = np.zeros(ncuts)
         ep = np.zeros(ncuts)
         rm = np.zeros(ncuts)
         rp = np.zeros(ncuts)
 
-        for ic, m00_min in enumerate(self.config.m00_cuts):
-            ell00, res00 = self.measure_shear_m00_cut(src00, m00_min)
-            ell10, res10 = self.measure_shear_m00_cut(src10, m00_min)
-            ell01, res01 = self.measure_shear_m00_cut(src01, m00_min)
-            ell11, res11 = self.measure_shear_m00_cut(src11, m00_min)
+        for ic, threshold in enumerate(self.config.thresholds):
+            ell00, res00 = self.measure_shear_ranforest(src00, threshold)
+            ell10, res10 = self.measure_shear_ranforest(src10, threshold)
+            ell01, res01 = self.measure_shear_ranforest(src01, threshold)
+            ell11, res11 = self.measure_shear_ranforest(src11, threshold)
 
             em[ic] = ell00 + ell01
             ep[ic] = ell10 + ell11
@@ -238,7 +268,7 @@ class SelBiasMultibandPipe(PipelineTask):
         return Struct(result=result)
 
 
-class SelBiasSummaryMultibandPipeConnections(
+class SelBiasRfSummaryMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=(),
     defaultTemplates={
@@ -248,7 +278,7 @@ class SelBiasSummaryMultibandPipeConnections(
 ):
     res_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_selbias_{dataType}",
+        name="{inputCoaddName}Coadd_anacal_selbias_ranforest_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
@@ -259,9 +289,9 @@ class SelBiasSummaryMultibandPipeConnections(
         super().__init__(config=config)
 
 
-class SelBiasSummaryMultibandPipeConfig(
+class SelBiasRfSummaryMultibandPipeConfig(
     PipelineTaskConfig,
-    pipelineConnections=SelBiasSummaryMultibandPipeConnections,
+    pipelineConnections=SelBiasRfSummaryMultibandPipeConnections,
 ):
 
     shape_name = Field[str](
@@ -297,36 +327,36 @@ class SelBiasSummaryMultibandPipeConfig(
             )
 
 
-class SelBiasSummaryMultibandPipe(PipelineTask):
-    _DefaultName = "FpfsSelBiasSummaryTask"
-    ConfigClass = SelBiasSummaryMultibandPipeConfig
+class SelBiasRfSummaryMultibandPipe(PipelineTask):
+    _DefaultName = "FpfsSelBiasRfSummaryTask"
+    ConfigClass = SelBiasRfSummaryMultibandPipeConfig
 
     def __init__(
         self,
         *,
-        config: SelBiasSummaryMultibandPipeConfig | None = None,
-        log: logging.Logger | LsstLogAdapter | None = None,
+        config: SelBiasRfSummaryMultibandPipeConfig | None = None,
+        log: LsstLogAdapter | None = None,
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
         super().__init__(
             config=config, log=log, initInputs=initInputs, **kwargs
         )
-        assert isinstance(self.config, SelBiasSummaryMultibandPipeConfig)
+        assert isinstance(self.config, SelBiasRfSummaryMultibandPipeConfig)
         self.ename = self.config.shape_name
         self.sname = self.config.shear_name
         self.svalue = self.config.shear_value
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
-        assert isinstance(self.config, SelBiasSummaryMultibandPipeConfig)
+        assert isinstance(self.config, SelBiasRfSummaryMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
         self.run(**inputs)
         return
 
     def run(self, res_list):
-        assert isinstance(self.config, SelBiasSummaryMultibandPipeConfig)
+        assert isinstance(self.config, SelBiasRfSummaryMultibandPipeConfig)
         up1 = []
         up2 = []
         down = []
