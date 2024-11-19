@@ -16,7 +16,6 @@
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
-from lsst.daf.butler import ValidationError
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField
 from lsst.pipe.base import (
@@ -35,9 +34,7 @@ class MultibandSimHaloPipeConnections(
     dimensions=("skymap", "tract", "patch", "band"),
     defaultTemplates={
         "inputCoaddName": "deep",
-        "outputCoaddName": "deep",
-        "psfType": "moffat",
-        "simType": "_sim",
+        "outputCoaddName": "sim",
         "mode": 0,
         "irot": 0,
     },
@@ -48,40 +45,39 @@ class MultibandSimHaloPipeConnections(
         storageClass="SkyMap",
         dimensions=("skymap",),
     )
-    simType = "{simType}"
-    if simType == "_sim":
-        exposure = cT.Input(
-            doc="Input coadd exposure",
-            name="{inputCoaddName}Coadd_calexp",
-            storageClass="ExposureF",
-            dimensions=("skymap", "tract", "patch", "band"),
-            multiple=False,
-        )
-        noiseCorrImage = cT.Input(
-            doc="image for noise correlation function",
-            name="{outputCoaddName}Coadd_systematics_noisecorr",
-            dimensions=("tract", "patch", "band", "skymap"),
-            storageClass="ImageF",
-            multiple=False,
-        )
-    psfType = "{psfType}"
-    if psfType in ["psf", "star"]:
-        psfImage = cT.Input(
-            doc="image for PSF model for simulation",
-            name="{inputCoaddName}Coadd_systematics_psfcentered",
-            dimensions=("skymap", "tract", "patch", "band"),
-            storageClass="ImageF",
-            multiple=False,
-        )
+    exposure = cT.Input(
+        doc="Input coadd exposure",
+        name="{inputCoaddName}Coadd_calexp",
+        storageClass="ExposureF",
+        dimensions=("skymap", "tract", "patch", "band"),
+        multiple=False,
+        minimum=0,
+    )
+    noiseCorrImage = cT.Input(
+        doc="image for noise correlation function",
+        name="{outputCoaddName}Coadd_systematics_noisecorr",
+        dimensions=("tract", "patch", "band", "skymap"),
+        storageClass="ImageF",
+        multiple=False,
+        minimum=0,
+    )
+    psfImage = cT.Input(
+        doc="image for PSF model for simulation",
+        name="{inputCoaddName}Coadd_systematics_psfcentered",
+        dimensions=("skymap", "tract", "patch", "band"),
+        storageClass="ImageF",
+        multiple=False,
+        minimum=0,
+    )
     outputExposure = cT.Output(
         doc="Output simulated coadd exposure",
-        name="{outputCoaddName}Coadd_calexp{simType}_{mode}_rot{irot}",
+        name="{outputCoaddName}_{mode}_rot{irot}_Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
     outputTruthCatalog = cT.Output(
         doc="Output truth catalog",
-        name="{outputCoaddName}Coadd_truthCatalog{simType}_{mode}_rot{irot}",
+        name="{outputCoaddName}_{mode}_rot{irot}_Coadd_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch", "band"),
     )
@@ -102,13 +98,9 @@ class MultibandSimHaloPipeConfig(
 
     def validate(self):
         super().validate()
-        psf_type_list = ["moffat", "psf", "star"]
-        if self.connections.psfType not in psf_type_list:
-            raise ValidationError("connection.psfType is incorrect")
 
     def setDefaults(self):
         print("Configuration starts")
-
         super().setDefaults()
 
 
@@ -133,13 +125,9 @@ class MultibandSimHaloPipe(PipelineTask):
         idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
         seed = idGenerator.catalog_id
 
-        # Extract tract and patch IDs from dataId
-        skymap = butlerQC.get(inputRefs.skymap)
-        if self.config.connections.psfType in ["psf", "star"]:
-            psfImage = butlerQC.get(inputRefs.psfImage)
-        else:
-            psfImage = None
+        psfImage = butlerQC.get(inputRefs.psfImage)
 
+        skymap = butlerQC.get(inputRefs.skymap)
         sky_info = makeSkyInfo(
             skymap,
             tractId=butlerQC.quantum.dataId["tract"],
@@ -151,12 +139,8 @@ class MultibandSimHaloPipe(PipelineTask):
         tract_info = sky_info.tractInfo
         wcs = tract_info.getWcs()
 
-        if self.config.connections.simType == "sim":
-            exposure = butlerQC.get(inputRefs.exposure)
-            noiseCorr = butlerQC.get(inputRefs.noiseCorrImage)
-        else:
-            exposure = None
-            noiseCorr = None
+        exposure = butlerQC.get(inputRefs.exposure)
+        noiseCorr = butlerQC.get(inputRefs.noiseCorrImage)
 
         outputs = self.simulator.run(
             band=band,
