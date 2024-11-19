@@ -145,7 +145,6 @@ class FpfsForcePipe(PipelineTask):
         exposure_handles_dict = {
             handle.dataId["band"]: handle for handle in exposure_handles
         }
-        print(exposure_handles_dict)
         correlation_handles = inputs["noise_corr"]
         if len(correlation_handles) == 0:
             correlation_handles_dict = None
