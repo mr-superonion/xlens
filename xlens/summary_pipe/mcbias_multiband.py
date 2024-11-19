@@ -43,13 +43,13 @@ class McBiasMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "band"),
     defaultTemplates={
-        "inputCoaddName": "deep",
+        "coaddName": "deep",
         "dataType": "",
     },
 ):
     src00_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_{dataType}_0_rot0",
+        name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
         multiple=True,
@@ -58,7 +58,7 @@ class McBiasMultibandPipeConnections(
 
     src01_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_{dataType}_0_rot1",
+        name="{coaddName}_0_rot1_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
         multiple=True,
@@ -67,7 +67,7 @@ class McBiasMultibandPipeConnections(
 
     src10_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_{dataType}_1_rot0",
+        name="{coaddName}_1_rot0_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
         multiple=True,
@@ -76,7 +76,7 @@ class McBiasMultibandPipeConnections(
 
     src11_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_{dataType}_1_rot1",
+        name="{coaddName}_1_rot1_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
         multiple=True,

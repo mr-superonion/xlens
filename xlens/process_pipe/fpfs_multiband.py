@@ -47,21 +47,20 @@ class FpfsMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=("tract", "patch", "band", "skymap"),
     defaultTemplates={
-        "inputCoaddName": "deep",
-        "outputCoaddName": "deep",
-        "dataType": "",
+        "coaddName": "deep",
+        "coaddName": "deep",
     },
 ):
     exposure = cT.Input(
         doc="Input coadd image",
-        name="{inputCoaddName}Coadd_calexp{dataType}",
+        name="{coaddName}Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=False,
     )
     detection = cT.Input(
         doc="Source catalog with detection",
-        name="{outputCoaddName}Coadd_anacal_detection{dataType}",
+        name="{coaddName}Coadd_anacal_detection",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         minimum=0,
@@ -69,7 +68,7 @@ class FpfsMultibandPipeConnections(
     )
     outputCatalog = cT.Output(
         doc="Source catalog with all the measurement generated in this task",
-        name="{outputCoaddName}Coadd_anacal_meas{dataType}",
+        name="{coaddName}Coadd_anacal_meas",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
     )
@@ -98,11 +97,6 @@ class FpfsMultibandPipeConfig(
 
     def validate(self):
         super().validate()
-        if not self.fpfs.do_adding_noise:
-            if len(self.connections.dataType) == 0:
-                raise ValueError(
-                    "Only set fpfs.do_adding_noise=False on simulation"
-                )
 
     def setDefaults(self):
         super().setDefaults()
