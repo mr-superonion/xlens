@@ -487,9 +487,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         area = np.mean(
             np.pi
             * (
-                (
-                    summary_table["angular_bin_right"] / 3600 * np.pi / 180.0
-                ) ** 2
+                (summary_table["angular_bin_right"] / 3600 * np.pi / 180.0) ** 2
                 - (summary_table["angular_bin_left"] / 3600 * np.pi / 180.0)
                 ** 2
             )
@@ -840,24 +838,20 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             truth_01_res = truth01.get()
 
             self.log.debug(
-                "truth 00 x residual is %.3f" % (
-                    np.mean(truth_00_res['image_x'] - (image_dim) / 2)
-                )
+                "truth 00 x residual is %.3f"
+                % (np.mean(truth_00_res["image_x"] - (image_dim) / 2))
             )
             self.log.debug(
-                "truth 00 y residual is %.3f" % (
-                    np.mean(truth_00_res['image_y'] - (image_dim) / 2)
-                )
+                "truth 00 y residual is %.3f"
+                % (np.mean(truth_00_res["image_y"] - (image_dim) / 2))
             )
             self.log.debug(
-                "truth 01 x residual is %.3f" % (
-                    np.mean(truth_01_res['image_x'] - (image_dim) / 2)
-                )
+                "truth 01 x residual is %.3f"
+                % (np.mean(truth_01_res["image_x"] - (image_dim) / 2))
             )
             self.log.debug(
-                "truth 01 y residual is %.3f" % (
-                    np.mean(truth_01_res['image_y'] - (image_dim) / 2)
-                )
+                "truth 01 y residual is %.3f"
+                % (np.mean(truth_01_res["image_y"] - (image_dim) / 2))
             )
 
             idx_00, match_dist_00 = self._match_input_to_det(
@@ -974,9 +968,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             )
 
             lensed_shift = (
-                np.sqrt(
-                    (lensed_x - x) ** 2 + (lensed_y - y) ** 2
-                ) * pixel_scale
+                np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             )
             radial_dist_lensed = np.sqrt(
                 (lensed_x - (image_dim) / 2) ** 2

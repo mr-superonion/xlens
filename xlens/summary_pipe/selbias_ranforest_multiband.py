@@ -28,8 +28,8 @@ __all__ = [
     "SelBiasRfSummaryMultibandPipe",
 ]
 
-from typing import Any
 import pickle
+from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
@@ -180,10 +180,12 @@ class SelBiasRfMultibandPipe(PipelineTask):
         phot = []
         for band in "grizy":
             phot.append(
-                mag_zero - np.log10(
+                mag_zero
+                - np.log10(
                     src[f"{band}_fpfs1_m00"]
                     + dg * src[f"{band}_fpfs1_dm00_dg1"]
-                ) * 2.5
+                )
+                * 2.5
             )
 
         phot = np.vstack(phot).T
@@ -196,7 +198,9 @@ class SelBiasRfMultibandPipe(PipelineTask):
         wname = self.wname
         wgname = self.wgname
         phot = self.measure_distorted_photomoetry(
-            src=src, dg=dg, mag_zero=self.config.mag_zero,
+            src=src,
+            dg=dg,
+            mag_zero=self.config.mag_zero,
         )
         scores = self.clf.predict_proba(phot)[:, 1]
         mask = scores < threshold
@@ -217,11 +221,15 @@ class SelBiasRfMultibandPipe(PipelineTask):
         if self.config.do_correct_selection_bias:
             dg = 0.01
             ellp = self.measure_shear(
-                src=src, dg=dg, threshold=threshold,
+                src=src,
+                dg=dg,
+                threshold=threshold,
             )["ellipticity"]
 
             ellm = self.measure_shear(
-                src=src, dg=-dg, threshold=threshold,
+                src=src,
+                dg=-dg,
+                threshold=threshold,
             )["ellipticity"]
 
             res_sel = (ellp - ellm) / 2.0 / dg
