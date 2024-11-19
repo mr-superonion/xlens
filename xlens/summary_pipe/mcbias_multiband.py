@@ -201,12 +201,27 @@ class McBiasMultibandPipe(PipelineTask):
         output[1] = np.sin(2*angle) ** 2 * R11 + np.cos(2*angle) ** 2 * R22
         return output
 
+    @staticmethod
+    def _compute_additive_bias(ep, em, Rp, Rm):
+        return (ep + em) / (Rp + Rm)
+
+
     def run_tx(self, skymap, src00List, src01List, src10List, src11List):
         image_dim = skymap.config.patchInnerDimensions[0] # in pixels
         print('running tx')
         up1 = []
         up2 = []
         down = []
+
+        eTp_list = []
+        eXp_list = []
+        RTp_list = []
+        RXp_list = []
+        eTm_list = []
+        eXm_list = []
+        RTm_list = []
+        RXm_list = []
+
         for src00, src01, src10, src11 in zip(
             src00List, src01List, src10List, src11List
         ):
@@ -259,37 +274,71 @@ class McBiasMultibandPipe(PipelineTask):
             RTm_sum = np.sum(RTm)
             RXm_sum = np.sum(RXm)
 
+            eTp_list.append(eTp_sum)
+            eXp_list.append(eXp_sum)
+            RTp_list.append(RTp_sum)
+            RXp_list.append(RXp_sum)
+            eTm_list.append(eTm_sum)
+            eXm_list.append(eXm_sum)
+            RTm_list.append(RTm_sum)
+            RXm_list.append(RXm_sum)
+
             up1.append(eTp_sum - eTm_sum)
             up2.append((eTm_sum + eTp_sum) / 2.0)
             down.append((RTm_sum + RTp_sum) / 2.0)
 
+
+        eTp = np.array(eTp_list)
+        eXp = np.array(eXp_list)
+        RTp = np.array(RTp_list)
+        RXp = np.array(RXp_list)
+        eTm = np.array(eTm_list)
+        eXm = np.array(eXm_list)
+        RTm = np.array(RTm_list)
+        RXm = np.array(RXm_list)
+
         nsim = len(src00List)
-        denom = np.average(down)
-        tmp = np.array(up1) / 2.0 + np.array(up2)
         print(
-            "Positive shear:",
-            np.average(tmp) / denom,
+            "Positive tangential shear:",
+            np.average(eTp) / np.average(RTp),
             "+-",
-            np.std(tmp) / denom / np.sqrt(nsim),
+            np.std(eTp) / np.average(RTp) / np.sqrt(nsim),
         )
-        tmp = -np.array(up1) / 2.0 + np.array(up2)
         print(
-            "Negative shear:",
-            np.average(tmp) / denom,
+            "Negative tangential shear:",
+            np.average(eTm) / np.average(RTm),
             "+-",
-            np.std(tmp) / denom / np.sqrt(nsim),
+            np.std(eTm) / np.average(RTm) / np.sqrt(nsim),
+        )
+        print(
+            "Positive cross shear:",
+            np.average(eXp) / np.average(RXp),
+            "+-",
+            np.std(eXp) / np.average(RXp) / np.sqrt(nsim),
+        )
+        print(
+            "Negative cross shear:",
+            np.average(eXm) / np.average(RXm),
+            "+-",
+            np.std(eXm) / np.average(RXm) / np.sqrt(nsim),
         )
         print(
             "Multiplicative bias:",
-            np.average(up1) / denom / self.svalue / 2.0 - 1,
+            np.average(eTp - eTm) / np.average(RTp + RTm) / self.svalue / 2.0 - 1,
             "+-",
-            np.std(up1) / denom / np.sqrt(nsim) / self.svalue / 2.0,
+            np.std(eTp - eTm) / np.average(RTp + RTm) / np.sqrt(nsim) / self.svalue / 2.0,
         )
         print(
-            "Additive bias:",
-            np.average(up2) / denom,
+            "Tangential additive bias:",
+            np.average(eTp + eTm) / np.average(RTp + RTm),
             "+-",
-            np.std(up2) / denom / np.sqrt(nsim),
+            np.std(eTp + eTm) / np.average(RTp + RTm) / np.sqrt(nsim),
+        )
+        print(
+            "Cross additive bias:",
+            np.average(eXp + eXm) / np.average(RXp + RXm),
+            "+-",
+            np.std(eXp + eXm) / np.average(RXp + RXm) / np.sqrt(nsim),
         )
         return
 
