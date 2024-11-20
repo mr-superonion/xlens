@@ -174,10 +174,7 @@ class McBiasMultibandPipe(PipelineTask):
         assert isinstance(self.config, McBiasMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
-        if self.sname[-1] in ["t", "x"]:
-            self.run_tx(**inputs)
-        else:
-            self.run_12(**inputs)
+        self.run(**inputs)
         return
 
     @staticmethod
@@ -217,7 +214,6 @@ class McBiasMultibandPipe(PipelineTask):
         eX_list = []
         rT_list = []
         rX_list = []
-        ngal_in_bin = []
         eT_std_list = []
         eX_std_list = []
 
@@ -228,7 +224,6 @@ class McBiasMultibandPipe(PipelineTask):
             eX_sum = np.sum(eX[mask] * w[mask])
             rT_sum = np.sum(rT[mask])
             rX_sum = np.sum(rX[mask])
-            ngal_in_bin.append(np.sum(mask))
 
             eT_list.append(eT_sum)
             eX_list.append(eX_sum)
@@ -242,33 +237,32 @@ class McBiasMultibandPipe(PipelineTask):
                 np.array(eX_list),
                 np.array(rT_list),
                 np.array(rX_list),
-                np.array(ngal_in_bin),
                 np.array(eT_std_list),
                 np.array(eX_std_list),
                 )
 
     @staticmethod
-    def _compute_additive_bias(ep, em, Rp, Rm):
-        return (ep + em) / (Rp + Rm)
-
-    @staticmethod
     def get_summary_struct(n_bins):
         dt = [
-            ("angular_bin_left", f"({n_bins},)f8"),
-            ("angular_bin_right", f"({n_bins},)f8"),
-            ("ngal_in_bin", f"({n_bins},)i4"),
-            ("eT", f"({n_bins},)f8"),
-            ("eT_std", f"({n_bins},)f8"),
-            ("eX", f"({n_bins},)f8"),
-            ("eX_std", f"({n_bins},)f8"),
-            ("rT", f"({n_bins},)f8"),
-            ("rT_std", f"({n_bins},)f8"),
-            ("rX", f"({n_bins},)f8"),
-            ("rX_std", f"({n_bins},)f8"),
+            ("angular_bin", f"({n_bins},)f8"),
+            ("gT+", f"({n_bins},)f8"),
+            ("gT+_std", f"({n_bins},)f8"),
+            ("gX+", f"({n_bins},)f8"),
+            ("gX+_std", f"({n_bins},)f8"),
+            ("gT-", f"({n_bins},)f8"),
+            ("gT-_std", f"({n_bins},)f8"),
+            ("gX-", f"({n_bins},)f8"),
+            ("gX-_std", f"({n_bins},)f8"),
+            ("m_T", f"({n_bins},)f8"),
+            ("m_T_std", f"({n_bins},)f8"),
+            ("m_X", f"({n_bins},)f8"),
+            ("m_X_std", f"({n_bins},)f8"),
+            ("c_T", f"({n_bins},)f8"),
+            ("c_X", f"({n_bins},)f8"),
         ]
         return np.zeros(n_halos, dtype=dt)
 
-    def run_tx(self, skymap, src00List, src01List, src10List, src11List):
+    def run(self, skymap, src00List, src01List, src10List, src11List):
         n_realization = len(src00List)
         logger.info("n_realization", n_realization)
 
@@ -289,12 +283,10 @@ class McBiasMultibandPipe(PipelineTask):
         eXp_ensemble = np.empty((len(src00List), n_bins))
         RTp_ensemble = np.empty((len(src00List), n_bins))
         RXp_ensemble = np.empty((len(src00List), n_bins))
-        ngal_in_binp_ensemble = np.empty((len(src00List), n_bins))
         eTm_ensemble = np.empty((len(src00List), n_bins))
         eXm_ensemble = np.empty((len(src00List), n_bins))
         RTm_ensemble = np.empty((len(src00List), n_bins))
         RXm_ensemble = np.empty((len(src00List), n_bins))
-        ngal_in_binm_ensemble = np.empty((len(src00List), n_bins))
 
         for i, (src00, src01, src10, src11) in enumerate(zip(
             src00List, src01List, src10List, src11List
@@ -327,7 +319,6 @@ class McBiasMultibandPipe(PipelineTask):
                 eX_list,
                 rT_list,
                 rX_list,
-                ngal_in_bin,
                 eT_std_list,
                 eX_std_list,
             ) = self._get_eT_eX_rT_rX_sum(
@@ -338,7 +329,6 @@ class McBiasMultibandPipe(PipelineTask):
             eXp_ensemble[i] = eX_list
             RTp_ensemble[i] = rT_list
             RXp_ensemble[i] = rX_list
-            ngal_in_binp_ensemble[i] = ngal_in_bin
 
             xm = np.concatenate([src10["x"], src11["x"]])
             ym = np.concatenate([src10["y"], src11["y"]])
@@ -363,7 +353,6 @@ class McBiasMultibandPipe(PipelineTask):
                 eX_list,
                 rT_list,
                 rX_list,
-                ngal_in_bin,
                 eT_std_list,
                 eX_std_list,
             ) = self._get_eT_eX_rT_rX_sum(
@@ -374,85 +363,24 @@ class McBiasMultibandPipe(PipelineTask):
             eXm_ensemble[i] = eX_list
             RTm_ensemble[i] = rT_list
             RXm_ensemble[i] = rX_list
-            ngal_in_binm_ensemble[i] = ngal_in_bin
 
         summary_stats = self.get_summary_struct(len(angular_bin_edges) - 1)
-        summary_stats["gt+"] = np.average(eTp_ensemble, axis=0) / np.average(RTp_ensemble, axis=0)
-        summary_stats["gt+_std"] = np.std(eTp_ensemble, axis=0) / np.average(RTp_ensemble, axis=0) / np.sqrt(n_realization)
-        summary_stats["gx+"] = np.average(eXp_ensemble, axis=0) / np.average(RXp_ensemble, axis=0)
-        summary_stats["gx+_std"] = np.std(eXp_ensemble, axis=0) / np.average(RXp_ensemble, axis=0) / np.sqrt(n_realization)
-        summary_stats["gt-"] = np.average(eTm_ensemble, axis=0) / np.average(RTm_ensemble, axis=0)
-        summary_stats["gt-_std"] = np.std(eTm_ensemble, axis=0) / np.average(RTm_ensemble, axis=0) / np.sqrt(n_realization)
-        summary_stats["gx-"] = np.average(eXm_ensemble, axis=0) / np.average(RXm_ensemble, axis=0)
-        summary_stats["gx-_std"] = np.std(eXm_ensemble, axis=0) / np.average(RXm_ensemble, axis=0) / np.sqrt(n_realization)
+        summary_stats["angular_bin"] = angular_bin_mids
+        summary_stats["gT+"] = np.average(eTp_ensemble, axis=0) / np.average(RTp_ensemble, axis=0)
+        summary_stats["gT+_std"] = np.std(eTp_ensemble, axis=0) / np.average(RTp_ensemble, axis=0) / np.sqrt(n_realization)
+        summary_stats["gX+"] = np.average(eXp_ensemble, axis=0) / np.average(RXp_ensemble, axis=0)
+        summary_stats["gX+_std"] = np.std(eXp_ensemble, axis=0) / np.average(RXp_ensemble, axis=0) / np.sqrt(n_realization)
+        summary_stats["gT-"] = np.average(eTm_ensemble, axis=0) / np.average(RTm_ensemble, axis=0)
+        summary_stats["gT-_std"] = np.std(eTm_ensemble, axis=0) / np.average(RTm_ensemble, axis=0) / np.sqrt(n_realization)
+        summary_stats["gX-"] = np.average(eXm_ensemble, axis=0) / np.average(RXm_ensemble, axis=0)
+        summary_stats["gX-_std"] = np.std(eXm_ensemble, axis=0) / np.average(RXm_ensemble, axis=0) / np.sqrt(n_realization)
         if self.sname[-1] == "t":
-            summary_stats["m_t"] =  np.average(eTp_ensemble - eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0) / self.svalue / 2.0 - 1
-            symmary_stats["m_t_std"] = np.std(eTp_ensemble - eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0) / np.sqrt(n_realization) / self.svalue / 2.0
+            summary_stats["m_T"] =  np.average(eTp_ensemble - eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0) / self.svalue / 2.0 - 1
+            symmary_stats["m_T_std"] = np.std(eTp_ensemble - eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0) / np.sqrt(n_realization) / self.svalue / 2.0
         else:
-            summary_stats["m_x"] =  np.average(eXp_ensemble - eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0) / self.svalue / 2.0 - 1
-            symmary_stats["m_x_std"] = np.std(eXp_ensemble - eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0) / np.sqrt(n_realization) / self.svalue / 2.0
+            summary_stats["m_X"] =  np.average(eXp_ensemble - eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0) / self.svalue / 2.0 - 1
+            symmary_stats["m_X_std"] = np.std(eXp_ensemble - eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0) / np.sqrt(n_realization) / self.svalue / 2.0
 
-        summary_stats["c_t"] = np.average(eTp_ensemble + eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0)
-        summary_stats["c_x"] = np.average(eXp_ensemble + eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0)
+        summary_stats["c_T"] = np.average(eTp_ensemble + eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0)
+        summary_stats["c_X"] = np.average(eXp_ensemble + eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0)
         return Struct(outputSummary=summary_stats)
-
-    def run_12(self, skymap, src00List, src01List, src10List, src11List):
-        en = self.ename
-        egn = self.egname
-        up1 = []
-        up2 = []
-        down = []
-        for src00, src01, src10, src11 in zip(
-            src00List, src01List, src10List, src11List
-        ):
-            src00 = src00.get()
-            src01 = src01.get()
-            src10 = src10.get()
-            src11 = src11.get()
-            em = np.sum(src00[en] * src00["w"]) + np.sum(src01[en] * src01["w"])
-            ep = np.sum(src10[en] * src10["w"]) + np.sum(src11[en] * src11["w"])
-            rm = np.sum(
-                src00[egn] * src00["w"] + src00[en] * src00["w_g1"]
-            ) + np.sum(src01[egn] * src01["w"] + src01[en] * src01["w_g1"])
-            rp = np.sum(
-                src10[egn] * src10["w"] + src10[en] * src10["w_g1"]
-            ) + np.sum(src11[egn] * src11["w"] + src11[en] * src11["w_g1"])
-
-            up1.append(ep - em)
-            up2.append((em + ep) / 2.0)
-            down.append((rm + rp) / 2.0)
-
-        nsim = len(src00List)
-        denom = np.average(down)
-        tmp = np.array(up1) / 2.0 + np.array(up2)
-        print(
-            "Positive shear:",
-            np.average(tmp) / denom,
-            "+-",
-            np.std(tmp) / denom / np.sqrt(nsim),
-        )
-        tmp = -np.array(up1) / 2.0 + np.array(up2)
-        print(
-            "Negative shear:",
-            np.average(tmp) / denom,
-            "+-",
-            np.std(tmp) / denom / np.sqrt(nsim),
-        )
-        if self.sname[-1] == self.ename[-1]:
-            print(
-                "Multiplicative bias:",
-                np.average(up1) / denom / self.svalue / 2.0 - 1,
-                "+-",
-                np.std(up1) / denom / np.sqrt(nsim) / self.svalue / 2.0,
-            )
-        else:
-            print(
-                "We do not estimate multiplicative bias:",
-            )
-        print(
-            "Additive bias:",
-            np.average(up2) / denom,
-            "+-",
-            np.std(up2) / denom / np.sqrt(nsim),
-        )
-        return
