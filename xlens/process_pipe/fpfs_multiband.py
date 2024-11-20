@@ -48,7 +48,6 @@ class FpfsMultibandPipeConnections(
     dimensions=("tract", "patch", "band", "skymap"),
     defaultTemplates={
         "coaddName": "deep",
-        "coaddName": "deep",
     },
 ):
     exposure = cT.Input(
