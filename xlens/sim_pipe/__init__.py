@@ -1,3 +1,3 @@
-from . import halo_multiband, shear_multiband
+from . import multibandSim
 
-__all__ = ["shear_multiband", "halo_multiband"]
+__all__ = ["multibandSim"]

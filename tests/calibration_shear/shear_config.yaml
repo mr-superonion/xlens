@@ -3,7 +3,7 @@ instrument: lsst.obs.subaru.HyperSuprimeCam
 
 tasks:
   MutibandSim1:
-    class: xlens.sim_pipe.shear_multiband.MultibandSimShearPipe
+    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
     config:
       simulator.survey_name: hsc
       simulator.mode: 0
@@ -12,7 +12,7 @@ tasks:
       connections.irot: 0
 
   MutibandSim2:
-    class: xlens.sim_pipe.shear_multiband.MultibandSimShearPipe
+    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
     config:
       simulator.survey_name: hsc
       simulator.mode: 0
@@ -21,7 +21,7 @@ tasks:
       connections.irot: 1
 
   MutibandSim3:
-    class: xlens.sim_pipe.shear_multiband.MultibandSimShearPipe
+    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
     config:
       simulator.survey_name: hsc
       simulator.mode: 1
@@ -30,7 +30,7 @@ tasks:
       connections.irot: 0
 
   MutibandSim4:
-    class: xlens.sim_pipe.shear_multiband.MultibandSimShearPipe
+    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
     config:
       simulator.survey_name: hsc
       simulator.mode: 1
