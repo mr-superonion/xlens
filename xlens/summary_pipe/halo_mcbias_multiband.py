@@ -46,7 +46,7 @@ class HaloMcBiasMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "band"),
     defaultTemplates={
-        "inputCoaddName": "deep",
+        "coaddName": "deep",
         "dataType": "",
     },
 ):
@@ -58,7 +58,7 @@ class HaloMcBiasMultibandPipeConnections(
     )
     src00List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_meas{dataType}_0_rot0",
+        name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
         dimensions=(
             "skymap",
             "band",
@@ -72,7 +72,7 @@ class HaloMcBiasMultibandPipeConnections(
 
     src01List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_meas{dataType}_0_rot1",
+        name="{coaddName}_0_rot1_Coadd_anacal_{dataType}",
         dimensions=(
             "skymap",
             "band",
@@ -86,7 +86,7 @@ class HaloMcBiasMultibandPipeConnections(
 
     truth00List = cT.Input(
         doc="input truth catalog",
-        name="{inputCoaddName}Coadd_truthCatalog{dataType}_0_rot0",
+        name="{coaddName}_0_rot0_Coadd_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=(
             "skymap",
@@ -100,7 +100,7 @@ class HaloMcBiasMultibandPipeConnections(
 
     truth01List = cT.Input(
         doc="input truth catalog",
-        name="{inputCoaddName}Coadd_truthCatalog{dataType}_0_rot1",
+        name="{coaddName}_0_rot1_Coadd_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=(
             "skymap",
@@ -114,7 +114,7 @@ class HaloMcBiasMultibandPipeConnections(
 
     outputSummary = cT.Output(
         doc="Summary statistics",
-        name="{inputCoaddName}_halo_mc_summary_stats{dataType}",
+        name="{coaddName}_halo_mc_{dataType}_summary_stats",
         storageClass="ArrowAstropy",
         dimensions=("skymap",),
     )
@@ -122,7 +122,7 @@ class HaloMcBiasMultibandPipeConnections(
     summaryPlot = cT.Output(
         doc="simple plot of summary stats",
         storageClass="Plot",
-        name="halo_mc_summary_plot_{dataType}",
+        name="halo_mc_summary_{dataType}_plot",
         dimensions=("skymap",),
     )
 

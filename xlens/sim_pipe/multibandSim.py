@@ -26,10 +26,12 @@ from lsst.pipe.base import (
 from lsst.pipe.tasks.coaddBase import makeSkyInfo
 from lsst.skymap import BaseSkyMap
 
-from ..simulator.multiband import MultibandSimHaloTask
+from ..simulator.multiband import (
+    MultibandSimShearTask, MultibandSimHaloTask,
+)
 
 
-class MultibandSimHaloPipeConnections(
+class MultibandSimPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch", "band"),
     defaultTemplates={
@@ -86,9 +88,67 @@ class MultibandSimHaloPipeConnections(
         super().__init__(config=config)
 
 
+class MultibandSimShearPipeConfig(
+    PipelineTaskConfig,
+    pipelineConnections=MultibandSimPipeConnections,
+):
+    simulator = ConfigurableField(
+        target=MultibandSimShearTask,
+        doc="Simulation task for shear test",
+    )
+    idGenerator = SkyMapIdGeneratorConfig.make_field()
+
+    def validate(self):
+        super().validate()
+
+    def setDefaults(self):
+        super().setDefaults()
+
+
+class MultibandSimShearPipe(PipelineTask):
+    _DefaultName = "MultibandSimShearPipe"
+    ConfigClass = MultibandSimShearPipeConfig
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.makeSubtask("simulator")
+
+    def runQuantum(self, butlerQC, inputRefs, outputRefs) -> None:
+        inputs = butlerQC.get(inputRefs)
+
+        # band name
+        assert butlerQC.quantum.dataId is not None
+        band = butlerQC.quantum.dataId["band"]
+        inputs["band"] = band
+
+        # Get unique integer ID for IdFactory and RNG seeds; only the latter
+        # should really be used as the IDs all come from the input catalog.
+        idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
+        seed = idGenerator.catalog_id
+        inputs["seed"] = seed
+
+        skymap = butlerQC.get(inputRefs.skymap)
+        sky_info = makeSkyInfo(
+            skymap,
+            tractId=butlerQC.quantum.dataId["tract"],
+            patchId=butlerQC.quantum.dataId["patch"],
+        )
+        boundaryBox = sky_info.bbox
+        inputs["boundaryBox"] = boundaryBox
+
+        # Obtain the WCS for the patch
+        tract_info = sky_info.tractInfo
+        wcs = tract_info.getWcs()
+        inputs["wcs"] = wcs
+
+        outputs = self.simulator.run(**inputs)
+        butlerQC.put(outputs, outputRefs)
+        return
+
+
 class MultibandSimHaloPipeConfig(
     PipelineTaskConfig,
-    pipelineConnections=MultibandSimHaloPipeConnections,
+    pipelineConnections=MultibandSimPipeConnections,
 ):
     simulator = ConfigurableField(
         target=MultibandSimHaloTask,
@@ -100,56 +160,13 @@ class MultibandSimHaloPipeConfig(
         super().validate()
 
     def setDefaults(self):
-        print("Configuration starts")
         super().setDefaults()
 
 
-class MultibandSimHaloPipe(PipelineTask):
+class MultibandSimHaloPipe(MultibandSimShearPipe):
     _DefaultName = "MultibandSimHaloPipe"
     ConfigClass = MultibandSimHaloPipeConfig
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        assert isinstance(self.config, MultibandSimHaloPipeConfig)
         self.makeSubtask("simulator")
-
-    def runQuantum(self, butlerQC, inputRefs, outputRefs) -> None:
-        assert isinstance(self.config, MultibandSimHaloPipeConfig)
-
-        # band name
-        assert butlerQC.quantum.dataId is not None
-        band = butlerQC.quantum.dataId["band"]
-
-        # Get unique integer ID for IdFactory and RNG seeds; only the latter
-        # should really be used as the IDs all come from the input catalog.
-        idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
-        seed = idGenerator.catalog_id
-
-        psfImage = butlerQC.get(inputRefs.psfImage)
-
-        skymap = butlerQC.get(inputRefs.skymap)
-        sky_info = makeSkyInfo(
-            skymap,
-            tractId=butlerQC.quantum.dataId["tract"],
-            patchId=butlerQC.quantum.dataId["patch"],
-        )
-        boundaryBox = sky_info.bbox
-
-        # Obtain the WCS for the patch
-        tract_info = sky_info.tractInfo
-        wcs = tract_info.getWcs()
-
-        exposure = butlerQC.get(inputRefs.exposure)
-        noiseCorr = butlerQC.get(inputRefs.noiseCorrImage)
-
-        outputs = self.simulator.run(
-            band=band,
-            seed=seed,
-            boundaryBox=boundaryBox,
-            wcs=wcs,
-            psfImage=psfImage,
-            noiseCorr=noiseCorr,
-            exposure=exposure,
-        )
-        butlerQC.put(outputs, outputRefs)
-        return
