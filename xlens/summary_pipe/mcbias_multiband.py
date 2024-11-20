@@ -283,11 +283,6 @@ class McBiasMultibandPipe(PipelineTask):
             RTm_list.append(RTm_sum)
             RXm_list.append(RXm_sum)
 
-            up1.append(eTp_sum - eTm_sum)
-            up2.append((eTm_sum + eTp_sum) / 2.0)
-            down.append((RTm_sum + RTp_sum) / 2.0)
-
-
         eTp = np.array(eTp_list)
         eXp = np.array(eXp_list)
         RTp = np.array(RTp_list)
