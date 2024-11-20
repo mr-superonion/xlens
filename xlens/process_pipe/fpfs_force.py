@@ -48,21 +48,19 @@ class FpfsForcePipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
     defaultTemplates={
-        "inputCoaddName": "deep",
-        "outputCoaddName": "deep",
-        "dataType": "",
+        "coaddName": "deep",
     },
 ):
-    detection = cT.Input(
-        doc="Source catalog with detection",
-        name="{outputCoaddName}Coadd_anacal_detection{dataType}",
+    joint_catalog = cT.Input(
+        doc="Source catalog with joint detection and measurement",
+        name="{coaddName}Coadd_anacal_joint",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,
     )
     exposure = cT.Input(
         doc="Input coadd image",
-        name="{inputCoaddName}Coadd_calexp{dataType}",
+        name="{coaddName}Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
@@ -70,7 +68,7 @@ class FpfsForcePipeConnections(
     )
     noise_corr = cT.Input(
         doc="noise correlation function",
-        name="{outputCoaddName}Coadd_systematics_noisecorr",
+        name="{coaddName}Coadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
@@ -79,7 +77,7 @@ class FpfsForcePipeConnections(
     )
     catalog = cT.Output(
         doc="Source catalog with all the measurement generated in this task",
-        name="{outputCoaddName}Coadd_anacal_force{dataType}",
+        name="{coaddName}Coadd_anacal_force",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -108,11 +106,6 @@ class FpfsForcePipeConfig(
 
     def validate(self):
         super().validate()
-        if not self.fpfs.do_adding_noise:
-            if len(self.connections.dataType) == 0:
-                raise ValueError(
-                    "Only set fpfs.do_adding_noise=False on simulation"
-                )
 
     def setDefaults(self):
         super().setDefaults()
@@ -154,7 +147,7 @@ class FpfsForcePipe(PipelineTask):
             }
 
         outputs = self.run(
-            detection=inputs["detection"],
+            joint_catalog=inputs["joint_catalog"],
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
         )
@@ -164,14 +157,16 @@ class FpfsForcePipe(PipelineTask):
     def run(
         self,
         *,
-        detection,
+        joint_catalog,
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
     ):
         assert isinstance(self.config, FpfsForcePipeConfig)
         det_names = ["y", "x", "fpfs_w", "fpfs_dw_dg1", "fpfs_dw_dg2"]
         det = (
-            detection[det_names].to_pandas(index=False).to_records(index=False)
+            joint_catalog[det_names].to_pandas(
+                index=False
+            ).to_records(index=False)
         )
         catalog = [det]
         for band in exposure_handles_dict.keys():
@@ -190,7 +185,7 @@ class FpfsForcePipe(PipelineTask):
                 exposure=exposure,
                 seed=seed,
                 noise_corr=noise_corr,
-                detection=detection,
+                detection=joint_catalog,
                 band=band,
             )
             cat = self.fpfs.run(**data)

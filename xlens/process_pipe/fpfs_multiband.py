@@ -65,7 +65,7 @@ class FpfsMultibandPipeConnections(
         minimum=0,
         multiple=False,
     )
-    outputCatalog = cT.Output(
+    catalog = cT.Output(
         doc="Source catalog with all the measurement generated in this task",
         name="{coaddName}Coadd_anacal_meas",
         dimensions=("skymap", "tract", "patch", "band"),
@@ -124,7 +124,7 @@ class FpfsMultibandPipe(PipelineTask):
         assert isinstance(self.config, FpfsMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         data = self.prepare_data(butlerQC=butlerQC, inputRefs=inputRefs)
-        outputs = Struct(outputCatalog=self.fpfs.run(**data))
+        outputs = Struct(catalog=self.fpfs.run(**data))
         butlerQC.put(outputs, outputRefs)
         return
 
