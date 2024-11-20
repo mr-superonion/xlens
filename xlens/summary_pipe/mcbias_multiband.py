@@ -26,6 +26,7 @@ __all__ = [
 ]
 
 import logging
+logger = logging.getLogger(__name__)
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
@@ -35,6 +36,7 @@ from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
+    Struct,
 )
 from lsst.utils.logging import LsstLogAdapter
 from lsst.skymap import BaseSkyMap
@@ -88,6 +90,13 @@ class McBiasMultibandPipeConnections(
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
+    )
+
+    outputSummary = cT.Output(
+        doc="Summary of the results",
+        name="{inputCoaddName}_summary_stats{dataType}",
+        dimensions=("skymap"),
+        storageClass="ArrowAstropy",
     )
 
     def __init__(self, *, config=None):
@@ -202,29 +211,94 @@ class McBiasMultibandPipe(PipelineTask):
         return output
 
     @staticmethod
+    def _get_eT_eX_rT_rX_sum(eT, eX, w, rT, rX, dist, radial_bin_edges):
+        n_bins = len(radial_bin_edges) - 1
+        eT_list = []
+        eX_list = []
+        rT_list = []
+        rX_list = []
+        ngal_in_bin = []
+        eT_std_list = []
+        eX_std_list = []
+
+        for i in range(n_bins):
+            mask = (dist >= radial_bin_edges[i]) & (
+                    dist < radial_bin_edges[i + 1])
+            eT_sum = np.sum(eT[mask] * w[mask])
+            eX_sum = np.sum(eX[mask] * w[mask])
+            rT_sum = np.sum(rT[mask])
+            rX_sum = np.sum(rX[mask])
+            ngal_in_bin.append(np.sum(mask))
+
+            eT_list.append(eT_sum)
+            eX_list.append(eX_sum)
+            rT_list.append(rT_sum)
+            rX_list.append(rX_sum)
+            eT_std_list.append(np.std(eT[mask]))
+            eX_std_list.append(np.std(eX[mask]))
+
+        return (
+                np.array(eT_list),
+                np.array(eX_list),
+                np.array(rT_list),
+                np.array(rX_list),
+                np.array(ngal_in_bin),
+                np.array(eT_std_list),
+                np.array(eX_std_list),
+                )
+
+    @staticmethod
     def _compute_additive_bias(ep, em, Rp, Rm):
         return (ep + em) / (Rp + Rm)
 
+    @staticmethod
+    def get_summary_struct(n_bins):
+        dt = [
+            ("angular_bin_left", f"({n_bins},)f8"),
+            ("angular_bin_right", f"({n_bins},)f8"),
+            ("ngal_in_bin", f"({n_bins},)i4"),
+            ("eT", f"({n_bins},)f8"),
+            ("eT_std", f"({n_bins},)f8"),
+            ("eX", f"({n_bins},)f8"),
+            ("eX_std", f"({n_bins},)f8"),
+            ("rT", f"({n_bins},)f8"),
+            ("rT_std", f"({n_bins},)f8"),
+            ("rX", f"({n_bins},)f8"),
+            ("rX_std", f"({n_bins},)f8"),
+        ]
+        return np.zeros(n_halos, dtype=dt)
 
     def run_tx(self, skymap, src00List, src01List, src10List, src11List):
+        n_realization = len(src00List)
+        logger.info("n_realization", n_realization)
+
+        pixel_scale = skymap.config.pixelScale # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0] # in pixels
-        print('running tx')
-        up1 = []
-        up2 = []
-        down = []
+        max_pixel = (image_dim - 40) / 2
 
-        eTp_list = []
-        eXp_list = []
-        RTp_list = []
-        RXp_list = []
-        eTm_list = []
-        eXm_list = []
-        RTm_list = []
-        RXm_list = []
+        logger.info("image dim", image_dim)
+        logger.info("pixel scale", pixel_scale)
+        logger.info("max pixel", max_pixel)
 
-        for src00, src01, src10, src11 in zip(
+        n_bins = 10
+        pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
+        angular_bin_edges = pixel_bin_edges * pixel_scale
+        angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
+
+        eTp_ensemble = np.empty((len(src00List), n_bins))
+        eXp_ensemble = np.empty((len(src00List), n_bins))
+        RTp_ensemble = np.empty((len(src00List), n_bins))
+        RXp_ensemble = np.empty((len(src00List), n_bins))
+        ngal_in_binp_ensemble = np.empty((len(src00List), n_bins))
+        eTm_ensemble = np.empty((len(src00List), n_bins))
+        eXm_ensemble = np.empty((len(src00List), n_bins))
+        RTm_ensemble = np.empty((len(src00List), n_bins))
+        RXm_ensemble = np.empty((len(src00List), n_bins))
+        ngal_in_binm_ensemble = np.empty((len(src00List), n_bins))
+
+        for i, (src00, src01, src10, src11) in enumerate(zip(
             src00List, src01List, src10List, src11List
-        ):
+        )):
             src00 = src00.get()
             src01 = src01.get()
             src10 = src10.get()
@@ -232,6 +306,7 @@ class McBiasMultibandPipe(PipelineTask):
 
             xp = np.concatenate([src00["x"], src01["x"]])
             yp = np.concatenate([src00["y"], src01["y"]])
+            distp = np.sqrt((xp - image_dim/2) ** 2 + (yp - image_dim/2) ** 2)
             anglep = self._get_angle_from_pixel(xp, yp, image_dim/2, image_dim/2)
             e1p = np.concatenate([src00["e1"], src01["e1"]])
             e2p = np.concatenate([src00["e2"], src01["e2"]])
@@ -247,13 +322,27 @@ class McBiasMultibandPipe(PipelineTask):
                     )
             RTp, RXp = self._rotate_spin_2_matrix(R1p, R2p, anglep)
 
-            eTp_sum = np.sum(eTp * wp)
-            eXp_sum = np.sum(eXp * wp)
-            RTp_sum = np.sum(RTp)
-            RXp_sum = np.sum(RXp)
+            (
+                eT_list,
+                eX_list,
+                rT_list,
+                rX_list,
+                ngal_in_bin,
+                eT_std_list,
+                eX_std_list,
+            ) = self._get_eT_eX_rT_rX_sum(
+                eTp, eXp, wp, RTp, RXp, distp, pixel_bin_edges
+            )
+
+            eTp_ensemble[i] = eT_list
+            eXp_ensemble[i] = eX_list
+            RTp_ensemble[i] = rT_list
+            RXp_ensemble[i] = rX_list
+            ngal_in_binp_ensemble[i] = ngal_in_bin
 
             xm = np.concatenate([src10["x"], src11["x"]])
             ym = np.concatenate([src10["y"], src11["y"]])
+            distm = np.sqrt((xm - image_dim/2) ** 2 + (ym - image_dim/2) ** 2)
             anglem = self._get_angle_from_pixel(xm, ym, image_dim/2, image_dim/2)
             e1m = np.concatenate([src10["e1"], src11["e1"]])
             e2m = np.concatenate([src10["e2"], src11["e2"]])
@@ -269,73 +358,43 @@ class McBiasMultibandPipe(PipelineTask):
                     )
             RTm, RXm = self._rotate_spin_2_matrix(R1m, R2m, anglem)
 
-            eTm_sum = np.sum(eTm * wm)
-            eXm_sum = np.sum(eXm * wm)
-            RTm_sum = np.sum(RTm)
-            RXm_sum = np.sum(RXm)
+            (
+                eT_list,
+                eX_list,
+                rT_list,
+                rX_list,
+                ngal_in_bin,
+                eT_std_list,
+                eX_std_list,
+            ) = self._get_eT_eX_rT_rX_sum(
+                eTm, eXm, wm, RTm, RXm, distm, pixel_bin_edges
+            )
 
-            eTp_list.append(eTp_sum)
-            eXp_list.append(eXp_sum)
-            RTp_list.append(RTp_sum)
-            RXp_list.append(RXp_sum)
-            eTm_list.append(eTm_sum)
-            eXm_list.append(eXm_sum)
-            RTm_list.append(RTm_sum)
-            RXm_list.append(RXm_sum)
+            eTm_ensemble[i] = eT_list
+            eXm_ensemble[i] = eX_list
+            RTm_ensemble[i] = rT_list
+            RXm_ensemble[i] = rX_list
+            ngal_in_binm_ensemble[i] = ngal_in_bin
 
-        eTp = np.array(eTp_list)
-        eXp = np.array(eXp_list)
-        RTp = np.array(RTp_list)
-        RXp = np.array(RXp_list)
-        eTm = np.array(eTm_list)
-        eXm = np.array(eXm_list)
-        RTm = np.array(RTm_list)
-        RXm = np.array(RXm_list)
+        summary_stats = self.get_summary_struct(len(angular_bin_edges) - 1)
+        summary_stats["gt+"] = np.average(eTp_ensemble, axis=0) / np.average(RTp_ensemble, axis=0)
+        summary_stats["gt+_std"] = np.std(eTp_ensemble, axis=0) / np.average(RTp_ensemble, axis=0) / np.sqrt(n_realization)
+        summary_stats["gx+"] = np.average(eXp_ensemble, axis=0) / np.average(RXp_ensemble, axis=0)
+        summary_stats["gx+_std"] = np.std(eXp_ensemble, axis=0) / np.average(RXp_ensemble, axis=0) / np.sqrt(n_realization)
+        summary_stats["gt-"] = np.average(eTm_ensemble, axis=0) / np.average(RTm_ensemble, axis=0)
+        summary_stats["gt-_std"] = np.std(eTm_ensemble, axis=0) / np.average(RTm_ensemble, axis=0) / np.sqrt(n_realization)
+        summary_stats["gx-"] = np.average(eXm_ensemble, axis=0) / np.average(RXm_ensemble, axis=0)
+        summary_stats["gx-_std"] = np.std(eXm_ensemble, axis=0) / np.average(RXm_ensemble, axis=0) / np.sqrt(n_realization)
+        if self.sname[-1] == "t":
+            summary_stats["m_t"] =  np.average(eTp_ensemble - eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0) / self.svalue / 2.0 - 1
+            symmary_stats["m_t_std"] = np.std(eTp_ensemble - eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0) / np.sqrt(n_realization) / self.svalue / 2.0
+        else:
+            summary_stats["m_x"] =  np.average(eXp_ensemble - eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0) / self.svalue / 2.0 - 1
+            symmary_stats["m_x_std"] = np.std(eXp_ensemble - eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0) / np.sqrt(n_realization) / self.svalue / 2.0
 
-        nsim = len(src00List)
-        print(
-            "Positive tangential shear:",
-            np.average(eTp) / np.average(RTp),
-            "+-",
-            np.std(eTp) / np.average(RTp) / np.sqrt(nsim),
-        )
-        print(
-            "Negative tangential shear:",
-            np.average(eTm) / np.average(RTm),
-            "+-",
-            np.std(eTm) / np.average(RTm) / np.sqrt(nsim),
-        )
-        print(
-            "Positive cross shear:",
-            np.average(eXp) / np.average(RXp),
-            "+-",
-            np.std(eXp) / np.average(RXp) / np.sqrt(nsim),
-        )
-        print(
-            "Negative cross shear:",
-            np.average(eXm) / np.average(RXm),
-            "+-",
-            np.std(eXm) / np.average(RXm) / np.sqrt(nsim),
-        )
-        print(
-            "Multiplicative bias:",
-            np.average(eTp - eTm) / np.average(RTp + RTm) / self.svalue / 2.0 - 1,
-            "+-",
-            np.std(eTp - eTm) / np.average(RTp + RTm) / np.sqrt(nsim) / self.svalue / 2.0,
-        )
-        print(
-            "Tangential additive bias:",
-            np.average(eTp + eTm) / np.average(RTp + RTm),
-            "+-",
-            np.std(eTp + eTm) / np.average(RTp + RTm) / np.sqrt(nsim),
-        )
-        print(
-            "Cross additive bias:",
-            np.average(eXp + eXm) / np.average(RXp + RXm),
-            "+-",
-            np.std(eXp + eXm) / np.average(RXp + RXm) / np.sqrt(nsim),
-        )
-        return
+        summary_stats["c_t"] = np.average(eTp_ensemble + eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0)
+        summary_stats["c_x"] = np.average(eXp_ensemble + eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0)
+        return Struct(outputSummary=summary_stats)
 
     def run_12(self, skymap, src00List, src01List, src10List, src11List):
         en = self.ename
