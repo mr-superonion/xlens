@@ -48,23 +48,31 @@ from ..processor.fpfs import FpfsMeasurementTask
 
 class FpfsJointPipeConnections(
     PipelineTaskConnections,
-    dimensions=("tract", "patch", "band", "skymap"),
+    dimensions=("skymap", "tract", "patch"),
     defaultTemplates={
-        "inputCoaddName": "deep",
-        "outputCoaddName": "deep",
-        "dataType": "",
+        "coaddName": "deep",
     },
 ):
     exposure = cT.Input(
         doc="Input coadd image",
-        name="{inputCoaddName}Coadd_calexp{dataType}",
+        name="{coaddName}Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
-        multiple=False,
+        multiple=True,
+        deferLoad=True,
     )
-    detection = cT.Output(
-        doc="Source catalog with all the measurement generated in this task",
-        name="{outputCoaddName}Coadd_anacal_detection{dataType}",
+    noise_corr = cT.Input(
+        doc="noise correlation function",
+        name="{coaddName}Coadd_systematics_noisecorr",
+        storageClass="ImageF",
+        dimensions=("skymap", "tract", "patch", "band"),
+        minimum=0,
+        multiple=True,
+        deferLoad=True,
+    )
+    joint_catalog = cT.Output(
+        doc="Source catalog with joint detection and measurement",
+        name="{coaddName}Coadd_anacal_joint",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -101,11 +109,6 @@ class FpfsJointPipeConfig(
 
     def validate(self):
         super().validate()
-        if not self.fpfs.do_adding_noise:
-            if len(self.connections.dataType) == 0:
-                raise ValueError(
-                    "Only set fpfs.do_adding_noise=False on simulation"
-                )
 
     def setDefaults(self):
         super().setDefaults()
@@ -140,30 +143,50 @@ class FpfsJointPipe(PipelineTask):
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, FpfsJointPipeConfig)
-        # Retrieve the filename of the input exposure
-        data = self.prepare_data(butlerQC=butlerQC, inputRefs=inputRefs)
-        outputs = Struct(detection=self.fpfs.run(**data))
+        inputs = butlerQC.get(inputRefs)
+        exposure_handles = inputs["exposure"]
+        exposure_handles_dict = {
+            handle.dataId["band"]: handle for handle in exposure_handles
+        }
+        correlation_handles = inputs["noise_corr"]
+        if len(correlation_handles) == 0:
+            correlation_handles_dict = None
+        else:
+            correlation_handles_dict = {
+                handle.dataId["band"]: handle for handle in correlation_handles
+            }
+        outputs = self.run(
+            exposure_handles_dict=exposure_handles_dict,
+            correlation_handles_dict=correlation_handles_dict,
+        )
         butlerQC.put(outputs, outputRefs)
         return
 
-    def prepare_data(
+    def run(
         self,
         *,
-        butlerQC,
-        inputRefs,
+        exposure_handles_dict: dict,
+        correlation_handles_dict: dict | None,
     ):
         assert isinstance(self.config, FpfsJointPipeConfig)
+        band = "i"
+        handle = exposure_handles_dict[band]
+        exposure = handle.get()
+        exposure.getPsf().setCacheCapacity(self.config.psf_cache)
+        if correlation_handles_dict is not None:
+            handle = correlation_handles_dict[band]
+            noise_corr = handle.get()
+        else:
+            noise_corr = None
 
-        inputs = butlerQC.get(inputRefs)
-
-        # Set psf_cache
-        # move this to run after gen2 deprecation
-        inputs["exposure"].getPsf().setCacheCapacity(self.config.psf_cache)
-
-        # Get unique integer ID for IdFactory and RNG seeds; only the latter
-        # should really be used as the IDs all come from the input catalog.
-        id_generator = self.config.id_generator.apply(butlerQC.quantum.dataId)
-        inputs["seed"] = id_generator.catalog_id
-        inputs["detection"] = None
-        inputs["noise_corr"] = None
-        return self.fpfs.prepare_data(**inputs)
+        id_generator = self.config.id_generator.apply(handle.dataId)
+        seed = id_generator.catalog_id
+        data = self.fpfs.prepare_data(
+            exposure=exposure,
+            seed=seed,
+            noise_corr=noise_corr,
+            detection=None,
+            band=None,
+        )
+        catalog = self.fpfs.run(**data)
+        return Struct(joint_catalog=catalog)

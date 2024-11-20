@@ -47,41 +47,41 @@ class SelBiasMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
     defaultTemplates={
-        "inputCoaddName": "deep",
+        "coaddName": "deep",
         "dataType": "",
     },
 ):
     src00 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_{dataType}_0_rot0",
+        name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src01 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_{dataType}_0_rot1",
+        name="{coaddName}_0_rot1_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src10 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_{dataType}_1_rot0",
+        name="{coaddName}_1_rot0_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src11 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_{dataType}_1_rot1",
+        name="{coaddName}_1_rot1_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
-    result = cT.Output(
+    summary = cT.Output(
         doc="Summary statistics",
-        name="{inputCoaddName}Coadd_anacal_selbias_{dataType}",
+        name="{coaddName}Coadd_anacal_selbias_m00_{dataType}",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
@@ -231,24 +231,24 @@ class SelBiasMultibandPipe(PipelineTask):
             ("up2", "f8"),
             ("down", "f8"),
         ]
-        result = np.zeros(ncuts, dtype=data_type)
-        result["up1"] = (ep - em) / 2.0
-        result["up2"] = (em + ep) / 2.0
-        result["down"] = (rm + rp) / 2.0
-        return Struct(result=result)
+        summary = np.zeros(ncuts, dtype=data_type)
+        summary["up1"] = (ep - em) / 2.0
+        summary["up2"] = (em + ep) / 2.0
+        summary["down"] = (rm + rp) / 2.0
+        return Struct(summary=summary)
 
 
 class SelBiasSummaryMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=(),
     defaultTemplates={
-        "inputCoaddName": "deep",
+        "coaddName": "deep",
         "dataType": "",
     },
 ):
-    res_list = cT.Input(
+    summary_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{inputCoaddName}Coadd_anacal_selbias_{dataType}",
+        name="{coaddName}Coadd_anacal_selbias_m00_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
@@ -325,12 +325,12 @@ class SelBiasSummaryMultibandPipe(PipelineTask):
         self.run(**inputs)
         return
 
-    def run(self, res_list):
+    def run(self, summary_list):
         assert isinstance(self.config, SelBiasSummaryMultibandPipeConfig)
         up1 = []
         up2 = []
         down = []
-        for res in res_list:
+        for res in summary_list:
             res = res.get()
             up1.append(np.array(res["up1"]))
             up2.append(np.array(res["up2"]))
