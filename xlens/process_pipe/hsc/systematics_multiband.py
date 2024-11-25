@@ -25,12 +25,12 @@ __all__ = [
     "SystematicsMultibandPipeConnections",
 ]
 
-import os
 import glob
 import logging
+import os
 from typing import Any
-import fitsio
 
+import fitsio
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.pipe.base.connectionTypes as cT
@@ -150,7 +150,7 @@ class SystematicsMultibandPipe(PipelineTask):
 
         if patch_db not in patch_list:
             return
-            #raise IOError("patch not in FDFC cut")
+            # raise IOError("patch not in FDFC cut")
 
         band = butlerQC.quantum.dataId["band"]
         hsc_dir = "/lustre/HSC_DR/hsc_ssp/dr4/s23b/data/s23b_wide/unified/"
@@ -159,7 +159,7 @@ class SystematicsMultibandPipe(PipelineTask):
             os.path.join(
                 hsc_dir,
                 f"deepCoadd_calexp/{tract}/{patch}/{band}/",
-                f"deepCoadd_calexp_{tract}_{patch}_{band}_*.fits"
+                f"deepCoadd_calexp_{tract}_{patch}_{band}_*.fits",
             )
         )
         if len(exp_file_name) > 0:
