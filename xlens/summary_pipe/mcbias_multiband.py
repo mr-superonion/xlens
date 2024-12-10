@@ -95,8 +95,8 @@ class McBiasMultibandPipeConnections(
     outputSummary = cT.Output(
         doc="Summary of the results",
         name="{inputCoaddName}_summary_stats{dataType}",
-        dimensions=("skymap"),
         storageClass="ArrowAstropy",
+        dimensions=("skymap",),
     )
 
     def __init__(self, *, config=None):
@@ -174,7 +174,8 @@ class McBiasMultibandPipe(PipelineTask):
         assert isinstance(self.config, McBiasMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
-        self.run(**inputs)
+        outputs = self.run(**inputs)
+        butlerQC.put(outputs, outputRefs)
         return
 
     @staticmethod
@@ -216,6 +217,7 @@ class McBiasMultibandPipe(PipelineTask):
         rX_list = []
         eT_std_list = []
         eX_std_list = []
+        ngal_in_bin = []
 
         for i in range(n_bins):
             mask = (dist >= radial_bin_edges[i]) & (
@@ -231,6 +233,7 @@ class McBiasMultibandPipe(PipelineTask):
             rX_list.append(rX_sum)
             eT_std_list.append(np.std(eT[mask]))
             eX_std_list.append(np.std(eX[mask]))
+            ngal_in_bin.append(np.sum(mask))
 
         return (
                 np.array(eT_list),
@@ -239,6 +242,7 @@ class McBiasMultibandPipe(PipelineTask):
                 np.array(rX_list),
                 np.array(eT_std_list),
                 np.array(eX_std_list),
+                np.array(ngal_in_bin),
                 )
 
     @staticmethod
@@ -258,9 +262,13 @@ class McBiasMultibandPipe(PipelineTask):
             ("m_X", f"({n_bins},)f8"),
             ("m_X_std", f"({n_bins},)f8"),
             ("c_T", f"({n_bins},)f8"),
+            ("c_T_std", f"({n_bins},)f8"),
             ("c_X", f"({n_bins},)f8"),
+            ("c_X_std", f"({n_bins},)f8"),
+            ("ngal_in_binp", f"({n_bins},)f8"),
+            ("ngal_in_binm", f"({n_bins},)f8"),
         ]
-        return np.zeros(n_halos, dtype=dt)
+        return np.zeros(1, dtype=dt)
 
     def run(self, skymap, src00List, src01List, src10List, src11List):
         n_realization = len(src00List)
@@ -279,14 +287,18 @@ class McBiasMultibandPipe(PipelineTask):
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
 
-        eTp_ensemble = np.empty((len(src00List), n_bins))
-        eXp_ensemble = np.empty((len(src00List), n_bins))
-        RTp_ensemble = np.empty((len(src00List), n_bins))
-        RXp_ensemble = np.empty((len(src00List), n_bins))
-        eTm_ensemble = np.empty((len(src00List), n_bins))
-        eXm_ensemble = np.empty((len(src00List), n_bins))
-        RTm_ensemble = np.empty((len(src00List), n_bins))
-        RXm_ensemble = np.empty((len(src00List), n_bins))
+        eTp_ensemble = np.empty((n_realization, n_bins))
+        eXp_ensemble = np.empty((n_realization, n_bins))
+        RTp_ensemble = np.empty((n_realization, n_bins))
+        RXp_ensemble = np.empty((n_realization, n_bins))
+        ngal_in_binp = np.empty((n_realization, n_bins))
+
+        eTm_ensemble = np.empty((n_realization, n_bins))
+        eXm_ensemble = np.empty((n_realization, n_bins))
+        RTm_ensemble = np.empty((n_realization, n_bins))
+        RXm_ensemble = np.empty((n_realization, n_bins))
+        ngal_in_binm = np.empty((n_realization, n_bins))
+
 
         for i, (src00, src01, src10, src11) in enumerate(zip(
             src00List, src01List, src10List, src11List
@@ -321,14 +333,16 @@ class McBiasMultibandPipe(PipelineTask):
                 rX_list,
                 eT_std_list,
                 eX_std_list,
+                ngal_in_bin,
             ) = self._get_eT_eX_rT_rX_sum(
                 eTp, eXp, wp, RTp, RXp, distp, pixel_bin_edges
             )
 
-            eTp_ensemble[i] = eT_list
-            eXp_ensemble[i] = eX_list
-            RTp_ensemble[i] = rT_list
-            RXp_ensemble[i] = rX_list
+            eTp_ensemble[i, :] = eT_list
+            eXp_ensemble[i, :] = eX_list
+            RTp_ensemble[i, :] = rT_list
+            RXp_ensemble[i, :] = rX_list
+            ngal_in_binp[i, :] = ngal_in_bin
 
             xm = np.concatenate([src10["x"], src11["x"]])
             ym = np.concatenate([src10["y"], src11["y"]])
@@ -355,32 +369,42 @@ class McBiasMultibandPipe(PipelineTask):
                 rX_list,
                 eT_std_list,
                 eX_std_list,
+                ngal_in_bin,
             ) = self._get_eT_eX_rT_rX_sum(
                 eTm, eXm, wm, RTm, RXm, distm, pixel_bin_edges
             )
 
-            eTm_ensemble[i] = eT_list
-            eXm_ensemble[i] = eX_list
-            RTm_ensemble[i] = rT_list
-            RXm_ensemble[i] = rX_list
+            eTm_ensemble[i, :] = eT_list
+            eXm_ensemble[i, :] = eX_list
+            RTm_ensemble[i, :] = rT_list
+            RXm_ensemble[i, :] = rX_list
+            ngal_in_binm[i, :] = ngal_in_bin
 
+        denom_T = np.average(RTp_ensemble + RTm_ensemble, axis=0) / 2.0
+        denom_X = np.average(RXp_ensemble + RXm_ensemble, axis=0) / 2.0
         summary_stats = self.get_summary_struct(len(angular_bin_edges) - 1)
         summary_stats["angular_bin"] = angular_bin_mids
-        summary_stats["gT+"] = np.average(eTp_ensemble, axis=0) / np.average(RTp_ensemble, axis=0)
-        summary_stats["gT+_std"] = np.std(eTp_ensemble, axis=0) / np.average(RTp_ensemble, axis=0) / np.sqrt(n_realization)
-        summary_stats["gX+"] = np.average(eXp_ensemble, axis=0) / np.average(RXp_ensemble, axis=0)
-        summary_stats["gX+_std"] = np.std(eXp_ensemble, axis=0) / np.average(RXp_ensemble, axis=0) / np.sqrt(n_realization)
-        summary_stats["gT-"] = np.average(eTm_ensemble, axis=0) / np.average(RTm_ensemble, axis=0)
-        summary_stats["gT-_std"] = np.std(eTm_ensemble, axis=0) / np.average(RTm_ensemble, axis=0) / np.sqrt(n_realization)
-        summary_stats["gX-"] = np.average(eXm_ensemble, axis=0) / np.average(RXm_ensemble, axis=0)
-        summary_stats["gX-_std"] = np.std(eXm_ensemble, axis=0) / np.average(RXm_ensemble, axis=0) / np.sqrt(n_realization)
-        if self.sname[-1] == "t":
-            summary_stats["m_T"] =  np.average(eTp_ensemble - eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0) / self.svalue / 2.0 - 1
-            symmary_stats["m_T_std"] = np.std(eTp_ensemble - eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0) / np.sqrt(n_realization) / self.svalue / 2.0
-        else:
-            summary_stats["m_X"] =  np.average(eXp_ensemble - eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0) / self.svalue / 2.0 - 1
-            symmary_stats["m_X_std"] = np.std(eXp_ensemble - eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0) / np.sqrt(n_realization) / self.svalue / 2.0
+        summary_stats["gT+"] = np.average(eTp_ensemble, axis=0) / denom_T
+        summary_stats["gT+_std"] = np.std(eTp_ensemble, axis=0) / denom_T / np.sqrt(n_realization)
+        summary_stats["gX+"] = np.average(eXp_ensemble, axis=0) / denom_X
+        summary_stats["gX+_std"] = np.std(eXp_ensemble, axis=0) / denom_X / np.sqrt(n_realization)
+        summary_stats["gT-"] = np.average(eTm_ensemble, axis=0) / denom_T
+        summary_stats["gT-_std"] = np.std(eTm_ensemble, axis=0) / denom_T / np.sqrt(n_realization)
+        summary_stats["gX-"] = np.average(eXm_ensemble, axis=0) / denom_X
+        summary_stats["gX-_std"] = np.std(eXm_ensemble, axis=0) / denom_X / np.sqrt(n_realization)  
 
-        summary_stats["c_T"] = np.average(eTp_ensemble + eTm_ensemble, axis=0) / np.average(RTp_ensemble + RTm_ensemble, axis=0)
-        summary_stats["c_X"] = np.average(eXp_ensemble + eXm_ensemble, axis=0) / np.average(RXp_ensemble + RXm_ensemble, axis=0)
+        if self.sname[-1] == "t":
+            summary_stats["m_T"] =  np.average(eTp_ensemble - eTm_ensemble, axis=0) / denom_T / self.svalue / 2.0 - 1
+            summary_stats["m_T_std"] = np.std(eTp_ensemble - eTm_ensemble, axis=0) / denom_T / np.sqrt(n_realization) / self.svalue / 2.0
+        else:
+            summary_stats["m_X"] =  np.average(eXp_ensemble - eXm_ensemble, axis=0) / denom_X / self.svalue / 2.0 - 1
+            summary_stats["m_X_std"] = np.std(eXp_ensemble - eXm_ensemble, axis=0) / denom_X / np.sqrt(n_realization) / self.svalue / 2.0
+
+        summary_stats["c_T"] = np.average(eTp_ensemble + eTm_ensemble, axis=0) / denom_T
+        summary_stats["c_T_std"] = np.std(eTp_ensemble + eTm_ensemble, axis=0) / denom_T / np.sqrt(n_realization)
+        summary_stats["c_X"] = np.average(eXp_ensemble + eXm_ensemble, axis=0) / denom_X
+        summary_stats["c_X_std"] = np.std(eXp_ensemble + eXm_ensemble, axis=0) / denom_X / np.sqrt(n_realization)
+
+        summary_stats["ngal_in_binp"] = np.average(ngal_in_binp, axis=0)
+        summary_stats["ngal_in_binm"] = np.average(ngal_in_binm, axis=0)
         return Struct(outputSummary=summary_stats)
