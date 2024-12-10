@@ -41,6 +41,8 @@ from lsst.pipe.base import (
 from lsst.utils.logging import LsstLogAdapter
 from lsst.skymap import BaseSkyMap
 
+import matplotlib.pyplot as plt
+
 
 class McBiasMultibandPipeConnections(
     PipelineTaskConnections,
@@ -96,6 +98,13 @@ class McBiasMultibandPipeConnections(
         doc="Summary of the results",
         name="{inputCoaddName}_summary_stats{dataType}",
         storageClass="ArrowAstropy",
+        dimensions=("skymap",),
+    )
+
+    summaryPlot = cT.Output(
+        doc="simple plot of summary stats",
+        storageClass="Plot",
+        name="mc_summary_plot{dataType}",
         dimensions=("skymap",),
     )
 
@@ -249,6 +258,8 @@ class McBiasMultibandPipe(PipelineTask):
     def get_summary_struct(n_bins):
         dt = [
             ("angular_bin", f"({n_bins},)f8"),
+            ("angular_bin_left", f"({n_bins},)f8"),
+            ("angular_bin_right", f"({n_bins},)f8"),
             ("gT+", f"({n_bins},)f8"),
             ("gT+_std", f"({n_bins},)f8"),
             ("gX+", f"({n_bins},)f8"),
@@ -269,6 +280,51 @@ class McBiasMultibandPipe(PipelineTask):
             ("ngal_in_binm", f"({n_bins},)f8"),
         ]
         return np.zeros(1, dtype=dt)
+
+    def generate_summary_lot(self, summary_table):
+        area = np.mean(
+            np.pi
+            * (
+                (summary_table["angular_bin_right"] / 3600 * np.pi / 180.0) ** 2
+                - (summary_table["angular_bin_left"] / 3600 * np.pi / 180.0)
+                ** 2
+            )
+            * (60 * 180 / np.pi) ** 2,
+            axis=0,
+        )
+
+        fig, axs = plt.subplots(2, 2, figsize=(24, 26))
+        angular_bin = summary_table["angular_bin"][0] / 60. # arcmin
+
+        for ax in axs.flatten():
+            ax.set_xlabel(r"$\theta$ [arcmin]")
+
+        # Plot gT
+        axs[0, 0].errorbar(angular_bin, summary_table["gT+"][0], summary_table["gT+_std"][0], fmt="o", c="C0", label="+")
+        axs[0, 0].errorbar(angular_bin, summary_table["gT-"][0], summary_table["gT-_std"][0], fmt="o", c="C1", label="-")
+        axs[0, 0].axhline(self.svalue, c="gray", ls="--")
+        axs[0, 0].axhline(-self.svalue, c="gray", ls="--")
+        axs[0, 0].set_ylabel(r"$\gamma_t$")
+        axs[0, 0].legend()
+
+        # Plot gX
+        axs[0, 1].errorbar(angular_bin, summary_table["gX+"][0], summary_table["gX+_std"][0], fmt="o", c="C0")
+        axs[0, 1].errorbar(angular_bin, summary_table["gX-"][0], summary_table["gX-_std"][0], fmt="o", c="C1")
+        axs[0, 1].axhline(0, c="gray", ls="--")
+        axs[0, 1].set_ylabel(r"$\gamma_x$")
+
+        # Plot m_T
+        axs[1, 0].errorbar(angular_bin, summary_table["m_T"][0], summary_table["m_T_std"][0], fmt="o", c="C0")
+        axs[1, 0].axhline(0, c="gray", ls="--")
+        axs[1, 0].set_ylabel(r"$m$")
+
+        # Plot c_T, c_X
+        axs[1, 1].errorbar(angular_bin, summary_table["c_T"][0], summary_table["c_T_std"][0], fmt="o", c="C0", label="T")
+        axs[1, 1].errorbar(angular_bin, summary_table["c_X"][0], summary_table["c_X_std"][0], fmt="o", c="C1", label="X")
+        axs[1, 1].axhline(0, c="gray", ls="--")
+        axs[1, 1].set_ylabel(r"$c$")
+
+        return fig
 
     def run(self, skymap, src00List, src01List, src10List, src11List):
         n_realization = len(src00List)
@@ -384,6 +440,8 @@ class McBiasMultibandPipe(PipelineTask):
         denom_X = np.average(RXp_ensemble + RXm_ensemble, axis=0) / 2.0
         summary_stats = self.get_summary_struct(len(angular_bin_edges) - 1)
         summary_stats["angular_bin"] = angular_bin_mids
+        summary_stats["angular_bin_left"] = angular_bin_edges[:-1]
+        summary_stats["angular_bin_right"] = angular_bin_edges[1:]
         summary_stats["gT+"] = np.average(eTp_ensemble, axis=0) / denom_T
         summary_stats["gT+_std"] = np.std(eTp_ensemble, axis=0) / denom_T / np.sqrt(n_realization)
         summary_stats["gX+"] = np.average(eXp_ensemble, axis=0) / denom_X
@@ -407,4 +465,7 @@ class McBiasMultibandPipe(PipelineTask):
 
         summary_stats["ngal_in_binp"] = np.average(ngal_in_binp, axis=0)
         summary_stats["ngal_in_binm"] = np.average(ngal_in_binm, axis=0)
-        return Struct(outputSummary=summary_stats)
+
+        summary_plot = self.generate_summary_lot(summary_stats)
+
+        return Struct(outputSummary=summary_stats, summaryPlot=summary_plot)
