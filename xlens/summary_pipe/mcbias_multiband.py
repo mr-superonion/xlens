@@ -316,6 +316,7 @@ class McBiasMultibandPipe(PipelineTask):
         # Plot m_T
         axs[1, 0].errorbar(angular_bin, summary_table["m_T"][0], summary_table["m_T_std"][0], fmt="o", c="C0")
         axs[1, 0].axhline(0, c="gray", ls="--")
+        axs[1, 0].axhspan(-3e-3, 3e-3, c="gray", alpha=0.7)
         axs[1, 0].set_ylabel(r"$m$")
 
         # Plot c_T, c_X
