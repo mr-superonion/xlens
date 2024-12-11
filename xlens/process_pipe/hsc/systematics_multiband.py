@@ -129,28 +129,28 @@ class SystematicsMultibandPipe(PipelineTask):
             config=config, log=log, initInputs=initInputs, **kwargs
         )
         assert isinstance(self.config, SystematicsMultibandPipeConfig)
+
+        self.pt_data = fitsio.read(
+            os.path.join(
+                "/work/xiangchong.li/work/hsc_s23b_sim/catalogs/",
+                "tracts_fdfc_v1_trim2_sim.fits",
+            )
+        )
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, SystematicsMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         assert butlerQC.quantum.dataId is not None
-        pt_data = fitsio.read(
-            os.path.join(
-                "/work/xiangchong.li/work/hsc_s23b_sim/catalogs/",
-                "tracts_fdfc_v1_trim2.fits",
-            )
-        )
         tract = butlerQC.quantum.dataId["tract"]
         patch = butlerQC.quantum.dataId["patch"]
-        patch_list = pt_data[pt_data["tract"] == tract]["patch"]
+        patch_list = self.pt_data[self.pt_data["tract"] == tract]["patch"]
         patch_y = int(patch) // 9
         patch_x = int(patch) % 9
         patch_db = patch_x * 100 + patch_y
 
         if patch_db not in patch_list:
             return
-            # raise IOError("patch not in FDFC cut")
 
         band = butlerQC.quantum.dataId["band"]
         hsc_dir = "/lustre/HSC_DR/hsc_ssp/dr4/s23b/data/s23b_wide/unified/"
@@ -165,8 +165,11 @@ class SystematicsMultibandPipe(PipelineTask):
         if len(exp_file_name) > 0:
             exp_file_name = exp_file_name[0]
         else:
-            raise IOError("Cannot find exposure")
+            return
+            # raise IOError("Cannot find exposure")
         exposure = afwImage.ExposureF.readFits(exp_file_name)
+        if exposure.getPsf() is None:
+            return
 
         cat_file_name = glob.glob(
             os.path.join(
@@ -178,7 +181,9 @@ class SystematicsMultibandPipe(PipelineTask):
         if len(cat_file_name) > 0:
             cat_file_name = cat_file_name[0]
         else:
-            raise IOError(f"Cannot find catalog")
+            return
+            # raise IOError(f"Cannot find catalog")
+
         catalog = afwTable.SourceCatalog.readFits(cat_file_name)
 
         idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
@@ -198,6 +203,7 @@ class SystematicsMultibandPipe(PipelineTask):
             catalog,
             seed,
         )
+        del exposure, catalog
         return Struct(
             outputNoiseCorr=noise_corr,
             outputPsfCentered=psf_image,
@@ -206,21 +212,24 @@ class SystematicsMultibandPipe(PipelineTask):
 
     def get_noise_corr(self, exposure):
         assert isinstance(self.config, SystematicsMultibandPipeConfig)
-        # noise
-        mask = exposure.getMaskedImage().mask.array == 0
-        variance_plane = exposure.getMaskedImage().variance.array[mask]
-        noise_variance = np.average(variance_plane)
-        if noise_variance < 1e-12:
+        noise_variance = np.average(
+            exposure.getMaskedImage().variance.array[
+                exposure.getMaskedImage().mask.array == 0
+            ]
+        )
+        if noise_variance < 1e-20:
             raise ValueError(
                 "the estimated image noise variance should be positive."
             )
 
-        window_array = (exposure.mask.array == 0).astype(np.float32)
+        window_array = (exposure.mask.array == 0).astype(
+            np.float32
+        )[1000: 3000, 1000: 3000]
         noise_array = (
             np.asarray(
                 exposure.getMaskedImage().image.array,
                 dtype=np.float32,
-            )
+            )[1000: 3000, 1000: 3000]
             * window_array
         )
 
@@ -241,7 +250,7 @@ class SystematicsMultibandPipe(PipelineTask):
 
         npixl = int(self.config.npix // 2)
         npixr = int(self.config.npix // 2 + 1)
-        noise_array = np.fft.fftshift(
+        noise_corr = np.fft.fftshift(
             np.fft.ifft2(np.abs(np.fft.fft2(noise_array)) ** 2.0)
         ).real[
             ny // 2 - npixl : ny // 2 + npixr, nx // 2 - npixl : nx // 2 + npixr
@@ -251,25 +260,13 @@ class SystematicsMultibandPipe(PipelineTask):
         ).real[
             ny // 2 - npixl : ny // 2 + npixr, nx // 2 - npixl : nx // 2 + npixr
         ]
-        noise_array = noise_array / window_corr
-        # v = noise_array[npixl, npixl]
-        # noise_array = noise_array / v
+        noise_corr = noise_corr / window_corr
+        del window_array, noise_array, window_corr
 
-        # Create a grid of coordinates
-        y, x = np.ogrid[: self.config.npix, : self.config.npix]
-        # Calculate the center of the circle
-        center = self.config.npix // 2
-        # Calculate the distance of each point from the center
-        distance_from_center = np.sqrt((x - center) ** 2 + (y - center) ** 2)
-        # Create a circular mask
-        mask = (distance_from_center <= 20.0).astype(int)
-        # Apply the mask to the correlation function
-        noise_array = noise_array * mask
+        noise_image = afwImage.ImageF(self.config.npix, self.config.npix)
+        noise_image.array[:, :] = noise_corr
 
-        noise_corr = afwImage.ImageF(self.config.npix, self.config.npix)
-        noise_corr.array[:, :] = noise_array
-
-        return noise_corr
+        return noise_image
 
     def get_psf_systematics(self, exposure, catalog, seed):
         assert isinstance(self.config, SystematicsMultibandPipeConfig)
