@@ -13,9 +13,6 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
-import logging
-
-logger = logging.getLogger(__name__)
 from typing import Any
 
 import anacal
@@ -76,9 +73,14 @@ class MultibandSimBaseConfig(Config):
         default=0,
     )
 
-    i_rng = Field[int](
-        doc="random seed index for halo",
+    irng = Field[int](
+        doc="random seed index , 0 <= irng < 10",
         default=0,
+    )
+
+    use_real_psf = Field[bool](
+        doc="whether to use real PSF",
+        default=False,
     )
 
     def validate(self):
@@ -87,6 +89,11 @@ class MultibandSimBaseConfig(Config):
             raise FieldValidationError(
                 self.__class__.irot, self, "irot needs to be smaller than nrot"
             )
+        if self.irng >= 10 or self.irng < 0:
+            raise FieldValidationError(
+                self.__class__.irng, self, "We require 0 <= irng < 10"
+            )
+
 
     def setDefaults(self):
         super().setDefaults()
@@ -213,8 +220,8 @@ class MultibandSimBaseTask(SimBaseTask):
         # write galaxy images
         image = res["band_data"][band][0].getMaskedImage().image.array
         truth = res["truth_info"]
-
         se_wcs = res["se_wcs"][band][0]
+        del res
         dm_wcs = make_dm_wcs(se_wcs)
         return image, truth, dm_wcs
 
@@ -231,11 +238,13 @@ class MultibandSimBaseTask(SimBaseTask):
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimBaseConfig)
+        if self.config.use_real_psf:
+            assert psfImage is not None, "Do not have PSF input model"
 
         # Prepare the random number generator and basic parameters
         irot = self.config.irot
         survey_name = self.config.survey_name
-        rng = np.random.RandomState(seed + self.config.i_rng * 100_000)
+        rng = np.random.RandomState(seed * 10 + self.config.irng)
         seed_noise = self.get_noise_seed(seed, irot)
 
         # Get the pixel scale in arcseconds per pixel
@@ -247,20 +256,15 @@ class MultibandSimBaseTask(SimBaseTask):
         photo_calib = afwImage.makePhotoCalibFromCalibZeroPoint(zero_flux)
 
         if exposure is not None:
-            self.log.debug("Using the real pixel mask and noise variance")
+            self.log.debug("Using the real pixel mask")
             mask_array = exposure.getMaskedImage().mask.array
-            variance = np.average(
-                exposure.getMaskedImage().variance.array[mask_array == 0]
-            )
             assert mag_zero == 2.5 * np.log10(
                 exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()
             )
         else:
-            self.log.info("Do not use the real pixel mask and noise variance")
+            self.log.debug("Do not use the real pixel mask")
             mask_array = 0.0
-            variance = noise_variance_defaults[band][survey_name]
 
-        noise_std = np.sqrt(variance)
         # Obtain PSF object for Galsim
         if psfImage is None:
             psf_fwhm = psf_fwhm_defaults[band][survey_name]
@@ -281,15 +285,25 @@ class MultibandSimBaseTask(SimBaseTask):
                 flux=1.0,
             )
 
+        # and psf kernel for the LSST exposure
+        kernel = afwMath.FixedKernel(psfImage.convertD())
+        kernel_psf = meaAlg.KernelPsf(kernel)
+
         # Obtain Noise correlation array
         if noiseCorrImage is None:
             noise_corr = None
+            variance = noise_variance_defaults[band][survey_name]
+            print("No correlation, variance:", variance)
         else:
             noise_corr = noiseCorrImage.getArray()
-
-        # and psf kernel for the LSST exposure
-        kernel = afwMath.FixedKernel(psfImage.convertD())
-        kernelPSF = meaAlg.KernelPsf(kernel)
+            variance = np.amax(
+                noise_corr
+            )
+            noise_corr = noise_corr / variance
+            ny, nx = noise_corr.shape
+            assert noise_corr[ny//2, nx//2] == 1
+            print("With correlation, variance:", variance)
+        noise_std = np.sqrt(variance)
 
         dim = int(max(width, height) * self.config.extend_ratio)
         galaxy_catalog = self.prpare_galaxy_catalog(rng, dim, pixel_scale)
@@ -307,20 +321,21 @@ class MultibandSimBaseTask(SimBaseTask):
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
         )
-        logger.debug(f"current shape of data is {data.shape}")
-        logger.debug(f"resizing data to {height} x {width}")
+        self.log.debug(f"current shape of data is {data.shape}")
+        self.log.debug(f"resizing data to {height} x {width}")
         data, truth_catalog = resize_array(
             data,
             (height, width),
             truth_catalog,
         )
 
-        outputExposure = afwImage.ExposureF(boundaryBox)
-        outputExposure.getMaskedImage().image.array[:, :] = data
-        outputExposure.setPhotoCalib(photo_calib)
-        outputExposure.setPsf(kernelPSF)
-        outputExposure.setWcs(dm_wcs)
-        outputExposure.getMaskedImage().variance.array[:, :] = variance
+        exp_out = afwImage.ExposureF(boundaryBox)
+        exp_out.getMaskedImage().image.array[:, :] = data
+        exp_out.setPhotoCalib(photo_calib)
+        exp_out.setPsf(kernel_psf)
+        exp_out.setWcs(dm_wcs)
+        exp_out.getMaskedImage().variance.array[:, :] = variance
+        del data, photo_calib, kernel_psf, dm_wcs
 
         if self.config.draw_image_noise:
             noise_array = self.get_noise_array(
@@ -330,13 +345,14 @@ class MultibandSimBaseTask(SimBaseTask):
                 shape=(height, width),
                 pixel_scale=pixel_scale,
             )
-            outputExposure.getMaskedImage().image.array[:, :] = (
-                outputExposure.getMaskedImage().image.array[:, :] + noise_array
+            exp_out.getMaskedImage().image.array[:, :] = (
+                exp_out.getMaskedImage().image.array[:, :] + noise_array
             )
-        outputExposure.getMaskedImage().mask.array[:, :] = mask_array
+        exp_out.getMaskedImage().mask.array[:, :] = mask_array
+        del mask_array
 
         outputs = Struct(
-            outputExposure=outputExposure, outputTruthCatalog=truth_catalog
+            outputExposure=exp_out, outputTruthCatalog=truth_catalog
         )
         return outputs
 

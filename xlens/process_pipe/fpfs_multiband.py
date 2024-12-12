@@ -28,10 +28,7 @@ __all__ = [
 import logging
 from typing import Any
 
-import lsst.afw.table as afwTable
-import lsst.daf.base as dafBase
 import lsst.pipe.base.connectionTypes as cT
-from lsst.meas.algorithms import SourceDetectionTask
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.meas.deblender import SourceDeblendTask
 from lsst.pex.config import ConfigurableField, Field
@@ -50,29 +47,27 @@ class FpfsMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=("tract", "patch", "band", "skymap"),
     defaultTemplates={
-        "inputCoaddName": "deep",
-        "outputCoaddName": "deep",
-        "dataType": "",
+        "coaddName": "deep",
     },
 ):
     exposure = cT.Input(
         doc="Input coadd image",
-        name="{inputCoaddName}Coadd_calexp{dataType}",
+        name="{coaddName}Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=False,
     )
     detection = cT.Input(
         doc="Source catalog with detection",
-        name="{outputCoaddName}Coadd_anacal_detection{dataType}",
+        name="{coaddName}Coadd_anacal_detection",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         minimum=0,
         multiple=False,
     )
-    outputCatalog = cT.Output(
+    catalog = cT.Output(
         doc="Source catalog with all the measurement generated in this task",
-        name="{outputCoaddName}Coadd_anacal_meas{dataType}",
+        name="{coaddName}Coadd_anacal_meas",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ArrowAstropy",
     )
@@ -101,11 +96,9 @@ class FpfsMultibandPipeConfig(
 
     def validate(self):
         super().validate()
-        if not self.fpfs.do_adding_noise:
-            if len(self.connections.dataType) == 0:
-                raise ValueError(
-                    "Only set fpfs.do_adding_noise=False on simulation"
-                )
+
+    def setDefaults(self):
+        super().setDefaults()
 
 
 class FpfsMultibandPipe(PipelineTask):
@@ -131,7 +124,7 @@ class FpfsMultibandPipe(PipelineTask):
         assert isinstance(self.config, FpfsMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         data = self.prepare_data(butlerQC=butlerQC, inputRefs=inputRefs)
-        outputs = Struct(outputCatalog=self.fpfs.run(**data))
+        outputs = Struct(catalog=self.fpfs.run(**data))
         butlerQC.put(outputs, outputRefs)
         return
 

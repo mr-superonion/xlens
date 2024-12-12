@@ -1,3 +1,13 @@
-from . import fpfs_multiband, jointdetect, systematics_multiband
+from . import (
+    fpfs_force, fpfs_joint, fpfs_multiband, systematics_multiband, hsc,
+    detect_multiband,
+)
 
-__all__ = ["fpfs_multiband", "systematics_multiband", "jointdetect"]
+__all__ = [
+    "detect_multiband",
+    "fpfs_multiband",
+    "systematics_multiband",
+    "fpfs_joint",
+    "fpfs_force",
+    "hsc",
+]
