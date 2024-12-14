@@ -7,6 +7,7 @@ from lsst.pipe.base import (
 import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import Field, ConfigurableField
 from lsst.meas.algorithms import SetPrimaryFlagsTask
+from lsst.meas.astrom import DirectMatchTask
 from lsst.meas.base import (
     SingleFrameMeasurementTask,
     CatalogCalculationTask,
@@ -39,6 +40,16 @@ class MeasureMergedCoaddSourcesConnections(
         doc="Output schema after all new fields are added by task",
         name="{inputCoaddName}Coadd_meas_schema",
         storageClass="SourceCatalog",
+    )
+    refCat = cT.Input(
+        doc="Reference catalog used to match measured sources against known"
+        "sources",
+        name="ref_cat",
+        storageClass="SimpleCatalog",
+        dimensions=("tract", "patch", "skymap",),
+        deferLoad=True,
+        multiple=True,
+        minimum=0,
     )
     exposure = cT.Input(
         doc="Input coadd image",
@@ -89,8 +100,7 @@ class MeasureMergedCoaddSourcesConfig(
     doAddFootprints = Field(
         dtype=bool,
         default=True,
-        doc=
-        "Whether or not to add footprints to the input catalog from scarlet"
+        doc="Whether to add footprints to the input catalog from scarlet"
         "models. This should be true whenever using the multi-band deblender,"
         "otherwise this should be False.",
     )
@@ -116,6 +126,24 @@ class MeasureMergedCoaddSourcesConfig(
         target=SetPrimaryFlagsTask,
         doc="Set flags for primary tract/patch",
     )
+    doMatchSources = Field(
+        dtype=bool,
+        default=False,
+        doc="Match sources to reference catalog?",
+        deprecated="Reference matching will be removed after v29.",
+    )
+    match = ConfigurableField(
+        target=DirectMatchTask,
+        doc="Matching to reference catalog",
+        deprecated="Reference matching will be removed after v29.",
+    )
+    doWriteMatchesDenormalized = Field(
+        dtype=bool,
+        default=False,
+        doc=("Write reference matches in denormalized format? "
+             "This format uses more disk space, but more convenient to read."),
+        deprecated="Reference matching will be removed after v29.",
+    )
     psfCache = Field(dtype=int, default=100, doc="Size of psfCache")
     checkUnitsParseStrict = Field(
         doc="Strictness of Astropy unit compatibility check, can be 'raise',"
@@ -128,10 +156,6 @@ class MeasureMergedCoaddSourcesConfig(
         doc="Subtask to run catalogCalculation plugins on catalog",
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
-
-    @property
-    def refObjLoader(self):
-        return self.match.refObjLoader
 
     def setDefaults(self):
         super().setDefaults()
