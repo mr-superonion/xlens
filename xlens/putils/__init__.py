@@ -23,13 +23,13 @@ def chunk_list(lst, num_chunks):
     return chunks
 
 
-butler_setup_script = '''
+butler_setup_script = """
 butler create .
 butler register-skymap ./ --config-file skymap.py
 butler register-instrument ./ lsst.obs.subaru.HyperSuprimeCam
-'''
+"""
 
-sky_map_script = '''
+sky_map_script = """
 config.name = "hsc"
 config.skyMap = "rings"
 
@@ -38,7 +38,7 @@ config.skyMap["rings"].numRings = 120
 config.skyMap["rings"].projection = "TAN"
 config.skyMap["rings"].tractOverlap = 1.0 / 60
 config.skyMap["rings"].pixelScale = 0.168  # arcsec/pixel
-'''
+"""
 
 
 def run(
@@ -107,7 +107,7 @@ def run(
                 ["bash", "butler_setup.sh"],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
             assert result.returncode == 0
 

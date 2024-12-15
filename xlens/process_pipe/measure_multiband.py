@@ -46,7 +46,11 @@ class MeasureMergedCoaddSourcesConnections(
         "sources",
         name="ref_cat",
         storageClass="SimpleCatalog",
-        dimensions=("tract", "patch", "skymap",),
+        dimensions=(
+            "tract",
+            "patch",
+            "skymap",
+        ),
         deferLoad=True,
         multiple=True,
         minimum=0,
@@ -140,8 +144,10 @@ class MeasureMergedCoaddSourcesConfig(
     doWriteMatchesDenormalized = Field(
         dtype=bool,
         default=False,
-        doc=("Write reference matches in denormalized format? "
-             "This format uses more disk space, but more convenient to read."),
+        doc=(
+            "Write reference matches in denormalized format? "
+            "This format uses more disk space, but more convenient to read."
+        ),
         deprecated="Reference matching will be removed after v29.",
     )
     psfCache = Field(dtype=int, default=100, doc="Size of psfCache")

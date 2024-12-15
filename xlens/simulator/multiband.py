@@ -94,7 +94,6 @@ class MultibandSimBaseConfig(Config):
                 self.__class__.irng, self, "We require 0 <= irng < 10"
             )
 
-
     def setDefaults(self):
         super().setDefaults()
         self.survey_name = self.survey_name.lower()
@@ -296,12 +295,10 @@ class MultibandSimBaseTask(SimBaseTask):
             print("No correlation, variance:", variance)
         else:
             noise_corr = noiseCorrImage.getArray()
-            variance = np.amax(
-                noise_corr
-            )
+            variance = np.amax(noise_corr)
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
-            assert noise_corr[ny//2, nx//2] == 1
+            assert noise_corr[ny // 2, nx // 2] == 1
             print("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
 
