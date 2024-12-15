@@ -231,9 +231,7 @@ class FpfsMeasurementTask(MeasBaseTask):
         else:
             noise_array = None
         if detection is not None:
-            detection = np.array(
-                detection[["y", "x", "is_peak", "mask_value"]]
-            )
+            detection = np.array(detection[["y", "x", "is_peak", "mask_value"]])
 
         if not self.config.use_average_psf:
             psf_object = utils.LsstPsf(psf=lsst_psf, npix=self.config.npix)

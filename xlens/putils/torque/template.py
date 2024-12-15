@@ -1,4 +1,4 @@
-template_string = '''#!/bin/bash
+template_string = """#!/bin/bash
 
 #PBS -S /bin/bash
 #PBS -N ${jobname}
@@ -18,4 +18,4 @@ cd ${base_dir}
 
 pipetask run -b ./ -j ${tasks_per_node} -i ${input_collection} -o ${output_collection} -p ${config_file_name} -d "skymap='${skymap_name}' AND tract in (${tract_list}) AND band in ('g', 'r', 'i', 'z', 'y')" --register-dataset-types --skip-existing --clobber-outputs
 
-'''
+"""

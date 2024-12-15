@@ -1,5 +1,8 @@
 from lsst.pipe.base import (
-    Struct, PipelineTask, PipelineTaskConfig, PipelineTaskConnections,
+    Struct,
+    PipelineTask,
+    PipelineTaskConfig,
+    PipelineTaskConnections,
 )
 import lsst.pipe.base.connectionTypes as cT
 from lsst.pex.config import ConfigurableField
@@ -12,7 +15,7 @@ import lsst.afw.math as afwMath
 class DetectCoaddSourcesConnections(
     PipelineTaskConnections,
     dimensions=("tract", "patch", "band", "skymap"),
-    defaultTemplates={"inputCoaddName": "deep", "outputCoaddName": "deep"}
+    defaultTemplates={"inputCoaddName": "deep", "outputCoaddName": "deep"},
 ):
     detectionSchema = cT.InitOutput(
         doc="Schema of the detection catalog",
@@ -23,31 +26,30 @@ class DetectCoaddSourcesConnections(
         doc="Exposure post detection",
         name="{outputCoaddName}Coadd_calexp",
         storageClass="ExposureF",
-        dimensions=("tract", "patch", "band", "skymap")
+        dimensions=("tract", "patch", "band", "skymap"),
     )
     outputBackgrounds = cT.Output(
         doc="Output Backgrounds used in detection",
         name="{outputCoaddName}Coadd_calexp_background",
         storageClass="Background",
-        dimensions=("tract", "patch", "band", "skymap")
+        dimensions=("tract", "patch", "band", "skymap"),
     )
     outputSources = cT.Output(
         doc="Detected sources catalog",
         name="{outputCoaddName}Coadd_det",
         storageClass="SourceCatalog",
-        dimensions=("tract", "patch", "band", "skymap")
+        dimensions=("tract", "patch", "band", "skymap"),
     )
 
 
 class DetectCoaddSourcesConfig(
-    PipelineTaskConfig,
-    pipelineConnections=DetectCoaddSourcesConnections
+    PipelineTaskConfig, pipelineConnections=DetectCoaddSourcesConnections
 ):
-    """Configuration parameters for the DetectCoaddSourcesTask
-    """
+    """Configuration parameters for the DetectCoaddSourcesTask"""
 
     detection = ConfigurableField(
-        target=DynamicDetectionTask, doc="Source detection",
+        target=DynamicDetectionTask,
+        doc="Source detection",
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
@@ -60,7 +62,7 @@ class DetectCoaddSourcesConfig(
         self.detection.reEstimateBackground = False
         self.detection.background.useApprox = False
         self.detection.background.binSize = 4096
-        self.detection.background.undersampleStyle = 'REDUCE_INTERP_ORDER'
+        self.detection.background.undersampleStyle = "REDUCE_INTERP_ORDER"
         # Suppress large footprints that overwhelm the deblender
         self.detection.doTempWideBackground = True
         # Include band in packed data IDs that go into object IDs (None -> "as

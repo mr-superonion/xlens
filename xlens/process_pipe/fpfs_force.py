@@ -164,9 +164,9 @@ class FpfsForcePipe(PipelineTask):
         assert isinstance(self.config, FpfsForcePipeConfig)
         det_names = ["y", "x", "fpfs_w", "fpfs_dw_dg1", "fpfs_dw_dg2"]
         det = (
-            joint_catalog[det_names].to_pandas(
-                index=False
-            ).to_records(index=False)
+            joint_catalog[det_names]
+            .to_pandas(index=False)
+            .to_records(index=False)
         )
         catalog = [det]
         for band in exposure_handles_dict.keys():

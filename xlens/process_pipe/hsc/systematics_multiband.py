@@ -222,14 +222,14 @@ class SystematicsMultibandPipe(PipelineTask):
                 "the estimated image noise variance should be positive."
             )
 
-        window_array = (exposure.mask.array == 0).astype(
-            np.float32
-        )[1000: 3000, 1000: 3000]
+        window_array = (exposure.mask.array == 0).astype(np.float32)[
+            1000:3000, 1000:3000
+        ]
         noise_array = (
             np.asarray(
                 exposure.getMaskedImage().image.array,
                 dtype=np.float32,
-            )[1000: 3000, 1000: 3000]
+            )[1000:3000, 1000:3000]
             * window_array
         )
 
