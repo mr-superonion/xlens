@@ -5,6 +5,7 @@ from . import (
     systematics_multiband,
     hsc,
     detect_multiband,
+    force_multiband,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "fpfs_joint",
     "fpfs_force",
     "hsc",
+    "force_multiband",
 ]

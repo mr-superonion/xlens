@@ -319,6 +319,7 @@ class MeasureMergedCoaddSourcesTask(PipelineTask):
         ccdInputs=None,
         sourceTableHandleDict=None,
         finalizedSourceTableHandleDict=None,
+        **kwargs,
     ):
         """Run measurement algorithms on the input exposure, and optionally
         populate the resulting catalog with extra information.
