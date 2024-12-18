@@ -7,36 +7,36 @@ tasks:
     config:
       simulator.survey_name: hsc
       simulator.mode: 0
-      simulator.irot: 0
+      simulator.rotId: 0
       connections.mode: 0
-      connections.irot: 0
+      connections.rotId: 0
 
   MutibandSim2:
     class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
     config:
       simulator.survey_name: hsc
       simulator.mode: 0
-      simulator.irot: 1
+      simulator.rotId: 1
       connections.mode: 0
-      connections.irot: 1
+      connections.rotId: 1
 
   MutibandSim3:
     class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
     config:
       simulator.survey_name: hsc
       simulator.mode: 1
-      simulator.irot: 0
+      simulator.rotId: 0
       connections.mode: 1
-      connections.irot: 0
+      connections.rotId: 0
 
   MutibandSim4:
     class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
     config:
       simulator.survey_name: hsc
       simulator.mode: 1
-      simulator.irot: 1
+      simulator.rotId: 1
       connections.mode: 1
-      connections.irot: 1
+      connections.rotId: 1
 
   DetectTask1:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe

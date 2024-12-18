@@ -24,7 +24,7 @@ def test_lsst():
 
     task = SimpleSimShearTask(config=config)
     task.run(ifield=0)
-    exposure = task.get_dm_exposure(ifield=0, mode=0, irot=0, band_list=bands)
+    exposure = task.get_dm_exposure(ifield=0, mode=0, rotId=0, band_list=bands)
 
     pixel_scale = exposure.getWcs().getPixelScale().asArcseconds()
     np.testing.assert_almost_equal(pixel_scale, 0.2)
@@ -46,16 +46,16 @@ def test_lsst():
     np.testing.assert_allclose(psf_array, psf_target, atol=1e-5, rtol=1e-3)
 
     for ind in task.get_sim_id_list(min_id=0, max_id=1):
-        ifield, mode, irot = tuple(ind)
+        ifield, mode, rotId = tuple(ind)
         fname = task.get_image_name(
             ifield=ifield,
             mode=mode,
-            irot=irot,
+            rotId=rotId,
             band=bands[0],
         )
         assert os.path.isfile(fname)
 
-        fname = task.get_truth_src_name(ifield=ifield, mode=mode, irot=irot)
+        fname = task.get_truth_src_name(ifield=ifield, mode=mode, rotId=rotId)
         assert os.path.isfile(fname)
 
     config2 = FpfsSimpleSimConfig()

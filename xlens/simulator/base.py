@@ -18,7 +18,7 @@ class SimBaseTask(Task):
         )
 
     def get_dm_exposure(
-        self, *, ifield: int, mode: int, irot: int, band_list: list[str]
+        self, *, ifield: int, mode: int, rotId: int, band_list: list[str]
     ) -> ExposureF:
         raise NotImplementedError(
             "'get_dm_exposure' must be implemented by subclasses."

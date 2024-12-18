@@ -31,8 +31,8 @@ def test_pipetask_shear():
     # Assert that the command executed successfully
     assert result.returncode == 0, f"Command failed with error: {result.stderr}"
 
-    command = ["sh", os.path.join(this_dir, "butler_clear.sh")]
-    subprocess.run(command, capture_output=False, text=False)
+    # command = ["sh", os.path.join(this_dir, "butler_clear.sh")]
+    # subprocess.run(command, capture_output=False, text=False)
 
 
 if __name__ == "__main__":
