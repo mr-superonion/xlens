@@ -30,6 +30,11 @@ from lsst.pipe.base import Struct
 from numpy.typing import NDArray
 
 from ..processor.utils import resize_array
+from ..simulator.random import (
+    get_noise_seed,
+    gal_seed_base,
+    num_rot,
+)
 from .base import SimBaseTask
 from .multiband_defaults import (
     mag_zero_defaults,
@@ -64,20 +69,18 @@ class MultibandSimBaseConfig(Config):
         doc="Whether to draw image noise in the simulation",
         default=False,
     )
-    nrot = Field[int](
-        doc="number of rotations",
-        default=2,
+    galId = Field[int](
+        doc="random seed index, 0 <= galId < 10",
+        default=0,
     )
-    irot = Field[int](
+    rotId = Field[int](
         doc="number of rotations",
         default=0,
     )
-
-    irng = Field[int](
-        doc="random seed index , 0 <= irng < 10",
+    noiseId = Field[int](
+        doc="random seed for noise, 0 <= noiseId < 10",
         default=0,
     )
-
     use_real_psf = Field[bool](
         doc="whether to use real PSF",
         default=False,
@@ -85,13 +88,21 @@ class MultibandSimBaseConfig(Config):
 
     def validate(self):
         super().validate()
-        if self.irot >= self.nrot:
+        if self.rotId >= num_rot:
             raise FieldValidationError(
-                self.__class__.irot, self, "irot needs to be smaller than nrot"
+                self.__class__.rotId, self, "rotId needs to be smaller than 2"
             )
-        if self.irng >= 10 or self.irng < 0:
+        if self.galId >= 10 or self.galId < 0:
             raise FieldValidationError(
-                self.__class__.irng, self, "We require 0 <= irng < 10"
+                self.__class__.galId,
+                self,
+                "We require 0 <= galId < 10"
+            )
+        if self.noiseId < 0 or self.noiseId >= 10:
+            raise FieldValidationError(
+                self.__class__.noiseId,
+                self,
+                "We require 0 <= noiseId < 10"
             )
 
     def setDefaults(self):
@@ -106,9 +117,7 @@ class MultibandSimBaseTask(SimBaseTask):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         assert isinstance(self.config, MultibandSimBaseConfig)
-        nrot = self.config.nrot
-        # number of redshiftbins
-        self.rotate_list = [np.pi / nrot * i for i in range(nrot)]
+        self.rotate_list = [np.pi / num_rot * i for i in range(num_rot)]
         pass
 
     def get_noise_array(
@@ -140,7 +149,7 @@ class MultibandSimBaseTask(SimBaseTask):
         self.log.debug("Simulated noise STD is: %.2f" % np.std(noise_array))
         return noise_array
 
-    def prpare_galaxy_catalog(
+    def prepare_galaxy_catalog(
         self,
         rng: np.random.RandomState,
         dim: int,
@@ -158,21 +167,7 @@ class MultibandSimBaseTask(SimBaseTask):
             pixel_scale=pixel_scale,
             layout=self.config.layout,
         )
-
-        # for fix source redshift
-        if (
-            "z_source" in self.config.keys()
-            and self.config.z_source is not None
-        ):
-            galaxy_catalog._wldeblend_cat["redshift"] = self.config.z_source
-
         return galaxy_catalog
-
-    def get_noise_seed(self, seed, irot):
-        assert isinstance(self.config, MultibandSimBaseConfig)
-        nrot2 = self.config.nrot + 1
-        seed_noise = nrot2 * seed + irot + 1
-        return seed_noise
 
     def simulate_images(
         self,
@@ -181,7 +176,7 @@ class MultibandSimBaseTask(SimBaseTask):
         galaxy_catalog,
         shear_obj,
         psf_obj,
-        irot: int,
+        rotId: int,
         band: str,
         coadd_dim: int,
         mag_zero: float,
@@ -209,7 +204,7 @@ class MultibandSimBaseTask(SimBaseTask):
             galaxy_catalog=galaxy_catalog,
             shear_obj=shear_obj,
             psf=psf_obj,
-            theta0=self.rotate_list[irot],
+            theta0=self.rotate_list[rotId],
             bands=[band],
             coadd_dim=coadd_dim,
             calib_mag_zero=mag_zero,
@@ -241,10 +236,15 @@ class MultibandSimBaseTask(SimBaseTask):
             assert psfImage is not None, "Do not have PSF input model"
 
         # Prepare the random number generator and basic parameters
-        irot = self.config.irot
+        rotId = self.config.rotId
         survey_name = self.config.survey_name
-        rng = np.random.RandomState(seed * 10 + self.config.irng)
-        seed_noise = self.get_noise_seed(seed, irot)
+        seed_gal = seed * gal_seed_base + self.config.galId
+        rng = np.random.RandomState(seed_gal)
+        seed_noise = get_noise_seed(
+            seed=seed,
+            noiseId=self.config.noiseId,
+            rotId=rotId,
+        )
 
         # Get the pixel scale in arcseconds per pixel
         pixel_scale = wcs.getPixelScale().asArcseconds()
@@ -265,7 +265,13 @@ class MultibandSimBaseTask(SimBaseTask):
             mask_array = 0.0
 
         # Obtain PSF object for Galsim
-        if psfImage is None:
+        if psfImage is not None and self.config.use_real_psf:
+            psf_galsim = galsim.InterpolatedImage(
+                galsim.Image(psfImage.getArray()),
+                scale=pixel_scale,
+                flux=1.0,
+            )
+        else:
             psf_fwhm = psf_fwhm_defaults[band][survey_name]
             psf_galsim = galsim.Moffat(fwhm=psf_fwhm, beta=2.5)
             psf_array = psf_galsim.drawImage(
@@ -277,12 +283,6 @@ class MultibandSimBaseTask(SimBaseTask):
             psfImage = afwImage.ImageF(sys_npix, sys_npix)
             assert psfImage is not None
             psfImage.array[:, :] = psf_array
-        else:
-            psf_galsim = galsim.InterpolatedImage(
-                galsim.Image(psfImage.getArray()),
-                scale=pixel_scale,
-                flux=1.0,
-            )
 
         # and psf kernel for the LSST exposure
         kernel = afwMath.FixedKernel(psfImage.convertD())
@@ -292,18 +292,18 @@ class MultibandSimBaseTask(SimBaseTask):
         if noiseCorrImage is None:
             noise_corr = None
             variance = noise_variance_defaults[band][survey_name]
-            print("No correlation, variance:", variance)
+            self.log.debug("No correlation, variance:", variance)
         else:
             noise_corr = noiseCorrImage.getArray()
             variance = np.amax(noise_corr)
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
             assert noise_corr[ny // 2, nx // 2] == 1
-            print("With correlation, variance:", variance)
+            self.log.debug("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
 
         dim = int(max(width, height) * self.config.extend_ratio)
-        galaxy_catalog = self.prpare_galaxy_catalog(rng, dim, pixel_scale)
+        galaxy_catalog = self.prepare_galaxy_catalog(rng, dim, pixel_scale)
         if dim % 2 == 1:
             dim = dim + 1
         coadd_dim = dim - 10
@@ -313,7 +313,7 @@ class MultibandSimBaseTask(SimBaseTask):
             galaxy_catalog=galaxy_catalog,
             shear_obj=shear_obj,
             psf_obj=psf_galsim,
-            irot=irot,
+            rotId=rotId,
             band=band,
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
@@ -481,6 +481,23 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         assert isinstance(self.config, MultibandSimHaloTaskConfig)
+
+    def prepare_galaxy_catalog(
+        self,
+        rng: np.random.RandomState,
+        dim: int,
+        pixel_scale: float,
+        **kwargs,
+    ):
+        assert isinstance(self.config, MultibandSimHaloTaskConfig)
+        galaxy_catalog = super().prepare_galaxy_catalog(
+            rng=rng,
+            dim=dim,
+            pixel_scale=pixel_scale,
+        )
+        # for fix source redshift
+        galaxy_catalog._wldeblend_cat["redshift"] = self.config.z_source
+        return galaxy_catalog
 
     def get_perturbation_object(self, **kwargs: Any):
         assert isinstance(self.config, MultibandSimHaloTaskConfig)

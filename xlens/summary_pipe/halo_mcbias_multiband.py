@@ -61,7 +61,6 @@ class HaloMcBiasMultibandPipeConnections(
         name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
         dimensions=(
             "skymap",
-            "band",
             "tract",
             "patch",
         ),
@@ -75,7 +74,6 @@ class HaloMcBiasMultibandPipeConnections(
         name="{coaddName}_0_rot1_Coadd_anacal_{dataType}",
         dimensions=(
             "skymap",
-            "band",
             "tract",
             "patch",
         ),

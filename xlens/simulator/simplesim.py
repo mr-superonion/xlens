@@ -224,7 +224,7 @@ class SimpleSimBaseTask(SimBaseTask):
             )
         return psf_obj
 
-    def get_truth_src_name(self, ifield: int, mode: int, irot: int) -> str:
+    def get_truth_src_name(self, ifield: int, mode: int, rotId: int) -> str:
         assert isinstance(self.config, SimpleSimBaseConfig)
         outdir = os.path.join(self.config.root_dir, "input_src")
         return "%s/src-%05d_%s-%d_rot%d.fits" % (
@@ -232,11 +232,11 @@ class SimpleSimBaseTask(SimBaseTask):
             ifield,
             self.config.test_target,
             mode,
-            irot,
+            rotId,
         )
 
     def get_image_name(
-        self, ifield: int, mode: int, irot: int, band: str
+        self, ifield: int, mode: int, rotId: int, band: str
     ) -> str:
         assert isinstance(self.config, SimpleSimBaseConfig)
         outdir = os.path.join(self.config.root_dir, "image")
@@ -245,15 +245,15 @@ class SimpleSimBaseTask(SimBaseTask):
             ifield,
             self.config.test_target,
             mode,
-            irot,
+            rotId,
             band,
         )
 
     def write_truth(
-        self, *, ifield: int, mode: int, irot: int, data: NDArray
+        self, *, ifield: int, mode: int, rotId: int, data: NDArray
     ) -> None:
         assert isinstance(self.config, SimpleSimBaseConfig)
-        name = self.get_truth_src_name(ifield, mode, irot)
+        name = self.get_truth_src_name(ifield, mode, rotId)
         fitsio.write(name, data)
 
     def write_image(
@@ -261,19 +261,19 @@ class SimpleSimBaseTask(SimBaseTask):
         *,
         ifield: int,
         mode: int,
-        irot: int,
+        rotId: int,
         band: str,
         data: NDArray,
     ) -> None:
         assert isinstance(self.config, SimpleSimBaseConfig)
-        name = self.get_image_name(ifield, mode, irot, band)
+        name = self.get_image_name(ifield, mode, rotId, band)
         fitsio.write(name, data)
 
     def get_random_seed(
         self,
         *,
         ifield: int,
-        irot: int,
+        rotId: int,
         band: str | None = None,
     ) -> int:
         """This function returns the random seed for image noise simulation.
@@ -288,7 +288,7 @@ class SimpleSimBaseTask(SimBaseTask):
             band_id = 0
         else:
             band_id = list(self.config.noise_stds.keys()).index(band) + 1
-        return (ifield * self.config.nrot + irot) * nbands2 + band_id
+        return (ifield * self.config.nrot + rotId) * nbands2 + band_id
 
     def get_noise_corr(self) -> NDArray | None:
         """This function get the image noise correlation function"""
@@ -388,8 +388,8 @@ class SimpleSimBaseTask(SimBaseTask):
             **star_kwargs,
         )
 
-    def get_truth_src(self, ifield, mode, irot):
-        name = self.get_truth_src_name(ifield, mode, irot)
+    def get_truth_src(self, ifield, mode, rotId):
+        name = self.get_truth_src_name(ifield, mode, rotId)
         if os.path.isfile(name):
             return fitsio.read(name)
         else:
@@ -400,13 +400,13 @@ class SimpleSimBaseTask(SimBaseTask):
         *,
         ifield: int,
         mode: int,
-        irot: int,
+        rotId: int,
         band_list: list[str],
     ):
         assert isinstance(self.config, SimpleSimBaseConfig)
         self.log.debug(
-            "Preparing the exposure for (ifield: %d, mode: %d irot: %d )"
-            % (ifield, mode, irot)
+            "Preparing the exposure for (ifield: %d, mode: %d rotId: %d )"
+            % (ifield, mode, rotId)
         )
         rng = np.random.RandomState(ifield)  # for PSF and stars
         pixel_scale = get_survey(
@@ -435,11 +435,11 @@ class SimpleSimBaseTask(SimBaseTask):
             self.log.debug("reading %s band" % band)
             seed = self.get_random_seed(
                 ifield=ifield,
-                irot=irot,
+                rotId=rotId,
                 band=band,
             )
             self.log.debug("The random seed is %d" % seed)
-            image_name = self.get_image_name(ifield, mode, irot, band)
+            image_name = self.get_image_name(ifield, mode, rotId, band)
             # Add noise
             noise_std = self.config.noise_stds[band]
             weight = 1.0 / (self.config.noise_stds[band]) ** 2.0
@@ -495,7 +495,7 @@ class SimpleSimBaseTask(SimBaseTask):
         shear_obj,
         psf_obj,
         ifield,
-        irot,
+        rotId,
         mode,
     ):
         assert isinstance(self.config, SimpleSimBaseConfig)
@@ -519,7 +519,7 @@ class SimpleSimBaseTask(SimBaseTask):
             dither=self.config.dither,
             rotate=self.config.rotate,
             bands=self.config.bands,
-            theta0=self.rotate_list[irot],
+            theta0=self.rotate_list[rotId],
             calib_mag_zero=self.config.mag_zero,
             survey_name=self.config.survey_name,
             **galaxy_kwargs,
@@ -527,7 +527,7 @@ class SimpleSimBaseTask(SimBaseTask):
         self.write_truth(
             ifield=ifield,
             mode=mode,
-            irot=irot,
+            rotId=rotId,
             data=sim_data["truth_info"],
         )
         # write galaxy images
@@ -537,7 +537,7 @@ class SimpleSimBaseTask(SimBaseTask):
             self.write_image(
                 ifield=ifield,
                 mode=mode,
-                irot=irot,
+                rotId=rotId,
                 band=_bn,
                 data=gdata,
             )
@@ -565,14 +565,14 @@ class SimpleSimBaseTask(SimBaseTask):
             shear_obj = self.get_perturbation_object(
                 mode=mode,
             )
-            for irot in range(self.config.nrot):
+            for rotId in range(self.config.nrot):
                 self.simulate_images(
                     rng=rng,
                     galaxy_catalog=galaxy_catalog,
                     shear_obj=shear_obj,
                     psf_obj=psf_obj,
                     ifield=ifield,
-                    irot=irot,
+                    rotId=rotId,
                     mode=mode,
                 )
         return
@@ -588,10 +588,10 @@ class SimpleSimBaseTask(SimBaseTask):
         """
         assert isinstance(self.config, SimpleSimBaseConfig)
         out = [
-            [fid, mode, irot]
+            [fid, mode, rotId]
             for fid in range(min_id, max_id)
             for mode in self.config.mode_list
-            for irot in range(self.config.nrot)
+            for rotId in range(self.config.nrot)
         ]
         return out
 

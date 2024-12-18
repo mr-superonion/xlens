@@ -107,7 +107,7 @@ class FpfsSimpleSimTask(Task):
         self.makeSubtask("simulator")
         return
 
-    def get_fpfs_src_name(self, *, ifield: int, mode: int, irot: int) -> str:
+    def get_fpfs_src_name(self, *, ifield: int, mode: int, rotId: int) -> str:
         assert isinstance(self.config, FpfsSimpleSimConfig)
         outdir = os.path.join(self.config.simulator.root_dir, "fpfs_src")
         return "%s/src-%05d_%s-%d_rot%d.fits" % (
@@ -115,18 +115,18 @@ class FpfsSimpleSimTask(Task):
             ifield,
             self.config.simulator.test_target,
             mode,
-            irot,
+            rotId,
         )
 
     def write_fpfs_src(
-        self, *, ifield: int, mode: int, irot: int, data: NDArray
+        self, *, ifield: int, mode: int, rotId: int, data: NDArray
     ) -> None:
-        name = self.get_fpfs_src_name(ifield=ifield, mode=mode, irot=irot)
+        name = self.get_fpfs_src_name(ifield=ifield, mode=mode, rotId=rotId)
         fitsio.write(name, data)
 
-    def process_data(self, *, ifield: int, mode: int, irot: int) -> NDArray:
+    def process_data(self, *, ifield: int, mode: int, rotId: int) -> NDArray:
         assert isinstance(self.config, FpfsSimpleSimConfig)
-        data = self.prepare_data(ifield=ifield, mode=mode, irot=irot)
+        data = self.prepare_data(ifield=ifield, mode=mode, rotId=rotId)
         result = self.fpfs.run(**data)
         return result
 
@@ -137,20 +137,20 @@ class FpfsSimpleSimTask(Task):
         down = np.zeros(nmodes)
         out = np.zeros(3)
         for mode in self.config.simulator.mode_list:
-            for irot in range(self.config.simulator.nrot):
+            for rotId in range(self.config.simulator.nrot):
                 name = self.get_fpfs_src_name(
                     ifield=ifield,
                     mode=mode,
-                    irot=irot,
+                    rotId=rotId,
                 )
                 if os.path.isfile(name):
                     res = fitsio.read(name)
                 else:
-                    res = self.process_data(ifield=ifield, mode=mode, irot=irot)
+                    res = self.process_data(ifield=ifield, mode=mode, rotId=rotId)
                     self.write_fpfs_src(
                         ifield=ifield,
                         mode=mode,
-                        irot=irot,
+                        rotId=rotId,
                         data=res,
                     )
                 up[mode] = up[mode] + np.sum(res["fpfs_e1"] * res["fpfs_w"])
@@ -163,12 +163,12 @@ class FpfsSimpleSimTask(Task):
         out[2] = (down[1] + down[0]) / 2.0
         return out
 
-    def prepare_data(self, ifield: int, mode: int, irot: int):
+    def prepare_data(self, ifield: int, mode: int, rotId: int):
         assert isinstance(self.config, FpfsSimpleSimConfig)
         exposure = self.simulator.get_dm_exposure(
             ifield=ifield,
             mode=mode,
-            irot=irot,
+            rotId=rotId,
             band_list=self.config.coadd_bands,
         )
         # Seed for additional noise layer for noise bias correction
@@ -176,7 +176,7 @@ class FpfsSimpleSimTask(Task):
         # since we set band = None
         seed = self.simulator.get_random_seed(
             ifield=ifield,
-            irot=irot,
+            rotId=rotId,
             band=None,
         )
         noise_corr = self.simulator.get_noise_corr()

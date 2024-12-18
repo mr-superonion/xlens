@@ -30,7 +30,6 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.meas.deblender import SourceDeblendTask
 from lsst.pex.config import ConfigurableField, Field
 from lsst.pipe.base import (
     PipelineTask,
@@ -90,19 +89,15 @@ class FpfsForcePipeConfig(
     PipelineTaskConfig,
     pipelineConnections=FpfsForcePipeConnections,
 ):
-    deblend = ConfigurableField(
-        target=SourceDeblendTask,
-        doc="Deblending Task",
-    )
     fpfs = ConfigurableField(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
     )
-    psf_cache = Field[int](
+    psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
     )
-    id_generator = SkyMapIdGeneratorConfig.make_field()
+    idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
         super().validate()
@@ -172,15 +167,15 @@ class FpfsForcePipe(PipelineTask):
         for band in exposure_handles_dict.keys():
             handle = exposure_handles_dict[band]
             exposure = handle.get()
-            exposure.getPsf().setCacheCapacity(self.config.psf_cache)
+            exposure.getPsf().setCacheCapacity(self.config.psfCache)
             if correlation_handles_dict is not None:
                 handle = correlation_handles_dict[band]
                 noise_corr = handle.get()
             else:
                 noise_corr = None
 
-            id_generator = self.config.id_generator.apply(handle.dataId)
-            seed = id_generator.catalog_id
+            idGenerator = self.config.idGenerator.apply(handle.dataId)
+            seed = idGenerator.catalog_id
             data = self.fpfs.prepare_data(
                 exposure=exposure,
                 seed=seed,

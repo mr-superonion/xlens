@@ -5,6 +5,7 @@ import numpy as np
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from numpy.typing import NDArray
+from ..simulator.random import get_noise_seed, num_rot
 
 from . import utils
 from .base import MeasBaseTask
@@ -67,10 +68,18 @@ class FpfsMeasurementConfig(Config):
         doc="Mask planes used to reject bad pixels.",
         default=["BAD", "SAT", "CR"],  # I keep CR here
     )
+    noiseId = Field[int](
+        doc="Noise realization id",
+        default=0,
+    )
+    rotId = Field[int](
+        doc="rotation id",
+        default=0,
+    )
 
     def validate(self):
         super().validate()
-        if self.sigma_arcsec > 2.0:
+        if self.sigma_arcsec > 2.0 or self.sigma_arcsec < 0.0:
             raise FieldValidationError(
                 self.__class__.sigma_arcsec,
                 self,
@@ -87,6 +96,18 @@ class FpfsMeasurementConfig(Config):
                 self.__class__.sigma_arcsec2,
                 self,
                 "sigma_arcsec2 in a wrong range",
+            )
+        if self.noiseId < 0 or self.noiseId >= 10:
+            raise FieldValidationError(
+                self.__class__.noiseId,
+                self,
+                "We require 0 <= noiseId < 10",
+            )
+        if self.rotId >= num_rot:
+            raise FieldValidationError(
+                self.__class__.rotId,
+                self,
+                "rotId needs to be smaller than 2",
             )
 
     def setDefaults(self):
@@ -206,10 +227,15 @@ class FpfsMeasurementTask(MeasBaseTask):
 
         if self.config.do_adding_noise:
             # TODO: merge the following to one code
+            noise_seed = get_noise_seed(
+                seed=seed,
+                noiseId=self.config.noiseId,
+                rotId=self.config.rotId,
+            )
             ny, nx = gal_array.shape
             if noise_corr is None:
                 noise_array = (
-                    np.random.RandomState(seed)
+                    np.random.RandomState(noise_seed)
                     .normal(
                         scale=noise_std,
                         size=(ny, nx),
@@ -220,7 +246,7 @@ class FpfsMeasurementTask(MeasBaseTask):
                 noise_corr = rotate90(noise_corr)
                 noise_array = (
                     anacal.noise.simulate_noise(
-                        seed=seed,
+                        seed=noise_seed,
                         correlation=noise_corr,
                         nx=nx,
                         ny=ny,
