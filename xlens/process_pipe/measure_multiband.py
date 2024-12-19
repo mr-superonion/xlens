@@ -1,21 +1,21 @@
-from lsst.pipe.base import (
-    Struct,
-    PipelineTask,
-    PipelineTaskConfig,
-    PipelineTaskConnections,
-)
+import lsst.afw.table as afwTable
 import lsst.pipe.base.connectionTypes as cT
-from lsst.pex.config import Field, ConfigurableField
+from lsst.daf.base import PropertyList
 from lsst.meas.algorithms import SetPrimaryFlagsTask
 from lsst.meas.astrom import DirectMatchTask
 from lsst.meas.base import (
-    SingleFrameMeasurementTask,
     CatalogCalculationTask,
+    SingleFrameMeasurementTask,
     SkyMapIdGeneratorConfig,
 )
 from lsst.meas.extensions.scarlet.io import updateCatalogFootprints
-import lsst.afw.table as afwTable
-from lsst.daf.base import PropertyList
+from lsst.pex.config import ConfigurableField, Field
+from lsst.pipe.base import (
+    PipelineTask,
+    PipelineTaskConfig,
+    PipelineTaskConnections,
+    Struct,
+)
 from lsst.skymap import BaseSkyMap
 
 

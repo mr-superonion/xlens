@@ -1,7 +1,8 @@
-import time
-from .template import template_string
-from string import Template
 import subprocess
+import time
+from string import Template
+
+from .template import template_string
 
 gw_node_list = [
     "hpcs005",

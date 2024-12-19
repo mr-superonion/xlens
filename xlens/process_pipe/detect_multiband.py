@@ -1,15 +1,15 @@
+import lsst.afw.math as afwMath
+import lsst.afw.table as afwTable
+import lsst.pipe.base.connectionTypes as cT
+from lsst.meas.algorithms import DynamicDetectionTask
+from lsst.meas.base import SkyMapIdGeneratorConfig
+from lsst.pex.config import ConfigurableField
 from lsst.pipe.base import (
-    Struct,
     PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
+    Struct,
 )
-import lsst.pipe.base.connectionTypes as cT
-from lsst.pex.config import ConfigurableField
-from lsst.meas.algorithms import DynamicDetectionTask
-from lsst.meas.base import SkyMapIdGeneratorConfig
-import lsst.afw.table as afwTable
-import lsst.afw.math as afwMath
 
 
 class DetectCoaddSourcesConnections(

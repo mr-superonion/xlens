@@ -1,4 +1,3 @@
-
 image_noise_base = 20
 gal_seed_base = 10
 

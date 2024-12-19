@@ -1,8 +1,10 @@
 import os
-from . import torque
 import subprocess
+
 import numpy as np
 from astropy.table import Table
+
+from . import torque
 
 
 def chunk_list(lst, num_chunks):

@@ -14,22 +14,22 @@
 # GNU General Public License for more details.
 #
 from typing import Any
-import numpy as np
-import lsst.afw.image as afwImage
 
+import lsst.afw.image as afwImage
 import lsst.pipe.base.connectionTypes as cT
+import numpy as np
 from lsst.meas.base import SkyMapIdGeneratorConfig
+from lsst.pex.config import Field, FieldValidationError
 from lsst.pipe.base import (
-    Struct,
     PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
+    Struct,
 )
-from lsst.pex.config import Field, FieldValidationError
-from ..simulator.multiband import get_noise_array
-from ..simulator.random import get_noise_seed, num_rot
-from ..simulator.multiband_defaults import noise_variance_defaults
 
+from ..simulator.multiband import get_noise_array
+from ..simulator.multiband_defaults import noise_variance_defaults
+from ..simulator.random import get_noise_seed, num_rot
 
 
 class MultibandSimPipeConnections(
@@ -59,7 +59,7 @@ class MultibandSimPipeConnections(
     )
     outputExposure = cT.Output(
         doc="Output simulated coadd exposure",
-        name="{outputCoaddName}_{mode}_rot{rotId}_noise{noiseId}_Coadd_calexp",
+        name="{outputCoaddName}_noise{noiseId}_{mode}_rot{rotId}_Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
@@ -94,9 +94,7 @@ class AddNoisePipeConfig(
             )
         if self.noiseId < 0 or self.noiseId >= 10:
             raise FieldValidationError(
-                self.__class__.noiseId,
-                self,
-                "We require 0 <= noiseId < 10"
+                self.__class__.noiseId, self, "We require 0 <= noiseId < 10"
             )
 
     def setDefaults(self):
@@ -169,6 +167,4 @@ class AddNoisePipe(PipelineTask):
             exposure.getMaskedImage().image.array[:, :] + noise_array
         )
 
-        return Struct(
-            outputExposure=exposure
-        )
+        return Struct(outputExposure=exposure)
