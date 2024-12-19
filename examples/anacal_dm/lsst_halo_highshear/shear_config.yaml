@@ -51,7 +51,7 @@ tasks:
     config:
       do_dm_detection: False
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.dataType: _test_0_rot0
 
   FpfsTask2:
@@ -59,7 +59,7 @@ tasks:
     config:
       do_dm_detection: False
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.dataType: _test_0_rot1
 
   FpfsTask3:
@@ -67,7 +67,7 @@ tasks:
     config:
       do_dm_detection: False
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.dataType: _test_1_rot0
 
   FpfsTask4:
@@ -75,7 +75,7 @@ tasks:
     config:
       do_dm_detection: False
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.dataType: _test_1_rot1
 
   SummaryTask:

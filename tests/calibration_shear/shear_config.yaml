@@ -42,28 +42,28 @@ tasks:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 
   DetectTask2:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot1_
 
   DetectTask3:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot0_
 
   DetectTask4:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot1_
 
   ForceTask1:
@@ -71,7 +71,7 @@ tasks:
     config:
       fpfs.sigma_arcsec1: 0.52
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 
   ForceTask2:
@@ -79,7 +79,7 @@ tasks:
     config:
       fpfs.sigma_arcsec1: 0.52
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot1_
 
   ForceTask3:
@@ -87,7 +87,7 @@ tasks:
     config:
       fpfs.sigma_arcsec1: 0.52
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot0_
 
   ForceTask4:
@@ -95,7 +95,7 @@ tasks:
     config:
       fpfs.sigma_arcsec1: 0.52
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot1_
 
   SelectBiasTask:

@@ -32,14 +32,14 @@ tasks:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 
   FpfsTask2:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
       fpfs.use_average_psf: True
-      fpfs.do_adding_noise: False
+      fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot1_
 
   SummaryTask:
