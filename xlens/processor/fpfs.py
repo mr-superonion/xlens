@@ -56,7 +56,7 @@ class FpfsMeasurementConfig(Config):
         doc="whether to use average PSF over the exposure",
         default=True,
     )
-    do_adding_noise = Field[bool](
+    do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
     )
@@ -225,7 +225,7 @@ class FpfsMeasurementTask(MeasBaseTask):
         bitValue = exposure.mask.getPlaneBitMask(self.config.badMaskPlanes)
         mask_array = ((exposure.mask.array & bitValue) != 0).astype(np.int16)
 
-        if self.config.do_adding_noise:
+        if self.config.do_noise_bias_correction:
             # TODO: merge the following to one code
             noise_seed = get_noise_seed(
                 seed=seed,
