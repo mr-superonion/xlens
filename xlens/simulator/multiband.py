@@ -44,6 +44,33 @@ from .multiband_defaults import (
 )
 
 
+def get_noise_array(
+    *,
+    seed_noise: int,
+    noise_std: float,
+    noise_corr: NDArray | None,
+    shape: tuple[int, int],
+    pixel_scale: float,
+) -> NDArray:
+    if noise_corr is None:
+        noise_array = np.random.RandomState(seed_noise).normal(
+            scale=noise_std,
+            size=shape,
+        )
+    else:
+        noise_array = (
+            anacal.noise.simulate_noise(
+                seed=seed_noise,
+                correlation=noise_corr,
+                nx=shape[1],
+                ny=shape[0],
+                scale=pixel_scale,
+            )
+            * noise_std
+        )
+    return noise_array
+
+
 class MultibandSimBaseConfig(Config):
     survey_name = Field[str](
         doc="Name of the survey",
@@ -88,15 +115,15 @@ class MultibandSimBaseConfig(Config):
 
     def validate(self):
         super().validate()
-        if self.rotId >= num_rot:
-            raise FieldValidationError(
-                self.__class__.rotId, self, "rotId needs to be smaller than 2"
-            )
         if self.galId >= 10 or self.galId < 0:
             raise FieldValidationError(
                 self.__class__.galId,
                 self,
                 "We require 0 <= galId < 10"
+            )
+        if self.rotId >= num_rot:
+            raise FieldValidationError(
+                self.__class__.rotId, self, "rotId needs to be smaller than 2"
             )
         if self.noiseId < 0 or self.noiseId >= 10:
             raise FieldValidationError(
@@ -119,35 +146,6 @@ class MultibandSimBaseTask(SimBaseTask):
         assert isinstance(self.config, MultibandSimBaseConfig)
         self.rotate_list = [np.pi / num_rot * i for i in range(num_rot)]
         pass
-
-    def get_noise_array(
-        self,
-        *,
-        seed_noise: int,
-        noise_std: float,
-        noise_corr: NDArray | None,
-        shape: tuple[int, int],
-        pixel_scale: float,
-    ) -> NDArray:
-        assert isinstance(self.config, MultibandSimBaseConfig)
-        if noise_corr is None:
-            noise_array = np.random.RandomState(seed_noise).normal(
-                scale=noise_std,
-                size=shape,
-            )
-        else:
-            noise_array = (
-                anacal.noise.simulate_noise(
-                    seed=seed_noise,
-                    correlation=noise_corr,
-                    nx=shape[1],
-                    ny=shape[0],
-                    scale=pixel_scale,
-                )
-                * noise_std
-            )
-        self.log.debug("Simulated noise STD is: %.2f" % np.std(noise_array))
-        return noise_array
 
     def prepare_galaxy_catalog(
         self,
@@ -240,11 +238,6 @@ class MultibandSimBaseTask(SimBaseTask):
         survey_name = self.config.survey_name
         seed_gal = seed * gal_seed_base + self.config.galId
         rng = np.random.RandomState(seed_gal)
-        seed_noise = get_noise_seed(
-            seed=seed,
-            noiseId=self.config.noiseId,
-            rotId=rotId,
-        )
 
         # Get the pixel scale in arcseconds per pixel
         pixel_scale = wcs.getPixelScale().asArcseconds()
@@ -335,7 +328,12 @@ class MultibandSimBaseTask(SimBaseTask):
         del data, photo_calib, kernel_psf, dm_wcs
 
         if self.config.draw_image_noise:
-            noise_array = self.get_noise_array(
+            seed_noise = get_noise_seed(
+                seed=seed,
+                noiseId=self.config.noiseId,
+                rotId=self.config.rotId,
+            )
+            noise_array = get_noise_array(
                 seed_noise=seed_noise,
                 noise_std=noise_std,
                 noise_corr=noise_corr,

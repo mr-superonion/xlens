@@ -14,22 +14,22 @@
 # GNU General Public License for more details.
 #
 from typing import Any
+import numpy as np
+import lsst.afw.image as afwImage
 
 import lsst.pipe.base.connectionTypes as cT
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import ConfigurableField
 from lsst.pipe.base import (
+    Struct,
     PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
 )
-from lsst.pipe.tasks.coaddBase import makeSkyInfo
-from lsst.skymap import BaseSkyMap
+from lsst.pex.config import Field, FieldValidationError
+from ..simulator.multiband import get_noise_array
+from ..simulator.random import get_noise_seed, num_rot
+from ..simulator.multiband_defaults import noise_variance_defaults
 
-from ..simulator.multiband import (
-    MultibandSimShearTask,
-    MultibandSimHaloTask,
-)
 
 
 class MultibandSimPipeConnections(
@@ -40,22 +40,9 @@ class MultibandSimPipeConnections(
         "outputCoaddName": "sim",
         "mode": 0,
         "rotId": 0,
+        "noiseId": 0,
     },
 ):
-    skymap = cT.Input(
-        doc="SkyMap to use in processing",
-        name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
-        storageClass="SkyMap",
-        dimensions=("skymap",),
-    )
-    exposure = cT.Input(
-        doc="Input coadd exposure",
-        name="{inputCoaddName}Coadd_calexp",
-        storageClass="ExposureF",
-        dimensions=("skymap", "tract", "patch", "band"),
-        multiple=False,
-        minimum=0,
-    )
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
         name="{inputCoaddName}Coadd_systematics_noisecorr",
@@ -64,24 +51,16 @@ class MultibandSimPipeConnections(
         multiple=False,
         minimum=0,
     )
-    psfImage = cT.Input(
-        doc="image for PSF model for simulation",
-        name="{inputCoaddName}Coadd_systematics_psfcentered",
-        dimensions=("skymap", "tract", "patch", "band"),
-        storageClass="ImageF",
-        multiple=False,
-        minimum=0,
-    )
-    outputExposure = cT.Output(
-        doc="Output simulated coadd exposure",
+    exposure = cT.Input(
+        doc="Input simulated coadd exposure",
         name="{outputCoaddName}_{mode}_rot{rotId}_Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
-    outputTruthCatalog = cT.Output(
-        doc="Output truth catalog",
-        name="{outputCoaddName}_{mode}_rot{rotId}_Coadd_truthCatalog",
-        storageClass="ArrowAstropy",
+    outputExposure = cT.Output(
+        doc="Output simulated coadd exposure",
+        name="{outputCoaddName}_{mode}_rot{rotId}_noise{noiseId}_Coadd_calexp",
+        storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
 
@@ -89,85 +68,107 @@ class MultibandSimPipeConnections(
         super().__init__(config=config)
 
 
-class MultibandSimShearPipeConfig(
+class AddNoisePipeConfig(
     PipelineTaskConfig,
     pipelineConnections=MultibandSimPipeConnections,
 ):
-    simulator = ConfigurableField(
-        target=MultibandSimShearTask,
-        doc="Simulation task for shear test",
-    )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
+    survey_name = Field[str](
+        doc="Name of the survey",
+        default="LSST",
+    )
+    rotId = Field[int](
+        doc="number of rotations",
+        default=0,
+    )
+    noiseId = Field[int](
+        doc="random seed for noise, 0 <= noiseId < 10",
+        default=0,
+    )
 
     def validate(self):
         super().validate()
+        if self.rotId >= num_rot:
+            raise FieldValidationError(
+                self.__class__.rotId, self, "rotId needs to be smaller than 2"
+            )
+        if self.noiseId < 0 or self.noiseId >= 10:
+            raise FieldValidationError(
+                self.__class__.noiseId,
+                self,
+                "We require 0 <= noiseId < 10"
+            )
 
     def setDefaults(self):
         super().setDefaults()
 
 
-class MultibandSimShearPipe(PipelineTask):
-    _DefaultName = "MultibandSimShearPipe"
-    ConfigClass = MultibandSimShearPipeConfig
+class AddNoisePipe(PipelineTask):
+    _DefaultName = "AddNoisePipe"
+    ConfigClass = AddNoisePipeConfig
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.makeSubtask("simulator")
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs) -> None:
+        assert isinstance(self.config, AddNoisePipeConfig)
         inputs = butlerQC.get(inputRefs)
 
         # band name
         assert butlerQC.quantum.dataId is not None
-        band = butlerQC.quantum.dataId["band"]
-        inputs["band"] = band
-
         # Get unique integer ID for IdFactory and RNG seeds; only the latter
         # should really be used as the IDs all come from the input catalog.
         idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
         seed = idGenerator.catalog_id
         inputs["seed"] = seed
-
-        skymap = butlerQC.get(inputRefs.skymap)
-        sky_info = makeSkyInfo(
-            skymap,
-            tractId=butlerQC.quantum.dataId["tract"],
-            patchId=butlerQC.quantum.dataId["patch"],
-        )
-        boundaryBox = sky_info.bbox
-        inputs["boundaryBox"] = boundaryBox
-
-        # Obtain the WCS for the patch
-        tract_info = sky_info.tractInfo
-        wcs = tract_info.getWcs()
-        inputs["wcs"] = wcs
-
-        outputs = self.simulator.run(**inputs)
+        band = butlerQC.quantum.dataId["band"]
+        inputs["band"] = band
+        outputs = self.run(**inputs)
         butlerQC.put(outputs, outputRefs)
         return
 
+    def run(
+        self,
+        *,
+        exposure: afwImage.ExposureF,
+        seed: int,
+        band: str,
+        noiseCorrImage: afwImage.ImageF | None = None,
+        **kwargs,
+    ):
+        assert isinstance(self.config, AddNoisePipeConfig)
+        # Obtain Noise correlation array
+        if noiseCorrImage is None:
+            noise_corr = None
+            variance = noise_variance_defaults[band][self.config.survey_name]
+            self.log.debug("No correlation, variance:", variance)
+        else:
+            noise_corr = noiseCorrImage.getArray()
+            variance = np.amax(noise_corr)
+            noise_corr = noise_corr / variance
+            ny, nx = noise_corr.shape
+            assert noise_corr[ny // 2, nx // 2] == 1
+            self.log.debug("With correlation, variance:", variance)
+        noise_std = np.sqrt(variance)
+        seed_noise = get_noise_seed(
+            seed=seed,
+            noiseId=self.config.noiseId,
+            rotId=self.config.rotId,
+        )
+        height, width = exposure.getMaskedImage().image.array.shape
+        wcs = exposure.getWcs()
+        pixel_scale = wcs.getPixelScale().asArcseconds()
+        noise_array = get_noise_array(
+            seed_noise=seed_noise,
+            noise_std=noise_std,
+            noise_corr=noise_corr,
+            shape=(height, width),
+            pixel_scale=pixel_scale,
+        )
+        exposure.getMaskedImage().image.array[:, :] = (
+            exposure.getMaskedImage().image.array[:, :] + noise_array
+        )
 
-class MultibandSimHaloPipeConfig(
-    PipelineTaskConfig,
-    pipelineConnections=MultibandSimPipeConnections,
-):
-    simulator = ConfigurableField(
-        target=MultibandSimHaloTask,
-        doc="Multiband Halo Simulation Task",
-    )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
-
-    def validate(self):
-        super().validate()
-
-    def setDefaults(self):
-        super().setDefaults()
-
-
-class MultibandSimHaloPipe(MultibandSimShearPipe):
-    _DefaultName = "MultibandSimHaloPipe"
-    ConfigClass = MultibandSimHaloPipeConfig
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.makeSubtask("simulator")
+        return Struct(
+            outputExposure=exposure
+        )

@@ -1,3 +1,3 @@
-from . import multibandSim
+from . import multibandSim, addNoise
 
-__all__ = ["multibandSim"]
+__all__ = ["multibandSim", "addNoise"]
