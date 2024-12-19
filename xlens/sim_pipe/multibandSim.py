@@ -26,10 +26,7 @@ from lsst.pipe.base import (
 from lsst.pipe.tasks.coaddBase import makeSkyInfo
 from lsst.skymap import BaseSkyMap
 
-from ..simulator.multiband import (
-    MultibandSimShearTask,
-    MultibandSimHaloTask,
-)
+from ..simulator.multiband import MultibandSimHaloTask, MultibandSimShearTask
 
 
 class MultibandSimPipeConnections(

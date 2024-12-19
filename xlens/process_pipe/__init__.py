@@ -1,10 +1,10 @@
 from . import (
-    fpfs_force,
-    fpfs_joint,
-    systematics_multiband,
-    hsc,
     detect_multiband,
     force_multiband,
+    fpfs_force,
+    fpfs_joint,
+    hsc,
+    systematics_multiband,
 )
 
 __all__ = [

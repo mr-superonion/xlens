@@ -5,8 +5,8 @@ import numpy as np
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from numpy.typing import NDArray
-from ..simulator.random import get_noise_seed, num_rot
 
+from ..simulator.random import get_noise_seed, num_rot
 from . import utils
 from .base import MeasBaseTask
 

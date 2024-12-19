@@ -39,8 +39,8 @@ from lsst.pex.config import (
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
-from .fpfs import FpfsMeasurementTask
 from ..simulator.simplesim import SimpleSimShearTask
+from .fpfs import FpfsMeasurementTask
 
 
 class FpfsSimpleSimConfig(Config):
@@ -78,8 +78,10 @@ class FpfsSimpleSimConfig(Config):
             )
         if not os.path.isdir(self.simulator.root_dir):
             raise FileNotFoundError("Cannot find root_dir")
-        if self.simulator.draw_image_noise != \
-                self.fpfs.do_noise_bias_correction:
+        if (
+            self.simulator.draw_image_noise
+            != self.fpfs.do_noise_bias_correction
+        ):
             raise ValueError(
                 "simulator.draw_image noise not equal"
                 "fpfs.do_noise_bias_correction"
@@ -148,7 +150,9 @@ class FpfsSimpleSimTask(Task):
                 if os.path.isfile(name):
                     res = fitsio.read(name)
                 else:
-                    res = self.process_data(ifield=ifield, mode=mode, rotId=rotId)
+                    res = self.process_data(
+                        ifield=ifield, mode=mode, rotId=rotId
+                    )
                     self.write_fpfs_src(
                         ifield=ifield,
                         mode=mode,

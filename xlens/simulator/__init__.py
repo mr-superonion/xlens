@@ -1,5 +1,11 @@
-from . import base, multiband, multiband_defaults, perturbation, simplesim
-from . import random
+from . import (
+    base,
+    multiband,
+    multiband_defaults,
+    perturbation,
+    random,
+    simplesim,
+)
 
 __all__ = [
     "base",
