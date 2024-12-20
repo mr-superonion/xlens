@@ -6,7 +6,7 @@ from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from numpy.typing import NDArray
 
-from ..simulator.random import get_noise_seed, num_rot
+from ..simulator.random import get_noise_seed, image_noise_base, num_rot
 from . import utils
 from .base import MeasBaseTask
 
@@ -97,11 +97,11 @@ class FpfsMeasurementConfig(Config):
                 self,
                 "sigma_arcsec2 in a wrong range",
             )
-        if self.noiseId < 0 or self.noiseId >= 10:
+        if self.noiseId < 0 or self.noiseId >= image_noise_base // 2:
             raise FieldValidationError(
                 self.__class__.noiseId,
                 self,
-                "We require 0 <= noiseId < 10",
+                "We require 0 <= noiseId < %d" % (image_noise_base // 2),
             )
         if self.rotId >= num_rot:
             raise FieldValidationError(
@@ -227,10 +227,15 @@ class FpfsMeasurementTask(MeasBaseTask):
 
         if self.config.do_noise_bias_correction:
             # TODO: merge the following to one code
-            noise_seed = get_noise_seed(
-                seed=seed,
-                noiseId=self.config.noiseId,
-                rotId=self.config.rotId,
+            noise_seed = (
+                get_noise_seed(
+                    seed=seed,
+                    noiseId=self.config.noiseId,
+                    rotId=self.config.rotId,
+                )
+                + image_noise_base // 2
+                # make sure the seed is different from
+                # noise seed for simulation
             )
             ny, nx = gal_array.shape
             if noise_corr is None:
