@@ -30,7 +30,12 @@ from lsst.pipe.base import Struct
 from numpy.typing import NDArray
 
 from ..processor.utils import resize_array
-from ..simulator.random import gal_seed_base, get_noise_seed, num_rot
+from ..simulator.random import (
+    gal_seed_base,
+    get_noise_seed,
+    image_noise_base,
+    num_rot,
+)
 from .base import SimBaseTask
 from .multiband_defaults import (
     mag_zero_defaults,
@@ -111,17 +116,23 @@ class MultibandSimBaseConfig(Config):
 
     def validate(self):
         super().validate()
-        if self.galId >= 10 or self.galId < 0:
+        if self.galId >= gal_seed_base or self.galId < 0:
             raise FieldValidationError(
-                self.__class__.galId, self, "We require 0 <= galId < 10"
+                self.__class__.galId,
+                self,
+                "We require 0 <= galId < %d" % (gal_seed_base),
             )
         if self.rotId >= num_rot:
             raise FieldValidationError(
-                self.__class__.rotId, self, "rotId needs to be smaller than 2"
+                self.__class__.rotId,
+                self,
+                "rotId needs to be smaller than 2",
             )
-        if self.noiseId < 0 or self.noiseId >= 10:
+        if self.noiseId < 0 or self.noiseId >= image_noise_base // 2:
             raise FieldValidationError(
-                self.__class__.noiseId, self, "We require 0 <= noiseId < 10"
+                self.__class__.noiseId,
+                self,
+                "We require 0 <= noiseId < %d" % (image_noise_base // 2),
             )
 
     def setDefaults(self):
