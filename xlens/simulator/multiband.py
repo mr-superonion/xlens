@@ -17,11 +17,13 @@ from typing import Any
 
 import anacal
 import galsim
+import lsst
 import lsst.afw.image as afwImage
 import lsst.afw.math as afwMath
 import lsst.meas.algorithms as meaAlg
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
+from .galaxies.skyCatalog import OpenUniverse2024RubinRomanCatalog
 from descwl_shear_sims.shear import ShearHalo, ShearRedshift
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.wcs import make_dm_wcs
@@ -78,12 +80,24 @@ class MultibandSimBaseConfig(Config):
         default="LSST",
     )
     layout = Field[str](
-        doc="Layout of the galaxy distribution",
+        doc="Layout of the galaxy distribution (random, grid, hex)",
         default="random",
+    )
+    galaxy_type = Field[str](
+        doc="galaxy type",
+        default="RomanRubin2024",
     )
     extend_ratio = Field[float](
         doc="The ratio to extend for the size of simulated image",
         default=1.06,
+    )
+    sep = Field[float](
+        doc="separation distance (arcsec) between galaxies (for grid and hex)",
+        default=11.0,
+    )
+    order_truth_catalog = Field[bool](
+        doc="Whether to keep the order in truth catalog",
+        default=False,
     )
     include_pixel_masks = Field[bool](
         doc="whether to include pixel masks in the simulation",
@@ -113,6 +127,10 @@ class MultibandSimBaseConfig(Config):
         doc="whether to use real PSF",
         default=False,
     )
+    force_pixel_center = Field[bool](
+        doc="whether to force galaxies at pixel center",
+        default=False,
+    )
 
     def validate(self):
         super().validate()
@@ -134,6 +152,24 @@ class MultibandSimBaseConfig(Config):
                 self,
                 "We require 0 <= noiseId < %d" % (image_noise_base // 2),
             )
+        if self.layout not in ["grid", "hex", "random"]:
+            raise FieldValidationError(
+                self.__class__.layout,
+                self,
+                "We require layout in ['grid', 'hex', 'random']",
+            )
+        if self.sep <= 0:
+            raise FieldValidationError(
+                self.__class__.sep,
+                self,
+                "We require sep > 0.0 arcsec",
+            )
+        if self.galaxy_type not in ["DC2", "RomanRubin2024"]:
+            raise FieldValidationError(
+                self.__class__.galaxy_type,
+                self,
+                "We require galaxy_type in ['DC2', 'RomanRubin2024']",
+            )
 
     def setDefaults(self):
         super().setDefaults()
@@ -152,28 +188,50 @@ class MultibandSimBaseTask(SimBaseTask):
 
     def prepare_galaxy_catalog(
         self,
+        *,
         rng: np.random.RandomState,
         dim: int,
         pixel_scale: float,
+        sep: float = 11.0,
+        indice_id=None,
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimBaseConfig)
         # prepare galaxy catalog
         coadd_dim = dim - 10
-        # galaxy catalog; you can make your own
-        galaxy_catalog = WLDeblendGalaxyCatalog(
+        # galaxy catalog;
+        if self.config.galaxy_type == "DC2":
+            GalClass = WLDeblendGalaxyCatalog
+        elif self.config.galaxy_type == "RomanRubin2024":
+            GalClass = OpenUniverse2024RubinRomanCatalog
+        else:
+            raise ValueError("invalid galaxy_type")
+        galaxy_catalog = GalClass(
             rng=rng,
             coadd_dim=coadd_dim,
             buff=0.0,
             pixel_scale=pixel_scale,
             layout=self.config.layout,
+            sep=sep,
+            indice_id=indice_id,
         )
+        if self.config.force_pixel_center:
+            galaxy_catalog.shifts_array["dx"] = (
+                np.floor(galaxy_catalog.shifts_array["dx"] / pixel_scale)
+                * pixel_scale
+                + pixel_scale / 2.0
+            )
+            galaxy_catalog.shifts_array["dy"] = (
+                np.floor(galaxy_catalog.shifts_array["dy"] / pixel_scale)
+                * pixel_scale
+                + pixel_scale / 2.0
+            )
         return galaxy_catalog
 
     def simulate_images(
         self,
         *,
-        rng,
+        rng: np.random.RandomState,
         galaxy_catalog,
         shear_obj,
         psf_obj,
@@ -226,15 +284,23 @@ class MultibandSimBaseTask(SimBaseTask):
         band: str,
         seed: int,
         boundaryBox,
-        wcs,
+        wcs: lsst.afw.geom.SkyWcs,
         psfImage: afwImage.ImageF | None = None,
         noiseCorrImage: afwImage.ImageF | None = None,
         exposure: afwImage.ExposureF | None = None,
+        patch: int = 0,
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimBaseConfig)
         if self.config.use_real_psf:
             assert psfImage is not None, "Do not have PSF input model"
+        if self.config.order_truth_catalog and self.config.layout in [
+            "grid",
+            "hex",
+        ]:
+            indice_id = patch
+        else:
+            indice_id = None
 
         # Prepare the random number generator and basic parameters
         rotId = self.config.rotId
@@ -299,7 +365,13 @@ class MultibandSimBaseTask(SimBaseTask):
         noise_std = np.sqrt(variance)
 
         dim = int(max(width, height) * self.config.extend_ratio)
-        galaxy_catalog = self.prepare_galaxy_catalog(rng, dim, pixel_scale)
+        galaxy_catalog = self.prepare_galaxy_catalog(
+            rng=rng,
+            dim=dim,
+            pixel_scale=pixel_scale,
+            sep=self.config.sep,
+            indice_id=indice_id,
+        )
         if dim % 2 == 1:
             dim = dim + 1
         coadd_dim = dim - 10
@@ -398,6 +470,14 @@ class MultibandSimShearTaskConfig(MultibandSimBaseConfig):
                 "test_value should be in [0.00, 0.10]",
             )
 
+        if self.force_pixel_center:
+            if self.mode != 2 or self.rotId != 0:
+                raise FieldValidationError(
+                    self.__class__.force_pixel_center,
+                    self,
+                    "Cannot force galaxies at pixel center",
+                )
+
     def setDefaults(self):
         super().setDefaults()
 
@@ -470,6 +550,12 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
                 self,
                 "halo redshift is larger than source redshift",
             )
+        if self.force_pixel_center:
+            raise FieldValidationError(
+                self.__class__.force_pixel_center,
+                self,
+                "Cannot force galaxies at pixel center",
+            )
 
     def setDefaults(self):
         super().setDefaults()
@@ -485,9 +571,12 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
 
     def prepare_galaxy_catalog(
         self,
+        *,
         rng: np.random.RandomState,
         dim: int,
         pixel_scale: float,
+        sep: float = 11.0,
+        indice_id=None,
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimHaloTaskConfig)
@@ -495,6 +584,8 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             rng=rng,
             dim=dim,
             pixel_scale=pixel_scale,
+            sep=sep,
+            indice_id=indice_id,
         )
         # for fix source redshift
         galaxy_catalog._wldeblend_cat["redshift"] = self.config.z_source

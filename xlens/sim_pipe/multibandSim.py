@@ -117,7 +117,9 @@ class MultibandSimShearPipe(PipelineTask):
         # band name
         assert butlerQC.quantum.dataId is not None
         band = butlerQC.quantum.dataId["band"]
+        patch = butlerQC.quantum.dataId["patch"]
         inputs["band"] = band
+        inputs["patch"] = patch
 
         # Get unique integer ID for IdFactory and RNG seeds; only the latter
         # should really be used as the IDs all come from the input catalog.

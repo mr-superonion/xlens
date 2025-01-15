@@ -29,6 +29,7 @@ import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
+import numpy as np
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field
 from lsst.pipe.base import (
@@ -38,6 +39,7 @@ from lsst.pipe.base import (
     Struct,
 )
 from lsst.utils.logging import LsstLogAdapter
+from numpy.typing import NDArray
 
 from ..processor.fpfs import FpfsMeasurementTask
 
@@ -61,6 +63,15 @@ class FpfsJointPipeConnections(
         doc="noise correlation function",
         name="{coaddName}Coadd_systematics_noisecorr",
         storageClass="ImageF",
+        dimensions=("skymap", "tract", "patch", "band"),
+        minimum=0,
+        multiple=True,
+        deferLoad=True,
+    )
+    truthCatalog = cT.Input(
+        doc="input truth catalog",
+        name="{coaddName}Coadd_truthCatalog",
+        storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
         multiple=True,
@@ -90,6 +101,14 @@ class FpfsJointPipeConfig(
         default=100,
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
+    use_truth_detection = Field[bool](
+        doc="whether to use truth catalog as detection",
+        default=False,
+    )
+    use_dm_detection = Field[bool](
+        doc="whether to use dm catalog as detection",
+        default=False,
+    )
 
     def validate(self):
         super().validate()
@@ -134,9 +153,30 @@ class FpfsJointPipe(PipelineTask):
             correlation_handles_dict = {
                 handle.dataId["band"]: handle for handle in correlation_handles
             }
+        detection = None
+        truth_handles = inputs["truthCatalog"]
+        if self.config.use_truth_detection:
+            assert len(truth_handles) > 0
+            tmp_dict = {
+                handle.dataId["band"]: handle for handle in truth_handles
+            }
+            truth_cat = tmp_dict["i"].get()
+            detection = np.zeros(
+                len(truth_cat),
+                dtype=[
+                    ("y", "f8"),
+                    ("x", "f8"),
+                    ("is_peak", "i4"),
+                    ("mask_value", "i4"),
+                ],
+            )
+            detection["is_peak"] = 1
+            detection["y"] = truth_cat["image_y"]
+            detection["x"] = truth_cat["image_x"]
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
+            detection=detection,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -146,6 +186,7 @@ class FpfsJointPipe(PipelineTask):
         *,
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
+        detection: NDArray | None = None,
     ):
         assert isinstance(self.config, FpfsJointPipeConfig)
         band = "i"
@@ -164,7 +205,7 @@ class FpfsJointPipe(PipelineTask):
             exposure=exposure,
             seed=seed,
             noise_corr=noise_corr,
-            detection=None,
+            detection=detection,
             band=None,
         )
         catalog = self.fpfs.run(**data)
