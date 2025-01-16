@@ -55,7 +55,7 @@ class OpenUniverse2024RubinRomanCatalog(object):
         self.gal_type = "wldeblend"
         self.rng = rng
 
-        self.input_catalog = read_ou2024rubinroman_cat(
+        self._wldeblend_cat = read_ou2024rubinroman_cat(
             select_observable=select_observable,
             select_lower_limit=select_lower_limit,
             select_upper_limit=select_upper_limit,
@@ -65,7 +65,7 @@ class OpenUniverse2024RubinRomanCatalog(object):
         area_tot_arcmin = (
             60.0**2 * (180.0 / np.pi) ** 2 * 4.0 * np.pi / (12.0 * 32.0**2)
         )
-        density = len(self.input_catalog) / area_tot_arcmin
+        density = len(self._wldeblend_cat) / area_tot_arcmin
 
         if isinstance(layout, str):
             self.layout = Layout(layout, coadd_dim, buff, pixel_scale)
@@ -78,20 +78,20 @@ class OpenUniverse2024RubinRomanCatalog(object):
             sep=sep,
         )
 
-        self.gal_ids = self.input_catalog["galaxy_id"]
+        self.gal_ids = self._wldeblend_cat["galaxy_id"]
 
         # randomly sample from the catalog
         num = len(self)
         if indice_id is None:
             self.indices = self.rng.randint(
                 0,
-                self.input_catalog.size,
+                self._wldeblend_cat.size,
                 size=num,
             )
         else:
             indice_min = indice_id * num
             indice_max = indice_min + num
-            if indice_min >= self.input_catalog.size:
+            if indice_min >= self._wldeblend_cat.size:
                 raise ValueError("indice_min too large")
             self.indices = (
                 np.arange(
@@ -99,7 +99,7 @@ class OpenUniverse2024RubinRomanCatalog(object):
                     indice_max,
                     dtype=int,
                 )
-                % self.input_catalog.size
+                % self._wldeblend_cat.size
             )
         # do a random rotation for each galaxy
         self.angles = self.rng.uniform(low=0, high=360, size=num)
@@ -130,7 +130,7 @@ class OpenUniverse2024RubinRomanCatalog(object):
             shifts.append(galsim.PositionD(sarray["dx"][i], sarray["dy"][i]))
             index = self.indices[i]
             indexes.append(index)
-            redshifts.append(self.input_catalog["redshift"][index])
+            redshifts.append(self._wldeblend_cat["redshift"][index])
 
         return {
             "objlist": objlist,
@@ -184,7 +184,7 @@ class OpenUniverse2024RubinRomanCatalog(object):
         galaxy = _generate_rubinroman_galaxies(
             self.rng,
             survey=survey,
-            entry=self.input_catalog[index],
+            entry=self._wldeblend_cat[index],
         )
         return galaxy
 
