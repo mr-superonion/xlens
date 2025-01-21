@@ -85,7 +85,7 @@ class MultibandSimBaseConfig(Config):
     )
     galaxy_type = Field[str](
         doc="galaxy type",
-        default="RomanRubin2024",
+        default="WLDeblend",
     )
     extend_ratio = Field[float](
         doc="The ratio to extend for the size of simulated image",
@@ -164,11 +164,11 @@ class MultibandSimBaseConfig(Config):
                 self,
                 "We require sep > 0.0 arcsec",
             )
-        if self.galaxy_type not in ["DC2", "RomanRubin2024"]:
+        if self.galaxy_type not in ["WLDeblend", "RomanRubin2024"]:
             raise FieldValidationError(
                 self.__class__.galaxy_type,
                 self,
-                "We require galaxy_type in ['DC2', 'RomanRubin2024']",
+                "We require galaxy_type in ['WLDeblend', 'RomanRubin2024']",
             )
 
     def setDefaults(self):
@@ -200,7 +200,7 @@ class MultibandSimBaseTask(SimBaseTask):
         # prepare galaxy catalog
         coadd_dim = dim - 10
         # galaxy catalog;
-        if self.config.galaxy_type == "DC2":
+        if self.config.galaxy_type == "WLDeblend":
             GalClass = WLDeblendGalaxyCatalog
         elif self.config.galaxy_type == "RomanRubin2024":
             GalClass = OpenUniverse2024RubinRomanCatalog
