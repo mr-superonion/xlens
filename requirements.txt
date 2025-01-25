@@ -7,4 +7,4 @@ lenstronomy
 matplotlib
 metadetect
 anacal==0.5.2
-lsstdesc-wl-shear-sims==0.4.4
+lsstdesc-wl-shear-sims==0.4.5
