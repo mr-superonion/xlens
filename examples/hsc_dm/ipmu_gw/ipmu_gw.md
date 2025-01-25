@@ -6,6 +6,7 @@ On GW@IPMU, we can use the butler here:
 ```shell
 /work/xiangchong.li/work/hsc_s23b_sim/sim_cosmos/simulation
 ```
+One can `cd` into the directory and run the following commands in this file.
 
 If you wish to not using existing butler, you can setup LSST DM butler using
 the skymaps defined in [here](./skymap.py), with the following command
