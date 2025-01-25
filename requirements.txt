@@ -1,5 +1,5 @@
 python==3.11
-stackvana
+stackvana>=0.2024.48
 healpy
 astropy
 fitsio
