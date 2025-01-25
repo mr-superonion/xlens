@@ -47,6 +47,9 @@ bps submit ./pfs_target/bps_sim.yaml
 Note, to run the BPS system on IPMU's torque server, we need to use the forked
 `ctrl_bps_parsl` [here](https://github.com/mr-superonion/ctrl_bps_parsl).
 
+To setup the BPS system, please forke, install and configure the system as
+follows:
+
 ```shell
 export BPS_WMS_SERVICE_CLASS=lsst.ctrl.bps.parsl.ParslService
 setup -kr ctrl_bps_parsl_directory
