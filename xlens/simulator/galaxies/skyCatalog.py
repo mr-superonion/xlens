@@ -243,10 +243,10 @@ def _generate_rubinroman_galaxies(
     bulge_frac = entry[sname + "_bulgefrac_" + band]
     bulge = galsim.Sersic(
         4, half_light_radius=bulge_hlr, flux=flux * bulge_frac
-    ).shear(e1=bulge_e1, e2=bulge_e2)
+    ).shear(g1=bulge_e1, g2=bulge_e2)
     disk = galsim.Sersic(
         1, half_light_radius=disk_hlr, flux=flux * (1.0 - bulge_frac)
-    ).shear(e1=disk_e1, e2=disk_e2)
+    ).shear(g1=disk_e1, g2=disk_e2)
     gal = bulge + disk
     gal = gal.withFlux(flux)
     return gal
