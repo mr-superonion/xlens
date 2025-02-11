@@ -31,7 +31,7 @@ in the  WeakLensingDeblending package
 ```shell
 wget https://idark.ipmu.jp/~xiangchong.li/Research/image_simulation/catsim-v4.tar.gz
 
-tar xvfz catsim.tar.gz
+tar xvfz catsim-v4.tar.gz
 export CATSIM_DIR=/path/to/catsim
 
 ```
