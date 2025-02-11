@@ -23,7 +23,6 @@ Note that there are three options in each redshift bin
 + 1: g=0.02;
 + 2: g=0.00
 
-For example, number of redshift bins is 4, (nz_bins = [0., 0.5, 1.0, 1.5,
-2.0]), if mode = 7 which in ternary is "0021" --- meaning that the shear is
-(-0.02, -0.02, 0.00, 0.02) in each bin, respectively.
-
+For example, number of redshift bins is 4, (with boundaries z_bounds = [0.,
+0.5, 1.0, 1.5, 2.0]), if mode = 7 which in ternary is "0021" --- meaning that
+the shear is (-0.02, -0.02, 0.00, 0.02) in each bin, respectively.
