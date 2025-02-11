@@ -30,7 +30,7 @@ pf = {
 }
 
 
-class SummarySimAnacal(SimulateBatchBase):
+class SummarySimDeepAnacal(SimulateBatchBase):
     def __init__(
         self,
         config_name,
@@ -72,7 +72,7 @@ class SummarySimAnacal(SimulateBatchBase):
 
     def run(self, icore):
         id_range = self.get_range(icore)
-        out = np.zeros((len(id_range), 5))
+        out = np.zeros((len(id_range), 9))
         print("start core: %d, with id: %s" % (icore, id_range))
         start_time = time.time()
         assert self.cat_dir is not None
@@ -105,18 +105,30 @@ class SummarySimAnacal(SimulateBatchBase):
                 dp = fitsio.read(sdp)
                 dm = fitsio.read(sdm)
                 ep = np.sum(wp["fpfs_e1"] * wp["fpfs_w"])
+                qp = np.sum(wp["fpfs_q1"] * wp["fpfs_w"])
                 rp = np.sum(
                     dp["fpfs_de1_dg1"] * dp["fpfs_w"] + dp["fpfs_e1"] * dp["fpfs_dw_dg1"]
                 )
+                rqp = np.sum(
+                    dp["fpfs_dq1_dg1"] * dp["fpfs_w"] + dp["fpfs_q1"] * dp["fpfs_dw_dg1"]
+                )
                 em = np.sum(wm["fpfs_e1"] * wm["fpfs_w"])
+                qm = np.sum(wm["fpfs_q1"] * wm["fpfs_w"])
                 rm = np.sum(
                     dm["fpfs_de1_dg1"] * dm["fpfs_w"] + dm["fpfs_e1"] * dm["fpfs_dw_dg1"]
+                )
+                rqm = np.sum(
+                    dm["fpfs_dq1_dg1"] * dm["fpfs_w"] + dm["fpfs_q1"] * dm["fpfs_dw_dg1"]
                 )
                 out[icount, 0] = ifield
                 out[icount, 1] = out[icount, 1] + ep
                 out[icount, 2] = out[icount, 2] + em
                 out[icount, 3] = out[icount, 3] + rp
                 out[icount, 4] = out[icount, 4] + rm
+                out[icount, 5] = out[icount, 5] + qp
+                out[icount, 6] = out[icount, 6] + qm
+                out[icount, 7] = out[icount, 7] + rqp
+                out[icount, 8] = out[icount, 8] + rqm
         end_time = time.time()
         elapsed_time = (end_time - start_time) / 4.0
         print("elapsed time: %.2f seconds" % elapsed_time)

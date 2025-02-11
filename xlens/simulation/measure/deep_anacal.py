@@ -45,7 +45,7 @@ def rotate90(image):
     return rotated_image
 
 
-class ProcessSimAnacal(SimulateBase):
+class ProcessSimDeepAnacal(SimulateBase):
     # @profile
     def __init__(self, config_name):
         cparser = ConfigParser(interpolation=ExtendedInterpolation())
@@ -120,9 +120,7 @@ class ProcessSimAnacal(SimulateBase):
         scale = data_w["pixel_scale"]
         seed = data_w["seed"]
         # Detection (use wide field images)
-        nn = self.coadd_dim + 10
         fpfs_config = anacal.fpfs.FpfsConfig(sigma_arcsec=self.sigma_arcsec)
-        noise_var_match = 0.5 * (data_w["noise_std"] ** 2 + 2 * data_d["noise_std"])
         dtask = anacal.fpfs.FpfsDeepWideImage(
             nx=npix_patch, ny=npix_patch, scale=scale,
             sigma_arcsec=self.sigma_arcsec, klim=2.650718801466388/0.2,
@@ -143,12 +141,12 @@ class ProcessSimAnacal(SimulateBase):
             std_m00=std_m00 * scale**2.0,
             omega_v=fpfs_config.omega_v * scale**2.0,
             v_min=fpfs_config.v_min * scale**2.0,
-            noise_array=data_d["noise_array"]+data_d["noise_array2"],
+            noise_array=data_d["noise_array"] + data_d["noise_array90"],
             noise_psf_array=data_d["psf_array"],
             mask_array=None
         )
         coords_deep = dtask.detect_source(
-            gal_array=data_d["gal_array"] + data_d["noise_array"],
+            gal_array=data_d["gal_array"] + data_d["noise_array90"],
             gal_psf_array=data_d["psf_array"],
             fthres=fpfs_config.fthres,
             pthres=fpfs_config.pthres,
@@ -168,7 +166,6 @@ class ProcessSimAnacal(SimulateBase):
                 % self.sigma_arcsec
             )
             res_wide, res_deep = deep_anacal.run_deep_anacal(
-                seed=seed,
                 scale=scale,
                 fpfs_config=fpfs_config,
                 gal_array_w=data_w["gal_array"],
@@ -177,6 +174,9 @@ class ProcessSimAnacal(SimulateBase):
                 psf_array_d=data_d["psf_array"],
                 noise_var_w=data_w["noise_std"]**2,
                 noise_var_d=data_d["noise_std"]**2,
+                noise_array_w=data_w["noise_array"],
+                noise_array_d=data_d["noise_array"],
+                noise_array_d90=data_d["noise_array90"],
                 detection_w=coords_wide,
                 detection_d=coords_deep,
             )
@@ -187,15 +187,16 @@ class ProcessSimAnacal(SimulateBase):
         return
 
     def prepare_data(self, file_name):
-        dm_task = MakeDMExposure(self.config_name)
+        if "wide" in file_name:
+            config_name = "config_wide.ini"
+        else:
+            config_name = "config_deep.ini"
+        dm_task = MakeDMExposure(config_name)
         # using seeds that are not used in simulation
         seed = dm_task.get_seed_from_fname(file_name, "i") + 1
         exposure = dm_task.generate_exposure(file_name)
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         variance = np.average(exposure.getMaskedImage().variance.array)
-        if "deep" in file_name:
-            variance *= self.deep_noise_frac
-        noise_std = np.sqrt(variance)
         psf_obj = get_gridpsf_obj(
             exposure,
             ngrid=self.ngrid,
@@ -231,7 +232,7 @@ class ProcessSimAnacal(SimulateBase):
                     )
                     .astype(np.float64)
                 )
-                noise_array2 = (
+                noise_array90 = (
                     rng
                     .normal(
                         scale=noise_std,
@@ -239,6 +240,7 @@ class ProcessSimAnacal(SimulateBase):
                     )
                     .astype(np.float64)
                 )
+                noise_array90 = rotate90(noise_array90)
             else:
                 noise_corr = fitsio.read(self.corr_fname)
                 noise_corr = rotate90(noise_corr)
@@ -262,7 +264,7 @@ class ProcessSimAnacal(SimulateBase):
             "gal_array": gal_array,
             "psf_array": psf_array,
             "noise_array": noise_array,
-            "noise_array2": noise_array2,
+            "noise_array90": noise_array90,
             "pixel_scale": pixel_scale,
             "noise_std": noise_std,
             "psf_obj": psf_obj,

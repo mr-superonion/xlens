@@ -60,20 +60,21 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         for _ in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "measure_anacal":
-        from xlens.simulation.measure import ProcessSimAnacal
+        #from xlens.simulation.measure import ProcessSimAnacal
+        from xlens.simulation.measure import ProcessSimDeepAnacal
 
         # import fitsio
 
-        worker = ProcessSimAnacal(cmd_args.config)
+        worker = ProcessSimDeepAnacal(cmd_args.config)
         input_list = worker.get_sim_fnames(min_id=min_id, max_id=max_id)
         for _ in pool.map(worker.run, input_list):
             pass
     elif taskname.lower() == "summary_anacal":
         import fitsio
 
-        from xlens.simulation.summary import SummarySimAnacal
+        from xlens.simulation.summary import SummarySimDeepAnacal
 
-        worker = SummarySimAnacal(
+        worker = SummarySimDeepAnacal(
             cmd_args.config,
             min_id=min_id,
             max_id=max_id,
@@ -82,7 +83,7 @@ def run(pool, cmd_args, taskname, min_id, max_id, ncores):
         if not os.path.isfile(worker.ofname):
             olist = pool.map(worker.run, np.arange(ncores))
             fitsio.write(worker.ofname, np.vstack(list(olist)))
-        worker.display_result()
+        #worker.display_result()
     elif taskname.lower() == "neff_anacal":
         from xlens.simulation.neff import NeffSimFpfs
 
