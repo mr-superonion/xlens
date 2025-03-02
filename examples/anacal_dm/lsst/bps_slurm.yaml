@@ -13,6 +13,7 @@ payload:
   inCollection: skymaps
   outputRun: run
   dataQuery: skymap='lsst_sim' AND tract=0 AND patch in (0..999) AND band='i'
+  # dataQuery: skymap='lsst_sim' AND tract=0 AND patch=0 AND band='i'
   command: --register-dataset-types
   
 parsl_config:
@@ -27,9 +28,11 @@ parsl_config:
 .site.Slurm:
     class: lsst.ctrl.bps.parsl.sites.Slurm
     job_name: shear_test
-    nodes: 2
-    cores_per_node: 64
-    walltime: '00:30:00'
-    qos: debug
+    nodes: 1
+    # cores_per_node: 64
+    walltime: '24:00:00'
+    # walltime: '00:30:00'
+    qos: regular
+    # qos: debug
     scheduler_options: |
       #SBATCH --constraint=cpu

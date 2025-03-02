@@ -302,6 +302,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ngal_in_bin(array): number of galaxies in each radial bin
             eT_std_list(array): per galaxy standard deviation of eT in each radial bin
             eX_std_list(array): per galaxy standard deviation of eX in each radial bin
+            mean_dist(array): mean distance of galaxies of the halo center
             median_match_dist_list(array): median of the match distance in each radial bin, expected to be around 0.5
             match_failure_rate_list(array): fraction of match distance larger than 2 in each radial bin
         """
@@ -322,6 +323,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         eX_std_list = []
         lensed_shift_list = []
         radial_lensed_shift_list = []
+        mean_dist = []
         median_matched_dist_list = []
         match_failure_rate_list = []
         m00_list = []
@@ -356,6 +358,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             lensed_shift_list.append(np.mean(lensed_shift[mask]))
             radial_lensed_shift_list.append(np.mean(radial_lensed_shift[mask]))
 
+            mean_dist.append(np.mean(dist[mask]))
             median_matched_dist_list.append(np.median(match_dist[mask]))
             match_failure_rate_list.append(
                 np.sum(match_dist[mask] > 2) / np.sum(mask)
@@ -379,6 +382,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             np.array(ngal_in_bin),
             np.array(eT_std_list),
             np.array(eX_std_list),
+            np.array(mean_dist),
             np.array(median_matched_dist_list),
             np.array(match_failure_rate_list),
             np.array(m00_list),
@@ -422,6 +426,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ("radial_lensed_shift", f"({n_bins},)f8"),
             ("r_weighted_gT", f"({n_bins},)f8"),
             ("r_weighted_gX", f"({n_bins},)f8"),
+            ("mean_dist", f"({n_bins},)f8"),
             ("median_match_dist", f"({n_bins},)f8"),
             ("match_failure_rate", f"({n_bins},)f8"),
             ("mean_m00", f"({n_bins},)f8"),
@@ -659,7 +664,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         logger.info("max pixel", max_pixel)
         logger.info("max pixel in arcsec", max_pixel * pixel_scale)
 
-        n_bins = 10
+        n_bins = 40
         pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
@@ -693,6 +698,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         eX_std_ensemble = np.empty((len(src00List), n_bins))
         lensed_shift_ensemble = np.empty((len(src00List), n_bins))
         radial_lensed_shift_ensemble = np.empty((len(src00List), n_bins))
+        mean_dist_ensemble = np.empty((len(src00List), n_bins))
         median_match_dist_ensemble = np.empty((len(src00List), n_bins))
         match_failure_rate_ensemble = np.empty((len(src00List), n_bins))
         m00_ensemble = np.empty((len(src00List), n_bins))
@@ -849,6 +855,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ngal_in_bin,
                 eT_std_list,
                 eX_std_list,
+                mean_dist_list,
                 median_match_dist,
                 match_failure_rate,
                 m00_list,
@@ -884,6 +891,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ngal_in_bin_ensemble[i, :] = ngal_in_bin
             eT_std_ensemble[i, :] = eT_std_list / np.sqrt(ngal_in_bin)
             eX_std_ensemble[i, :] = eX_std_list / np.sqrt(ngal_in_bin)
+            mean_dist_ensemble[i, :] = mean_dist_list
             median_match_dist_ensemble[i, :] = median_match_dist
             match_failure_rate_ensemble[i, :] = match_failure_rate
             m00_ensemble[i, :] = m00_list
@@ -929,6 +937,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         summary_stats["radial_lensed_shift"] = (
             radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
         )
+        summary_stats["mean_dist"] = mean_dist_ensemble
         summary_stats["median_match_dist"] = (
             median_match_dist_ensemble  # Shape (n_halos, n_bins)
         )
