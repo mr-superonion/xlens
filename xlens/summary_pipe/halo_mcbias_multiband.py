@@ -435,6 +435,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return np.zeros(n_halos, dtype=dt)
 
     @staticmethod
+    def get_per_galaxy_struct(n_gal):
+        dt = [
+            ("rT", f"({n_gal},)f8"),
+            ("x", f"({n_gal},)f8"),
+            ("y", f"({n_gal},)f8"),
+        ]
+        return np.zeros(n_gal, dtype=dt)
+
+    @staticmethod
     def generate_summary_plot(summary_table):
 
         area = np.mean(
