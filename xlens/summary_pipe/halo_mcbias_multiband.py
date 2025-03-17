@@ -106,6 +106,13 @@ class HaloMcBiasMultibandPipeConnections(
         storageClass="ArrowAstropy",
         dimensions=("skymap",),
     )
+    
+    perGalaxy = cT.Output(
+        doc="per galaxy output",
+        name="{inputCoaddName}_halo_mc_per_galaxy{dataType}",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap",),
+    )
 
     summaryPlot = cT.Output(
         doc="simple plot of summary stats",
@@ -433,13 +440,16 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ("mean_m20", f"({n_bins},)f8"),
         ]
         return np.zeros(n_halos, dtype=dt)
-
+    
     @staticmethod
     def get_per_galaxy_struct(n_gal):
         dt = [
-            ("rT", f"({n_gal},)f8"),
-            ("x", f"({n_gal},)f8"),
-            ("y", f"({n_gal},)f8"),
+            ("rT", "f8"),
+            ("gT", "f8"),
+            ("x", "f8"),
+            ("y", "f8"),
+            ("lensed_x", "f8"),
+            ("lensed_y", "f8"),
         ]
         return np.zeros(n_gal, dtype=dt)
 
@@ -713,6 +723,13 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         m00_ensemble = np.empty((len(src00List), n_bins))
         m20_ensemble = np.empty((len(src00List), n_bins))
 
+        ind_rT_list = []
+        ind_gT_true_list = []
+        ind_x_list = []
+        ind_y_list = []
+        ind_lensed_x_list = []
+        ind_lensed_y_list = []
+
         for i, cats in enumerate(
             zip(src00List, src01List, truth00List, truth01List)
         ):
@@ -774,7 +791,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             m00 = np.concatenate([sr_00_res["m00"], sr_01_res["m00"]])
             m20 = np.concatenate([sr_00_res["m20"], sr_01_res["m20"]])
 
-            # use the prelensed location in binning and calculating angle
             x = np.concatenate(
                 [
                     truth_00_res["prelensed_image_x"][idx_00],
@@ -800,6 +816,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                     truth_01_res["image_y"][idx_01],
                 ]
             )
+
+            # ind_x_list.append(lensed_x)
+            # ind_y_list.append(lensed_y)
+            
+            ind_x_list.append(x)
+            ind_y_list.append(y)
+            ind_lensed_x_list.append(lensed_x)
+            ind_lensed_y_list.append(lensed_y)
+            
             assert (
                 np.mean(lensed_x - (image_dim) / 2) < 100
             ), f"mean x should be close to the center, distance is {np.mean(lensed_x - (image_dim) / 2)}, index is {i}"
@@ -838,6 +863,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, -angle)
             gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, -angle)
+
+            ind_gT_true_list.append(gT_true)
+
             # w are scalar so no need to rotate
             dist = np.sqrt(
                 (lensed_x - (image_dim) / 2) ** 2
@@ -848,6 +876,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 e1, e2, w, e1_g1, e2_g2, w_g1, w_g2
             )
             rT, rX = self._rotate_spin_2_matrix(r11, r22, angle)
+            ind_rT_list.append(rT)
 
             (
                 eT_list,
@@ -905,7 +934,22 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             match_failure_rate_ensemble[i, :] = match_failure_rate
             m00_ensemble[i, :] = m00_list
             m20_ensemble[i, :] = m20_list
+            
+        rT_ind = np.concatenate(ind_rT_list)
+        ind_gT_true = np.concatenate(ind_gT_true_list)
+        x_ind = np.concatenate(ind_x_list)
+        y_ind = np.concatenate(ind_y_list)
+        lensed_x_ind = np.concatenate(ind_lensed_x_list)
+        lensed_y_ind = np.concatenate(ind_lensed_y_list)
 
+        per_galaxy_struct = self.get_per_galaxy_struct(len(rT_ind))
+        per_galaxy_struct["rT"] = rT_ind
+        per_galaxy_struct["gT"] = ind_gT_true
+        per_galaxy_struct["x"] = x_ind
+        per_galaxy_struct["y"] = y_ind
+        per_galaxy_struct["lensed_x"] = lensed_x_ind
+        per_galaxy_struct["lensed_y"] = lensed_y_ind
+            
         summary_stats = self.get_summary_struct(
             n_realization, len(angular_bin_edges) - 1
         )
@@ -959,4 +1003,4 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         summary_plot = self.generate_summary_plot(summary_stats)
 
-        return Struct(outputSummary=summary_stats, summaryPlot=summary_plot)
+        return Struct(outputSummary=summary_stats, summaryPlot=summary_plot, perGalaxy=per_galaxy_struct)

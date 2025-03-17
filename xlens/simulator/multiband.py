@@ -471,6 +471,7 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             mass=self.config.mass,
             conc=self.config.conc,
             z_lens=self.config.z_lens,
+            z_source = self.config.z_source,
             ra_lens=self.config.ra_lens,
             dec_lens=self.config.dec_lens,
             no_kappa=self.config.no_kappa,
