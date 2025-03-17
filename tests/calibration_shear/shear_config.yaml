@@ -99,16 +99,18 @@ tasks:
       connections.coaddName: sim_1_rot1_
 
   SelectBiasTask:
-    class: xlens.summary_pipe.selbias_m00_multiband.SelBiasMultibandPipe
+    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasMultibandPipe
     config:
       shape_name: "i_fpfs1_e1"
-      m00_name: "i_fpfs1_m00"
+      dshape_name: "i_fpfs1_de1"
+      flux_name: "i_fpfs1_m00"
+      dflux_name: "i_fpfs1_dm00"
       do_correct_selection_bias: True
       connections.dataType: force
       connections.coaddName: sim
 
   Summary:
-    class: xlens.summary_pipe.selbias_m00_multiband.SelBiasSummaryMultibandPipe
+    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasSummaryMultibandPipe
     config:
       connections.dataType: force
       connections.coaddName: sim

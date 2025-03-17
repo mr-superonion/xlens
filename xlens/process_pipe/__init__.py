@@ -3,6 +3,7 @@ from . import (
     force_multiband,
     fpfs_force,
     fpfs_joint,
+    anacal_alpha,
     hsc,
     systematics_multiband,
 )
@@ -14,4 +15,5 @@ __all__ = [
     "fpfs_force",
     "hsc",
     "force_multiband",
+    "anacal_alpha",
 ]
