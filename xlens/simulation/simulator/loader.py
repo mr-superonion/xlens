@@ -444,7 +444,7 @@ class MakeDMExposureSV(SimulateBase):
         if self.bands != "a":
             bands = self.bands
         else:
-            bands = "aaaa"
+            bands = self.blist
 
         if self.corr_fname is None:
             noise_corr = None
