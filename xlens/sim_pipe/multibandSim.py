@@ -13,6 +13,8 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
+import os
+import fitsio
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
@@ -59,7 +61,7 @@ class MultibandSimPipeConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
-        minimum=0,
+        # minimum=0,
     )
     psfImage = cT.Input(
         doc="image for PSF model for simulation",
@@ -67,7 +69,7 @@ class MultibandSimPipeConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
-        minimum=0,
+        # minimum=0,
     )
     outputExposure = cT.Output(
         doc="Output simulated coadd exposure",
@@ -110,9 +112,26 @@ class MultibandSimShearPipe(PipelineTask):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.makeSubtask("simulator")
+        fname = os.path.join(
+            "/lustre/work/xiangchong.li/work",
+            "hsc_s23b_data/sim_v1/success.fits",
+        )
+        if os.path.isfile(fname):
+            self.pt_data = fitsio.read(fname)
+        else:
+            self.pt_data = None
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs) -> None:
+        assert butlerQC.quantum.dataId is not None
+        tract = butlerQC.quantum.dataId["tract"]
+        patch = butlerQC.quantum.dataId["patch"]
+        if self.pt_data is not None:
+            patch_list = self.pt_data[self.pt_data["tract"] == tract]["patch"]
+            if patch not in patch_list:
+                return
+
         inputs = butlerQC.get(inputRefs)
+
 
         # band name
         assert butlerQC.quantum.dataId is not None
