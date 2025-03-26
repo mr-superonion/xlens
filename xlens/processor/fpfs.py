@@ -248,7 +248,7 @@ class FpfsMeasurementTask(MeasBaseTask):
                     .astype(np.float64)
                 )
             else:
-                noise_corr = rotate90(noise_corr)
+                noise_corr = rotate90(noise_corr.getArray())
                 noise_array = (
                     anacal.noise.simulate_noise(
                         seed=noise_seed,

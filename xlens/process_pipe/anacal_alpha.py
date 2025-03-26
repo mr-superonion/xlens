@@ -38,7 +38,7 @@ from lsst.pipe.base import (
     Struct,
 )
 from lsst.utils.logging import LsstLogAdapter
-from numpy.typing import NDArray
+import numpy as np
 
 from ..processor.anacal_alpha import AnacalAlphaTask
 
@@ -60,9 +60,18 @@ class AnacalAlphaPipeConnections(
     )
     noise_corr = cT.Input(
         doc="noise correlation function",
-        name="{coaddName}Coadd_systematics_noisecorr",
+        name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
+        minimum=0,
+        multiple=True,
+        deferLoad=True,
+    )
+    dm_catalog = cT.Input(
+        doc="Source catalog containing all the measurement information",
+        name="sim_0_rot0_Coadd_meas",
+        dimensions=("skymap", "tract", "patch", "band"),
+        storageClass="SourceCatalog",
         minimum=0,
         multiple=True,
         deferLoad=True,
@@ -132,11 +141,17 @@ class AnacalAlphaPipe(PipelineTask):
             correlation_handles_dict = {
                 handle.dataId["band"]: handle for handle in correlation_handles
             }
-        detection = None
+        dm_handles = inputs["dm_catalog"]
+        if len(dm_handles) == 0:
+            dm_handles_dict = None
+        else:
+            dm_handles_dict = {
+                handle.dataId["band"]: handle for handle in dm_handles
+            }
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
-            detection=detection,
+            dm_handles_dict=dm_handles_dict,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -146,7 +161,7 @@ class AnacalAlphaPipe(PipelineTask):
         *,
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
-        detection: NDArray | None = None,
+        dm_handles_dict: dict | None,
     ):
         assert isinstance(self.config, AnacalAlphaPipeConfig)
         band = "i"
@@ -154,10 +169,18 @@ class AnacalAlphaPipe(PipelineTask):
         exposure = handle.get()
         exposure.getPsf().setCacheCapacity(self.config.psfCache)
         if correlation_handles_dict is not None:
-            handle = correlation_handles_dict[band]
-            noise_corr = handle.get()
+            noise_corr = correlation_handles_dict[band].get().getArray()
+            variance = np.amax(noise_corr)
+            noise_corr = noise_corr / variance
+            ny, nx = noise_corr.shape
+            assert noise_corr[ny // 2, nx // 2] == 1
+            self.log.debug("With correlation, variance:", variance)
         else:
             noise_corr = None
+        if dm_handles_dict is not None:
+            detection = dm_handles_dict[band].get()
+        else:
+            detection = None
 
         idGenerator = self.config.idGenerator.apply(handle.dataId)
         seed = idGenerator.catalog_id
