@@ -18,25 +18,19 @@ class AnacalAlphaConfig(Config):
     )
     bound = Field[int](
         doc="Sources to be removed if too close to boundary",
-        default=32,
-    )
-    sigma_arcsec = Field[float](
-        doc="Kernel size for re-smoothing",
-        default=0.42,
+        default=40,
     )
     sigma_arcsec_det = Field[float](
         doc="kernel size for detection",
         default=0.52,
     )
+    sigma_arcsec = Field[float](
+        doc="Kernel size for re-smoothing",
+        default=0.42,
+    )
     snr_min = Field[float](
         doc="snr min for detection",
-        optional=True,
-        default=5.0,
-    )
-    trace_min = Field[float](
-        doc="Shapelet's Gaussian kernel size for the second measurement",
-        optional=True,
-        default=0.25,
+        default=8.0,
     )
     num_epochs = Field[int](
         doc="Number of iterations",
@@ -48,7 +42,7 @@ class AnacalAlphaConfig(Config):
     )
     p_min = Field[float](
         doc="peak detection threshold",
-        default=0.15,
+        default=0.14,
     )
     omega_p = Field[float](
         doc="peak detection threshold",
@@ -87,7 +81,7 @@ class AnacalAlphaConfig(Config):
             raise FieldValidationError(
                 self.__class__.sigma_arcsec_det,
                 self,
-                "sigma_arcsec1 in a wrong range",
+                "sigma_arcsec_det in a wrong range",
             )
         if self.noiseId < 0 or self.noiseId >= image_noise_base // 2:
             raise FieldValidationError(
@@ -146,7 +140,6 @@ class AnacalAlphaTask(MeasBaseTask):
         psf_array: NDArray,
         mask_array: NDArray,
         noise_array: NDArray | None,
-        detection: NDArray | None,
         psf_object: utils.LsstPsf | None,
         base_column_name: str | None,
         **kwargs,
@@ -156,18 +149,19 @@ class AnacalAlphaTask(MeasBaseTask):
         ratio = 10.0 ** ((mag_zero - 30.0) / 2.5)
         taskA = anacal.task.TaskAlpha(
             scale=pixel_scale,
-            omega_f=0.1 * ratio,
-            v_min=0.02 * ratio,
-            omega_v=0.04 * ratio,
+            omega_f=0.06 * ratio,
+            v_min=0.013 * ratio,
+            omega_v=0.025 * ratio,
+            fpfs_c0=8.4 * ratio,
             **self.config_kwargs,
         )
 
         blocks = anacal.geometry.get_block_list(
             gal_array.shape[0],         # image size
             gal_array.shape[1],
-            500,                        # block size
-            500,
-            self.config.npix * 2 + 4,   # bound
+            256,                        # block size
+            256,
+            self.config.npix * 2 + 10,   # bound
             pixel_scale,
         )
 
@@ -200,11 +194,6 @@ class AnacalAlphaTask(MeasBaseTask):
             (dict)
         """
         assert isinstance(self.config, AnacalAlphaConfig)
-
-        def rotate90(image):
-            rotated_image = np.zeros_like(image)
-            rotated_image[1:, 1:] = np.rot90(m=image[1:, 1:], k=-1)
-            return rotated_image
 
         pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
         noise_variance = np.average(exposure.getMaskedImage().variance.array)
@@ -251,6 +240,9 @@ class AnacalAlphaTask(MeasBaseTask):
             )
             ny, nx = gal_array.shape
             if noise_corr is None:
+                self.log.debug(
+                    "use white noise for noise bias correction"
+                )
                 noise_array = (
                     np.random.RandomState(noise_seed)
                     .normal(
@@ -260,7 +252,10 @@ class AnacalAlphaTask(MeasBaseTask):
                     .astype(np.float64)
                 )
             else:
-                noise_corr = rotate90(noise_corr)
+                self.log.debug(
+                    "use noise correlation function for noise bias correction"
+                )
+                noise_corr = np.rot90(m=noise_corr, k=-1)
                 noise_array = (
                     anacal.noise.simulate_noise(
                         seed=noise_seed,
@@ -268,13 +263,13 @@ class AnacalAlphaTask(MeasBaseTask):
                         nx=nx,
                         ny=ny,
                         scale=pixel_scale,
-                    ).astype(np.float64)
-                    * noise_std
+                    ) * noise_std
                 )
         else:
+            self.log.debug(
+                "Do not correct for noise bias"
+            )
             noise_array = None
-        if detection is not None:
-            detection = np.array(detection[["y", "x", "is_peak", "mask_value"]])
 
         if not self.config.use_average_psf:
             psf_object = utils.LsstPsf(psf=lsst_psf, npix=self.config.npix)
@@ -293,7 +288,6 @@ class AnacalAlphaTask(MeasBaseTask):
             "psf_array": psf_array,
             "mask_array": mask_array,
             "noise_array": noise_array,
-            "detection": detection,
             "psf_object": psf_object,
             "base_column_name": base_column_name,
         }
