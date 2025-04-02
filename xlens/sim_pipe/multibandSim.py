@@ -61,7 +61,7 @@ class MultibandSimPipeConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
-        # minimum=0,
+        minimum=0,
     )
     psfImage = cT.Input(
         doc="image for PSF model for simulation",
@@ -69,7 +69,7 @@ class MultibandSimPipeConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
-        # minimum=0,
+        minimum=0,
     )
     outputExposure = cT.Output(
         doc="Output simulated coadd exposure",
@@ -128,6 +128,8 @@ class MultibandSimShearPipe(PipelineTask):
         if self.pt_data is not None:
             patch_list = self.pt_data[self.pt_data["tract"] == tract]["patch"]
             if patch not in patch_list:
+                print(patch)
+                print("failed..............")
                 return
 
         inputs = butlerQC.get(inputRefs)

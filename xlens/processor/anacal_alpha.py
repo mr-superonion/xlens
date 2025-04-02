@@ -110,10 +110,8 @@ class AnacalAlphaTask(MeasBaseTask):
         super().__init__(**kwargs)
         assert isinstance(self.config, AnacalAlphaConfig)
         prior = anacal.ngmix.modelPrior()
-        prior.set_sigma_e(anacal.math.qnumber(0.6))
+        prior.set_sigma_a(anacal.math.qnumber(0.2))
         prior.set_sigma_x(anacal.math.qnumber(0.5))
-        prior.mu_t = anacal.math.qnumber(-1.0)
-        prior.set_sigma_t(anacal.math.qnumber(0.5))
         self.config_kwargs = {
             "p_min": self.config.p_min,
             "omega_p": self.config.omega_p,
@@ -123,7 +121,6 @@ class AnacalAlphaTask(MeasBaseTask):
             "stamp_size": self.config.npix,
             "image_bound": self.config.bound,
             "num_epochs": self.config.num_epochs,
-            "force_shape": self.config.force_size,
             "force_size": self.config.force_size,
             "force_center": True,
             "prior": prior,
