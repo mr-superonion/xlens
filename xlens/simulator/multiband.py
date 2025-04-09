@@ -30,8 +30,8 @@ from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from lsst.pipe.base import Struct
 from numpy.typing import NDArray
 
-from ..processor.utils import resize_array
-from ..simulator.random import (
+from ..utils.image import resize_array
+from ..utils.random import (
     gal_seed_base,
     get_noise_seed,
     image_noise_base,
