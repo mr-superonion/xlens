@@ -29,6 +29,7 @@ import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
+import numpy as np
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field
 from lsst.pipe.base import (
@@ -38,7 +39,6 @@ from lsst.pipe.base import (
     Struct,
 )
 from lsst.utils.logging import LsstLogAdapter
-import numpy as np
 
 from ..processor.anacal_alpha import AnacalAlphaTask
 

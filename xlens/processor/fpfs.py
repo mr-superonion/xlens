@@ -265,7 +265,9 @@ class FpfsMeasurementTask(MeasBaseTask):
             detection = np.array(detection[["y", "x", "is_peak", "mask_value"]])
 
         if not self.config.use_average_psf:
-            psf_object = utils.image.LsstPsf(psf=lsst_psf, npix=self.config.npix)
+            psf_object = utils.image.LsstPsf(
+                psf=lsst_psf, npix=self.config.npix
+            )
         else:
             psf_object = None
 

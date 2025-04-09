@@ -1,4 +1,3 @@
-
 config.name = "hsc"
 config.skyMap = "rings"
 

@@ -168,10 +168,7 @@ class SystematicsMultibandPipe(PipelineTask):
         inputs["exposure"].getPsf().setCacheCapacity(self.config.psfCache)
         idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
         seed = idGenerator.catalog_id
-        outputs = self.run(
-            seed=seed,
-            **inputs
-        )
+        outputs = self.run(seed=seed, **inputs)
         butlerQC.put(outputs, outputRefs)
         return
 
@@ -203,14 +200,14 @@ class SystematicsMultibandPipe(PipelineTask):
             dtype=np.float32,
         )[1000:3000, 1000:3000]
         window_array = (
-            window_array * (noise_array ** 2.0 < variance_array * 9)
-            * (variance_array < 5.0) * (~np.isnan(variance_array))
+            window_array
+            * (noise_array**2.0 < variance_array * 9)
+            * (variance_array < 5.0)
+            * (~np.isnan(variance_array))
         )
 
         noise_array[~window_array.astype(bool)] = 0.0
-        noise_variance = np.average(
-            variance_array[window_array.astype(bool)]
-        )
+        noise_variance = np.average(variance_array[window_array.astype(bool)])
         if noise_variance < 1e-20:
             raise ValueError(
                 "the estimated image noise variance should be positive."

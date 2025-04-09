@@ -44,7 +44,6 @@ from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
 
-
 class RegisterSimPipeConnections(
     PipelineTaskConnections,
     dimensions=("tract", "patch", "band", "skymap"),

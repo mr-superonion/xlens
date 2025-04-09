@@ -56,7 +56,18 @@ class AnacalAlphaConfig(Config):
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
-        default=["BAD", "SAT", "CR"],  # I keep CR here
+        default=[
+            "BAD",
+            "SAT",
+            "CR",
+            "NO_DATA",
+            "UNMASKEDNAN",
+            "CROSSTALK",
+            "INTRP",
+            "STREAK",
+            "VIGNETTED",
+            "CLIPPED",
+        ],
     )
     noiseId = Field[int](
         doc="Noise realization id",
@@ -81,11 +92,12 @@ class AnacalAlphaConfig(Config):
                 self,
                 "sigma_arcsec_det in a wrong range",
             )
-        if self.noiseId < 0 or self.noiseId >= utils.random.image_noise_base // 2:
+        n_min = utils.random.image_noise_base // 2
+        if self.noiseId < 0 or self.noiseId >= n_min:
             raise FieldValidationError(
                 self.__class__.noiseId,
                 self,
-                "We require 0 <= noiseId < %d" % (utils.random.image_noise_base // 2),
+                "We require 0 <= noiseId < %d" % (n_min),
             )
         if self.rotId >= utils.random.num_rot:
             raise FieldValidationError(
@@ -152,11 +164,11 @@ class AnacalAlphaTask(MeasBaseTask):
         )
 
         blocks = anacal.geometry.get_block_list(
-            gal_array.shape[0],         # image size
+            gal_array.shape[0],  # image size
             gal_array.shape[1],
-            256,                        # block size
+            256,  # block size
             256,
-            self.config.npix * 2 + 10,   # bound
+            self.config.npix * 2 + 10,  # bound
             pixel_scale,
         )
 
