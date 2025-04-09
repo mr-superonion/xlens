@@ -67,13 +67,18 @@ class ShearHalo(object):
             )
             kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
 
-            lensed_ra, lensed_dec = lens_eqn_solver.image_position_from_source(
+            lensed_ra, lensed_dec = self.lens_eqn_solver.image_position_from_source(
                 r.x,
                 r.y,
                 kwargs,
                 min_distance=0.2,  # chance of finding solutions as close as min_distance away from each other
                 search_window=50,  # largest distance to find a solution for
             )
+            
+            # if lenstronomy cannot find a solution
+            # do not shift
+            if len(lensed_ra) == 0 or len(lensed_dec) == 0:
+                lensed_ra, lensed_dec = shift.x, shift.y
 
             f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
                 lensed_ra, lensed_dec, kwargs
@@ -92,7 +97,8 @@ class ShearHalo(object):
             if g1**2.0 + g2**2.0 > 0.95:
                 return gso, shift, shift, gamma1, gamma2, kappa
 
-            dra, ddec = self.lens.alpha(lensed_ra, lensed_dec, kwargs)
+            # dra, ddec = self.lens.alpha(lensed_ra, lensed_dec, kwargs)
+            dra, ddec = lensed_ra - shift.x, lensed_dec - shift.y
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
             lensed_shift = shift + galsim.PositionD(dra, ddec)
         return gso, lensed_shift, shift, gamma1, gamma2, kappa
