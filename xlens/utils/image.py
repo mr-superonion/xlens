@@ -20,12 +20,13 @@
 # see <http://www.lsstcorp.org/LegalNotices/>.
 #
 
-from typing import Any
+from typing import Any, List
 
 import anacal
 import lsst.geom as lsst_geom
 import numpy as np
 from numpy.typing import NDArray
+from lsst.afw.image import ExposureF
 
 
 def subpixel_shift(image: NDArray, shift_x: int, shift_y: int):
@@ -199,3 +200,116 @@ def get_psf_array(
     psf_rcut = npix // 2 - 4
     anacal.fpfs.base.truncate_square(out, psf_rcut)
     return out
+
+
+def prepare_data(
+    *,
+    exposure: ExposureF,
+    seed: int,
+    noiseId: int = 0,
+    rotId: int = 0,
+    npix: int = 32,
+    noise_corr: NDArray | None = None,
+    band: str | None = None,
+    do_noise_bias_correction: bool = True,
+    use_average_psf: bool = True,
+    badMaskPlanes: List[str] = ["BAD", "SAT", "CR"],
+    **kwargs,
+):
+    """Prepares the data from LSST exposure
+    Args:
+    exposure (ExposureF):   LSST exposure
+    seed (int):  random seed
+    noise_corr (NDArray):  image noise correlation function (None)
+
+    Returns:
+        (dict)
+    """
+    from ..simulator.random import get_noise_seed, image_noise_base
+
+    pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
+    noise_variance = np.average(exposure.getMaskedImage().variance.array)
+    if noise_variance < 1e-12:
+        raise ValueError(
+            "the estimated image noise variance should be positive."
+        )
+    noise_std = np.sqrt(noise_variance)
+    mag_zero = (
+        np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude())
+        / 0.4
+    )
+
+    lsst_bbox = exposure.getBBox()
+    lsst_psf = exposure.getPsf()
+    psf_array = np.asarray(
+        get_psf_array(
+            lsst_psf=lsst_psf,
+            lsst_bbox=lsst_bbox,
+            npix=npix,
+            dg=250,
+        ),
+        dtype=np.float64,
+    )
+    gal_array = np.asarray(
+        exposure.getMaskedImage().image.array,
+        dtype=np.float64,
+    )
+
+    bitValue = exposure.mask.getPlaneBitMask(badMaskPlanes)
+    mask_array = ((exposure.mask.array & bitValue) != 0).astype(np.int16)
+
+    if do_noise_bias_correction:
+        noise_seed = (
+            get_noise_seed(
+                seed=seed,
+                noiseId=noiseId,
+                rotId=rotId,
+            )
+            + image_noise_base // 2
+            # make sure the seed is different from
+            # noise seed for simulation
+        )
+        ny, nx = gal_array.shape
+        if noise_corr is None:
+            noise_array = (
+                np.random.RandomState(noise_seed)
+                .normal(
+                    scale=noise_std,
+                    size=(ny, nx),
+                )
+                .astype(np.float64)
+            )
+        else:
+            noise_corr = np.rot90(m=noise_corr, k=-1)
+            noise_array = (
+                anacal.noise.simulate_noise(
+                    seed=noise_seed,
+                    correlation=noise_corr,
+                    nx=nx,
+                    ny=ny,
+                    scale=pixel_scale,
+                ) * noise_std
+            )
+    else:
+        noise_array = None
+
+    if not use_average_psf:
+        psf_object = LsstPsf(psf=lsst_psf, npix=npix)
+    else:
+        psf_object = None
+
+    if band is None:
+        base_column_name = None
+    else:
+        base_column_name = band + "_"
+    return {
+        "pixel_scale": pixel_scale,
+        "mag_zero": mag_zero,
+        "noise_variance": noise_variance,
+        "gal_array": gal_array,
+        "psf_array": psf_array,
+        "mask_array": mask_array,
+        "noise_array": noise_array,
+        "psf_object": psf_object,
+        "base_column_name": base_column_name,
+    }

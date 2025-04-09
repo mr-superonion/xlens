@@ -4,7 +4,6 @@ from . import (
     multiband,
     multiband_defaults,
     perturbation,
-    random,
     simplesim,
 )
 
@@ -14,6 +13,5 @@ __all__ = [
     "multiband",
     "perturbation",
     "multiband_defaults",
-    "random",
     "galaxies",
 ]

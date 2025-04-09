@@ -6,8 +6,8 @@ from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from numpy.typing import NDArray
 
-from ..simulator.random import get_noise_seed, image_noise_base, num_rot
-from . import utils
+from .. import utils
+from ..utils.random import get_noise_seed, image_noise_base, num_rot
 from .base import MeasBaseTask
 
 
@@ -147,7 +147,7 @@ class FpfsMeasurementTask(MeasBaseTask):
         mask_array: NDArray,
         noise_array: NDArray | None,
         detection: NDArray | None,
-        psf_object: utils.LsstPsf | None,
+        psf_object: utils.image.LsstPsf | None,
         base_column_name: str | None,
         **kwargs,
     ):
@@ -209,7 +209,7 @@ class FpfsMeasurementTask(MeasBaseTask):
         lsst_bbox = exposure.getBBox()
         lsst_psf = exposure.getPsf()
         psf_array = np.asarray(
-            utils.get_psf_array(
+            utils.image.get_psf_array(
                 lsst_psf=lsst_psf,
                 lsst_bbox=lsst_bbox,
                 npix=self.config.npix,
@@ -265,7 +265,7 @@ class FpfsMeasurementTask(MeasBaseTask):
             detection = np.array(detection[["y", "x", "is_peak", "mask_value"]])
 
         if not self.config.use_average_psf:
-            psf_object = utils.LsstPsf(psf=lsst_psf, npix=self.config.npix)
+            psf_object = utils.image.LsstPsf(psf=lsst_psf, npix=self.config.npix)
         else:
             psf_object = None
 

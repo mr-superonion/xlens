@@ -43,7 +43,7 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
-from ..processor.utils import resize_array, subpixel_shift
+from ..utils.image import resize_array, subpixel_shift
 
 
 class SystematicsMultibandPipeConnections(

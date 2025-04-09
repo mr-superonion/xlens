@@ -1,13 +1,11 @@
 from typing import Any
 
 import anacal
-import numpy as np
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from numpy.typing import NDArray
 
-from ..simulator.random import get_noise_seed, image_noise_base, num_rot
-from . import utils
+from .. import utils
 from .base import MeasBaseTask
 
 
@@ -83,13 +81,13 @@ class AnacalAlphaConfig(Config):
                 self,
                 "sigma_arcsec_det in a wrong range",
             )
-        if self.noiseId < 0 or self.noiseId >= image_noise_base // 2:
+        if self.noiseId < 0 or self.noiseId >= utils.random.image_noise_base // 2:
             raise FieldValidationError(
                 self.__class__.noiseId,
                 self,
-                "We require 0 <= noiseId < %d" % (image_noise_base // 2),
+                "We require 0 <= noiseId < %d" % (utils.random.image_noise_base // 2),
             )
-        if self.rotId >= num_rot:
+        if self.rotId >= utils.random.num_rot:
             raise FieldValidationError(
                 self.__class__.rotId,
                 self,
@@ -137,7 +135,7 @@ class AnacalAlphaTask(MeasBaseTask):
         psf_array: NDArray,
         mask_array: NDArray,
         noise_array: NDArray | None,
-        psf_object: utils.LsstPsf | None,
+        psf_object: utils.image.LsstPsf | None,
         base_column_name: str | None,
         **kwargs,
     ):
@@ -176,7 +174,6 @@ class AnacalAlphaTask(MeasBaseTask):
         exposure: ExposureF,
         seed: int,
         noise_corr: NDArray | None = None,
-        detection: NDArray | None = None,
         band: str | None = None,
         **kwargs,
     ):
@@ -185,106 +182,20 @@ class AnacalAlphaTask(MeasBaseTask):
         exposure (ExposureF):   LSST exposure
         seed (int):  random seed
         noise_corr (NDArray):  image noise correlation function (None)
-        detection (NDArray | None):  external detection catalog (None)
 
         Returns:
             (dict)
         """
         assert isinstance(self.config, AnacalAlphaConfig)
-
-        pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
-        noise_variance = np.average(exposure.getMaskedImage().variance.array)
-        if noise_variance < 1e-12:
-            raise ValueError(
-                "the estimated image noise variance should be positive."
-            )
-        noise_std = np.sqrt(noise_variance)
-        mag_zero = (
-            np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude())
-            / 0.4
+        return utils.image.prepare_data(
+            exposure=exposure,
+            seed=seed,
+            noiseId=self.config.noiseId,
+            rotId=self.config.rotId,
+            npix=self.config.npix,
+            noise_corr=noise_corr,
+            band=band,
+            do_noise_bias_correction=self.config.do_noise_bias_correction,
+            use_average_psf=self.config.use_average_psf,
+            badMaskPlanes=self.config.badMaskPlanes,
         )
-
-        lsst_bbox = exposure.getBBox()
-        lsst_psf = exposure.getPsf()
-        psf_array = np.asarray(
-            utils.get_psf_array(
-                lsst_psf=lsst_psf,
-                lsst_bbox=lsst_bbox,
-                npix=self.config.npix,
-                dg=250,
-            ),
-            dtype=np.float64,
-        )
-        gal_array = np.asarray(
-            exposure.getMaskedImage().image.array,
-            dtype=np.float64,
-        )
-
-        bitValue = exposure.mask.getPlaneBitMask(self.config.badMaskPlanes)
-        mask_array = ((exposure.mask.array & bitValue) != 0).astype(np.int16)
-
-        if self.config.do_noise_bias_correction:
-            # TODO: merge the following to one code
-            noise_seed = (
-                get_noise_seed(
-                    seed=seed,
-                    noiseId=self.config.noiseId,
-                    rotId=self.config.rotId,
-                )
-                + image_noise_base // 2
-                # make sure the seed is different from
-                # noise seed for simulation
-            )
-            ny, nx = gal_array.shape
-            if noise_corr is None:
-                self.log.debug(
-                    "use white noise for noise bias correction"
-                )
-                noise_array = (
-                    np.random.RandomState(noise_seed)
-                    .normal(
-                        scale=noise_std,
-                        size=(ny, nx),
-                    )
-                    .astype(np.float64)
-                )
-            else:
-                self.log.debug(
-                    "use noise correlation function for noise bias correction"
-                )
-                noise_corr = np.rot90(m=noise_corr, k=-1)
-                noise_array = (
-                    anacal.noise.simulate_noise(
-                        seed=noise_seed,
-                        correlation=noise_corr,
-                        nx=nx,
-                        ny=ny,
-                        scale=pixel_scale,
-                    ) * noise_std
-                )
-        else:
-            self.log.debug(
-                "Do not correct for noise bias"
-            )
-            noise_array = None
-
-        if not self.config.use_average_psf:
-            psf_object = utils.LsstPsf(psf=lsst_psf, npix=self.config.npix)
-        else:
-            psf_object = None
-
-        if band is None:
-            base_column_name = None
-        else:
-            base_column_name = band + "_"
-        return {
-            "pixel_scale": pixel_scale,
-            "mag_zero": mag_zero,
-            "noise_variance": noise_variance,
-            "gal_array": gal_array,
-            "psf_array": psf_array,
-            "mask_array": mask_array,
-            "noise_array": noise_array,
-            "psf_object": psf_object,
-            "base_column_name": base_column_name,
-        }

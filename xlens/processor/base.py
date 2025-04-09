@@ -4,7 +4,7 @@ from lsst.afw.image import ExposureF
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
-from .utils import LsstPsf
+from ..utils.image import LsstPsf
 
 
 class MeasBaseTask(Task):

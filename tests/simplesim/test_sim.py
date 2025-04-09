@@ -7,8 +7,8 @@ from xlens.processor.fpfs_simplesim import (
     FpfsSimpleSimConfig,
     FpfsSimpleSimTask,
 )
-from xlens.processor.utils import get_psf_array
 from xlens.simulator.simplesim import SimpleSimShearConfig, SimpleSimShearTask
+from xlens.utils.image import get_psf_array
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
