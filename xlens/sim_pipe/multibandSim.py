@@ -14,9 +14,9 @@
 # GNU General Public License for more details.
 #
 import os
-import fitsio
 from typing import Any
 
+import fitsio
 import lsst.pipe.base.connectionTypes as cT
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField
@@ -133,7 +133,6 @@ class MultibandSimShearPipe(PipelineTask):
                 return
 
         inputs = butlerQC.get(inputRefs)
-
 
         # band name
         assert butlerQC.quantum.dataId is not None

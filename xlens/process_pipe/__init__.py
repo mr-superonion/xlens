@@ -1,9 +1,9 @@
 from . import (
+    anacal_alpha,
     detect_multiband,
     force_multiband,
     fpfs_force,
     fpfs_joint,
-    anacal_alpha,
     hsc,
     systematics_multiband,
 )

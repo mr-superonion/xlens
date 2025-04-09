@@ -25,8 +25,21 @@ from typing import Any, List
 import anacal
 import lsst.geom as lsst_geom
 import numpy as np
-from numpy.typing import NDArray
 from lsst.afw.image import ExposureF
+from numpy.typing import NDArray
+
+badMaskDefault = [
+    "BAD",
+    "SAT",
+    "CR",
+    "NO_DATA",
+    "UNMASKEDNAN",
+    "CROSSTALK",
+    "INTRP",
+    "STREAK",
+    "VIGNETTED",
+    "CLIPPED",
+]
 
 
 def subpixel_shift(image: NDArray, shift_x: int, shift_y: int):
@@ -213,7 +226,7 @@ def prepare_data(
     band: str | None = None,
     do_noise_bias_correction: bool = True,
     use_average_psf: bool = True,
-    badMaskPlanes: List[str] = ["BAD", "SAT", "CR"],
+    badMaskPlanes: List[str] = badMaskDefault,
     **kwargs,
 ):
     """Prepares the data from LSST exposure
@@ -225,7 +238,7 @@ def prepare_data(
     Returns:
         (dict)
     """
-    from ..simulator.random import get_noise_seed, image_noise_base
+    from .random import get_noise_seed, image_noise_base
 
     pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
     noise_variance = np.average(exposure.getMaskedImage().variance.array)
@@ -235,8 +248,7 @@ def prepare_data(
         )
     noise_std = np.sqrt(noise_variance)
     mag_zero = (
-        np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude())
-        / 0.4
+        np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()) / 0.4
     )
 
     lsst_bbox = exposure.getBBox()
@@ -256,7 +268,16 @@ def prepare_data(
     )
 
     bitValue = exposure.mask.getPlaneBitMask(badMaskPlanes)
-    mask_array = ((exposure.mask.array & bitValue) != 0).astype(np.int16)
+    mask_array = (
+        ((exposure.mask.array & bitValue) != 0) |
+        (
+            exposure.image.array < (
+                -6.0 * np.sqrt(np.where(
+                    exposure.variance.array < 0, 0, exposure.variance.array
+                ))
+            )
+        )
+    ).astype(np.int16)
 
     if do_noise_bias_correction:
         noise_seed = (
@@ -288,7 +309,8 @@ def prepare_data(
                     nx=nx,
                     ny=ny,
                     scale=pixel_scale,
-                ) * noise_std
+                )
+                * noise_std
             )
     else:
         noise_array = None
