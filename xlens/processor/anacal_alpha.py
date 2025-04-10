@@ -149,9 +149,21 @@ class AnacalAlphaTask(MeasBaseTask):
         noise_array: NDArray | None,
         psf_object: utils.image.LsstPsf | None,
         base_column_name: str | None,
+        star_cat: NDArray | None = None,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalAlphaConfig)
+
+        if mask_array is not None:
+            # Set the value inside star mask to zero
+            anacal.mask.mask_galaxy_image(
+                gal_array, mask_array, True, star_cat,
+            )
+            if noise_array is not None:
+                # Also do it for pure noise image
+                anacal.mask.mask_galaxy_image(
+                    noise_array, mask_array, True, star_cat,
+                )
 
         ratio = 10.0 ** ((mag_zero - 30.0) / 2.5)
         taskA = anacal.task.TaskAlpha(
@@ -178,6 +190,7 @@ class AnacalAlphaTask(MeasBaseTask):
             variance=noise_variance,
             block_list=blocks,
             noise_array=noise_array,
+            mask_array=mask_array,
         )
 
     def prepare_data(
