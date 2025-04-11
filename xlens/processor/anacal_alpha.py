@@ -4,6 +4,7 @@ import anacal
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from numpy.typing import NDArray
+from lsst.afw.geom import SkyWcs
 
 from .. import utils
 from .base import MeasBaseTask
@@ -35,6 +36,10 @@ class AnacalAlphaConfig(Config):
         default=0,
     )
     force_size = Field[bool](
+        doc="Whether forcing the size and shape of galaxies",
+        default=True,
+    )
+    force_center = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
         default=True,
     )
@@ -132,7 +137,7 @@ class AnacalAlphaTask(MeasBaseTask):
             "image_bound": self.config.bound,
             "num_epochs": self.config.num_epochs,
             "force_size": self.config.force_size,
-            "force_center": True,
+            "force_center": self.config.force_center,
             "prior": prior,
         }
         return
@@ -150,6 +155,12 @@ class AnacalAlphaTask(MeasBaseTask):
         psf_object: utils.image.LsstPsf | None,
         base_column_name: str | None,
         star_cat: NDArray | None = None,
+        begin_x: int = 0,
+        begin_y: int = 0,
+        wcs: SkyWcs | None = None,
+        skyMap=None,
+        tractInfo=None,
+        patchInfo=None,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalAlphaConfig)
@@ -157,12 +168,18 @@ class AnacalAlphaTask(MeasBaseTask):
         if mask_array is not None:
             # Set the value inside star mask to zero
             anacal.mask.mask_galaxy_image(
-                gal_array, mask_array, True, star_cat,
+                gal_array,
+                mask_array,
+                True,
+                star_cat,
             )
             if noise_array is not None:
                 # Also do it for pure noise image
                 anacal.mask.mask_galaxy_image(
-                    noise_array, mask_array, True, star_cat,
+                    noise_array,
+                    mask_array,
+                    True,
+                    star_cat,
                 )
 
         ratio = 10.0 ** ((mag_zero - 30.0) / 2.5)
@@ -184,7 +201,7 @@ class AnacalAlphaTask(MeasBaseTask):
             pixel_scale,
         )
 
-        return taskA.process_image(
+        catalog = taskA.process_image(
             gal_array,
             psf_array,
             variance=noise_variance,
@@ -192,6 +209,26 @@ class AnacalAlphaTask(MeasBaseTask):
             noise_array=noise_array,
             mask_array=mask_array,
         )
+        catalog["x1"] = catalog["x1"] + begin_x * pixel_scale
+        catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
+        if wcs is not None:
+            ra, dec = wcs.pixelToSkyArray(
+                catalog["x1"] / pixel_scale,
+                catalog["x2"] / pixel_scale,
+                degrees=True,
+            )
+            catalog["ra"] = ra
+            catalog["dec"] = dec
+        condition = (
+            (skyMap is not None)
+            and (tractInfo is not None)
+            and (patchInfo is not None)
+        )
+        if condition:
+            utils.catalog.set_isPrimary(
+                catalog, skyMap, tractInfo, patchInfo, pixel_scale,
+            )
+        return catalog
 
     def prepare_data(
         self,
@@ -200,6 +237,9 @@ class AnacalAlphaTask(MeasBaseTask):
         seed: int,
         noise_corr: NDArray | None = None,
         band: str | None = None,
+        skyMap=None,
+        tract: int = 0,
+        patch: int = 0,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -207,6 +247,8 @@ class AnacalAlphaTask(MeasBaseTask):
         exposure (ExposureF):   LSST exposure
         seed (int):  random seed
         noise_corr (NDArray):  image noise correlation function (None)
+        tractInfo:  tract information
+        patchInfo:  patch information
 
         Returns:
             (dict)
@@ -223,4 +265,7 @@ class AnacalAlphaTask(MeasBaseTask):
             do_noise_bias_correction=self.config.do_noise_bias_correction,
             use_average_psf=self.config.use_average_psf,
             badMaskPlanes=self.config.badMaskPlanes,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
         )

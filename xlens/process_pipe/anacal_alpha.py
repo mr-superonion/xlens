@@ -27,6 +27,7 @@ __all__ = [
 
 import logging
 from typing import Any
+from lsst.skymap import BaseSkyMap
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
@@ -50,6 +51,12 @@ class AnacalAlphaPipeConnections(
         "coaddName": "deep",
     },
 ):
+    skyMap = cT.Input(
+        doc="SkyMap to use in processing",
+        name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
+        storageClass="SkyMap",
+        dimensions=("skymap",),
+    )
     exposure = cT.Input(
         doc="Input coadd image",
         name="{coaddName}Coadd_calexp",
@@ -130,6 +137,8 @@ class AnacalAlphaPipe(PipelineTask):
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, AnacalAlphaPipeConfig)
         inputs = butlerQC.get(inputRefs)
+        tract = butlerQC.quantum.dataId["tract"]
+        patch = butlerQC.quantum.dataId["patch"]
         exposure_handles = inputs["exposure"]
         exposure_handles_dict = {
             handle.dataId["band"]: handle for handle in exposure_handles
@@ -162,6 +171,9 @@ class AnacalAlphaPipe(PipelineTask):
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
         dm_handles_dict: dict | None,
+        tractInfo,
+        patchInfo,
+        skymap,
     ):
         assert isinstance(self.config, AnacalAlphaPipeConfig)
         band = "i"

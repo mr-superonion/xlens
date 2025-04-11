@@ -227,6 +227,9 @@ def prepare_data(
     do_noise_bias_correction: bool = True,
     use_average_psf: bool = True,
     badMaskPlanes: List[str] = badMaskDefault,
+    skyMap=None,
+    tract: int = 0,
+    patch: int = 0,
     **kwargs,
 ):
     """Prepares the data from LSST exposure
@@ -250,6 +253,7 @@ def prepare_data(
     mag_zero = (
         np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()) / 0.4
     )
+    wcs = exposure.getWcs()
 
     lsst_bbox = exposure.getBBox()
     lsst_psf = exposure.getPsf()
@@ -269,12 +273,16 @@ def prepare_data(
 
     bitValue = exposure.mask.getPlaneBitMask(badMaskPlanes)
     mask_array = (
-        ((exposure.mask.array & bitValue) != 0) |
-        (
-            exposure.image.array < (
-                -6.0 * np.sqrt(np.where(
-                    exposure.variance.array < 0, 0, exposure.variance.array
-                ))
+        ((exposure.mask.array & bitValue) != 0)
+        | (
+            exposure.image.array
+            < (
+                -6.0
+                * np.sqrt(
+                    np.where(
+                        exposure.variance.array < 0, 0, exposure.variance.array
+                    )
+                )
             )
         )
     ).astype(np.int16)
@@ -324,6 +332,12 @@ def prepare_data(
         base_column_name = None
     else:
         base_column_name = band + "_"
+    if skyMap is not None:
+        tractInfo = skyMap[tract]
+        patchInfo = tractInfo[patch]
+    else:
+        tractInfo = None
+        patchInfo = None
     return {
         "pixel_scale": pixel_scale,
         "mag_zero": mag_zero,
@@ -334,4 +348,10 @@ def prepare_data(
         "noise_array": noise_array,
         "psf_object": psf_object,
         "base_column_name": base_column_name,
+        "begin_x": lsst_bbox.beginX,
+        "begin_y": lsst_bbox.beginY,
+        "wcs": wcs,
+        "skyMap": skyMap,
+        "tractInfo": tractInfo,
+        "patchInfo": patchInfo,
     }
