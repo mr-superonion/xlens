@@ -1,3 +1,6 @@
+from lsst.geom import Box2D
+
+
 def getPatchInner(sources, patchInfo, pixel_scale):
     """Set a flag for each source if it is in the innerBBox of a patch.
 
@@ -44,6 +47,7 @@ def getTractInner(sources, tractInfo, skyMap):
         skyMap.findTractIdArray(
             sources["ra"],
             sources["dec"],
+            degrees=True,
         )
         == tractInfo.getId()
     )
