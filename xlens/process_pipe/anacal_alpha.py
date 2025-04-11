@@ -27,7 +27,6 @@ __all__ = [
 
 import logging
 from typing import Any
-from lsst.skymap import BaseSkyMap
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
@@ -39,6 +38,7 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
     Struct,
 )
+from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
 from ..processor.anacal_alpha import AnacalAlphaTask
@@ -151,6 +151,7 @@ class AnacalAlphaPipe(PipelineTask):
                 handle.dataId["band"]: handle for handle in correlation_handles
             }
         dm_handles = inputs["dm_catalog"]
+        skyMap = inputs["skyMap"]
         if len(dm_handles) == 0:
             dm_handles_dict = None
         else:
@@ -161,6 +162,9 @@ class AnacalAlphaPipe(PipelineTask):
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
             dm_handles_dict=dm_handles_dict,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -171,9 +175,9 @@ class AnacalAlphaPipe(PipelineTask):
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
         dm_handles_dict: dict | None,
-        tractInfo,
-        patchInfo,
-        skymap,
+        skyMap,
+        tract: int,
+        patch: int,
     ):
         assert isinstance(self.config, AnacalAlphaPipeConfig)
         band = "i"
@@ -202,6 +206,9 @@ class AnacalAlphaPipe(PipelineTask):
             noise_corr=noise_corr,
             detection=detection,
             band=None,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
         )
         catalog = self.anacal.run(**data)
         return Struct(alpha_catalog=catalog)

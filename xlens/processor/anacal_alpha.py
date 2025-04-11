@@ -1,10 +1,10 @@
 from typing import Any
 
 import anacal
+from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from numpy.typing import NDArray
-from lsst.afw.geom import SkyWcs
 
 from .. import utils
 from .base import MeasBaseTask
@@ -66,12 +66,6 @@ class AnacalAlphaConfig(Config):
             "SAT",
             "CR",
             "NO_DATA",
-            "UNMASKEDNAN",
-            "CROSSTALK",
-            "INTRP",
-            "STREAK",
-            "VIGNETTED",
-            "CLIPPED",
         ],
     )
     noiseId = Field[int](
@@ -226,7 +220,11 @@ class AnacalAlphaTask(MeasBaseTask):
         )
         if condition:
             utils.catalog.set_isPrimary(
-                catalog, skyMap, tractInfo, patchInfo, pixel_scale,
+                catalog,
+                skyMap,
+                tractInfo,
+                patchInfo,
+                pixel_scale,
             )
         return catalog
 
