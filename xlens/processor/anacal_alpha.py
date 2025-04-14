@@ -172,7 +172,7 @@ class AnacalAlphaTask(MeasBaseTask):
                 anacal.mask.mask_galaxy_image(
                     noise_array,
                     mask_array,
-                    True,
+                    False,
                     star_cat,
                 )
 
@@ -238,6 +238,7 @@ class AnacalAlphaTask(MeasBaseTask):
         skyMap=None,
         tract: int = 0,
         patch: int = 0,
+        star_cat: NDArray | None = None,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -266,4 +267,5 @@ class AnacalAlphaTask(MeasBaseTask):
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            star_cat=star_cat,
         )

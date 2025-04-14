@@ -25,6 +25,7 @@ from typing import Any, List
 import anacal
 import lsst.geom as lsst_geom
 import numpy as np
+from astropy.stats import sigma_clip
 from lsst.afw.image import ExposureF
 from numpy.typing import NDArray
 
@@ -230,6 +231,7 @@ def prepare_data(
     skyMap=None,
     tract: int = 0,
     patch: int = 0,
+    star_cat: NDArray | None = None,
     **kwargs,
 ):
     """Prepares the data from LSST exposure
@@ -244,7 +246,13 @@ def prepare_data(
     from .random import get_noise_seed, image_noise_base
 
     pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
-    noise_variance = np.average(exposure.getMaskedImage().variance.array)
+    noise_variance = np.nanmean(
+        sigma_clip(
+            exposure.variance.array[exposure.mask.array == 0],
+            sigma=3,
+            maxiters=2,
+        )
+    )
     if noise_variance < 1e-12:
         raise ValueError(
             "the estimated image noise variance should be positive."
@@ -354,4 +362,5 @@ def prepare_data(
         "skyMap": skyMap,
         "tractInfo": tractInfo,
         "patchInfo": patchInfo,
+        "star_cat": star_cat,
     }
