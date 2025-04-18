@@ -198,7 +198,10 @@ def get_psf_array(
     height = (height // dg) * dg - 1
 
     if lsst_mask is not None:
-        mask_array = lsst_mask.getPlaneBitMask("INEXACT_PSF") & lsst_mask.array
+        if "INEXACT_PSF" in lsst_mask.getMaskPlaneDict().keys():
+            mask_array = lsst_mask.getPlaneBitMask() & lsst_mask.array
+        else:
+            mask_array = None
     else:
         mask_array = None
 
@@ -273,9 +276,11 @@ def get_psf_object(
 
     width = (width // dg) * dg - 1
     height = (height // dg) * dg - 1
-
     if lsst_mask is not None:
-        mask_array = lsst_mask.getPlaneBitMask("INEXACT_PSF") & lsst_mask.array
+        if "INEXACT_PSF" in lsst_mask.getMaskPlaneDict().keys():
+            mask_array = lsst_mask.getPlaneBitMask() & lsst_mask.array
+        else:
+            mask_array = None
     else:
         mask_array = None
 
