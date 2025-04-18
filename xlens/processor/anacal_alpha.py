@@ -143,10 +143,9 @@ class AnacalAlphaTask(MeasBaseTask):
         mag_zero: float,
         noise_variance: float,
         gal_array: NDArray,
-        psf_array: NDArray,
+        psf: NDArray,
         mask_array: NDArray,
         noise_array: NDArray | None,
-        psf_object: utils.image.LsstPsf | None,
         base_column_name: str | None,
         star_cat: NDArray | None = None,
         begin_x: int = 0,
@@ -197,7 +196,7 @@ class AnacalAlphaTask(MeasBaseTask):
 
         catalog = taskA.process_image(
             gal_array,
-            psf_array,
+            psf,
             variance=noise_variance,
             block_list=blocks,
             noise_array=noise_array,
