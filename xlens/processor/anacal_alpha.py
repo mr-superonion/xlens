@@ -1,6 +1,7 @@
 from typing import Any
 
 import anacal
+import astropy
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
@@ -19,13 +20,9 @@ class AnacalAlphaConfig(Config):
         doc="Sources to be removed if too close to boundary",
         default=40,
     )
-    sigma_arcsec_det = Field[float](
-        doc="kernel size for detection",
-        default=0.52,
-    )
     sigma_arcsec = Field[float](
         doc="Kernel size for re-smoothing",
-        default=0.42,
+        default=0.40,
     )
     snr_min = Field[float](
         doc="snr min for detection",
@@ -85,12 +82,6 @@ class AnacalAlphaConfig(Config):
                 self,
                 "sigma_arcsec in a wrong range",
             )
-        if self.sigma_arcsec_det > 2.0 or self.sigma_arcsec_det < 0.0:
-            raise FieldValidationError(
-                self.__class__.sigma_arcsec_det,
-                self,
-                "sigma_arcsec_det in a wrong range",
-            )
         n_min = utils.random.image_noise_base // 2
         if self.noiseId < 0 or self.noiseId >= n_min:
             raise FieldValidationError(
@@ -124,7 +115,6 @@ class AnacalAlphaTask(MeasBaseTask):
         self.config_kwargs = {
             "p_min": self.config.p_min,
             "omega_p": self.config.omega_p,
-            "sigma_arcsec_det": self.config.sigma_arcsec_det,
             "sigma_arcsec": self.config.sigma_arcsec,
             "snr_peak_min": self.config.snr_min,
             "stamp_size": self.config.npix,
@@ -154,6 +144,7 @@ class AnacalAlphaTask(MeasBaseTask):
         skyMap=None,
         tractInfo=None,
         patchInfo=None,
+        detection: NDArray | None,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalAlphaConfig)
@@ -194,11 +185,15 @@ class AnacalAlphaTask(MeasBaseTask):
             pixel_scale,
         )
 
+        if detection is not None:
+            detection["x1"] = detection["x1"] - begin_x * pixel_scale
+            detection["x2"] = detection["x2"] - begin_y * pixel_scale
         catalog = taskA.process_image(
             gal_array,
             psf,
             variance=noise_variance,
             block_list=blocks,
+            detection=detection,
             noise_array=noise_array,
             mask_array=mask_array,
         )
@@ -238,6 +233,7 @@ class AnacalAlphaTask(MeasBaseTask):
         tract: int = 0,
         patch: int = 0,
         star_cat: NDArray | None = None,
+        detection: astropy.table.Table | None = None,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -267,4 +263,5 @@ class AnacalAlphaTask(MeasBaseTask):
             tract=tract,
             patch=patch,
             star_cat=star_cat,
+            detection=detection,
         )

@@ -23,6 +23,7 @@
 from typing import Any, List
 
 import anacal
+import astropy
 import lsst.geom as lsst_geom
 import numpy as np
 from astropy.stats import sigma_clip
@@ -199,7 +200,8 @@ def get_psf_array(
 
     if lsst_mask is not None:
         if "INEXACT_PSF" in lsst_mask.getMaskPlaneDict().keys():
-            mask_array = lsst_mask.getPlaneBitMask() & lsst_mask.array
+            bitv = lsst_mask.getPlaneBitMask("INEXACT_PSF")
+            mask_array = bitv & lsst_mask.array
         else:
             mask_array = None
     else:
@@ -278,7 +280,8 @@ def get_psf_object(
     height = (height // dg) * dg - 1
     if lsst_mask is not None:
         if "INEXACT_PSF" in lsst_mask.getMaskPlaneDict().keys():
-            mask_array = lsst_mask.getPlaneBitMask() & lsst_mask.array
+            bitv = lsst_mask.getPlaneBitMask("INEXACT_PSF")
+            mask_array = bitv & lsst_mask.array
         else:
             mask_array = None
     else:
@@ -337,6 +340,7 @@ def prepare_data(
     tract: int = 0,
     patch: int = 0,
     star_cat: NDArray | None = None,
+    detection: astropy.table.Table | None = None,
     **kwargs,
 ):
     """Prepares the data from LSST exposure
@@ -445,7 +449,6 @@ def prepare_data(
     else:
         noise_array = None
 
-
     if band is None:
         base_column_name = None
     else:
@@ -456,6 +459,12 @@ def prepare_data(
     else:
         tractInfo = None
         patchInfo = None
+    if detection is not None:
+        if isinstance(detection, astropy.table.Table):
+            detection = detection.copy().as_array()
+        elif isinstance(detection, np.ndarray):
+            detection = detection.copy()
+
     return {
         "pixel_scale": pixel_scale,
         "mag_zero": mag_zero,
@@ -472,4 +481,5 @@ def prepare_data(
         "tractInfo": tractInfo,
         "patchInfo": patchInfo,
         "star_cat": star_cat,
+        "detection": detection,
     }
