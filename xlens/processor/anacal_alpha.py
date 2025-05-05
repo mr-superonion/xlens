@@ -14,7 +14,7 @@ from .base import MeasBaseTask
 class AnacalAlphaConfig(Config):
     npix = Field[int](
         doc="number of pixels in stamp",
-        default=32,
+        default=48,
     )
     bound = Field[int](
         doc="Sources to be removed if too close to boundary",
@@ -110,7 +110,7 @@ class AnacalAlphaTask(MeasBaseTask):
         super().__init__(**kwargs)
         assert isinstance(self.config, AnacalAlphaConfig)
         prior = anacal.ngmix.modelPrior()
-        prior.set_sigma_a(anacal.math.qnumber(0.2))
+        prior.set_sigma_a(anacal.math.qnumber(0.03))
         prior.set_sigma_x(anacal.math.qnumber(0.5))
         self.config_kwargs = {
             "p_min": self.config.p_min,
@@ -179,9 +179,9 @@ class AnacalAlphaTask(MeasBaseTask):
         blocks = anacal.geometry.get_block_list(
             gal_array.shape[0],  # image size
             gal_array.shape[1],
-            256,  # block size
-            256,
-            self.config.npix * 2 + 10,  # bound
+            300,  # block size
+            300,
+            self.config.npix * 2 + 4,  # bound
             pixel_scale,
         )
 

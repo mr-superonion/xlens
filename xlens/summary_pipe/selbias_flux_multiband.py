@@ -49,6 +49,7 @@ class SelBiasMultibandPipeConnections(
     defaultTemplates={
         "coaddName": "deep",
         "dataType": "",
+        "version": "",
     },
 ):
     src00 = cT.Input(
@@ -81,7 +82,7 @@ class SelBiasMultibandPipeConnections(
 
     summary = cT.Output(
         doc="Summary statistics",
-        name="{coaddName}Coadd_anacal_selbias_flux_{dataType}",
+        name="{coaddName}Coadd_anacal_selbias_flux_{dataType}{version}",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
@@ -258,11 +259,12 @@ class SelBiasSummaryMultibandPipeConnections(
     defaultTemplates={
         "coaddName": "deep",
         "dataType": "",
+        "version": "",
     },
 ):
     summary_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}Coadd_anacal_selbias_flux_{dataType}",
+        name="{coaddName}Coadd_anacal_selbias_flux_{dataType}{version}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
