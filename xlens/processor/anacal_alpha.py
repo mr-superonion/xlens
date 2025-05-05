@@ -110,7 +110,7 @@ class AnacalAlphaTask(MeasBaseTask):
         super().__init__(**kwargs)
         assert isinstance(self.config, AnacalAlphaConfig)
         prior = anacal.ngmix.modelPrior()
-        prior.set_sigma_a(anacal.math.qnumber(0.03))
+        prior.set_sigma_a(anacal.math.qnumber(0.05))
         prior.set_sigma_x(anacal.math.qnumber(0.5))
         self.config_kwargs = {
             "p_min": self.config.p_min,
@@ -154,7 +154,7 @@ class AnacalAlphaTask(MeasBaseTask):
             anacal.mask.mask_galaxy_image(
                 gal_array,
                 mask_array,
-                True,
+                True,     # extend mask
                 star_cat,
             )
             if noise_array is not None:
@@ -162,7 +162,7 @@ class AnacalAlphaTask(MeasBaseTask):
                 anacal.mask.mask_galaxy_image(
                     noise_array,
                     mask_array,
-                    False,
+                    True,       # extend mask
                     star_cat,
                 )
 
@@ -181,7 +181,7 @@ class AnacalAlphaTask(MeasBaseTask):
             gal_array.shape[1],
             300,  # block size
             300,
-            self.config.npix * 2 + 4,  # bound
+            self.config.npix * 2 + 10,  # bound
             pixel_scale,
         )
 

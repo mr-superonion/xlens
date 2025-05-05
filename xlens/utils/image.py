@@ -26,7 +26,6 @@ import anacal
 import astropy
 import lsst.geom as lsst_geom
 import numpy as np
-from astropy.stats import sigma_clip
 from lsst.afw.image import ExposureF, MaskX
 from numpy.typing import NDArray
 
@@ -208,8 +207,8 @@ def get_psf_array(
         mask_array = None
 
     # Calculate the central point
-    x_array = np.arange(x_min, x_max, dg, dtype=int) + dg // 2
-    y_array = np.arange(y_min, y_max, dg, dtype=int) + dg // 2
+    x_array = np.arange(x_min + 20, x_max - 20, dg, dtype=int)
+    y_array = np.arange(y_min + 20, y_max - 20, dg, dtype=int)
     nx, ny = len(x_array), len(y_array)
     out = np.zeros((npix, npix))
     ncount = 0.0
@@ -229,9 +228,9 @@ def get_psf_array(
                 dx = 0
                 dy = 0
                 for _ in range(500):
-                    if mask_array[yim+dy, xim+dx]==0:
+                    if mask_array[yim + dy, xim + dx] == 0:
                         this_psf = lsst_psf.computeImage(
-                            lsst_geom.Point2D(xc+dx, yc+dy)
+                            lsst_geom.Point2D(xc + dx, yc + dy)
                         ).getArray()
                         out = out + resize_array(this_psf, (npix, npix))
                         ncount += 1
@@ -288,8 +287,8 @@ def get_psf_object(
         mask_array = None
 
     # Calculate the central point
-    x_array = np.arange(x_min, x_max, dg, dtype=int) + dg // 2
-    y_array = np.arange(y_min, y_max, dg, dtype=int) + dg // 2
+    x_array = np.arange(x_min + 20, x_max - 20, dg, dtype=int)
+    y_array = np.arange(y_min + 20, y_max - 20, dg, dtype=int)
     nx, ny = len(x_array), len(y_array)
     out = np.zeros((ny, nx, npix, npix))
     for j in range(ny):
@@ -307,9 +306,9 @@ def get_psf_object(
                 dx = 0
                 dy = 0
                 for _ in range(500):
-                    if mask_array[yim+dy, xim+dx]==0:
+                    if mask_array[yim + dy, xim + dx] == 0:
                         this_psf = lsst_psf.computeImage(
-                            lsst_geom.Point2D(xc+dx, yc+dy)
+                            lsst_geom.Point2D(xc + dx, yc + dy)
                         ).getArray()
                         break
                     dx = np.random.randint(-10, 10)
@@ -323,6 +322,7 @@ def get_psf_object(
             out[j, i] = this_psf
 
     return anacal.psf.GridPsf(x0=0, y0=0, dx=dg, dy=dg, model_array=out)
+
 
 def prepare_data(
     *,
@@ -389,7 +389,7 @@ def prepare_data(
             lsst_psf=lsst_psf,
             lsst_bbox=lsst_bbox,
             npix=npix,
-            dg=100,
+            dg=200,
             lsst_mask=exposure.mask,
         )
     gal_array = np.asarray(
