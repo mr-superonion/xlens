@@ -58,12 +58,7 @@ class AnacalAlphaConfig(Config):
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
-        default=[
-            "BAD",
-            "SAT",
-            "CR",
-            "NO_DATA",
-        ],
+        default=[],
     )
     noiseId = Field[int](
         doc="Noise realization id",
@@ -179,15 +174,16 @@ class AnacalAlphaTask(MeasBaseTask):
         blocks = anacal.geometry.get_block_list(
             gal_array.shape[0],  # image size
             gal_array.shape[1],
-            300,  # block size
-            300,
-            self.config.npix * 2 + 10,  # bound
+            256,  # block size
+            256,
+            self.config.npix * 2 + 2,  # bound
             pixel_scale,
         )
 
         if detection is not None:
             detection["x1"] = detection["x1"] - begin_x * pixel_scale
             detection["x2"] = detection["x2"] - begin_y * pixel_scale
+
         catalog = taskA.process_image(
             gal_array,
             psf,
