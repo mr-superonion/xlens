@@ -174,9 +174,9 @@ class AnacalAlphaTask(MeasBaseTask):
         blocks = anacal.geometry.get_block_list(
             gal_array.shape[0],  # image size
             gal_array.shape[1],
-            256,  # block size
-            256,
-            self.config.npix * 2 + 2,  # bound
+            300,  # block size
+            300,
+            self.config.npix * 2 + 10,  # bound
             pixel_scale,
         )
 
