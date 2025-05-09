@@ -172,12 +172,12 @@ class AnacalAlphaTask(MeasBaseTask):
         )
 
         blocks = anacal.geometry.get_block_list(
-            gal_array.shape[0],  # image size
-            gal_array.shape[1],
-            512,  # block size
-            512,
-            self.config.npix * 2 + 10,  # bound
-            pixel_scale,
+            img_ny=img_array.shape[0],
+            img_nx=img_array.shape[1],
+            block_nx=512,
+            block_ny=512,
+            block_overlap=150,
+            scale=pixel_scale,
         )
 
         if detection is not None:

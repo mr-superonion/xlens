@@ -147,3 +147,7 @@ tmp/
 _results/
 _html/
 tmp*
+
+tests/calibration_halo/butler.yaml
+tests/calibration_halo/gen3.sqlite3
+tests/calibration_halo/skymaps/
