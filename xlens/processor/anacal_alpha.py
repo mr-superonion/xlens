@@ -174,9 +174,9 @@ class AnacalAlphaTask(MeasBaseTask):
         blocks = anacal.geometry.get_block_list(
             img_ny=gal_array.shape[0],
             img_nx=gal_array.shape[1],
-            block_nx=300,
-            block_ny=300,
-            block_overlap=130,
+            block_nx=500,
+            block_ny=500,
+            block_overlap=150,
             scale=pixel_scale,
         )
 
