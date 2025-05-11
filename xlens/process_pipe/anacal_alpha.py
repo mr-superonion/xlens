@@ -74,15 +74,6 @@ class AnacalAlphaPipeConnections(
         multiple=True,
         deferLoad=True,
     )
-    dm_catalog = cT.Input(
-        doc="Source catalog containing all the measurement information",
-        name="sim_0_rot0_Coadd_meas",
-        dimensions=("skymap", "tract", "patch", "band"),
-        storageClass="SourceCatalog",
-        minimum=0,
-        multiple=True,
-        deferLoad=True,
-    )
     alpha_catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
         name="{coaddName}Coadd_anacal_joint",
@@ -150,18 +141,10 @@ class AnacalAlphaPipe(PipelineTask):
             correlation_handles_dict = {
                 handle.dataId["band"]: handle for handle in correlation_handles
             }
-        dm_handles = inputs["dm_catalog"]
         skyMap = inputs["skyMap"]
-        if len(dm_handles) == 0:
-            dm_handles_dict = None
-        else:
-            dm_handles_dict = {
-                handle.dataId["band"]: handle for handle in dm_handles
-            }
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
-            dm_handles_dict=dm_handles_dict,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
@@ -174,7 +157,6 @@ class AnacalAlphaPipe(PipelineTask):
         *,
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
-        dm_handles_dict: dict | None,
         skyMap,
         tract: int,
         patch: int,
@@ -193,10 +175,6 @@ class AnacalAlphaPipe(PipelineTask):
             self.log.debug("With correlation, variance:", variance)
         else:
             noise_corr = None
-        if dm_handles_dict is not None:
-            detection = dm_handles_dict[band].get()
-        else:
-            detection = None
 
         idGenerator = self.config.idGenerator.apply(handle.dataId)
         seed = idGenerator.catalog_id
@@ -204,7 +182,7 @@ class AnacalAlphaPipe(PipelineTask):
             exposure=exposure,
             seed=seed,
             noise_corr=noise_corr,
-            detection=detection,
+            detection=None,
             band=None,
             skyMap=skyMap,
             tract=tract,
