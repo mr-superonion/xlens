@@ -14,7 +14,7 @@ from .base import MeasBaseTask
 class AnacalAlphaConfig(Config):
     npix = Field[int](
         doc="number of pixels in stamp",
-        default=48,
+        default=64,
     )
     bound = Field[int](
         doc="Sources to be removed if too close to boundary",
@@ -30,7 +30,11 @@ class AnacalAlphaConfig(Config):
     )
     num_epochs = Field[int](
         doc="Number of iterations",
-        default=0,
+        default=5,
+    )
+    num_epochs_deblend = Field[int](
+        doc="Number of iterations",
+        default=1,
     )
     force_size = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
@@ -115,6 +119,7 @@ class AnacalAlphaTask(MeasBaseTask):
             "stamp_size": self.config.npix,
             "image_bound": self.config.bound,
             "num_epochs": self.config.num_epochs,
+            "num_epochs_deblend": self.config.num_epochs_deblend,
             "force_size": self.config.force_size,
             "force_center": self.config.force_center,
             "prior": prior,
