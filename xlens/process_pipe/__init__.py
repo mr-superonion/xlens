@@ -1,11 +1,13 @@
 from . import (
-    anacal_alpha,
+    anacal_detect,
     detect_multiband,
     force_multiband,
     fpfs_force,
     fpfs_joint,
     hsc,
+    match,
     systematics_multiband,
+    anacal_force,
 )
 
 __all__ = [
@@ -14,6 +16,8 @@ __all__ = [
     "fpfs_joint",
     "fpfs_force",
     "hsc",
+    "match",
     "force_multiband",
-    "anacal_alpha",
+    "anacal_detect",
+    "anacal_force",
 ]

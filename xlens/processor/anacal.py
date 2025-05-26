@@ -11,7 +11,7 @@ from .. import utils
 from .base import MeasBaseTask
 
 
-class AnacalAlphaConfig(Config):
+class AnacalConfig(Config):
     npix = Field[int](
         doc="number of pixels in stamp",
         default=64,
@@ -99,15 +99,15 @@ class AnacalAlphaConfig(Config):
         super().setDefaults()
 
 
-class AnacalAlphaTask(MeasBaseTask):
+class AnacalTask(MeasBaseTask):
     """Measure Fpfs FPFS observables"""
 
-    _DefaultName = "AnacalAlphaTask"
-    ConfigClass = AnacalAlphaConfig
+    _DefaultName = "AnacalTask"
+    ConfigClass = AnacalConfig
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
-        assert isinstance(self.config, AnacalAlphaConfig)
+        assert isinstance(self.config, AnacalConfig)
         prior = anacal.ngmix.modelPrior()
         prior.set_sigma_a(anacal.math.qnumber(0.05))
         prior.set_sigma_x(anacal.math.qnumber(0.5))
@@ -147,7 +147,7 @@ class AnacalAlphaTask(MeasBaseTask):
         detection: NDArray | None,
         **kwargs,
     ):
-        assert isinstance(self.config, AnacalAlphaConfig)
+        assert isinstance(self.config, AnacalConfig)
 
         if mask_array is not None:
             # Set the value inside star mask to zero
@@ -167,7 +167,7 @@ class AnacalAlphaTask(MeasBaseTask):
                 )
 
         ratio = 10.0 ** ((mag_zero - 30.0) / 2.5)
-        taskA = anacal.task.TaskAlpha(
+        taskA = anacal.task.Task(
             scale=pixel_scale,
             omega_f=0.06 * ratio,
             v_min=0.013 * ratio,
@@ -188,6 +188,8 @@ class AnacalAlphaTask(MeasBaseTask):
         if detection is not None:
             detection["x1"] = detection["x1"] - begin_x * pixel_scale
             detection["x2"] = detection["x2"] - begin_y * pixel_scale
+            detection["x1_det"] = detection["x1_det"] - begin_x * pixel_scale
+            detection["x2_det"] = detection["x2_det"] - begin_y * pixel_scale
 
         catalog = taskA.process_image(
             gal_array,
@@ -200,6 +202,8 @@ class AnacalAlphaTask(MeasBaseTask):
         )
         catalog["x1"] = catalog["x1"] + begin_x * pixel_scale
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
+        catalog["x1_det"] = catalog["x1_det"] + begin_x * pixel_scale
+        catalog["x2_det"] = catalog["x2_det"] + begin_y * pixel_scale
         if wcs is not None:
             ra, dec = wcs.pixelToSkyArray(
                 catalog["x1"] / pixel_scale,
@@ -248,7 +252,7 @@ class AnacalAlphaTask(MeasBaseTask):
         Returns:
             (dict)
         """
-        assert isinstance(self.config, AnacalAlphaConfig)
+        assert isinstance(self.config, AnacalConfig)
         return utils.image.prepare_data(
             exposure=exposure,
             seed=seed,

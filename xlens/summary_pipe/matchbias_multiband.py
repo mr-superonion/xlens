@@ -268,18 +268,15 @@ class MatchBiasMultibandPipe(PipelineTask):
             res_sel = 0.0
         return ell, (res + res_sel)
 
-    def match(self, src, dm):
+    def match(self, src: np.ndarray, dm: np.ndarray):
         assert isinstance(self.config, MatchBiasMultibandPipeConfig)
         msk2 = (
-            ~dm["modelfit_CModel_flag"] &
             (dm["deblend_nChild"] == 0) &
-            (dm["modelfit_CModel_instFlux"] > 0.0) &
-            (27 - 2.5 * np.log10(dm["modelfit_CModel_instFlux"]) < 25.7) &
-            (~dm["base_SdssShape_flag"] > 0)
+            (dm["modelfit_CModel_instFlux"] > 0.0)
         )
         mag_dm = 27 - 2.5 * np.log10(dm["modelfit_CModel_instFlux"][msk2])
-        x_dm = np.array(dm["base_SdssShape_x"][msk2])
-        y_dm = np.array(dm["base_SdssShape_y"][msk2])
+        x_dm = np.array(dm["base_SdssCentroid_x"][msk2])
+        y_dm = np.array(dm["base_SdssCentroid_y"][msk2])
         mag = 27 - np.log10(src["flux"]) * 2.5
 
         dm_coords = np.vstack((x_dm, y_dm)).T
