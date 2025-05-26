@@ -4,6 +4,7 @@ from . import (
     mcbias_multiband,
     selbias_flux_multiband,
     selbias_ranforest_multiband,
+    neff
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "halo_mcbias_multiband",
     "selbias_flux_multiband",
     "selbias_ranforest_multiband",
+    "neff",
 ]
