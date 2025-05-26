@@ -110,7 +110,7 @@ class AnacalTask(MeasBaseTask):
         assert isinstance(self.config, AnacalConfig)
         prior = anacal.ngmix.modelPrior()
         prior.set_sigma_a(anacal.math.qnumber(0.05))
-        prior.set_sigma_x(anacal.math.qnumber(0.5))
+        prior.set_sigma_x(anacal.math.qnumber(0.05))
         self.config_kwargs = {
             "p_min": self.config.p_min,
             "omega_p": self.config.omega_p,
