@@ -2,9 +2,9 @@ from . import (
     halo_mcbias_multiband,
     matchbias_multiband,
     mcbias_multiband,
+    neff,
     selbias_flux_multiband,
     selbias_ranforest_multiband,
-    neff
 )
 
 __all__ = [

@@ -40,9 +40,9 @@ from lsst.pipe.base import (
 )
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
+from numpy.lib import recfunctions as rfn
 
 from ..processor.anacal import AnacalTask
-from numpy.lib import recfunctions as rfn
 
 
 class AnacalForcePipeConnections(
@@ -153,9 +153,7 @@ class AnacalForcePipe(PipelineTask):
                 handle.dataId["band"]: handle for handle in correlation_handles
             }
         skyMap = inputs["skyMap"]
-        detection = (
-            inputs["input_catalog"].as_array()
-        )
+        detection = inputs["input_catalog"].as_array()
         outputs = self.run(
             detection=detection,
             exposure_handles_dict=exposure_handles_dict,
@@ -205,9 +203,7 @@ class AnacalForcePipe(PipelineTask):
                 tract=tract,
                 patch=patch,
             )
-            cat = rfn.repack_fields(
-                self.anacal.run(**data)[colnames]
-            )
+            cat = rfn.repack_fields(self.anacal.run(**data)[colnames])
             map_dict = {name: f"{band}_" + name for name in colnames}
             renamed = rfn.rename_fields(cat, map_dict)
             catalog.append(renamed)

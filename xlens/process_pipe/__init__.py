@@ -1,5 +1,6 @@
 from . import (
     anacal_detect,
+    anacal_force,
     detect_multiband,
     force_multiband,
     fpfs_force,
@@ -7,7 +8,6 @@ from . import (
     hsc,
     match,
     systematics_multiband,
-    anacal_force,
 )
 
 __all__ = [

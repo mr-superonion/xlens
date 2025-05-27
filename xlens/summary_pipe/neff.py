@@ -298,8 +298,7 @@ class NeffSummaryMultibandPipe(PipelineTask):
         patch = butlerQC.quantum.dataId["patch"]
         skyMap = inputs["skyMap"]
         self.run(
-            summary_list=input["summary_list"],
-            patch_info=skyMap[tract][patch]
+            summary_list=input["summary_list"], patch_info=skyMap[tract][patch]
         )
         return
 
@@ -309,7 +308,7 @@ class NeffSummaryMultibandPipe(PipelineTask):
         pixel_scale = (
             patch_info.getWcs().getPixelScale().asDegrees() * 60  # arcmin
         )
-        area = bbox.getHeight() * bbox.getWidth() * pixel_scale ** 2.0
+        area = bbox.getHeight() * bbox.getWidth() * pixel_scale**2.0
         up = []
         down = []
         for res in summary_list:
