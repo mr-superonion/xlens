@@ -22,7 +22,6 @@ import lsst.afw.image as afwImage
 import lsst.afw.math as afwMath
 import lsst.meas.algorithms as meaAlg
 import numpy as np
-from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
 from descwl_shear_sims.shear import ShearHalo, ShearRedshift
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.wcs import make_dm_wcs
@@ -38,6 +37,7 @@ from ..utils.random import (
     num_rot,
 )
 from .base import SimBaseTask
+from .galaxies.catsim import CatSim2017Catalog
 from .galaxies.skyCatalog import OpenUniverse2024RubinRomanCatalog
 from .multiband_defaults import (
     mag_zero_defaults,
@@ -201,7 +201,7 @@ class MultibandSimBaseTask(SimBaseTask):
         coadd_dim = dim - 10
         # galaxy catalog;
         if self.config.galaxy_type == "catsim2017":
-            GalClass = WLDeblendGalaxyCatalog
+            GalClass = CatSim2017Catalog
         elif self.config.galaxy_type == "RomanRubin2024":
             GalClass = OpenUniverse2024RubinRomanCatalog
         else:

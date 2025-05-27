@@ -270,9 +270,8 @@ class MatchBiasMultibandPipe(PipelineTask):
 
     def match(self, src: np.ndarray, dm: np.ndarray):
         assert isinstance(self.config, MatchBiasMultibandPipeConfig)
-        msk2 = (
-            (dm["deblend_nChild"] == 0) &
-            (dm["modelfit_CModel_instFlux"] > 0.0)
+        msk2 = (dm["deblend_nChild"] == 0) & (
+            dm["modelfit_CModel_instFlux"] > 0.0
         )
         mag_dm = 27 - 2.5 * np.log10(dm["modelfit_CModel_instFlux"][msk2])
         x_dm = np.array(dm["base_SdssCentroid_x"][msk2])
@@ -282,8 +281,8 @@ class MatchBiasMultibandPipe(PipelineTask):
         dm_coords = np.vstack((x_dm, y_dm)).T
         ana_coords = np.vstack(
             (
-                src['x1'] / self.config.pixel_scale,
-                src['x2'] / self.config.pixel_scale
+                src["x1"] / self.config.pixel_scale,
+                src["x2"] / self.config.pixel_scale,
             )
         ).T
         ana_tree = KDTree(ana_coords)
@@ -297,7 +296,7 @@ class MatchBiasMultibandPipe(PipelineTask):
         order = np.lexsort((abs_diffs, ana_idx))
         ana_idx_sorted = ana_idx[order]
         _, first = np.unique(ana_idx_sorted, return_index=True)
-        ana_keep = ana_idx_sorted[first]     # corresponding ANA indices
+        ana_keep = ana_idx_sorted[first]  # corresponding ANA indices
         return src[ana_keep]
 
     def run(self, src00, src01, src10, src11, dm00, dm01, dm10, dm11):
@@ -309,16 +308,20 @@ class MatchBiasMultibandPipe(PipelineTask):
         rp = np.zeros(ncuts)
 
         src00 = self.match(
-            src00, dm00,
+            src00,
+            dm00,
         )
         src01 = self.match(
-            src01, dm01,
+            src01,
+            dm01,
         )
         src10 = self.match(
-            src10, dm10,
+            src10,
+            dm10,
         )
         src11 = self.match(
-            src11, dm11,
+            src11,
+            dm11,
         )
 
         for ic, flux_min in enumerate(self.config.flux_cuts):

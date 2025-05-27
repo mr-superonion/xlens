@@ -154,7 +154,7 @@ class AnacalTask(MeasBaseTask):
             anacal.mask.mask_galaxy_image(
                 gal_array,
                 mask_array,
-                True,     # extend mask
+                True,  # extend mask
                 star_cat,
             )
             if noise_array is not None:
@@ -162,7 +162,7 @@ class AnacalTask(MeasBaseTask):
                 anacal.mask.mask_galaxy_image(
                     noise_array,
                     mask_array,
-                    True,       # extend mask
+                    True,  # extend mask
                     star_cat,
                 )
 

@@ -25,11 +25,11 @@ __all__ = [
     "matchPipeConnections",
 ]
 
-import os
 import logging
-import fitsio
+import os
 from typing import Any
 
+import fitsio
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.pipe.base import (
@@ -40,10 +40,8 @@ from lsst.pipe.base import (
 )
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
-
 from numpy.lib import recfunctions as rfn
 from scipy.spatial import KDTree
-
 
 dm_colnames = [
     "deblend_nChild",
@@ -164,12 +162,8 @@ class matchPipe(PipelineTask):
         truth_handles_dict = {
             handle.dataId["band"]: handle for handle in truth_handles
         }
-        truth_catalog = (
-            truth_handles_dict["i"].get().as_array()
-        )
-        anacal_catalog = (
-            inputs["anacal_catalog"].as_array()
-        )
+        truth_catalog = truth_handles_dict["i"].get().as_array()
+        anacal_catalog = inputs["anacal_catalog"].as_array()
         outputs = self.run(
             dm_handles_dict=dm_handles_dict,
             truth_catalog=truth_catalog,
@@ -184,9 +178,7 @@ class matchPipe(PipelineTask):
     def merge_dm(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
         assert isinstance(self.config, matchPipeConfig)
         # Apply quality mask to DM
-        msk = (
-            (mrc["i_deblend_nChild"] == 0)
-        )
+        msk = mrc["i_deblend_nChild"] == 0
         mrc = mrc[msk]
         mag_mrc = 27 - 2.5 * np.log10(mrc["i_base_GaussianFlux_instFlux"])
         x_mrc = np.array(mrc["deblend_peak_center_x"])
@@ -198,10 +190,7 @@ class matchPipe(PipelineTask):
         # Coordinates
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
         ana_coords = np.vstack(
-            (
-                src['x1'] / pixel_scale,
-                src['x2'] / pixel_scale
-            )
+            (src["x1"] / pixel_scale, src["x2"] / pixel_scale)
         ).T
         ana_tree = KDTree(ana_coords)
         match_dist, match_ndx = ana_tree.query(mrc_coords)
@@ -224,10 +213,11 @@ class matchPipe(PipelineTask):
 
         # Combine fields
         combined = rfn.merge_arrays(
-            (final_src, final_mrc), flatten=True, usemask=False,
+            (final_src, final_mrc),
+            flatten=True,
+            usemask=False,
         )
         return combined
-
 
     def merge_truth(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
         assert isinstance(self.config, matchPipeConfig)
@@ -245,10 +235,7 @@ class matchPipe(PipelineTask):
         # Coordinates
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
         ana_coords = np.vstack(
-            (
-                src['x1'] / pixel_scale,
-                src['x2'] / pixel_scale
-            )
+            (src["x1"] / pixel_scale, src["x2"] / pixel_scale)
         ).T
         ana_tree = KDTree(ana_coords)
         match_dist, match_ndx = ana_tree.query(mrc_coords)
@@ -274,10 +261,11 @@ class matchPipe(PipelineTask):
 
         # Combine fields
         combined = rfn.merge_arrays(
-            (final_src, final_mrc), flatten=True, usemask=False,
+            (final_src, final_mrc),
+            flatten=True,
+            usemask=False,
         )
         return combined
-
 
     def run(
         self,
@@ -292,15 +280,16 @@ class matchPipe(PipelineTask):
         assert isinstance(self.config, matchPipeConfig)
         # TODO: Will be removed
         bbox = skyMap[tract][patch].getOuterBBox()
-        truth_catalog["image_x"] = (bbox.beginX + truth_catalog["image_x"])
-        truth_catalog["image_y"] = (bbox.beginY + truth_catalog["image_y"])
+        truth_catalog["image_x"] = bbox.beginX + truth_catalog["image_x"]
+        truth_catalog["image_y"] = bbox.beginY + truth_catalog["image_y"]
         # TODO: Will be removed
 
         dm_catalog = []
         for band in dm_handles_dict.keys():
             handle = dm_handles_dict[band]
             cat = rfn.repack_fields(
-                handle.get().asAstropy()
+                handle.get()
+                .asAstropy()
                 .to_pandas(index=False)
                 .to_records(index=False)[dm_colnames]
             )
@@ -310,10 +299,6 @@ class matchPipe(PipelineTask):
         pixel_scale = (
             skyMap[tract][patch].getWcs().getPixelScale().asDegrees() * 3600
         )
-        catalog = self.merge_dm(
-            anacal_catalog, dm_catalog, pixel_scale
-        )
-        catalog = self.merge_truth(
-            catalog, truth_catalog, pixel_scale
-        )
+        catalog = self.merge_dm(anacal_catalog, dm_catalog, pixel_scale)
+        catalog = self.merge_truth(catalog, truth_catalog, pixel_scale)
         return Struct(catalog=catalog)
