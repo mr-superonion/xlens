@@ -35,11 +35,6 @@ class ShearHalo(object):
         cosmo (astropy.cosmology):  cosmology object
         no_kappa (bool):            if True, turn off kappa field
         """
-        
-        if ra_lens != 200.0 or dec_lens != 0.:
-            raise ValueError(
-                f"ra_lens and dec_lens should be 200.0 and 0.0 respectively, ra: {ra_lens}, dec: {dec_lens}"
-            )
 
         if cosmo is None:
             cosmo = Planck18
@@ -75,28 +70,11 @@ class ShearHalo(object):
         gso, shift:
             distorted galaxy object and shift
         """
-        
-        # assert WORLD_ORIGIN.ra == 200.0 and WORLD_ORIGIN.dec == 0.0, \
-        #     "WORLD_ORIGIN should be at (200.0, 0.0) in this code"
-        
-        # world_pos = WORLD_ORIGIN.deproject(shift.x * galsim.arcsec,
-        #                                  shift.y * galsim.arcsec)
-        # ra = world_pos.ra / galsim.arcsec
-        # dec = world_pos.dec / galsim.arcsec
-        # source_pos = galsim.PositionD(ra, dec)
 
         
         if redshift > self.z_lens:
-            # r = source_pos - self.pos_lens
-            # delta_ra, delta_dec = get_offset(
-            #     ra_arcsec=source_pos.x,
-            #     dec_arcsec=source_pos.y,
-            #     ra0_arcsec=self.pos_lens.x,
-            #     dec0_arcsec=self.pos_lens.y,
-            # )
-
             r = shift
-            
+
             lens_cosmo = LensCosmo(
                 z_lens=self.z_lens,
                 z_source=redshift,
@@ -107,7 +85,7 @@ class ShearHalo(object):
             )
             kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
 
-            lensed_ra, lensed_dec = self.lens_eqn_solver.image_position_from_source(
+            lensed_x, lensed_y = self.lens_eqn_solver.image_position_from_source(
                 r.x,
                 r.y,
                 kwargs,
@@ -117,10 +95,10 @@ class ShearHalo(object):
 
             # if lenstronomy cannot find a solution
             # do not shift
-            if len(lensed_ra) == 0 or len(lensed_dec) == 0:
-                lensed_ra, lensed_dec = shift.x, shift.y
+            if len(lensed_x) == 0 or len(lensed_y) == 0:
+                lensed_x, lensed_y = shift.x, shift.y
             else:
-                lensed_ra, lensed_dec = lensed_ra[0], lensed_dec[0]
+                lensed_x, lensed_y = lensed_x[0], lensed_y[0]
                 
             f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
                 lensed_ra, lensed_dec, kwargs
@@ -140,18 +118,9 @@ class ShearHalo(object):
                 return _get_shear_res_dict(gso, shift, gamma1, gamma2, kappa)
                 return gso, shift, shift, gamma1, gamma2, kappa
 
-            # dra, ddec = self.lens.alpha(lensed_ra, lensed_dec, kwargs)
-            # dra, ddec = lensed_ra - shift.x, lensed_dec - shift.y
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
-            # lensed_shift = shift + galsim.PositionD(dra, ddec)
-            
-            # lensed_shift = WORLD_ORIGIN.project(
-            #     galsim.CelestialCoord((lensed_ra + 200 * 3600) * galsim.arcsec, lensed_dec * galsim.arcsec)
-            # )
-            # lensed_shift = galsim.PositionD(lensed_shift[0] / galsim.arcsec, lensed_shift[1] / galsim.arcsec)
 
-            lensed_shift = galsim.PositionD(lensed_ra, lensed_dec)
-            
-            # lensed_shift = galsim.PositionD(lensed_ra, lensed_dec)
-            # print(f"shift: {shift}, lensed_shift: {lensed_shift}, gso: {gso}, gamma1: {gamma1}, gamma2: {gamma2}, kappa: {kappa}, mass: {self.mass}, conc: {self.conc}")
+
+            lensed_shift = galsim.PositionD(lensed_x, lensed_y)
+
             return _get_shear_res_dict(gso, lensed_shift, gamma1, gamma2, kappa)
