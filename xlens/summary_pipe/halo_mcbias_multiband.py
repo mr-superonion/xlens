@@ -44,10 +44,15 @@ from lsst.skymap import BaseSkyMap
 
 import galsim
 from astropy.cosmology import Planck18
+from astropy.coordinates import SkyCoord, position_angle, Angle
+import astropy.units as u
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel
 from scipy.spatial import cKDTree
 import matplotlib.pyplot as plt
+
+from descwl_shear_sims.wcs import make_wcs, make_dm_wcs
+from descwl_shear_sims.constants import WORLD_ORIGIN
 
 
 class HaloMcBiasMultibandPipeConnections(
@@ -106,7 +111,7 @@ class HaloMcBiasMultibandPipeConnections(
         storageClass="ArrowAstropy",
         dimensions=("skymap",),
     )
-    
+
     perGalaxy = cT.Output(
         doc="per galaxy output",
         name="{inputCoaddName}_halo_mc_per_galaxy{dataType}",
@@ -248,14 +253,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return r11, r22
 
     @staticmethod
-    def _get_angle_from_pixel(x, y, x_cen, y_cen):
-        """
-        Get the angle from the pixel coordinates
-        the output is in radians between -pi and pi
-        """
-        return np.arctan2(y - y_cen, x - x_cen)
-
-    @staticmethod
     def _get_eT_eX_rT_rX_sum(
         eT,
         eX,
@@ -286,10 +283,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             gT_true (array): true tangential shear
             gX_true (array): true cross shear
             kappa_true (array): true convergence
-            dist (array): pixel distance from the halo center
+            dist (array): arcsec distance from the halo center
             lensed_shift (array): distance between the lensed and prelensed position,
             radial_lensed_shift (array): distance between the lensed and prelensed position in radial direction
-            radial_bin_edges (array): radial bin edges in pixel
+            radial_bin_edges (array): radial bin edges in arcsec
             match_dist (array): the distance between detection and matched input
             m00 (array): fpfs shapelet mode m00
             m20 (array): fpfs shapelet mode m20
@@ -340,6 +337,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             mask = (dist >= radial_bin_edges[i_bin]) & (
                 dist < radial_bin_edges[i_bin + 1]
             )
+
             eT_sum = np.sum(eT[mask] * w[mask])
             eX_sum = np.sum(eX[mask] * w[mask])
             # we use the mean of R11 and R22 as an estimator of Rt
@@ -440,7 +438,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ("mean_m20", f"({n_bins},)f8"),
         ]
         return np.zeros(n_halos, dtype=dt)
-    
+
     @staticmethod
     def get_per_galaxy_struct(n_gal):
         dt = [
@@ -450,8 +448,32 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ("y", "f8"),
             ("lensed_x", "f8"),
             ("lensed_y", "f8"),
+            ("dist", "f8")
         ]
         return np.zeros(n_gal, dtype=dt)
+    
+    @staticmethod
+    def angsep(ra, dec, ra2=200.0, dec2=0.0):
+        c1 = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')
+        c2 = SkyCoord(ra=ra2*u.deg, dec=dec2*u.deg, frame='icrs')
+        return c1.separation(c2).arcsec
+
+    @staticmethod
+    def position_angle_ccw_from_east(ra1, dec1, ra2, dec2):
+        """
+        Compute the PA of (ra2,dec2) relative to (ra1,dec1),
+        measured from +RA (east=0°), increasing CCW towards +Dec (north).
+        Returns an Angle in [0,360)°.
+        """
+        c1 = SkyCoord(ra1*u.deg, dec1*u.deg, frame='icrs')
+        c2 = SkyCoord(ra2*u.deg, dec2*u.deg, frame='icrs')
+
+        # pa_north = angle east of north (0° at north, + toward east)
+        pa_north = c1.position_angle(c2)
+
+        # shift zero to east and make it CCW (north positive)
+        pa_ccw = (90*u.deg - pa_north).wrap_at(360*u.deg)
+        return pa_ccw
 
     @staticmethod
     def generate_summary_plot(summary_table):
@@ -683,10 +705,18 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         logger.info("max pixel", max_pixel)
         logger.info("max pixel in arcsec", max_pixel * pixel_scale)
 
-        n_bins = 40
-        pixel_bin_edges = np.linspace(0, max_pixel, n_bins + 1)
+        n_bins = 10
+        pixel_bin_edges = np.linspace(15 / 0.2, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
+
+        wcs = make_dm_wcs(
+            make_wcs(
+                scale=0.2,
+                image_origin=galsim.PositionD(2499.5, 2499.5),
+                world_origin=WORLD_ORIGIN,
+            )
+        )
 
         en = self.ename
         e1n = en + "1"
@@ -727,6 +757,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         ind_gT_true_list = []
         ind_x_list = []
         ind_y_list = []
+        # ind_det_ra_list = []
+        # ind_det_dec_list = []
+        ind_dist_list = []
         ind_lensed_x_list = []
         ind_lensed_y_list = []
 
@@ -782,7 +815,11 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             e1 = np.concatenate([sr_00_res[e1n], sr_01_res[e1n]])
             e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
+            det_x = np.concatenate([sr_00_res["x"], sr_01_res["x"]])
+            det_y = np.concatenate([sr_00_res["y"], sr_01_res["y"]])
+            det_ra, det_dec = wcs.pixelToSkyArray(det_x, det_y, degrees=True)
             logger.info(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
+
             e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
             e2_g2 = np.concatenate([sr_00_res[e2g2n], sr_01_res[e2g2n]])
             w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
@@ -819,12 +856,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             # ind_x_list.append(lensed_x)
             # ind_y_list.append(lensed_y)
-            
+
             ind_x_list.append(x)
             ind_y_list.append(y)
             ind_lensed_x_list.append(lensed_x)
             ind_lensed_y_list.append(lensed_y)
-            
+            # ind_det_ra_list.append(det_ra)
+            # ind_det_dec_list.append(det_dec)
+
             assert (
                 np.mean(lensed_x - (image_dim) / 2) < 100
             ), f"mean x should be close to the center, distance is {np.mean(lensed_x - (image_dim) / 2)}, index is {i}"
@@ -857,9 +896,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 f"mean radial lensed shift: {np.mean(radial_lensed_shift)}"
             )
 
-            angle = self._get_angle_from_pixel(
-                lensed_x, lensed_y, (image_dim) / 2, (image_dim) / 2
-            )
+            # angle = self._get_angle_from_pixel(
+            #     , lensed_y, (image_dim) / 2, (image_dim) / 2
+            # )
+
+            angle = self.position_angle_ccw_from_east(
+                WORLD_ORIGIN.ra.deg, WORLD_ORIGIN.dec.deg, det_ra, det_dec
+            ).rad
+            
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, -angle)
             gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, -angle)
@@ -867,11 +911,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ind_gT_true_list.append(gT_true)
 
             # w are scalar so no need to rotate
-            dist = np.sqrt(
-                (lensed_x - (image_dim) / 2) ** 2
-                + (lensed_y - (image_dim) / 2) ** 2
-            )
+            # dist = np.sqrt(
+            #     (lensed_x - (image_dim) / 2) ** 2
+            #     + (lensed_y - (image_dim) / 2) ** 2
+            # )
 
+            # dist = np.array([self.angsep(ra, dec) for ra, dec in zip(det_ra, det_dec)]) # in arcsec
+            dist = self.angsep(det_ra, det_dec)
+            ind_dist_list.append(dist)
+            
             r11, r22 = self._get_response_from_w_and_der(
                 e1, e2, w, e1_g1, e2_g2, w_g1, w_g2
             )
@@ -910,7 +958,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 dist,
                 lensed_shift,
                 radial_lensed_shift,
-                pixel_bin_edges,
+                angular_bin_edges,
                 match_dist,
                 m00,
                 m20,
@@ -934,13 +982,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             match_failure_rate_ensemble[i, :] = match_failure_rate
             m00_ensemble[i, :] = m00_list
             m20_ensemble[i, :] = m20_list
-            
+
         rT_ind = np.concatenate(ind_rT_list)
         ind_gT_true = np.concatenate(ind_gT_true_list)
         x_ind = np.concatenate(ind_x_list)
         y_ind = np.concatenate(ind_y_list)
         lensed_x_ind = np.concatenate(ind_lensed_x_list)
         lensed_y_ind = np.concatenate(ind_lensed_y_list)
+        dist_ind = np.concatenate(ind_dist_list)
 
         per_galaxy_struct = self.get_per_galaxy_struct(len(rT_ind))
         per_galaxy_struct["rT"] = rT_ind
@@ -949,7 +998,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         per_galaxy_struct["y"] = y_ind
         per_galaxy_struct["lensed_x"] = lensed_x_ind
         per_galaxy_struct["lensed_y"] = lensed_y_ind
-            
+        per_galaxy_struct["dist"] = dist_ind
+
         summary_stats = self.get_summary_struct(
             n_realization, len(angular_bin_edges) - 1
         )
@@ -1003,4 +1053,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         summary_plot = self.generate_summary_plot(summary_stats)
 
-        return Struct(outputSummary=summary_stats, summaryPlot=summary_plot, perGalaxy=per_galaxy_struct)
+        return Struct(
+            outputSummary=summary_stats,
+            summaryPlot=summary_plot,
+            perGalaxy=per_galaxy_struct,
+        )
