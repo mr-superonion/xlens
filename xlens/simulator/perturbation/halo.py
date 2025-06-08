@@ -101,7 +101,7 @@ class ShearHalo(object):
                 lensed_x, lensed_y = lensed_x[0], lensed_y[0]
                 
             f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
-                lensed_ra, lensed_dec, kwargs
+                lensed_x, lensed_y, kwargs
             )
             gamma1 = 1.0 / 2 * (f_xx - f_yy)
             gamma2 = f_xy
@@ -116,10 +116,8 @@ class ShearHalo(object):
 
             if g1**2.0 + g2**2.0 > 0.95:
                 return _get_shear_res_dict(gso, shift, gamma1, gamma2, kappa)
-                return gso, shift, shift, gamma1, gamma2, kappa
 
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
-
 
             lensed_shift = galsim.PositionD(lensed_x, lensed_y)
 
