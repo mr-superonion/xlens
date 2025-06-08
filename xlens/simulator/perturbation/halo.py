@@ -48,15 +48,6 @@ class ShearHalo(object):
         self.lens_eqn_solver = LensEquationSolver(lensModel=self.lens)
         return
 
-    # def get_offset(ra_arcsec, dec_arcsec, ra0_arcsec, dec0_arcsec):
-    #     c0 = SkyCoord(ra=ra0_arcsec * u.arcsec, dec=dec0_arcsec * u.arcsec)
-    #     c1 = SkyCoord(ra=ra_arcsec * u.arcsec, dec=dec_arcsec * u.arcsec)
-    #     dlon, dlat = c0.spherical_offsets_to(c1)
-    #     delta_ra_astro = dlon.to(u.arcsec).value
-    #     delta_dec_astro = dlat.to(u.arcsec).value
-
-    #     return delta_ra_astro, delta_dec_astro
-
     def distort_galaxy(self, gso, shift, redshift):
         """This function distorts the galaxy's shape and position
         Parameters
@@ -71,7 +62,6 @@ class ShearHalo(object):
             distorted galaxy object and shift
         """
 
-        
         if redshift > self.z_lens:
             r = shift
 
