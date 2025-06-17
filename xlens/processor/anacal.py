@@ -26,7 +26,7 @@ class AnacalConfig(Config):
     )
     snr_min = Field[float](
         doc="snr min for detection",
-        default=8.0,
+        default=5.0,
     )
     num_epochs = Field[int](
         doc="Number of iterations",
@@ -46,7 +46,7 @@ class AnacalConfig(Config):
     )
     p_min = Field[float](
         doc="peak detection threshold",
-        default=0.14,
+        default=0.12,
     )
     omega_p = Field[float](
         doc="peak detection threshold",
@@ -154,7 +154,7 @@ class AnacalTask(MeasBaseTask):
             anacal.mask.mask_galaxy_image(
                 gal_array,
                 mask_array,
-                True,  # extend mask
+                False,  # extend mask
                 star_cat,
             )
             if noise_array is not None:
@@ -162,12 +162,12 @@ class AnacalTask(MeasBaseTask):
                 anacal.mask.mask_galaxy_image(
                     noise_array,
                     mask_array,
-                    True,  # extend mask
+                    False,  # extend mask
                     star_cat,
                 )
 
         ratio = 10.0 ** ((mag_zero - 30.0) / 2.5)
-        taskA = anacal.task.Task(
+        task = anacal.task.Task(
             scale=pixel_scale,
             omega_f=0.06 * ratio,
             v_min=0.013 * ratio,
@@ -179,9 +179,9 @@ class AnacalTask(MeasBaseTask):
         blocks = anacal.geometry.get_block_list(
             img_ny=gal_array.shape[0],
             img_nx=gal_array.shape[1],
-            block_nx=500,
-            block_ny=500,
-            block_overlap=150,
+            block_nx=250,
+            block_ny=250,
+            block_overlap=80,
             scale=pixel_scale,
         )
 
@@ -191,7 +191,7 @@ class AnacalTask(MeasBaseTask):
             detection["x1_det"] = detection["x1_det"] - begin_x * pixel_scale
             detection["x2_det"] = detection["x2_det"] - begin_y * pixel_scale
 
-        catalog = taskA.process_image(
+        catalog = task.process_image(
             gal_array,
             psf,
             variance=noise_variance,
