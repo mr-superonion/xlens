@@ -114,7 +114,7 @@ class AnacalForcePipeConfig(
         super().setDefaults()
         self.anacal.force_size = True
         self.anacal.force_center = True
-        self.anacal.num_epochs = 1
+        self.anacal.use_average_psf = True
 
 
 class AnacalForcePipe(PipelineTask):

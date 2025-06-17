@@ -104,6 +104,7 @@ class AnacalDetectPipeConfig(
 
     def setDefaults(self):
         super().setDefaults()
+        self.anacal.use_average_psf = True
 
 
 class AnacalDetectPipe(PipelineTask):
