@@ -593,7 +593,7 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             indice_id=indice_id,
         )
         # for fix source redshift
-        galaxy_catalog._wldeblend_cat["redshift"] = self.config.z_source
+        galaxy_catalog.input_catalog["redshift"] = self.config.z_source
         return galaxy_catalog
 
     def get_perturbation_object(self, **kwargs: Any):
