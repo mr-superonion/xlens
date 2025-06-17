@@ -23,7 +23,6 @@ tasks:
     class: xlens.process_pipe.anacal_force.AnacalForcePipe
     config:
       anacal.use_average_psf: True
-      anacal.num_epochs_deblend: 5
       anacal.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 
