@@ -14,7 +14,6 @@ tasks:
   AnacalDetectTask:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
-      anacal.use_average_psf: True
       anacal.num_epochs: 3
       anacal.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
@@ -22,7 +21,6 @@ tasks:
   AnacalForceTask:
     class: xlens.process_pipe.anacal_force.AnacalForcePipe
     config:
-      anacal.use_average_psf: True
       anacal.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 

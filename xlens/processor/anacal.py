@@ -48,10 +48,6 @@ class AnacalConfig(Config):
         doc="peak detection threshold",
         default=0.05,
     )
-    use_average_psf = Field[bool](
-        doc="whether to use average PSF over the exposure",
-        default=True,
-    )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
@@ -140,6 +136,7 @@ class AnacalTask(MeasBaseTask):
         tractInfo=None,
         patchInfo=None,
         detection: NDArray | None,
+        blocks,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
@@ -169,15 +166,6 @@ class AnacalTask(MeasBaseTask):
             omega_v=0.025 * ratio,
             fpfs_c0=8.4 * ratio,
             **self.config_kwargs,
-        )
-
-        blocks = anacal.geometry.get_block_list(
-            img_ny=gal_array.shape[0],
-            img_nx=gal_array.shape[1],
-            block_nx=250,
-            block_ny=250,
-            block_overlap=80,
-            scale=pixel_scale,
         )
 
         if detection is not None:
@@ -233,6 +221,7 @@ class AnacalTask(MeasBaseTask):
         tract: int = 0,
         patch: int = 0,
         star_cat: NDArray | None = None,
+        mask_array: NDArray | None = None,
         detection: astropy.table.Table | None = None,
         **kwargs,
     ):
@@ -248,7 +237,6 @@ class AnacalTask(MeasBaseTask):
             (dict)
         """
         assert isinstance(self.config, AnacalConfig)
-        assert isinstance(self.config.badMaskPlanes, list)
         return utils.image.prepare_data(
             exposure=exposure,
             seed=seed,
@@ -258,11 +246,12 @@ class AnacalTask(MeasBaseTask):
             noise_corr=noise_corr,
             band=band,
             do_noise_bias_correction=self.config.do_noise_bias_correction,
-            use_average_psf=self.config.use_average_psf,
             badMaskPlanes=self.config.badMaskPlanes,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
             star_cat=star_cat,
+            mask_array=mask_array,
             detection=detection,
+            do_prepare_blocks=True,
         )
