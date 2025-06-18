@@ -268,9 +268,9 @@ def get_blocks(lsst_psf, lsst_bbox, lsst_mask, pixel_scale, npix):
             mask_array = np.zeros((height, width), dtype=np.int16)
     else:
         mask_array = np.zeros((height, width), dtype=np.int16)
-    radius = 10
+    radius = 5
     kernel = make_circular_kernel(radius)
-    mask_array = anacal.mask.sparse_convolve(mask_array, kernel)
+    mask_array = anacal.mask.convolve_mask(mask_array, kernel)
 
     blocks = anacal.geometry.get_block_list(
         img_ny=height,
