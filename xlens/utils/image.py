@@ -228,7 +228,7 @@ def get_psf_array(
                         out = out + resize_array(this_psf, (npix, npix))
                         ncount += 1
                     except InvalidPsfError:
-                        ncount = ncount
+                        pass
             else:
                 try:
                     this_psf = lsst_psf.computeImage(
@@ -237,11 +237,11 @@ def get_psf_array(
                     out = out + resize_array(this_psf, (npix, npix))
                     ncount += 1
                 except InvalidPsfError:
-                    ncount = ncount
+                    pass
 
     out = out / ncount
     # cut out the boundary
-    psf_rcut = npix // 2 - 4
+    psf_rcut = npix // 2 - 2
     anacal.fpfs.base.truncate_square(out, psf_rcut)
     return out
 
@@ -306,8 +306,7 @@ def get_blocks(lsst_psf, lsst_bbox, lsst_mask, pixel_scale, npix):
                     except InvalidPsfError:
                         found = False
 
-        if bb.psf_array.size == 0:
-            found = False
+        if not found:
             for j in range(max(bb.ymin, 0), min(height, bb.ymax)):
                 if found:
                     break
