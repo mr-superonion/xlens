@@ -136,6 +136,7 @@ class AnacalTask(MeasBaseTask):
         tractInfo=None,
         patchInfo=None,
         detection: NDArray | None,
+        blocks,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
@@ -165,15 +166,6 @@ class AnacalTask(MeasBaseTask):
             omega_v=0.025 * ratio,
             fpfs_c0=8.4 * ratio,
             **self.config_kwargs,
-        )
-
-        blocks = anacal.geometry.get_block_list(
-            img_ny=gal_array.shape[0],
-            img_nx=gal_array.shape[1],
-            block_nx=250,
-            block_ny=250,
-            block_overlap=80,
-            scale=pixel_scale,
         )
 
         if detection is not None:
@@ -245,7 +237,6 @@ class AnacalTask(MeasBaseTask):
             (dict)
         """
         assert isinstance(self.config, AnacalConfig)
-        assert isinstance(self.config.badMaskPlanes, list)
         return utils.image.prepare_data(
             exposure=exposure,
             seed=seed,
