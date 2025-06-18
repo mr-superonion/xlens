@@ -28,6 +28,7 @@ __all__ = [
 import logging
 import os
 from typing import Any
+from numpy.typing import NDArray
 
 import fitsio
 import lsst.pipe.base.connectionTypes as cT
@@ -40,6 +41,7 @@ from lsst.pipe.base import (
 )
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
+from lsst.pex.config import Field
 from numpy.lib import recfunctions as rfn
 from scipy.spatial import KDTree
 
@@ -48,25 +50,30 @@ dm_colnames = [
     "deblend_blendedness",
     "deblend_peak_center_x",
     "deblend_peak_center_y",
-    "base_Blendedness_raw",
     "base_Blendedness_abs",
     "base_CircularApertureFlux_3_0_instFlux",
     "base_CircularApertureFlux_3_0_instFluxErr",
-    "base_CircularApertureFlux_4_5_instFlux",
-    "base_CircularApertureFlux_4_5_instFluxErr",
-    "base_GaussianFlux_flag",
     "base_GaussianFlux_instFlux",
     "base_GaussianFlux_instFluxErr",
     "base_PsfFlux_instFlux",
     "base_PsfFlux_instFluxErr",
     "base_Variance_value",
-    "ext_photometryKron_KronFlux_instFlux",
-    "ext_photometryKron_KronFlux_instFluxErr",
     "modelfit_CModel_instFlux",
     "modelfit_CModel_instFluxErr",
     "base_ClassificationExtendedness_value",
-    "base_ClassificationSizeExtendedness_value",
     "base_FootprintArea_value",
+    'ext_shapeHSM_HsmPsfMoments_xx',
+    'ext_shapeHSM_HsmPsfMoments_yy',
+    'ext_shapeHSM_HsmPsfMoments_xy',
+    'ext_shapeHSM_HigherOrderMomentsPSF_03',
+    'ext_shapeHSM_HigherOrderMomentsPSF_12',
+    'ext_shapeHSM_HigherOrderMomentsPSF_21',
+    'ext_shapeHSM_HigherOrderMomentsPSF_30',
+    'ext_shapeHSM_HigherOrderMomentsPSF_04',
+    'ext_shapeHSM_HigherOrderMomentsPSF_13',
+    'ext_shapeHSM_HigherOrderMomentsPSF_22',
+    'ext_shapeHSM_HigherOrderMomentsPSF_31',
+    'ext_shapeHSM_HigherOrderMomentsPSF_40',
 ]
 
 
@@ -97,6 +104,7 @@ class matchPipeConnections(
         storageClass="SourceCatalog",
         multiple=True,
         deferLoad=True,
+        minimum=0,
     )
     truth_catalog = cT.Input(
         doc="Output truth catalog",
@@ -105,6 +113,7 @@ class matchPipeConnections(
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
+        minimum=0,
     )
     catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
@@ -121,6 +130,10 @@ class matchPipeConfig(
     PipelineTaskConfig,
     pipelineConnections=matchPipeConnections,
 ):
+    mag_zero = Field[float](
+        doc="magnitude zero point",
+        default=27.0,
+    )
 
     def validate(self):
         super().validate()
@@ -155,22 +168,41 @@ class matchPipe(PipelineTask):
         skyMap = inputs["skyMap"]
 
         dm_handles = inputs["dm_catalog"]
-        dm_handles_dict = {
-            handle.dataId["band"]: handle for handle in dm_handles
-        }
+        if len(dm_handles) == 0:
+            dm_handles_dict = None
+            dm_catalog = None
+        else:
+            dm_handles_dict = {
+                handle.dataId["band"]: handle for handle in dm_handles
+            }
+            dm_catalog = []
+            for band in dm_handles_dict.keys():
+                handle = dm_handles_dict[band]
+                cat = rfn.repack_fields(
+                    handle.get().as_array()[dm_colnames]
+                )
+                map_dict = {name: f"{band}_" + name for name in dm_colnames}
+                dm_catalog.append(rfn.rename_fields(cat, map_dict))
+            dm_catalog = rfn.merge_arrays(dm_catalog, flatten=True)
+
         truth_handles = inputs["truth_catalog"]
-        truth_handles_dict = {
-            handle.dataId["band"]: handle for handle in truth_handles
-        }
-        truth_catalog = truth_handles_dict["i"].get().as_array()
+        if len(truth_handles) == 0:
+            truth_handles_dict = None
+            truth_catalog = None
+        else:
+            truth_handles_dict = {
+                handle.dataId["band"]: handle for handle in truth_handles
+            }
+            truth_catalog = truth_handles_dict["i"].get().as_array()
+
         anacal_catalog = inputs["anacal_catalog"].as_array()
         outputs = self.run(
-            dm_handles_dict=dm_handles_dict,
-            truth_catalog=truth_catalog,
-            anacal_catalog=anacal_catalog,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            catalog=anacal_catalog,
+            dm_catalog=dm_catalog,
+            truth_catalog=truth_catalog,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -178,14 +210,20 @@ class matchPipe(PipelineTask):
     def merge_dm(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
         assert isinstance(self.config, matchPipeConfig)
         # Apply quality mask to DM
-        msk = mrc["i_deblend_nChild"] == 0
+        msk = (
+            mrc["i_deblend_nChild"] == 0 &
+            ~np.isnan(mrc["i_ext_shapeHSM_HsmPsfMoments_xx"]) &
+            ~np.isnan(mrc["i_ext_shapeHSM_HsmPsfMoments_xy"]) &
+            ~np.isnan(mrc["i_ext_shapeHSM_HsmPsfMoments_yy"])
+        )
         mrc = mrc[msk]
-        mag_mrc = 27 - 2.5 * np.log10(mrc["i_base_GaussianFlux_instFlux"])
-        x_mrc = np.array(mrc["deblend_peak_center_x"])
-        y_mrc = np.array(mrc["deblend_peak_center_y"])
+        magz = self.config.mag_zero
+        mag_mrc = magz - 2.5 * np.log10(mrc["i_base_GaussianFlux_instFlux"])
+        x_mrc = np.array(mrc["i_deblend_peak_center_x"])
+        y_mrc = np.array(mrc["i_deblend_peak_center_y"])
 
         # Magnitude from src
-        mag = 27 - 2.5 * np.log10(src["i_flux"])
+        mag = magz - 2.5 * np.log10(src["flux"])
 
         # Coordinates
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
@@ -230,7 +268,8 @@ class matchPipe(PipelineTask):
         y_mrc = np.array(mrc["image_y"])
 
         # Magnitude from src
-        mag = 27 - 2.5 * np.log10(src["flux"])
+        magz = self.config.mag_zero
+        mag = magz - 2.5 * np.log10(src["flux"])
 
         # Coordinates
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
@@ -270,35 +309,27 @@ class matchPipe(PipelineTask):
     def run(
         self,
         *,
-        dm_handles_dict: dict,
-        truth_catalog,
-        anacal_catalog,
         skyMap,
         tract: int,
         patch: int,
+        catalog: NDArray,
+        dm_catalog: NDArray | None = None,
+        truth_catalog: NDArray | None = None,
     ):
         assert isinstance(self.config, matchPipeConfig)
-        # TODO: Will be removed
-        bbox = skyMap[tract][patch].getOuterBBox()
-        truth_catalog["image_x"] = bbox.beginX + truth_catalog["image_x"]
-        truth_catalog["image_y"] = bbox.beginY + truth_catalog["image_y"]
-        # TODO: Will be removed
-
-        dm_catalog = []
-        for band in dm_handles_dict.keys():
-            handle = dm_handles_dict[band]
-            cat = rfn.repack_fields(
-                handle.get()
-                .asAstropy()
-                .to_pandas(index=False)
-                .to_records(index=False)[dm_colnames]
-            )
-            map_dict = {name: f"{band}_" + name for name in dm_colnames}
-            dm_catalog.append(rfn.rename_fields(cat, map_dict))
-        dm_catalog = rfn.merge_arrays(dm_catalog, flatten=True)
         pixel_scale = (
             skyMap[tract][patch].getWcs().getPixelScale().asDegrees() * 3600
         )
-        catalog = self.merge_dm(anacal_catalog, dm_catalog, pixel_scale)
-        catalog = self.merge_truth(catalog, truth_catalog, pixel_scale)
+
+        if dm_catalog is not None:
+            catalog = self.merge_dm(catalog, dm_catalog, pixel_scale)
+
+        if truth_catalog is not None:
+            # TODO: Will be removed
+            bbox = skyMap[tract][patch].getOuterBBox()
+            truth_catalog["image_x"] = bbox.beginX + truth_catalog["image_x"]
+            truth_catalog["image_y"] = bbox.beginY + truth_catalog["image_y"]
+            # TODO: Will be removed
+            catalog = self.merge_truth(catalog, truth_catalog, pixel_scale)
+
         return Struct(catalog=catalog)

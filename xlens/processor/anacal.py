@@ -34,7 +34,7 @@ class AnacalConfig(Config):
     )
     force_size = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
-        default=True,
+        default=False,
     )
     force_center = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
