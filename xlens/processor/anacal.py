@@ -48,10 +48,6 @@ class AnacalConfig(Config):
         doc="peak detection threshold",
         default=0.05,
     )
-    use_average_psf = Field[bool](
-        doc="whether to use average PSF over the exposure",
-        default=True,
-    )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
@@ -233,6 +229,7 @@ class AnacalTask(MeasBaseTask):
         tract: int = 0,
         patch: int = 0,
         star_cat: NDArray | None = None,
+        mask_array: NDArray | None = None,
         detection: astropy.table.Table | None = None,
         **kwargs,
     ):
@@ -258,11 +255,12 @@ class AnacalTask(MeasBaseTask):
             noise_corr=noise_corr,
             band=band,
             do_noise_bias_correction=self.config.do_noise_bias_correction,
-            use_average_psf=self.config.use_average_psf,
             badMaskPlanes=self.config.badMaskPlanes,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
             star_cat=star_cat,
+            mask_array=mask_array,
             detection=detection,
+            do_prepare_blocks=True,
         )
