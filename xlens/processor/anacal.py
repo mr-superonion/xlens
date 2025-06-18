@@ -248,6 +248,7 @@ class AnacalTask(MeasBaseTask):
             (dict)
         """
         assert isinstance(self.config, AnacalConfig)
+        assert isinstance(self.config.badMaskPlanes, list)
         return utils.image.prepare_data(
             exposure=exposure,
             seed=seed,
