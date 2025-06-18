@@ -7,5 +7,5 @@ fitsio
 lenstronomy
 matplotlib
 metadetect
-anacal==0.5.3
+anacal==0.5.4
 lsstdesc-wl-shear-sims==0.4.5
