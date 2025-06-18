@@ -332,7 +332,6 @@ def prepare_data(
     rotId: int = 0,
     npix: int = 32,
     noise_corr: NDArray | None = None,
-    band: str | None = None,
     do_noise_bias_correction: bool = True,
     badMaskPlanes: List[str] = badMaskDefault,
     skyMap=None,
@@ -341,7 +340,6 @@ def prepare_data(
     star_cat: NDArray | None = None,
     mask_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
-    do_prepare_blocks: bool = False,
     **kwargs,
 ):
     """Prepares the data from LSST exposure
@@ -352,7 +350,6 @@ def prepare_data(
     rotId (int): rotation id
     npix (int): stamp size for PSF
     noise_corr (NDArray): image noise correlation function (None)
-    band (str): band name (g, r, i, z, y)
 
     Returns:
         (dict)
@@ -367,7 +364,7 @@ def prepare_data(
 
     lsst_bbox = exposure.getBBox()
     lsst_psf = exposure.getPsf()
-    psf = np.asarray(
+    psf_array = np.asarray(
         get_psf_array(
             lsst_psf=lsst_psf,
             lsst_bbox=lsst_bbox,
@@ -381,6 +378,7 @@ def prepare_data(
         exposure.image.array,
         dtype=np.float64,
     )
+
     if mask_array is None:
         bitv = exposure.mask.getPlaneBitMask(badMaskPlanes)
         mask_array = (
@@ -398,6 +396,14 @@ def prepare_data(
                 )
             )
         ).astype(np.int16)
+    if star_cat is not None:
+        # Set the value inside star mask to zero
+        anacal.mask.mask_galaxy_image(
+            gal_array,
+            mask_array,
+            False,  # extend mask
+            star_cat,
+        )
 
     mm = (
         (exposure.variance.array < 1e4) &
@@ -447,13 +453,17 @@ def prepare_data(
                 )
                 * noise_std
             )
+        if star_cat is not None:
+            # Also do it for pure noise image
+            anacal.mask.mask_galaxy_image(
+                noise_array,
+                mask_array,
+                False,  # extend mask
+                star_cat,
+            )
     else:
         noise_array = None
 
-    if band is None:
-        base_column_name = None
-    else:
-        base_column_name = band + "_"
     if skyMap is not None:
         tractInfo = skyMap[tract]
         patchInfo = tractInfo[patch]
@@ -465,30 +475,20 @@ def prepare_data(
             detection = detection.copy().as_array()
         elif isinstance(detection, np.ndarray):
             detection = detection.copy()
-    blocks = get_blocks(
-        lsst_psf,
-        lsst_bbox,
-        exposure.mask,
-        pixel_scale,
-        npix,
-    )
 
     return {
         "pixel_scale": pixel_scale,
         "mag_zero": mag_zero,
         "noise_variance": noise_variance,
         "gal_array": gal_array,
-        "psf": psf,
+        "psf_array": psf_array,
         "mask_array": mask_array,
         "noise_array": noise_array,
-        "base_column_name": base_column_name,
         "begin_x": lsst_bbox.beginX,
         "begin_y": lsst_bbox.beginY,
         "wcs": wcs,
         "skyMap": skyMap,
         "tractInfo": tractInfo,
         "patchInfo": patchInfo,
-        "star_cat": star_cat,
         "detection": detection,
-        "blocks": blocks,
     }

@@ -183,7 +183,6 @@ class AnacalDetectPipe(PipelineTask):
             seed=seed,
             noise_corr=noise_corr,
             detection=None,
-            band=None,
             skyMap=skyMap,
             tract=tract,
             patch=patch,

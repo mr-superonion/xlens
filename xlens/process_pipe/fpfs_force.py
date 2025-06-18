@@ -30,7 +30,7 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import ConfigurableField, Field
+from lsst.pex.config import ConfigurableField, Field, FieldValidationError
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -76,7 +76,7 @@ class FpfsForcePipeConnections(
     )
     catalog = cT.Output(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}Coadd_anacal_force",
+        name="{coaddName}Coadd_fpfs_force",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -93,14 +93,20 @@ class FpfsForcePipeConfig(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
     )
-    psfCache = Field[int](
+    psf_cache = Field[int](
         doc="Size of PSF cache",
         default=100,
     )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
+    id_generator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
         super().validate()
+        if self.fpfs.sigma_arcsec1 < 0.0:
+            raise FieldValidationError(
+                self.fpfs.__class__.sigma_arcsec1,
+                self,
+                "sigma_arcsec1 in a wrong range",
+            )
 
     def setDefaults(self):
         super().setDefaults()
@@ -157,25 +163,24 @@ class FpfsForcePipe(PipelineTask):
         correlation_handles_dict: dict | None,
     ):
         assert isinstance(self.config, FpfsForcePipeConfig)
-        catalog = [joint_catalog]
+        catalog = []
         for band in exposure_handles_dict.keys():
             handle = exposure_handles_dict[band]
             exposure = handle.get()
-            exposure.getPsf().setCacheCapacity(self.config.psfCache)
+            exposure.getPsf().setCacheCapacity(self.config.psf_cache)
             if correlation_handles_dict is not None:
                 handle = correlation_handles_dict[band]
                 noise_corr = handle.get()
             else:
                 noise_corr = None
 
-            idGenerator = self.config.idGenerator.apply(handle.dataId)
-            seed = idGenerator.catalog_id
+            id_generator = self.config.id_generator.apply(handle.dataId)
+            seed = id_generator.catalog_id
             data = self.fpfs.prepare_data(
                 exposure=exposure,
                 seed=seed,
                 noise_corr=noise_corr,
                 detection=joint_catalog,
-                band=band,
             )
             cat = self.fpfs.run(**data)
             catalog.append(cat)
