@@ -5,10 +5,10 @@ import astropy
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
+from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
-from .base import MeasBaseTask
 
 
 class AnacalConfig(Config):
@@ -91,7 +91,7 @@ class AnacalConfig(Config):
         super().setDefaults()
 
 
-class AnacalTask(MeasBaseTask):
+class AnacalTask(Task):
     """Measure Fpfs FPFS observables"""
 
     _DefaultName = "AnacalTask"
@@ -124,11 +124,9 @@ class AnacalTask(MeasBaseTask):
         mag_zero: float,
         noise_variance: float,
         gal_array: NDArray,
-        psf: NDArray,
+        psf_array: NDArray,
         mask_array: NDArray,
         noise_array: NDArray | None,
-        base_column_name: str | None,
-        star_cat: NDArray | None = None,
         begin_x: int = 0,
         begin_y: int = 0,
         wcs: SkyWcs | None = None,
@@ -140,23 +138,6 @@ class AnacalTask(MeasBaseTask):
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
-
-        if mask_array is not None:
-            # Set the value inside star mask to zero
-            anacal.mask.mask_galaxy_image(
-                gal_array,
-                mask_array,
-                False,  # extend mask
-                star_cat,
-            )
-            if noise_array is not None:
-                # Also do it for pure noise image
-                anacal.mask.mask_galaxy_image(
-                    noise_array,
-                    mask_array,
-                    False,  # extend mask
-                    star_cat,
-                )
 
         ratio = 10.0 ** ((mag_zero - 30.0) / 2.5)
         task = anacal.task.Task(
@@ -176,7 +157,7 @@ class AnacalTask(MeasBaseTask):
 
         catalog = task.process_image(
             gal_array,
-            psf,
+            psf_array,
             variance=noise_variance,
             block_list=blocks,
             detection=detection,
@@ -220,8 +201,8 @@ class AnacalTask(MeasBaseTask):
         skyMap=None,
         tract: int = 0,
         patch: int = 0,
-        star_cat: NDArray | None = None,
         mask_array: NDArray | None = None,
+        star_cat: NDArray | None = None,
         detection: astropy.table.Table | None = None,
         **kwargs,
     ):
@@ -237,14 +218,13 @@ class AnacalTask(MeasBaseTask):
             (dict)
         """
         assert isinstance(self.config, AnacalConfig)
-        return utils.image.prepare_data(
+        data = utils.image.prepare_data(
             exposure=exposure,
             seed=seed,
             noiseId=self.config.noiseId,
             rotId=self.config.rotId,
             npix=self.config.npix,
             noise_corr=noise_corr,
-            band=band,
             do_noise_bias_correction=self.config.do_noise_bias_correction,
             badMaskPlanes=self.config.badMaskPlanes,
             skyMap=skyMap,
@@ -253,5 +233,13 @@ class AnacalTask(MeasBaseTask):
             star_cat=star_cat,
             mask_array=mask_array,
             detection=detection,
-            do_prepare_blocks=True,
         )
+        blocks = utils.image.get_blocks(
+            exposure.getPsf(),
+            exposure.getBBox(),
+            exposure.mask,
+            data["pixel_scale"],
+            self.config.npix,
+        )
+        data["blocks"] = blocks
+        return data

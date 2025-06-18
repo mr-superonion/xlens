@@ -24,18 +24,10 @@ tasks:
       anacal.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 
-  # SelectBiasTaskRanforest:
-  #   class: xlens.summary_pipe.selbias_ranforest_multiband.SelBiasRfMultibandPipe
-  #   config:
-  #     shape_name: "i_fpfs1_e1"
-  #     do_correct_selection_bias: True
-  #     mag_zero: 27.0
-  #     connections.dataType: force
-  #     connections.coaddName: sim
-  #     model_name: simple_sim_RF.pkl  # need to use absolute dir if run with bps
-
-  # SummaryRanForest:
-  #   class: xlens.summary_pipe.selbias_ranforest_multiband.SelBiasRfSummaryMultibandPipe
-  #   config:
-  #     connections.dataType: force
-  #     connections.coaddName: sim
+  FpfsForceTask:
+    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
+    config:
+      fpfs.use_average_psf: True
+      fpfs.sigma_arcsec1: 0.52
+      fpfs.do_noise_bias_correction: False
+      connections.coaddName: sim_0_rot0_
