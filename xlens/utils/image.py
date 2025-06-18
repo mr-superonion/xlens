@@ -24,6 +24,7 @@ from typing import Any, List
 
 import anacal
 import astropy
+from lsst.afw.detection import InvalidPsfError
 import lsst.geom as lsst_geom
 import numpy as np
 from lsst.afw.image import ExposureF, MaskX
@@ -218,25 +219,25 @@ def get_psf_array(
         for i in range(nx):
             xc = int(x_array[i])
             xim = xc - x_min
-            if mask_array is None:
-                this_psf = lsst_psf.computeImage(
-                    lsst_geom.Point2D(xc, yc)
-                ).getArray()
-                out = out + resize_array(this_psf, (npix, npix))
-                ncount += 1
-            else:
-                dx = 0
-                dy = 0
-                for _ in range(500):
-                    if mask_array[yim + dy, xim + dx] == 0:
+            if mask_array is not None:
+                if mask_array[yim, xim] == 0:
+                    try:
                         this_psf = lsst_psf.computeImage(
-                            lsst_geom.Point2D(xc + dx, yc + dy)
+                            lsst_geom.Point2D(xc, yc)
                         ).getArray()
                         out = out + resize_array(this_psf, (npix, npix))
                         ncount += 1
-                        break
-                    dx = np.random.randint(-10, 10)
-                    dy = np.random.randint(-10, 10)
+                    except InvalidPsfError:
+                        ncount = ncount
+            else:
+                try:
+                    this_psf = lsst_psf.computeImage(
+                        lsst_geom.Point2D(xc, yc)
+                    ).getArray()
+                    out = out + resize_array(this_psf, (npix, npix))
+                    ncount += 1
+                except InvalidPsfError:
+                    ncount = ncount
 
     out = out / ncount
     # cut out the boundary
@@ -245,83 +246,83 @@ def get_psf_array(
     return out
 
 
-def get_psf_object(
-    *,
-    lsst_psf,
-    lsst_bbox,
-    npix: int,
-    dg: int = 250,
-    lsst_mask: None | MaskX = None,
-):
-    """This function returns the average PSF model as numpy array
-    Args:
-    lsst_psf:  lsst PSF model
-    lsst_bbox: lsst boundary box
-    npix (int):  number of pixels for stamp
-    dg (int): patch size
-    lsst_mask (None | MaskX): mask object of LSST DM
-    """
-    # cut out the boundary
-    psf_rcut = npix // 2 - 4
+def get_blocks(lsst_psf, lsst_bbox, lsst_mask, pixel_scale, npix):
+    def make_circular_kernel(radius):
+        """Create a binary circular (disk-shaped) kernel."""
+        y, x = np.ogrid[-radius:radius+1, -radius:radius+1]
+        mask = x**2 + y**2 <= radius**2
+        return mask.astype(np.int16)
 
-    width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
-    # Get the minimum corner
     min_corner = lsst_bbox.getMin()
     # Get the x_min and y_min
     x_min = min_corner.getX()
     y_min = min_corner.getY()
+    width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
 
-    max_corner = lsst_bbox.getMax()
-    x_max = max_corner.getX()
-    y_max = max_corner.getY()
-
-    width = (width // dg) * dg - 1
-    height = (height // dg) * dg - 1
     if lsst_mask is not None:
         if "INEXACT_PSF" in lsst_mask.getMaskPlaneDict().keys():
             bitv = lsst_mask.getPlaneBitMask("INEXACT_PSF")
             mask_array = bitv & lsst_mask.array
+            mask_array = (mask_array > 0).astype(np.int16)
         else:
-            mask_array = None
+            mask_array = np.zeros((height, width), dtype=np.int16)
     else:
-        mask_array = None
+        mask_array = np.zeros((height, width), dtype=np.int16)
+    radius = 5
+    kernel = make_circular_kernel(radius)
+    mask_array = anacal.mask.convolve_mask(mask_array, kernel)
 
-    # Calculate the central point
-    x_array = np.arange(x_min + 20, x_max - 20, dg, dtype=int)
-    y_array = np.arange(y_min + 20, y_max - 20, dg, dtype=int)
-    nx, ny = len(x_array), len(y_array)
-    out = np.zeros((ny, nx, npix, npix))
-    for j in range(ny):
-        yc = int(y_array[j])
-        yim = yc - y_min
-        for i in range(nx):
-            xc = int(x_array[i])
-            xim = xc - x_min
-            this_psf = None
-            if mask_array is None:
-                this_psf = lsst_psf.computeImage(
-                    lsst_geom.Point2D(xc, yc)
-                ).getArray()
-            else:
-                dx = 0
-                dy = 0
-                for _ in range(500):
-                    if mask_array[yim + dy, xim + dx] == 0:
-                        this_psf = lsst_psf.computeImage(
-                            lsst_geom.Point2D(xc + dx, yc + dy)
-                        ).getArray()
-                        break
-                    dx = np.random.randint(-10, 10)
-                    dy = np.random.randint(-10, 10)
-                if this_psf is None:
-                    this_psf = lsst_psf.computeImage(
-                        lsst_geom.Point2D(xc, yc)
-                    ).getArray()
-            this_psf = resize_array(this_psf, (npix, npix))
-            anacal.fpfs.base.truncate_square(this_psf, psf_rcut)
-            out[j, i] = this_psf
+    blocks = anacal.geometry.get_block_list(
+        img_ny=height,
+        img_nx=width,
+        block_nx=250,
+        block_ny=250,
+        block_overlap=80,
+        scale=pixel_scale,
+    )
 
-    return anacal.psf.GridPsf(x0=0, y0=0, dx=dg, dy=dg, model_array=out)
+    for bb in blocks:
+        x = max(min(bb.xcen, width - 15), 15)
+        y = max(min(bb.ycen, height - 15), 15)
+        found = False
+        for niter in range(6):
+            if found:
+                break
+            for dy in range(-niter, niter + 1):
+                if found:
+                    break
+                for dx in range(-niter, niter + 1):
+                    try:
+                        if mask_array[y+dy, x+dx] == 0:
+                            this_psf = lsst_psf.computeImage(
+                                lsst_geom.Point2D(
+                                    x_min + x + dx,
+                                    y_min + y + dy
+                                )
+                            ).getArray()
+                            bb.psf_array = resize_array(this_psf, (npix, npix))
+                            found = True
+                            break
+                    except InvalidPsfError:
+                        found = False
+
+        if bb.psf_array.size == 0:
+            found = False
+            for j in range(max(bb.ymin, 0), min(height, bb.ymax)):
+                if found:
+                    break
+                for i in range(max(bb.xmin, 0), min(width, bb.xmax)):
+                    try:
+                        if mask_array[j, i] == 0:
+                            this_psf = lsst_psf.computeImage(
+                                lsst_geom.Point2D(x_min + i, y_min + j)
+                            ).getArray()
+                            bb.psf_array = resize_array(this_psf, (npix, npix))
+                            found = True
+                            break
+                    except InvalidPsfError:
+                        found = False
+    return blocks
 
 
 def prepare_data(
@@ -334,20 +335,25 @@ def prepare_data(
     noise_corr: NDArray | None = None,
     band: str | None = None,
     do_noise_bias_correction: bool = True,
-    use_average_psf: bool = True,
     badMaskPlanes: List[str] = badMaskDefault,
     skyMap=None,
     tract: int = 0,
     patch: int = 0,
     star_cat: NDArray | None = None,
+    mask_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
+    do_prepare_blocks: bool = False,
     **kwargs,
 ):
     """Prepares the data from LSST exposure
     Args:
-    exposure (ExposureF):   LSST exposure
+    exposure (ExposureF): LSST exposure
     seed (int):  random seed
-    noise_corr (NDArray):  image noise correlation function (None)
+    noiseId (int): noise id
+    rotId (int): rotation id
+    npix (int): stamp size for PSF
+    noise_corr (NDArray): image noise correlation function (None)
+    band (str): band name (g, r, i, z, y)
 
     Returns:
         (dict)
@@ -355,16 +361,6 @@ def prepare_data(
     from .random import get_noise_seed, image_noise_base
 
     pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
-    noise_variance = np.nanmean(
-        exposure.variance.array[
-            (exposure.variance.array < 1e4) & (exposure.mask.array == 0)
-        ],
-    )
-    if noise_variance < 1e-12:
-        raise ValueError(
-            "the estimated image noise variance should be positive."
-        )
-    noise_std = np.sqrt(noise_variance)
     mag_zero = (
         np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()) / 0.4
     )
@@ -372,46 +368,52 @@ def prepare_data(
 
     lsst_bbox = exposure.getBBox()
     lsst_psf = exposure.getPsf()
-
-    if use_average_psf:
-        psf = np.asarray(
-            get_psf_array(
-                lsst_psf=lsst_psf,
-                lsst_bbox=lsst_bbox,
-                npix=npix,
-                dg=250,
-                lsst_mask=exposure.mask,
-            ),
-            dtype=np.float64,
-        )
-    else:
-        psf = get_psf_object(
+    psf = np.asarray(
+        get_psf_array(
             lsst_psf=lsst_psf,
             lsst_bbox=lsst_bbox,
             npix=npix,
-            dg=200,
+            dg=250,
             lsst_mask=exposure.mask,
-        )
+        ),
+        dtype=np.float64,
+    )
     gal_array = np.asarray(
         exposure.image.array,
         dtype=np.float64,
     )
-
-    bitValue = exposure.mask.getPlaneBitMask(badMaskPlanes)
-    mask_array = (
-        ((exposure.mask.array & bitValue) != 0)
-        | (
-            exposure.image.array
-            < (
-                -6.0
-                * np.sqrt(
-                    np.where(
-                        exposure.variance.array < 0, 0, exposure.variance.array
+    if mask_array is None:
+        bitv = exposure.mask.getPlaneBitMask(badMaskPlanes)
+        mask_array = (
+            ((exposure.mask.array & bitv) != 0)
+            | (
+                exposure.image.array
+                < (
+                    -6.0
+                    * np.sqrt(
+                        np.where(
+                            exposure.variance.array < 0,
+                            0, exposure.variance.array,
+                        )
                     )
                 )
             )
+        ).astype(np.int16)
+
+    mm = (
+        (exposure.variance.array < 1e4) &
+        (exposure.mask.array == 0) &
+        (mask_array == 0)
+    )
+    noise_variance = np.nanmean(
+        exposure.variance.array[mm],
+    )
+    del mm
+    if noise_variance < 1e-12:
+        raise ValueError(
+            "the estimated image noise variance should be positive."
         )
-    ).astype(np.int16)
+    noise_std = np.sqrt(noise_variance)
 
     if do_noise_bias_correction:
         noise_seed = (
@@ -464,6 +466,13 @@ def prepare_data(
             detection = detection.copy().as_array()
         elif isinstance(detection, np.ndarray):
             detection = detection.copy()
+    blocks = get_blocks(
+        lsst_psf,
+        lsst_bbox,
+        exposure.mask,
+        pixel_scale,
+        npix,
+    )
 
     return {
         "pixel_scale": pixel_scale,
@@ -482,4 +491,5 @@ def prepare_data(
         "patchInfo": patchInfo,
         "star_cat": star_cat,
         "detection": detection,
+        "blocks": blocks,
     }
