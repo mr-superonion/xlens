@@ -31,6 +31,7 @@ __all__ = [
 import logging
 from typing import Any
 
+from lsst.skymap import BaseSkyMap
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.pex.config import Field, FieldValidationError, ListField
@@ -52,13 +53,18 @@ class NeffMultibandPipeConnections(
         "version": "",
     },
 ):
-    src00 = cT.Input(
+    skyMap = cT.Input(
+        doc="SkyMap to use in processing",
+        name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
+        storageClass="SkyMap",
+        dimensions=("skymap",),
+    )
+    src = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
         name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
-
     summary = cT.Output(
         doc="Summary statistics",
         name="{coaddName}Coadd_anacal_neff_flux_{dataType}{version}",
@@ -104,15 +110,19 @@ class NeffMultibandPipeConfig(
     )
     flux_name = Field[str](
         doc="flux column name",
-        default="fpfs_m00",
+        default="fpfs_m",
     )
     dflux_name = Field[str](
         doc="flux's shear response column name",
-        default="fpfs_dm00",
+        default="fpfs_dm",
     )
     flux_cuts = ListField[float](
         doc="lower limit of flux",
         default=[6.0, 12.0, 18.0, 24.0, 30.0],
+    )
+    bound = Field[int](
+        doc="Sources to be removed if too close to boundary",
+        default=40,
     )
 
     def validate(self):
@@ -131,7 +141,7 @@ class NeffMultibandPipeConfig(
             raise FieldValidationError(
                 self.__class__.shear_value,
                 self,
-                "shear_value should be in [0.00, 0.10]",
+                "shear_value should be in [0., 0.10]",
             )
 
 
@@ -167,7 +177,11 @@ class NeffMultibandPipe(PipelineTask):
         assert isinstance(self.config, NeffMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
-        outputs = self.run(**inputs)
+        tract = butlerQC.quantum.dataId["tract"]
+        patch = butlerQC.quantum.dataId["patch"]
+        skyMap = inputs["skyMap"]
+        patch_info = skyMap[tract][patch]
+        outputs = self.run(inputs["src"], patch_info)
         butlerQC.put(outputs, outputRefs)
         return
 
@@ -182,6 +196,7 @@ class NeffMultibandPipe(PipelineTask):
         msk = (~np.isnan(src[fgname])) & (~np.isnan(src[egn]))
         src = src[msk]
         tmp = src[src[fname] > flux_min]
+        ngal = len(msk)
         ell = np.sum(tmp[en] * tmp[wname])
         res = np.sum(tmp[egn] * tmp[wname] + tmp[en] * tmp[wgname])
 
@@ -199,26 +214,33 @@ class NeffMultibandPipe(PipelineTask):
             del tmp
         else:
             res_sel = 0.0
-        return ell, (res + res_sel)
+        return ell, (res + res_sel), ngal
 
-    def run(self, src00, src01, src10, src11):
+    def run(self, src, patch_info):
         assert isinstance(self.config, NeffMultibandPipeConfig)
+        bbox = patch_info.getOuterBBox()
+        pixel_scale = (
+            patch_info.getWcs().getPixelScale().asDegrees() * 60  # arcmin
+        )
+        area = (
+            (bbox.getHeight() - 2.0 * self.config.bound) *
+            (bbox.getWidth() - 2.0 * self.config.bound) * pixel_scale**2.0
+        )  # arcmin
+
         ncuts = len(self.config.flux_cuts)
-        ee = np.zeros(ncuts)
-        rr = np.zeros(ncuts)
-
-        for ic, flux_min in enumerate(self.config.flux_cuts):
-            ell00, res00 = self.measure_shear_flux_cut(src00, flux_min)
-            ee[ic] = ell00
-            rr[ic] = res00
-
         data_type = [
             ("up", "f8"),
             ("down", "f8"),
+            ("ngal", "f8"),
+            ("area", "f8"),
         ]
         summary = np.zeros(ncuts, dtype=data_type)
-        summary["up"] = ee
-        summary["down"] = rr
+        for ic, flux_min in enumerate(self.config.flux_cuts):
+            ell, res, ngal = self.measure_shear_flux_cut(src, flux_min)
+            summary["up"][ic] = ell
+            summary["down"][ic] = res
+            summary["ngal"][ic] = ngal
+            summary["area"][ic] = area
         return Struct(summary=summary)
 
 
@@ -249,26 +271,10 @@ class NeffSummaryMultibandPipeConfig(
     pipelineConnections=NeffSummaryMultibandPipeConnections,
 ):
 
-    estimate_multiplicative_bias = Field[bool](
-        doc="Whether estimate multiplicative bias",
-        default=True,
-    )
-    shear_value = Field[float](
-        doc="absolute value of the shear",
-        default=0.02,
-    )
-
     def validate(self):
         super().validate()
         if len(self.connections.dataType) == 0:
             raise ValueError("connections.dataType missing")
-
-        if self.shear_value < 0.0 or self.shear_value > 0.10:
-            raise FieldValidationError(
-                self.__class__.shear_value,
-                self,
-                "shear_value should be in [0.00, 0.10]",
-            )
 
 
 class NeffSummaryMultibandPipe(PipelineTask):
@@ -287,38 +293,30 @@ class NeffSummaryMultibandPipe(PipelineTask):
             config=config, log=log, initInputs=initInputs, **kwargs
         )
         assert isinstance(self.config, NeffSummaryMultibandPipeConfig)
-        self.svalue = self.config.shear_value
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, NeffSummaryMultibandPipeConfig)
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
-        tract = butlerQC.quantum.dataId["tract"]
-        patch = butlerQC.quantum.dataId["patch"]
-        skyMap = inputs["skyMap"]
-        self.run(
-            summary_list=input["summary_list"], patch_info=skyMap[tract][patch]
-        )
+        self.run(**inputs)
         return
 
-    def run(self, *, summary_list, patch_info):
+    def run(self, *, summary_list):
         assert isinstance(self.config, NeffSummaryMultibandPipeConfig)
-        bbox = patch_info.getOuterBBox()
-        pixel_scale = (
-            patch_info.getWcs().getPixelScale().asDegrees() * 60  # arcmin
-        )
-        area = bbox.getHeight() * bbox.getWidth() * pixel_scale**2.0
         up = []
         down = []
+        ngal = []
         for res in summary_list:
             res = res.get()
-            up.append(np.array(res["up1"]))
+            up.append(np.array(res["up"]))
             down.append(np.array(res["down"]))
+            ngal.append(np.array(res["ngal"]))
+            area = res["area"][0]
         up = np.vstack(up)
         down = np.vstack(down)
-        denom = np.average(down, axis=0)
-        std = np.std(up) / denom
+        ngal = np.vstack(ngal)
+        std = np.std(up / down, axis=0)
         neff = (0.26 / std) ** 2.0 / area
         print("neff: ", neff)
         return
