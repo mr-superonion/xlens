@@ -163,7 +163,19 @@ class FpfsForcePipe(PipelineTask):
         correlation_handles_dict: dict | None,
     ):
         assert isinstance(self.config, FpfsForcePipeConfig)
-        catalog = []
+
+        if joint_catalog is not None:
+            anacal_colnames = [
+                "x1", "x2",
+                "flux", "dflux_dg1", "dflux_dg2",
+                "wsel", "dwsel_dg1", "dwsel_dg2",
+            ]
+            cat = rfn.repack_fields(
+                joint_catalog[anacal_colnames]
+            )
+            catalog = [cat]
+        else:
+            catalog = []
         for band in exposure_handles_dict.keys():
             handle = exposure_handles_dict[band]
             exposure = handle.get()
