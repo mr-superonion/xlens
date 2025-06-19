@@ -16,6 +16,7 @@ tasks:
     config:
       anacal.num_epochs: 3
       anacal.do_noise_bias_correction: False
+      anacal.validate_psf: True
       connections.coaddName: sim_0_rot0_
 
   AnacalForceTask:

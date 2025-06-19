@@ -7,6 +7,9 @@ from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
+from lsst.afw.detection import InvalidPsfError
+from lsst.geom import Point2D
+import numpy as np
 
 from .. import utils
 
@@ -39,6 +42,10 @@ class AnacalConfig(Config):
     force_center = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
         default=True,
+    )
+    validate_psf = Field[bool](
+        doc="Whether validating PSF",
+        default=False,
     )
     p_min = Field[float](
         doc="peak detection threshold",
@@ -134,6 +141,7 @@ class AnacalTask(Task):
         tractInfo=None,
         patchInfo=None,
         detection: NDArray | None,
+        lsst_psf=None,
         blocks,
         **kwargs,
     ):
@@ -168,6 +176,24 @@ class AnacalTask(Task):
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
         catalog["x1_det"] = catalog["x1_det"] + begin_x * pixel_scale
         catalog["x2_det"] = catalog["x2_det"] + begin_y * pixel_scale
+        if self.config.validate_psf and (lsst_psf is not None):
+            indexes = []
+            for ic, cc in enumerate(catalog):
+                try:
+                    ep = np.abs(
+                        1 - np.sum(lsst_psf.computeImage(
+                            Point2D(
+                                cc["x1"] / pixel_scale,
+                                cc["x2"] / pixel_scale,
+                            )
+                        ).getArray())
+                    )
+                    if ep < 1e-2:
+                        indexes.append(ic)
+                except InvalidPsfError:
+                    pass
+            catalog = catalog[indexes]
+
         if wcs is not None:
             ra, dec = wcs.pixelToSkyArray(
                 catalog["x1"] / pixel_scale,
@@ -242,4 +268,8 @@ class AnacalTask(Task):
             self.config.npix,
         )
         data["blocks"] = blocks
+        if self.config.validate_psf:
+            data["lsst_psf"] = exposure.getPsf()
+        else:
+            data["lsst_psf"] = None
         return data
