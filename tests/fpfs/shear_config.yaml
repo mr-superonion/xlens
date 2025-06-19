@@ -74,11 +74,11 @@ tasks:
       flux_name: "fpfs_m00"
       dflux_name: "fpfs_dm00"
       do_correct_selection_bias: True
-      connections.dataType: joint
+      connections.dataType: anacal_joint
       connections.coaddName: sim
 
   Summary:
     class: xlens.summary_pipe.selbias_flux_multiband.SelBiasSummaryMultibandPipe
     config:
-      connections.dataType: joint
+      connections.dataType: anacal_joint
       connections.coaddName: sim
