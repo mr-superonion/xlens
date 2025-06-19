@@ -55,28 +55,28 @@ class MatchBiasMultibandPipeConnections(
 ):
     src00 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_0_rot0_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src01 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot1_Coadd_anacal_{dataType}",
+        name="{coaddName}_0_rot1_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src10 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_1_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_1_rot0_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src11 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_1_rot1_Coadd_anacal_{dataType}",
+        name="{coaddName}_1_rot1_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
