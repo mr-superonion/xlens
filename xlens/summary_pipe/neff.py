@@ -61,7 +61,7 @@ class NeffMultibandPipeConnections(
     )
     src = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_0_rot0_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
