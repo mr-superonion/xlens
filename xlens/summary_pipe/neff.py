@@ -31,7 +31,6 @@ __all__ = [
 import logging
 from typing import Any
 
-from lsst.skymap import BaseSkyMap
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.pex.config import Field, FieldValidationError, ListField
@@ -41,6 +40,7 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
     Struct,
 )
+from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
 

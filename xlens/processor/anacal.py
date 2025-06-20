@@ -2,14 +2,14 @@ from typing import Any
 
 import anacal
 import astropy
+import numpy as np
+from lsst.afw.detection import InvalidPsfError
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
+from lsst.geom import Point2D
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
-from lsst.afw.detection import InvalidPsfError
-from lsst.geom import Point2D
-import numpy as np
 
 from .. import utils
 
