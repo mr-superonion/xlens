@@ -28,11 +28,11 @@ __all__ = [
 import logging
 import os
 from typing import Any
-from numpy.typing import NDArray
 
 import fitsio
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
+from lsst.pex.config import Field
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -41,8 +41,8 @@ from lsst.pipe.base import (
 )
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
-from lsst.pex.config import Field
 from numpy.lib import recfunctions as rfn
+from numpy.typing import NDArray
 from scipy.spatial import KDTree
 
 dm_colnames = [

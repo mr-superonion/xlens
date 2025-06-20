@@ -24,9 +24,9 @@ from typing import Any, List
 
 import anacal
 import astropy
-from lsst.afw.detection import InvalidPsfError
 import lsst.geom as lsst_geom
 import numpy as np
+from lsst.afw.detection import InvalidPsfError
 from lsst.afw.image import ExposureF, MaskX
 from numpy.typing import NDArray
 
