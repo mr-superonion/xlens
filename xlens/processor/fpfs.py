@@ -207,10 +207,12 @@ class FpfsMeasurementTask(Task):
             (dict)
         """
         assert isinstance(self.config, FpfsMeasurementConfig)
+        lsst_bbox = exposure.getBBox()
 
         if not self.config.use_average_psf:
             psf_object = utils.image.LsstPsf(
-                psf=exposure.getPsf(), npix=self.config.npix
+                psf=exposure.getPsf(), npix=self.config.npix,
+                lsst_bbox=lsst_bbox,
             )
         else:
             psf_object = None
