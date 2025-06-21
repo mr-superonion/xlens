@@ -162,8 +162,8 @@ class FpfsMeasurementTask(Task):
                 ('mask_value', np.int32),
             ])
             det = np.zeros(len(detection), dtype=fpfs_peaks_dtype)
-            det["y"] = detection["x2_det"] / pixel_scale - begin_y
             det["x"] = detection["x1_det"] / pixel_scale - begin_x
+            det["y"] = detection["x2_det"] / pixel_scale - begin_y
             det["is_peak"] = 1
             det["mask_value"] = 0
         else:

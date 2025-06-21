@@ -68,7 +68,7 @@ class FpfsForcePipeConnections(
     )
     noise_corr = cT.Input(
         doc="noise correlation function",
-        name="{coaddName}Coadd_systematics_noisecorr",
+        name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
@@ -94,11 +94,11 @@ class FpfsForcePipeConfig(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
     )
-    psf_cache = Field[int](
+    psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
     )
-    id_generator = SkyMapIdGeneratorConfig.make_field()
+    idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
         super().validate()
@@ -180,7 +180,7 @@ class FpfsForcePipe(PipelineTask):
         for band in exposure_handles_dict.keys():
             handle = exposure_handles_dict[band]
             exposure = handle.get()
-            exposure.getPsf().setCacheCapacity(self.config.psf_cache)
+            exposure.getPsf().setCacheCapacity(self.config.psfCache)
             if correlation_handles_dict is not None:
                 noise_corr = correlation_handles_dict[band].get().getArray()
                 variance = np.amax(noise_corr)
@@ -190,8 +190,9 @@ class FpfsForcePipe(PipelineTask):
                 self.log.debug("With correlation, variance:", variance)
             else:
                 noise_corr = None
-            id_generator = self.config.id_generator.apply(handle.dataId)
-            seed = id_generator.catalog_id
+
+            idGenerator = self.config.idGenerator.apply(handle.dataId)
+            seed = idGenerator.catalog_id
             data = self.fpfs.prepare_data(
                 exposure=exposure,
                 seed=seed,
@@ -201,6 +202,6 @@ class FpfsForcePipe(PipelineTask):
             )
             cat = self.fpfs.run(**data)
             catalog.append(cat)
-            del exposure
+            del exposure, data
         catalog = rfn.merge_arrays(catalog, flatten=True)
         return Struct(catalog=catalog)
