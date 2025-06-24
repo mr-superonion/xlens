@@ -1,53 +1,31 @@
-import astropy.io.fits as pyfits
+import fitsio
 import healpy as hp
 import numpy as np
-from astropy.table import Table
+from numpy.lib import recfunctions as rfn
 
 
-def read_dm_catalog(filename):
-    """From LSST pipeline data to HSC catalog data
+def read_catalog(filename):
+    with fitsio.FITS(filename) as f:
+        data = f[1].read()  # Structured NumPy array
+        colnames = data.dtype.names
 
-    Args:
-    filename (str):     fits filename to read
+        if "flags" not in colnames:
+            return data  # No flags column; return as-is
+        flags = data["flags"]
+        n_flag = flags.shape[1]
 
-    Returns:
-    catalog (ndarray): the prepared catalog for a subfield
-    """
+        # Only now read the header
+        header = f[1].read_header()
 
-    # Read the catalog data
-    catalog = Table.read(filename)
-    col_names = catalog.colnames
+        # Extract new fields
+        new_fields = []
+        for i in range(n_flag):
+            name = header.get(f"TFLAG{i+1}", f"flag_{i}")
+            new_fields.append((name, flags[:, i]))
 
-    # Load the header to get proper name of flags
-    header = pyfits.getheader(filename, 1)
-    n_flag = catalog["flags"].shape[1]
-    for i in range(n_flag):
-        catalog[header["TFLAG%s" % (i + 1)]] = catalog["flags"][:, i]
-
-    # Then, apply mask for permissive cuts
-    mask = (
-        (~(catalog["base_SdssCentroid_flag"]))
-        & (~catalog["ext_shapeHSM_HsmShapeRegauss_flag"])
-        & (catalog["base_ClassificationExtendedness_value"] > 0)
-        & (~np.isnan(catalog["modelfit_CModel_instFlux"]))
-        & (~np.isnan(catalog["modelfit_CModel_instFluxErr"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmShapeRegauss_resolution"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmPsfMoments_xx"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmPsfMoments_xy"]))
-        & (~np.isnan(catalog["base_Variance_value"]))
-        & (~np.isnan(catalog["modelfit_CModel_instFlux"]))
-        & (~np.isnan(catalog["modelfit_CModel_instFluxErr"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmShapeRegauss_resolution"]))
-        & (catalog["deblend_nChild"] == 0)
-    )
-    catalog = catalog[mask]
-    if len(catalog) == 0:
-        return None
-    catalog = catalog[col_names]
-    # Add column to make a WL flag for the simulation data:
-    catalog["dm_hsc_wl_flag"] = get_wl_cuts(catalog)
-    return catalog
+        names, arrays = zip(*new_fields)
+        result = rfn.append_fields(data, names, arrays, usemask=False)
+        return result
 
 
 def get_pixel_cuts(catalog):
