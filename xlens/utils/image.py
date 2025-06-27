@@ -396,14 +396,13 @@ def prepare_data(
                 )
             )
         ).astype(np.int16)
-    if star_cat is not None:
-        # Set the value inside star mask to zero
-        anacal.mask.mask_galaxy_image(
-            gal_array,
-            mask_array,
-            False,  # extend mask
-            star_cat,
-        )
+    # Set the value inside star mask to zero
+    anacal.mask.mask_galaxy_image(
+        gal_array,
+        mask_array,
+        False,  # extend mask
+        star_cat,
+    )
 
     mm = (
         (exposure.variance.array < 1e4) &
@@ -453,14 +452,13 @@ def prepare_data(
                 )
                 * noise_std
             )
-        if star_cat is not None:
-            # Also do it for pure noise image
-            anacal.mask.mask_galaxy_image(
-                noise_array,
-                mask_array,
-                False,  # extend mask
-                star_cat,
-            )
+        # Also do it for pure noise image
+        anacal.mask.mask_galaxy_image(
+            noise_array,
+            mask_array,
+            False,  # extend mask
+            star_cat,
+        )
     else:
         noise_array = None
 

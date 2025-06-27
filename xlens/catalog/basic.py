@@ -28,6 +28,47 @@ def read_catalog(filename):
         return result
 
 
+def get_shear_regauss(catalog, mbias, msel=0.0, asel=0.0):
+    """Returns the regauss shear in data *on single galaxy level*.
+    Note: shape weight should be added when caluculating ensemble average.
+
+    Args:
+        catalog (ndarray):    input hsc catalog
+        mbias (float):      average multiplicative bias [m+dm2]
+        msel (float):       selection multiplicative bias for the sample
+        asel (float):       selection additive bias
+        Returns:
+        g1 (ndarray):       the first component of shear
+        g2 (ndarray):       the second component of shear
+    """
+    if "i_hsmshaperegauss_derived_weight" in catalog.dtype.names:
+        wname = "i_hsmshaperegauss_derived_weight"
+        erms_name = "i_hsmshaperegauss_derived_rms_e"
+        e1name = "i_hsmshaperegauss_e1"
+        e2name = "i_hsmshaperegauss_e2"
+        c1name = "i_hsmshaperegauss_derived_shear_bias_c1"
+        c2name = "i_hsmshaperegauss_derived_shear_bias_c2"
+    elif "ishape_hsm_regauss_derived_shape_weight" in catalog.dtype.names:
+        wname = "ishape_hsm_regauss_derived_shape_weight"
+        erms_name = "ishape_hsm_regauss_derived_rms_e"
+        e1name = "ishape_hsm_regauss_e1"
+        e2name = "ishape_hsm_regauss_e2"
+        c1name = "ishape_hsm_regauss_derived_shear_bias_c1"
+        c2name = "ishape_hsm_regauss_derived_shear_bias_c2"
+    else:
+        raise ValueError("Cannot process the catalog")
+
+    wsum = np.sum(catalog[wname])
+    eres = 1.0 - np.sum(catalog[erms_name] ** 2.0 * catalog[wname]) / wsum
+    g1 = (catalog[e1name] / 2.0 / eres - catalog[c1name]) / (1.0 + mbias)
+    g2 = (catalog[e2name] / 2.0 / eres - catalog[c2name]) / (1.0 + mbias)
+    e1pg, e2pg = get_psf_ellip(catalog)  # PSF shape
+    # correcting for selection bias
+    g1 = (g1 - e1pg * asel) / (1.0 + msel)
+    g2 = (g2 - e2pg * asel) / (1.0 + msel)
+    return g1, g2
+
+
 def get_pixel_cuts(catalog):
     """Returns pixel cuts"""
     mask = (
