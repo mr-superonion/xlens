@@ -413,7 +413,7 @@ def prepare_data(
         exposure.variance.array[mm],
     )
     del mm
-    if noise_variance < 1e-12:
+    if (noise_variance < 1e-10) | (noise_variance > 1e3):
         raise ValueError(
             "the estimated image noise variance should be positive."
         )
