@@ -44,15 +44,13 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 from scipy.spatial import KDTree
+from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
 
 dm_colnames = [
-    "deblend_nChild",
-    "deblend_blendedness",
-    "deblend_peak_center_x",
-    "deblend_peak_center_y",
+    "base_SdssCentroid_x",
+    "base_SdssCentroid_y",
     "base_Blendedness_abs",
-    "base_CircularApertureFlux_3_0_instFlux",
-    "base_CircularApertureFlux_3_0_instFluxErr",
     "base_GaussianFlux_instFlux",
     "base_GaussianFlux_instFluxErr",
     "base_PsfFlux_instFlux",
@@ -61,14 +59,9 @@ dm_colnames = [
     "modelfit_CModel_instFlux",
     "modelfit_CModel_instFluxErr",
     "base_ClassificationExtendedness_value",
-    "base_FootprintArea_value",
     'ext_shapeHSM_HsmPsfMoments_xx',
     'ext_shapeHSM_HsmPsfMoments_yy',
     'ext_shapeHSM_HsmPsfMoments_xy',
-    'ext_shapeHSM_HigherOrderMomentsPSF_03',
-    'ext_shapeHSM_HigherOrderMomentsPSF_12',
-    'ext_shapeHSM_HigherOrderMomentsPSF_21',
-    'ext_shapeHSM_HigherOrderMomentsPSF_30',
     'ext_shapeHSM_HigherOrderMomentsPSF_04',
     'ext_shapeHSM_HigherOrderMomentsPSF_13',
     'ext_shapeHSM_HigherOrderMomentsPSF_22',
@@ -178,8 +171,10 @@ class matchPipe(PipelineTask):
             dm_catalog = []
             for band in dm_handles_dict.keys():
                 handle = dm_handles_dict[band]
+                cat = handle.get()
+                mask = cat["detect_isPrimary"]
                 cat = rfn.repack_fields(
-                    handle.get().as_array()[dm_colnames]
+                    cat.asAstropy().as_array()[dm_colnames][mask]
                 )
                 map_dict = {name: f"{band}_" + name for name in dm_colnames}
                 dm_catalog.append(rfn.rename_fields(cat, map_dict))
@@ -207,48 +202,68 @@ class matchPipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
         return
 
+    def match(self, ana_coords, mrc_coords):
+        thres = 6
+        mrc_tree = KDTree(mrc_coords)
+        match_dist, match_ndx = mrc_tree.query(ana_coords)
+        # Filter on distance
+        mask = match_dist < thres
+        ana_idx = np.flatnonzero(mask)
+        mrc_idx = match_ndx[mask]
+
+        # Count how many times each mrc is matched
+        _, mrc_counts = np.unique(mrc_idx, return_counts=True)
+        repeated_mrc = set(mrc_idx[mrc_counts > 1])
+
+        # Filter to unique one-to-one matches
+        is_unique = np.array([m not in repeated_mrc for m in mrc_idx])
+        uniq_ana_idx = ana_idx[is_unique]
+        uniq_mrc_idx = mrc_idx[is_unique]
+
+        # Get remaining unmatched indices
+        all_ana = set(range(len(ana_coords)))
+        all_mrc = set(range(len(mrc_coords)))
+
+        used_ana = set(uniq_ana_idx)
+        used_mrc = set(uniq_mrc_idx)
+
+        remain_ana = np.array(sorted(all_ana - used_ana))
+        remain_mrc = np.array(sorted(all_mrc - used_mrc))
+
+        if len(remain_ana) > 0 and len(remain_mrc) > 0:
+            # Compute distance matrix (only for remaining entries)
+            dist_matrix = cdist(ana_coords[remain_ana], mrc_coords[remain_mrc])
+            dist_matrix[dist_matrix > thres] = np.inf
+            # Apply Hungarian algorithm
+            row, col = linear_sum_assignment(dist_matrix)
+            # Filter only valid assignments
+            valid = dist_matrix[row, col] < np.inf
+            src_idx2 = remain_ana[row[valid]]
+            mrc_idx2 = remain_mrc[col[valid]]
+        else:
+            src_idx2 = np.array([], dtype=int)
+            mrc_idx2 = np.array([], dtype=int)
+
+        final_src_idx = np.concatenate([uniq_ana_idx, src_idx2])
+        final_mrc_idx = np.concatenate([uniq_mrc_idx, mrc_idx2])
+        return final_src_idx, final_mrc_idx
+
     def merge_dm(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
         assert isinstance(self.config, matchPipeConfig)
-        # Apply quality mask to DM
-        msk = (
-            mrc["i_deblend_nChild"] == 0 &
-            ~np.isnan(mrc["i_ext_shapeHSM_HsmPsfMoments_xx"]) &
-            ~np.isnan(mrc["i_ext_shapeHSM_HsmPsfMoments_xy"]) &
-            ~np.isnan(mrc["i_ext_shapeHSM_HsmPsfMoments_yy"])
-        )
-        mrc = mrc[msk]
         magz = self.config.mag_zero
         mag_mrc = magz - 2.5 * np.log10(mrc["i_base_GaussianFlux_instFlux"])
-        x_mrc = np.array(mrc["i_deblend_peak_center_x"])
-        y_mrc = np.array(mrc["i_deblend_peak_center_y"])
-
-        # Magnitude from src
-        mag = magz - 2.5 * np.log10(src["flux"])
-
+        mrc = mrc[mag_mrc < 27.0]
+        x_mrc = np.array(mrc["base_SdssCentroid_x"])
+        y_mrc = np.array(mrc["base_SdssCentroid_y"])
         # Coordinates
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
         ana_coords = np.vstack(
             (src["x1"] / pixel_scale, src["x2"] / pixel_scale)
         ).T
-        ana_tree = KDTree(ana_coords)
-        match_dist, match_ndx = ana_tree.query(mrc_coords)
-        mag_diffs = mag[match_ndx] - mag_mrc
+        src_idx, mrc_idx = self.match(ana_coords, mrc_coords)
 
-        # Filter on distance
-        mask = match_dist < 6
-        ana_idx = match_ndx[mask]
-        mrc_idx = np.flatnonzero(mask)
-        abs_diffs = np.abs(mag_diffs[mask])
-
-        # Resolve duplicates by lowest magnitude difference
-        order = np.lexsort((abs_diffs, ana_idx))
-        ana_idx_sorted = ana_idx[order]
-        mrc_idx_sorted = mrc_idx[order]
-        _, first = np.unique(ana_idx_sorted, return_index=True)
-
-        final_src = src[ana_idx_sorted[first]]
-        final_mrc = mrc[mrc_idx_sorted[first]]
-
+        final_src = src[src_idx]
+        final_mrc = mrc[mrc_idx]
         # Combine fields
         combined = rfn.merge_arrays(
             (final_src, final_mrc),
