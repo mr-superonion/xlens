@@ -66,67 +66,19 @@ tasks:
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot1_
 
-  ForceTask1:
-    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
-    config:
-      fpfs.sigma_arcsec1: 0.52
-      fpfs.use_average_psf: True
-      fpfs.do_noise_bias_correction: False
-      connections.coaddName: sim_0_rot0_
-
-  ForceTask2:
-    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
-    config:
-      fpfs.sigma_arcsec1: 0.52
-      fpfs.use_average_psf: True
-      fpfs.do_noise_bias_correction: False
-      connections.coaddName: sim_0_rot1_
-
-  ForceTask3:
-    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
-    config:
-      fpfs.sigma_arcsec1: 0.52
-      fpfs.use_average_psf: True
-      fpfs.do_noise_bias_correction: False
-      connections.coaddName: sim_1_rot0_
-
-  ForceTask4:
-    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
-    config:
-      fpfs.sigma_arcsec1: 0.52
-      fpfs.use_average_psf: True
-      fpfs.do_noise_bias_correction: False
-      connections.coaddName: sim_1_rot1_
-
   SelectBiasTask:
     class: xlens.summary_pipe.selbias_flux_multiband.SelBiasMultibandPipe
     config:
-      shape_name: "i_fpfs1_e1"
-      dshape_name: "i_fpfs1_de1"
-      flux_name: "i_fpfs1_m00"
-      dflux_name: "i_fpfs1_dm00"
+      shape_name: "fpfs_e1"
+      dshape_name: "fpfs_de1"
+      flux_name: "fpfs_m00"
+      dflux_name: "fpfs_dm00"
       do_correct_selection_bias: True
-      connections.dataType: force
+      connections.dataType: anacal_joint
       connections.coaddName: sim
 
   Summary:
     class: xlens.summary_pipe.selbias_flux_multiband.SelBiasSummaryMultibandPipe
     config:
-      connections.dataType: force
+      connections.dataType: anacal_joint
       connections.coaddName: sim
-
-  # SelectBiasTaskRanforest:
-  #   class: xlens.summary_pipe.selbias_ranforest_multiband.SelBiasRfMultibandPipe
-  #   config:
-  #     shape_name: "i_fpfs1_e1"
-  #     do_correct_selection_bias: True
-  #     mag_zero: 27.0
-  #     connections.dataType: force
-  #     connections.coaddName: sim
-  #     model_name: simple_sim_RF.pkl  # need to use absolute dir if run with bps
-
-  # SummaryRanForest:
-  #   class: xlens.summary_pipe.selbias_ranforest_multiband.SelBiasRfSummaryMultibandPipe
-  #   config:
-  #     connections.dataType: force
-  #     connections.coaddName: sim

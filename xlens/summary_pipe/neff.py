@@ -31,7 +31,6 @@ __all__ = [
 import logging
 from typing import Any
 
-from lsst.skymap import BaseSkyMap
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.pex.config import Field, FieldValidationError, ListField
@@ -41,6 +40,7 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
     Struct,
 )
+from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
 
@@ -61,7 +61,7 @@ class NeffMultibandPipeConnections(
     )
     src = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_0_rot0_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )

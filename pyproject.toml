@@ -50,7 +50,7 @@ line_length = 80
 [tool.flake8]
 ignore = [
     "N801", "N802", "N803", "N806", "N815", "N816", "W503", "W504",
-    "E133", "E203", "E303", "E731", "E226", "E228", "N812"
+    "E133", "E203", "E303", "E731", "E226", "E228", "N812", "N815"
 ]
 exclude = [".git", "__pycache__", "docs", "build", "dist"]
 max-line-length = 80

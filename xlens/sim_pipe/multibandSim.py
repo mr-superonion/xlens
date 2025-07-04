@@ -125,12 +125,12 @@ class MultibandSimShearPipe(PipelineTask):
         assert butlerQC.quantum.dataId is not None
         tract = butlerQC.quantum.dataId["tract"]
         patch = butlerQC.quantum.dataId["patch"]
-        if self.pt_data is not None:
-            patch_list = self.pt_data[self.pt_data["tract"] == tract]["patch"]
-            if patch not in patch_list:
-                print(patch)
-                print("failed..............")
-                return
+        # if self.pt_data is not None:
+        #     patch_list = self.pt_data[self.pt_data["tract"] == tract]["patch"]
+        #     if patch not in patch_list:
+        #         print(patch)
+        #         print("failed..............")
+        #         return
 
         inputs = butlerQC.get(inputRefs)
 

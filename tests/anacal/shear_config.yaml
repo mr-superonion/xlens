@@ -2,7 +2,7 @@ description: The pipeline specialized for testing image simulation.
 instrument: lsst.obs.subaru.HyperSuprimeCam
 
 tasks:
-  MutibandSim:
+  MutibandSim1:
     class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
     config:
       simulator.survey_name: hsc
@@ -11,31 +11,137 @@ tasks:
       connections.mode: 0
       connections.rotId: 0
 
-  AnacalDetectTask:
+  MutibandSim2:
+    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
+    config:
+      simulator.survey_name: hsc
+      simulator.mode: 0
+      simulator.rotId: 1
+      connections.mode: 0
+      connections.rotId: 1
+
+  MutibandSim3:
+    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
+    config:
+      simulator.survey_name: hsc
+      simulator.mode: 1
+      simulator.rotId: 0
+      connections.mode: 1
+      connections.rotId: 0
+
+  MutibandSim4:
+    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
+    config:
+      simulator.survey_name: hsc
+      simulator.mode: 1
+      simulator.rotId: 1
+      connections.mode: 1
+      connections.rotId: 1
+
+  AnacalDetectTask1:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
       anacal.num_epochs: 3
       anacal.do_noise_bias_correction: False
+      anacal.validate_psf: True
       connections.coaddName: sim_0_rot0_
 
-  AnacalForceTask:
+  AnacalDetectTask2:
+    class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
+    config:
+      anacal.num_epochs: 3
+      anacal.do_noise_bias_correction: False
+      anacal.validate_psf: True
+      connections.coaddName: sim_0_rot1_
+
+  AnacalDetectTask3:
+    class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
+    config:
+      anacal.num_epochs: 3
+      anacal.do_noise_bias_correction: False
+      anacal.validate_psf: True
+      connections.coaddName: sim_1_rot0_
+
+  AnacalDetectTask4:
+    class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
+    config:
+      anacal.num_epochs: 3
+      anacal.do_noise_bias_correction: False
+      anacal.validate_psf: True
+      connections.coaddName: sim_1_rot1_
+
+  AnacalForceTask1:
     class: xlens.process_pipe.anacal_force.AnacalForcePipe
     config:
       anacal.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 
-  # SelectBiasTaskRanforest:
-  #   class: xlens.summary_pipe.selbias_ranforest_multiband.SelBiasRfMultibandPipe
-  #   config:
-  #     shape_name: "i_fpfs1_e1"
-  #     do_correct_selection_bias: True
-  #     mag_zero: 27.0
-  #     connections.dataType: force
-  #     connections.coaddName: sim
-  #     model_name: simple_sim_RF.pkl  # need to use absolute dir if run with bps
+  FpfsForceTask1:
+    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
+    config:
+      fpfs.use_average_psf: False
+      fpfs.sigma_arcsec1: 0.52
+      fpfs.do_noise_bias_correction: False
+      connections.coaddName: sim_0_rot0_
 
-  # SummaryRanForest:
-  #   class: xlens.summary_pipe.selbias_ranforest_multiband.SelBiasRfSummaryMultibandPipe
-  #   config:
-  #     connections.dataType: force
-  #     connections.coaddName: sim
+  FpfsForceTask2:
+    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
+    config:
+      fpfs.use_average_psf: False
+      fpfs.sigma_arcsec1: 0.52
+      fpfs.do_noise_bias_correction: False
+      connections.coaddName: sim_0_rot1_
+
+  FpfsForceTask3:
+    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
+    config:
+      fpfs.use_average_psf: False
+      fpfs.sigma_arcsec1: 0.52
+      fpfs.do_noise_bias_correction: False
+      connections.coaddName: sim_1_rot0_
+
+  FpfsForceTask4:
+    class: xlens.process_pipe.fpfs_force.FpfsForcePipe
+    config:
+      fpfs.use_average_psf: False
+      fpfs.sigma_arcsec1: 0.52
+      fpfs.do_noise_bias_correction: False
+      connections.coaddName: sim_1_rot1_
+
+  SelectBiasTask:
+    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasMultibandPipe
+    config:
+      shape_name: "fpfs_e1"
+      dshape_name: "fpfs_de1"
+      flux_name: "flux"
+      dflux_name: "dflux"
+      weight_name: "wsel"
+      dweight_name: "dwsel"
+      do_correct_selection_bias: True
+      connections.dataType: anacal_joint
+      connections.coaddName: sim
+
+  Summary:
+    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasSummaryMultibandPipe
+    config:
+      connections.dataType: fpfs_force
+      connections.coaddName: sim
+
+  SelectBiasTask2:
+    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasMultibandPipe
+    config:
+      shape_name: "i_fpfs1_e1"
+      dshape_name: "i_fpfs1_de1"
+      flux_name: "flux"
+      dflux_name: "dflux"
+      weight_name: "wsel"
+      dweight_name: "dwsel"
+      do_correct_selection_bias: True
+      connections.dataType: fpfs_force
+      connections.coaddName: sim
+
+  Summary2:
+    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasSummaryMultibandPipe
+    config:
+      connections.dataType: fpfs_force
+      connections.coaddName: sim
