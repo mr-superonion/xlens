@@ -124,7 +124,11 @@ class matchPipeConfig(
     pipelineConnections=matchPipeConnections,
 ):
     mag_zero = Field[float](
-        doc="magnitude zero point",
+        doc="magnitude zero point of the input catalog",
+        default=27.0,
+    )
+    mag_max_truth = Field[float](
+        doc="maximum magnitude limit of truth catalog",
         default=27.0,
     )
 
@@ -259,7 +263,7 @@ class matchPipe(PipelineTask):
         assert isinstance(self.config, matchPipeConfig)
         magz = self.config.mag_zero
         mag_mrc = magz - 2.5 * np.log10(mrc["i_base_GaussianFlux_instFlux"])
-        mrc = mrc[mag_mrc < 27.0]
+        mrc = mrc[mag_mrc < self.config.mag_max_truth]
         x_mrc = np.array(mrc["i_base_SdssCentroid_x"])
         y_mrc = np.array(mrc["i_base_SdssCentroid_y"])
         # Coordinates
@@ -285,7 +289,7 @@ class matchPipe(PipelineTask):
             os.path.join(os.environ["CATSIM_DIR"], "OneDegSq.fits")
         )
         mag_mrc = cat_ref[mrc["index"]]["i_ab"]
-        mrc = mrc[mag_mrc < 27.0]
+        mrc = mrc[mag_mrc < self.config.mag_max_truth]
         x_mrc = np.array(mrc["image_x"])
         y_mrc = np.array(mrc["image_y"])
 
@@ -301,7 +305,10 @@ class matchPipe(PipelineTask):
         final_mrc = rfn.repack_fields(
             final_mrc[["index", "z"]]
         )
-        final_mrc = rfn.rename_fields(final_mrc, {"z": "redshift"})
+        final_mrc = rfn.rename_fields(
+            final_mrc,
+            {"z": "redshift", "index": "truth_index"}
+        )
 
         # Combine fields
         combined = rfn.merge_arrays(
@@ -332,9 +339,10 @@ class matchPipe(PipelineTask):
         if truth_catalog is not None:
             # TODO: Will be removed
             bbox = skyMap[tract][patch].getOuterBBox()
-            truth_catalog["image_x"] = bbox.beginX + truth_catalog["image_x"]
-            truth_catalog["image_y"] = bbox.beginY + truth_catalog["image_y"]
+            t = truth_catalog.copy()
+            t["image_x"] = bbox.beginX + t["image_x"]
+            t["image_y"] = bbox.beginY + t["image_y"]
             # TODO: Will be removed
-            catalog = self.merge_truth(catalog, truth_catalog, pixel_scale)
+            catalog = self.merge_truth(catalog, t, pixel_scale)
 
         return Struct(catalog=catalog)
