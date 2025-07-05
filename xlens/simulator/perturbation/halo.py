@@ -3,6 +3,8 @@ from astropy.cosmology import Planck18
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel
 
+from .utils import _get_shear_res_dict
+
 
 class ShearHalo(object):
     def __init__(
@@ -82,4 +84,6 @@ class ShearHalo(object):
             dra, ddec = self.lens.alpha(r.x, r.y, kwargs)
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
             lensed_shift = shift + galsim.PositionD(dra, ddec)
-        return gso, lensed_shift, shift, gamma1, gamma2, kappa
+        return _get_shear_res_dict(
+            gso, lensed_shift, gamma1, gamma2, kappa
+        )
