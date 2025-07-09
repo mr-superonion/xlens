@@ -447,28 +447,13 @@ def get_abs_ellip_psf(catalog):
     return out
 
 
-def get_FDFC_flag(data, hpfname):
-    """Returns the Full Depth Full Color (FDFC) cut
-
-    Args:
-    data (ndarray):     input catalog array
-    hpfname (str):      healpix fname (s16a_wide2_fdfc.fits,
-                        s18a_fdfc_hp_contarea.fits, or
-                        s19a_fdfc_hp_contarea_izy-gt-5_trimmed_fd001.fits)
-    Returns:
-    mask (ndarray):     mask array for FDFC region
-    """
-    ra, dec = get_radec(data)
+def objects_in_healpix_mask(hpfname, ra, dec):
     m = hp.read_map(hpfname, nest=True, dtype=bool)
-
-    # Get flag
-    mfactor = np.pi / 180.0
-    indices_map = np.where(m)[0]
     nside = hp.get_nside(m)
-    phi = ra * mfactor
-    theta = np.pi / 2.0 - dec * mfactor
+    phi = np.deg2rad(ra)
+    theta = np.deg2rad(90.0 - dec)
     indices_obj = hp.ang2pix(nside, theta, phi, nest=True)
-    return np.in1d(indices_obj, indices_map)
+    return m[indices_obj]  # boolean array
 
 
 def get_radec(catalog):
