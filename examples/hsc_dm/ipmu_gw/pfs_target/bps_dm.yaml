@@ -1,0 +1,29 @@
+pipelineYaml: "dm_config.yaml"
+
+wmsServiceClass: lsst.ctrl.bps.parsl.ParslService
+project: shear
+campaign: test
+computeSite: Torque
+
+# Make sure these values correspond to ones in the bin/run_demo.sh's
+# pipetask command line.
+payload:
+  payloadName: shear_test
+  butlerConfig: /work/xiangchong.li/work/hsc_s23b_sim/sim_cosmos/cosmos/butler.yaml
+  inCollection: sim_image3
+  output: dm_catalog3
+  dataQuery: skymap='hsc' AND tract in (10054, 10055, 10056, 9570, 9571, 9812, 9813, 9814) AND band in ('g', 'r', 'i', 'z', 'y')
+
+parsl_config:
+  retries: 1
+  provider: Torque
+
+.site.Torque:
+    class: lsst.ctrl.bps.parsl.sites.Torque
+    job_name: sim
+    nodes: 20
+    tasks_per_node: 25
+    walltime: "500:00:00"
+    queue: large
+    worker_init: "source /work/xiangchong.li/setupIm3.sh"
+

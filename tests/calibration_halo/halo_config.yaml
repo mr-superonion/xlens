@@ -1,0 +1,52 @@
+description: The pipeline specialized for testing image simulation.
+instrument: lsst.obs.subaru.HyperSuprimeCam
+
+tasks:
+  MutibandSimHalo1:
+    class: xlens.sim_pipe.multibandSim.MultibandSimHaloPipe
+    config:
+      connections.mode: 0
+      connections.rotId: 0
+      simulator.mass: 8e14
+      simulator.rotId: 0
+      simulator.z_lens: 0.25
+      simulator.ra_lens: 0.0  # arcsec
+      simulator.dec_lens: 0.0 # arcsec
+      simulator.z_source: 1.0
+      simulator.survey_name: hsc
+
+  MutibandSimHalo2:
+    class: xlens.sim_pipe.multibandSim.MultibandSimHaloPipe
+    config:
+      connections.mode: 0
+      connections.rotId: 1
+      simulator.mass: 8e14
+      simulator.rotId: 1
+      simulator.z_lens: 0.25
+      simulator.ra_lens: 0.0  # arcsec
+      simulator.dec_lens: 0.0 # arcsec
+      simulator.z_source: 1.0
+      simulator.survey_name: hsc
+
+  FpfsTask1:
+    class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
+    config:
+      fpfs.use_average_psf: True
+      fpfs.do_noise_bias_correction: False
+      connections.coaddName: sim_0_rot0_
+
+  FpfsTask2:
+    class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
+    config:
+      fpfs.use_average_psf: True
+      fpfs.do_noise_bias_correction: False
+      connections.coaddName: sim_0_rot1_
+
+  SummaryTask:
+    class: xlens.summary_pipe.halo_mcbias_multiband.HaloMcBiasMultibandPipe
+    config:
+      mass: 8e14
+      z_lens: 0.25
+      z_source: 1.0
+      connections.coaddName: sim
+      connections.dataType: joint

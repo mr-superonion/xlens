@@ -1,10 +1,10 @@
 python==3.11
-stackvana
+stackvana>=0.2024.48
 healpy
 astropy
 fitsio
 lenstronomy
 matplotlib
 metadetect
-anacal==0.5.1
-lsstdesc-wl-shear-sims==0.4.4
+anacal==0.5.2
+lsstdesc-wl-shear-sims==0.4.5
