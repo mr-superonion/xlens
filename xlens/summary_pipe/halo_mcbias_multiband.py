@@ -705,8 +705,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         logger.info("max pixel", max_pixel)
         logger.info("max pixel in arcsec", max_pixel * pixel_scale)
 
-        n_bins = 10
-        pixel_bin_edges = np.linspace(15 / 0.2, max_pixel, n_bins + 1)
+        n_bins = 15
+        # starting from 15 arcsec
+        pixel_bin_edges = np.linspace(5 / 0.2, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
 
@@ -905,8 +906,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ).rad
             
             # negative since we are rotating axes
-            eT, eX = self._rotate_spin_2_vec(e1, e2, -angle)
-            gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, -angle)
+            eT, eX = self._rotate_spin_2_vec(e1, e2, angle)
+            gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, angle)
 
             ind_gT_true_list.append(gT_true)
 
