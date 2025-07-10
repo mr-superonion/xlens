@@ -20,15 +20,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 __all__ = [
-    "FpfsJointPipeConfig",
-    "FpfsJointPipe",
-    "FpfsJointPipeConnections",
+    "AnacalForcePipeConfig",
+    "AnacalForcePipe",
+    "AnacalForcePipeConnections",
 ]
 
 import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
+import numpy as np
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field
 from lsst.pipe.base import (
@@ -37,18 +38,33 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
     Struct,
 )
+from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
+from numpy.lib import recfunctions as rfn
 
-from ..processor.fpfs import FpfsMeasurementTask
+from ..processor.anacal import AnacalTask
 
 
-class FpfsJointPipeConnections(
+class AnacalForcePipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
     defaultTemplates={
         "coaddName": "deep",
     },
 ):
+    skyMap = cT.Input(
+        doc="SkyMap to use in processing",
+        name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
+        storageClass="SkyMap",
+        dimensions=("skymap",),
+    )
+    input_catalog = cT.Input(
+        doc="Source catalog with joint detection and measurement",
+        name="{coaddName}Coadd_anacal_joint",
+        dimensions=("skymap", "tract", "patch"),
+        storageClass="ArrowAstropy",
+        multiple=False,
+    )
     exposure = cT.Input(
         doc="Input coadd image",
         name="{coaddName}Coadd_calexp",
@@ -59,16 +75,16 @@ class FpfsJointPipeConnections(
     )
     noise_corr = cT.Input(
         doc="noise correlation function",
-        name="{coaddName}Coadd_systematics_noisecorr",
+        name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
         multiple=True,
         deferLoad=True,
     )
-    joint_catalog = cT.Output(
+    catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_joint",
+        name="{coaddName}Coadd_anacal_force",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -77,46 +93,37 @@ class FpfsJointPipeConnections(
         super().__init__(config=config)
 
 
-class FpfsJointPipeConfig(
+class AnacalForcePipeConfig(
     PipelineTaskConfig,
-    pipelineConnections=FpfsJointPipeConnections,
+    pipelineConnections=AnacalForcePipeConnections,
 ):
-    fpfs = ConfigurableField(
-        target=FpfsMeasurementTask,
-        doc="Fpfs Source Measurement Task",
+    anacal = ConfigurableField(
+        target=AnacalTask,
+        doc="AnaCal Task Force",
     )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
-    use_truth_detection = Field[bool](
-        doc="whether to use truth catalog as detection",
-        default=False,
-    )
-    use_dm_detection = Field[bool](
-        doc="whether to use dm catalog as detection",
-        default=False,
-    )
 
     def validate(self):
         super().validate()
 
     def setDefaults(self):
         super().setDefaults()
-        self.fpfs.sigma_arcsec1 = -1
-        self.fpfs.sigma_arcsec2 = -1
-        self.fpfs.do_compute_detect_weight = True
+        self.anacal.force_size = True
+        self.anacal.force_center = True
 
 
-class FpfsJointPipe(PipelineTask):
-    _DefaultName = "FpfsJointPipe"
-    ConfigClass = FpfsJointPipeConfig
+class AnacalForcePipe(PipelineTask):
+    _DefaultName = "AnacalForcePipe"
+    ConfigClass = AnacalForcePipeConfig
 
     def __init__(
         self,
         *,
-        config: FpfsJointPipeConfig | None = None,
+        config: AnacalForcePipeConfig | None = None,
         log: logging.Logger | LsstLogAdapter | None = None,
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -124,13 +131,15 @@ class FpfsJointPipe(PipelineTask):
         super().__init__(
             config=config, log=log, initInputs=initInputs, **kwargs
         )
-        assert isinstance(self.config, FpfsJointPipeConfig)
-        self.makeSubtask("fpfs")
+        assert isinstance(self.config, AnacalForcePipeConfig)
+        self.makeSubtask("anacal")
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
-        assert isinstance(self.config, FpfsJointPipeConfig)
+        assert isinstance(self.config, AnacalForcePipeConfig)
         inputs = butlerQC.get(inputRefs)
+        tract = butlerQC.quantum.dataId["tract"]
+        patch = butlerQC.quantum.dataId["patch"]
         exposure_handles = inputs["exposure"]
         exposure_handles_dict = {
             handle.dataId["band"]: handle for handle in exposure_handles
@@ -142,9 +151,15 @@ class FpfsJointPipe(PipelineTask):
             correlation_handles_dict = {
                 handle.dataId["band"]: handle for handle in correlation_handles
             }
+        skyMap = inputs["skyMap"]
+        detection = inputs["input_catalog"].as_array()
         outputs = self.run(
+            detection=detection,
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -152,27 +167,45 @@ class FpfsJointPipe(PipelineTask):
     def run(
         self,
         *,
+        detection,
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
+        skyMap,
+        tract: int,
+        patch: int,
     ):
-        assert isinstance(self.config, FpfsJointPipeConfig)
-        band = "i"
-        handle = exposure_handles_dict[band]
-        exposure = handle.get()
-        exposure.getPsf().setCacheCapacity(self.config.psfCache)
-        if correlation_handles_dict is not None:
-            handle = correlation_handles_dict[band]
-            noise_corr = handle.get()
-        else:
-            noise_corr = None
-
-        idGenerator = self.config.idGenerator.apply(handle.dataId)
-        seed = idGenerator.catalog_id
-        data = self.fpfs.prepare_data(
-            exposure=exposure,
-            seed=seed,
-            noise_corr=noise_corr,
-            detection=None,
-        )
-        catalog = self.fpfs.run(**data)
-        return Struct(joint_catalog=catalog)
+        assert isinstance(self.config, AnacalForcePipeConfig)
+        colnames = ["flux", "dflux_dg1", "dflux_dg2", "dflux_dj1", "dflux_dj2"]
+        catalog = [detection]
+        for band in exposure_handles_dict.keys():
+            handle = exposure_handles_dict[band]
+            exposure = handle.get()
+            exposure.getPsf().setCacheCapacity(self.config.psfCache)
+            if correlation_handles_dict is not None:
+                noise_corr = correlation_handles_dict[band].get().getArray()
+                variance = np.amax(noise_corr)
+                noise_corr = noise_corr / variance
+                ny, nx = noise_corr.shape
+                assert noise_corr[ny // 2, nx // 2] == 1
+                self.log.debug("With correlation, variance:", variance)
+            else:
+                noise_corr = None
+            idGenerator = self.config.idGenerator.apply(handle.dataId)
+            seed = idGenerator.catalog_id
+            data = self.anacal.prepare_data(
+                exposure=exposure,
+                seed=seed,
+                noise_corr=noise_corr,
+                detection=detection,
+                band=band,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+            )
+            cat = rfn.repack_fields(self.anacal.run(**data)[colnames])
+            map_dict = {name: f"{band}_" + name for name in colnames}
+            renamed = rfn.rename_fields(cat, map_dict)
+            catalog.append(renamed)
+            del exposure, data
+        catalog = rfn.merge_arrays(catalog, flatten=True)
+        return Struct(catalog=catalog)

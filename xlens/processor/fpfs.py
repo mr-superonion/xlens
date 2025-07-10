@@ -4,11 +4,11 @@ import anacal
 import numpy as np
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
+from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
-from ..simulator.random import get_noise_seed, image_noise_base, num_rot
-from . import utils
-from .base import MeasBaseTask
+from .. import utils
+from ..utils.random import image_noise_base, num_rot
 
 
 class FpfsMeasurementConfig(Config):
@@ -66,7 +66,7 @@ class FpfsMeasurementConfig(Config):
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
-        default=["BAD", "SAT", "CR"],  # I keep CR here
+        default=[],
     )
     noiseId = Field[int](
         doc="Noise realization id",
@@ -114,7 +114,7 @@ class FpfsMeasurementConfig(Config):
         super().setDefaults()
 
 
-class FpfsMeasurementTask(MeasBaseTask):
+class FpfsMeasurementTask(Task):
     """Measure Fpfs FPFS observables"""
 
     _DefaultName = "FpfsMeasurementTask"
@@ -147,12 +147,28 @@ class FpfsMeasurementTask(MeasBaseTask):
         mask_array: NDArray,
         noise_array: NDArray | None,
         detection: NDArray | None,
-        psf_object: utils.LsstPsf | None,
+        psf_object: utils.image.LsstPsf | None,
         base_column_name: str | None,
+        begin_x: int = 0,
+        begin_y: int = 0,
         **kwargs,
     ):
         assert isinstance(self.config, FpfsMeasurementConfig)
-        return anacal.fpfs.process_image(
+        if detection is not None:
+            fpfs_peaks_dtype = np.dtype([
+                ('y', np.float64),
+                ('x', np.float64),
+                ('is_peak', np.int32),
+                ('mask_value', np.int32),
+            ])
+            det = np.zeros(len(detection), dtype=fpfs_peaks_dtype)
+            det["x"] = detection["x1_det"] / pixel_scale - begin_x
+            det["y"] = detection["x2_det"] / pixel_scale - begin_y
+            det["is_peak"] = 1
+            det["mask_value"] = 0
+        else:
+            det = None
+        catalog = anacal.fpfs.process_image(
             fpfs_config=self.fpfs_config,
             pixel_scale=pixel_scale,
             mag_zero=mag_zero,
@@ -161,11 +177,12 @@ class FpfsMeasurementTask(MeasBaseTask):
             psf_array=psf_array,
             mask_array=mask_array,
             noise_array=noise_array,
-            detection=detection,
+            detection=det,
             psf_object=psf_object,
             do_compute_detect_weight=self.config.do_compute_detect_weight,
             base_column_name=base_column_name,
         )
+        return catalog
 
     def prepare_data(
         self,
@@ -173,8 +190,10 @@ class FpfsMeasurementTask(MeasBaseTask):
         exposure: ExposureF,
         seed: int,
         noise_corr: NDArray | None = None,
-        detection: NDArray | None = None,
         band: str | None = None,
+        mask_array: NDArray | None = None,
+        star_cat: NDArray | None = None,
+        detection: NDArray | None = None,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -188,100 +207,32 @@ class FpfsMeasurementTask(MeasBaseTask):
             (dict)
         """
         assert isinstance(self.config, FpfsMeasurementConfig)
-
-        def rotate90(image):
-            rotated_image = np.zeros_like(image)
-            rotated_image[1:, 1:] = np.rot90(m=image[1:, 1:], k=-1)
-            return rotated_image
-
-        pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
-        noise_variance = np.average(exposure.getMaskedImage().variance.array)
-        if noise_variance < 1e-12:
-            raise ValueError(
-                "the estimated image noise variance should be positive."
-            )
-        noise_std = np.sqrt(noise_variance)
-        mag_zero = (
-            np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude())
-            / 0.4
-        )
-
         lsst_bbox = exposure.getBBox()
-        lsst_psf = exposure.getPsf()
-        psf_array = np.asarray(
-            utils.get_psf_array(
-                lsst_psf=lsst_psf,
-                lsst_bbox=lsst_bbox,
-                npix=self.config.npix,
-                dg=250,
-            ),
-            dtype=np.float64,
-        )
-        gal_array = np.asarray(
-            exposure.getMaskedImage().image.array,
-            dtype=np.float64,
-        )
-
-        bitValue = exposure.mask.getPlaneBitMask(self.config.badMaskPlanes)
-        mask_array = ((exposure.mask.array & bitValue) != 0).astype(np.int16)
-
-        if self.config.do_noise_bias_correction:
-            # TODO: merge the following to one code
-            noise_seed = (
-                get_noise_seed(
-                    seed=seed,
-                    noiseId=self.config.noiseId,
-                    rotId=self.config.rotId,
-                )
-                + image_noise_base // 2
-                # make sure the seed is different from
-                # noise seed for simulation
-            )
-            ny, nx = gal_array.shape
-            if noise_corr is None:
-                noise_array = (
-                    np.random.RandomState(noise_seed)
-                    .normal(
-                        scale=noise_std,
-                        size=(ny, nx),
-                    )
-                    .astype(np.float64)
-                )
-            else:
-                noise_corr = rotate90(noise_corr)
-                noise_array = (
-                    anacal.noise.simulate_noise(
-                        seed=noise_seed,
-                        correlation=noise_corr,
-                        nx=nx,
-                        ny=ny,
-                        scale=pixel_scale,
-                    ).astype(np.float64)
-                    * noise_std
-                )
-        else:
-            noise_array = None
-        if detection is not None:
-            detection = np.array(detection[["y", "x", "is_peak", "mask_value"]])
 
         if not self.config.use_average_psf:
-            psf_object = utils.LsstPsf(psf=lsst_psf, npix=self.config.npix)
+            psf_object = utils.image.LsstPsf(
+                psf=exposure.getPsf(), npix=self.config.npix,
+                lsst_bbox=lsst_bbox,
+            )
         else:
             psf_object = None
-
         if band is None:
             base_column_name = None
         else:
             base_column_name = band + "_"
-        return {
-            "pixel_scale": pixel_scale,
-            "mag_zero": mag_zero,
-            "noise_variance": noise_variance,
-            "gal_array": gal_array,
-            "psf_array": psf_array,
-            "mask_array": mask_array,
-            "noise_array": noise_array,
-            "detection": detection,
-            "psf_object": psf_object,
-            "base_column_name": base_column_name,
-        }
+        data = utils.image.prepare_data(
+            exposure=exposure,
+            seed=seed,
+            noiseId=self.config.noiseId,
+            rotId=self.config.rotId,
+            npix=self.config.npix,
+            noise_corr=noise_corr,
+            do_noise_bias_correction=self.config.do_noise_bias_correction,
+            badMaskPlanes=self.config.badMaskPlanes,
+            star_cat=star_cat,
+            mask_array=mask_array,
+            detection=detection,
+        )
+        data["psf_object"] = psf_object
+        data["base_column_name"] = base_column_name
+        return data

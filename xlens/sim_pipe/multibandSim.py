@@ -13,8 +13,10 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
+import os
 from typing import Any
 
+import fitsio
 import lsst.pipe.base.connectionTypes as cT
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField
@@ -110,8 +112,26 @@ class MultibandSimShearPipe(PipelineTask):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.makeSubtask("simulator")
+        fname = os.path.join(
+            "/lustre/work/xiangchong.li/work",
+            "hsc_s23b_data/sim_v1/success.fits",
+        )
+        if os.path.isfile(fname):
+            self.pt_data = fitsio.read(fname)
+        else:
+            self.pt_data = None
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs) -> None:
+        assert butlerQC.quantum.dataId is not None
+        tract = butlerQC.quantum.dataId["tract"]
+        patch = butlerQC.quantum.dataId["patch"]
+        # if self.pt_data is not None:
+        #     patch_list = self.pt_data[self.pt_data["tract"] == tract]["patch"]
+        #     if patch not in patch_list:
+        #         print(patch)
+        #         print("failed..............")
+        #         return
+
         inputs = butlerQC.get(inputRefs)
 
         # band name

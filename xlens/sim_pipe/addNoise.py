@@ -29,7 +29,7 @@ from lsst.pipe.base import (
 
 from ..simulator.multiband import get_noise_array
 from ..simulator.multiband_defaults import noise_variance_defaults
-from ..simulator.random import get_noise_seed, num_rot
+from ..utils.random import get_noise_seed, num_rot
 
 
 class MultibandSimPipeConnections(

@@ -25,14 +25,12 @@ __all__ = [
     "SystematicsMultibandPipeConnections",
 ]
 
-import glob
 import logging
 import os
 from typing import Any
 
 import fitsio
 import lsst.afw.image as afwImage
-import lsst.afw.table as afwTable
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.geom import Box2I, Extent2I, Point2D, Point2I
@@ -60,6 +58,19 @@ class SystematicsMultibandPipeConnections(
         name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
         storageClass="SkyMap",
         dimensions=("skymap",),
+    )
+
+    exposure = cT.Input(
+        doc="Input coadd image",
+        name="{coaddName}Coadd_calexp",
+        storageClass="ExposureF",
+        dimensions=("tract", "patch", "band", "skymap"),
+    )
+    catalog = cT.Input(
+        doc=("original measurement catalog"),
+        name="{coaddName}Coadd_meas",
+        storageClass="SourceCatalog",
+        dimensions=("tract", "patch", "band", "skymap"),
     )
     outputNoiseCorr = cT.Output(
         doc="noise correlation function",
@@ -141,58 +152,21 @@ class SystematicsMultibandPipe(PipelineTask):
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, SystematicsMultibandPipeConfig)
         # Retrieve the filename of the input exposure
-        assert butlerQC.quantum.dataId is not None
-        tract = butlerQC.quantum.dataId["tract"]
-        patch = butlerQC.quantum.dataId["patch"]
-        patch_list = self.pt_data[self.pt_data["tract"] == tract]["patch"]
-        patch_y = int(patch) // 9
-        patch_x = int(patch) % 9
-        patch_db = patch_x * 100 + patch_y
+        # assert butlerQC.quantum.dataId is not None
+        # tract = butlerQC.quantum.dataId["tract"]
+        # patch = butlerQC.quantum.dataId["patch"]
+        # patch_list = self.pt_data[self.pt_data["tract"] == tract]["patch"]
+        # patch_y = int(patch) // 9
+        # patch_x = int(patch) % 9
+        # patch_db = patch_x * 100 + patch_y
+        # if patch_db not in patch_list:
+        #     return
 
-        if patch_db not in patch_list:
-            return
-
-        band = butlerQC.quantum.dataId["band"]
-        hsc_dir = "/lustre/HSC_DR/hsc_ssp/dr4/s23b/data/s23b_wide/unified/"
-
-        exp_file_name = glob.glob(
-            os.path.join(
-                hsc_dir,
-                f"deepCoadd_calexp/{tract}/{patch}/{band}/",
-                f"deepCoadd_calexp_{tract}_{patch}_{band}_*.fits",
-            )
-        )
-        if len(exp_file_name) > 0:
-            exp_file_name = exp_file_name[0]
-        else:
-            return
-            # raise IOError("Cannot find exposure")
-        exposure = afwImage.ExposureF.readFits(exp_file_name)
-        if exposure.getPsf() is None:
-            return
-
-        cat_file_name = glob.glob(
-            os.path.join(
-                hsc_dir,
-                f"deepCoadd_meas/{tract}/{patch}/{band}/",
-                f"deepCoadd_meas_{tract}_{patch}_{band}_*.fits",
-            )
-        )
-        if len(cat_file_name) > 0:
-            cat_file_name = cat_file_name[0]
-        else:
-            return
-            # raise IOError(f"Cannot find catalog")
-
-        catalog = afwTable.SourceCatalog.readFits(cat_file_name)
-
+        inputs = butlerQC.get(inputRefs)
+        inputs["exposure"].getPsf().setCacheCapacity(self.config.psfCache)
         idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
         seed = idGenerator.catalog_id
-        outputs = self.run(
-            exposure=exposure,
-            catalog=catalog,
-            seed=seed,
-        )
+        outputs = self.run(seed=seed, **inputs)
         butlerQC.put(outputs, outputRefs)
         return
 
@@ -212,26 +186,30 @@ class SystematicsMultibandPipe(PipelineTask):
 
     def get_noise_corr(self, exposure):
         assert isinstance(self.config, SystematicsMultibandPipeConfig)
-        noise_variance = np.average(
-            exposure.getMaskedImage().variance.array[
-                exposure.getMaskedImage().mask.array == 0
-            ]
+        variance_array = exposure.getMaskedImage().variance.array[
+            1000:3000, 1000:3000
+        ]
+        window_array = (exposure.mask.array == 0).astype(np.float32)[
+            1000:3000, 1000:3000
+        ]
+
+        noise_array = np.asarray(
+            exposure.getMaskedImage().image.array,
+            dtype=np.float32,
+        )[1000:3000, 1000:3000]
+        window_array = (
+            window_array
+            * (noise_array**2.0 < variance_array * 9)
+            * (variance_array < 5.0)
+            * (~np.isnan(variance_array))
         )
+
+        noise_array[~window_array.astype(bool)] = 0.0
+        noise_variance = np.average(variance_array[window_array.astype(bool)])
         if noise_variance < 1e-20:
             raise ValueError(
                 "the estimated image noise variance should be positive."
             )
-
-        window_array = (exposure.mask.array == 0).astype(np.float32)[
-            1000:3000, 1000:3000
-        ]
-        noise_array = (
-            np.asarray(
-                exposure.getMaskedImage().image.array,
-                dtype=np.float32,
-            )[1000:3000, 1000:3000]
-            * window_array
-        )
 
         pad_width = ((10, 10), (10, 10))  # ((top, bottom), (left, right))
         window_array = np.pad(

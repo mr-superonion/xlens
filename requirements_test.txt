@@ -1,5 +1,6 @@
 nbval
 black
+flake8-pyproject
 pytest>=3.4
 pytest-xdist>=1.19
 pytest-timeout>=1.2

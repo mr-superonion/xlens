@@ -49,39 +49,40 @@ class SelBiasMultibandPipeConnections(
     defaultTemplates={
         "coaddName": "deep",
         "dataType": "",
+        "version": "",
     },
 ):
     src00 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_0_rot0_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src01 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot1_Coadd_anacal_{dataType}",
+        name="{coaddName}_0_rot1_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src10 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_1_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_1_rot0_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src11 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_1_rot1_Coadd_anacal_{dataType}",
+        name="{coaddName}_1_rot1_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     summary = cT.Output(
         doc="Summary statistics",
-        name="{coaddName}Coadd_anacal_selbias_m00_{dataType}",
+        name="{coaddName}Coadd_anacal_selbias_flux_{dataType}{version}",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
@@ -98,10 +99,6 @@ class SelBiasMultibandPipeConfig(
         doc="Whether correct for selection bias",
         default=True,
     )
-    shape_name = Field[str](
-        doc="ellipticity column name",
-        default="e1",
-    )
     shear_name = Field[str](
         doc="the shear component to test",
         default="g1",
@@ -110,13 +107,33 @@ class SelBiasMultibandPipeConfig(
         doc="absolute value of the shear",
         default=0.02,
     )
-    m00_cuts = ListField[float](
-        doc="lower limit of m00",
-        default=[6.0, 12.0, 18.0, 24.0, 30.0],
+    shape_name = Field[str](
+        doc="ellipticity column name",
+        default="fpfs_e1",
     )
-    m00_name = Field[str](
-        doc="the column name of m00",
-        default="m00",
+    dshape_name = Field[str](
+        doc="ellipticity's shear response column name",
+        default="fpfs_de1",
+    )
+    weight_name = Field[str](
+        doc="weight column name",
+        default="fpfs_w",
+    )
+    dweight_name = Field[str](
+        doc="weight's shear response column name",
+        default="fpfs_dw",
+    )
+    flux_name = Field[str](
+        doc="flux column name",
+        default="fpfs_m00",
+    )
+    dflux_name = Field[str](
+        doc="flux's shear response column name",
+        default="fpfs_dm00",
+    )
+    flux_cuts = ListField[float](
+        doc="lower limit of flux",
+        default=[6.0, 12.0, 18.0, 24.0, 30.0],
     )
 
     def validate(self):
@@ -137,10 +154,6 @@ class SelBiasMultibandPipeConfig(
                 self,
                 "shear_value should be in [0.00, 0.10]",
             )
-
-
-def name_add_d(ename, nchars):
-    return ename[:-nchars] + "d" + ename[-nchars:]
 
 
 class SelBiasMultibandPipe(PipelineTask):
@@ -164,11 +177,11 @@ class SelBiasMultibandPipe(PipelineTask):
         self.svalue = self.config.shear_value
         self.ename = self.config.shape_name
         ins = "_dg" + self.ename[-1]
-        self.egname = name_add_d(self.ename, 2) + ins
-        self.wname = "fpfs_w"
-        self.wgname = name_add_d(self.wname, 1) + ins
-        self.fname = self.config.m00_name
-        self.fgname = name_add_d(self.fname, 3) + ins
+        self.egname = self.config.dshape_name + ins
+        self.wname = self.config.weight_name
+        self.wgname = self.config.dweight_name + ins
+        self.fname = self.config.flux_name
+        self.fgname = self.config.dflux_name + ins
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -179,7 +192,7 @@ class SelBiasMultibandPipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
         return
 
-    def measure_shear_m00_cut(self, src, m00_min):
+    def measure_shear_flux_cut(self, src, flux_min):
         assert isinstance(self.config, SelBiasMultibandPipeConfig)
         en = self.ename
         egn = self.egname
@@ -187,19 +200,21 @@ class SelBiasMultibandPipe(PipelineTask):
         wgname = self.wgname
         fname = self.fname
         fgname = self.fgname
-        tmp = src[src[fname] > m00_min]
+        msk = (~np.isnan(src[fgname])) & (~np.isnan(src[egn]))
+        src = src[msk]
+        tmp = src[src[fname] > flux_min]
         ell = np.sum(tmp[en] * tmp[wname])
         res = np.sum(tmp[egn] * tmp[wname] + tmp[en] * tmp[wgname])
 
         if self.config.do_correct_selection_bias:
             dg = 0.02
             # selection
-            tmp = src[(src[fname] + dg * src[fgname]) > m00_min]
+            tmp = src[(src[fname] + dg * src[fgname]) > flux_min]
             ellp = np.sum(tmp[en] * tmp[wname])
             del tmp
 
             # selection
-            tmp = src[(src[fname] - dg * src[fgname]) > m00_min]
+            tmp = src[(src[fname] - dg * src[fgname]) > flux_min]
             ellm = np.sum(tmp[en] * tmp[wname])
             res_sel = (ellp - ellm) / 2.0 / dg
             del tmp
@@ -209,17 +224,17 @@ class SelBiasMultibandPipe(PipelineTask):
 
     def run(self, src00, src01, src10, src11):
         assert isinstance(self.config, SelBiasMultibandPipeConfig)
-        ncuts = len(self.config.m00_cuts)
+        ncuts = len(self.config.flux_cuts)
         em = np.zeros(ncuts)
         ep = np.zeros(ncuts)
         rm = np.zeros(ncuts)
         rp = np.zeros(ncuts)
 
-        for ic, m00_min in enumerate(self.config.m00_cuts):
-            ell00, res00 = self.measure_shear_m00_cut(src00, m00_min)
-            ell10, res10 = self.measure_shear_m00_cut(src10, m00_min)
-            ell01, res01 = self.measure_shear_m00_cut(src01, m00_min)
-            ell11, res11 = self.measure_shear_m00_cut(src11, m00_min)
+        for ic, flux_min in enumerate(self.config.flux_cuts):
+            ell00, res00 = self.measure_shear_flux_cut(src00, flux_min)
+            ell10, res10 = self.measure_shear_flux_cut(src10, flux_min)
+            ell01, res01 = self.measure_shear_flux_cut(src01, flux_min)
+            ell11, res11 = self.measure_shear_flux_cut(src11, flux_min)
 
             em[ic] = ell00 + ell01
             ep[ic] = ell10 + ell11
@@ -244,11 +259,12 @@ class SelBiasSummaryMultibandPipeConnections(
     defaultTemplates={
         "coaddName": "deep",
         "dataType": "",
+        "version": "",
     },
 ):
     summary_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}Coadd_anacal_selbias_m00_{dataType}",
+        name="{coaddName}Coadd_anacal_selbias_flux_{dataType}{version}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
@@ -264,13 +280,9 @@ class SelBiasSummaryMultibandPipeConfig(
     pipelineConnections=SelBiasSummaryMultibandPipeConnections,
 ):
 
-    shape_name = Field[str](
-        doc="ellipticity column name",
-        default="e1",
-    )
-    shear_name = Field[str](
-        doc="the shear component to test",
-        default="g1",
+    estimate_multiplicative_bias = Field[bool](
+        doc="Whether estimate multiplicative bias",
+        default=True,
     )
     shear_value = Field[float](
         doc="absolute value of the shear",
@@ -281,13 +293,6 @@ class SelBiasSummaryMultibandPipeConfig(
         super().validate()
         if len(self.connections.dataType) == 0:
             raise ValueError("connections.dataType missing")
-
-        if self.shear_name not in ["g1", "g2"]:
-            raise FieldValidationError(
-                self.__class__.shear_name,
-                self,
-                "shear_name can only be 'g1' or 'g2'",
-            )
 
         if self.shear_value < 0.0 or self.shear_value > 0.10:
             raise FieldValidationError(
@@ -313,8 +318,6 @@ class SelBiasSummaryMultibandPipe(PipelineTask):
             config=config, log=log, initInputs=initInputs, **kwargs
         )
         assert isinstance(self.config, SelBiasSummaryMultibandPipeConfig)
-        self.ename = self.config.shape_name
-        self.sname = self.config.shear_name
         self.svalue = self.config.shear_value
         return
 
@@ -352,7 +355,7 @@ class SelBiasSummaryMultibandPipe(PipelineTask):
             "+-",
             np.std(tmp, axis=0) / denom / np.sqrt(nsim),
         )
-        if self.sname[-1] == self.ename[-1]:
+        if self.config.estimate_multiplicative_bias:
             print(
                 "Multiplicative bias:",
                 np.average(up1, axis=0) / denom / self.svalue - 1,

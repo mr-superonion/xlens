@@ -31,14 +31,15 @@ from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from lsst.pipe.base import Struct
 from numpy.typing import NDArray
 
-from ..processor.utils import resize_array
-from ..simulator.random import (
+from ..utils.image import resize_array
+from ..utils.random import (
     gal_seed_base,
     get_noise_seed,
     image_noise_base,
     num_rot,
 )
 from .base import SimBaseTask
+from .galaxies.catsim import CatSim2017Catalog
 from .galaxies.skyCatalog import OpenUniverse2024RubinRomanCatalog
 from .multiband_defaults import (
     mag_zero_defaults,
@@ -202,7 +203,7 @@ class MultibandSimBaseTask(SimBaseTask):
         coadd_dim = dim - 10
         # galaxy catalog;
         if self.config.galaxy_type == "catsim2017":
-            GalClass = WLDeblendGalaxyCatalog
+            GalClass = CatSim2017Catalog
         elif self.config.galaxy_type == "RomanRubin2024":
             GalClass = OpenUniverse2024RubinRomanCatalog
         else:
@@ -241,6 +242,7 @@ class MultibandSimBaseTask(SimBaseTask):
         band: str,
         coadd_dim: int,
         mag_zero: float,
+        draw_method: str = "auto",
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimBaseConfig)
@@ -253,7 +255,6 @@ class MultibandSimBaseTask(SimBaseTask):
             "bad_columns": False,
             "star_bleeds": False,
             "noise_factor": 0.0,
-            "draw_method": "auto",
             "draw_gals": True,
             "draw_stars": False,
             "draw_bright": False,
@@ -270,6 +271,7 @@ class MultibandSimBaseTask(SimBaseTask):
             coadd_dim=coadd_dim,
             calib_mag_zero=mag_zero,
             simple_coadd_bbox=True,
+            draw_method=draw_method,
             **galaxy_kwargs,
         )
 
@@ -296,7 +298,8 @@ class MultibandSimBaseTask(SimBaseTask):
     ):
         assert isinstance(self.config, MultibandSimBaseConfig)
         if self.config.use_real_psf:
-            assert psfImage is not None, "Do not have PSF input model"
+            if psfImage is None:
+                raise IOError("Do not have PSF input model")
         if self.config.order_truth_catalog and self.config.layout in [
             "grid",
             "hex",
@@ -336,6 +339,7 @@ class MultibandSimBaseTask(SimBaseTask):
                 scale=pixel_scale,
                 flux=1.0,
             )
+            draw_method = "no_pixel"
         else:
             psf_fwhm = psf_fwhm_defaults[band][survey_name]
             psf_galsim = galsim.Moffat(fwhm=psf_fwhm, beta=2.5)
@@ -348,6 +352,7 @@ class MultibandSimBaseTask(SimBaseTask):
             psfImage = afwImage.ImageF(sys_npix, sys_npix)
             assert psfImage is not None
             psfImage.array[:, :] = psf_array
+            draw_method = "auto"
 
         # and psf kernel for the LSST exposure
         kernel = afwMath.FixedKernel(psfImage.convertD())
@@ -388,6 +393,7 @@ class MultibandSimBaseTask(SimBaseTask):
             band=band,
             coadd_dim=coadd_dim,
             mag_zero=mag_zero,
+            draw_method=draw_method,
         )
         self.log.debug(f"current shape of data is {data.shape}")
         self.log.debug(f"resizing data to {height} x {width}")
@@ -591,7 +597,7 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             indice_id=indice_id,
         )
         # for fix source redshift
-        galaxy_catalog._wldeblend_cat["redshift"] = self.config.z_source
+        galaxy_catalog.input_catalog["redshift"] = self.config.z_source
         return galaxy_catalog
 
     def get_perturbation_object(self, **kwargs: Any):

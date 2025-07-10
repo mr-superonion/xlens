@@ -8,6 +8,8 @@ import numpy as np
 
 
 
+from .utils import _get_shear_res_dict
+
 
 class ShearHalo(object):
     def __init__(
