@@ -24,7 +24,8 @@ import lsst.afw.math as afwMath
 import lsst.meas.algorithms as meaAlg
 import numpy as np
 from descwl_shear_sims.galaxies import WLDeblendGalaxyCatalog
-from descwl_shear_sims.shear import ShearRedshift, ShearHalo
+from descwl_shear_sims.shear import ShearRedshift
+from xlens.simulator.perturbation.halo import ShearHalo
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.wcs import make_dm_wcs
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
@@ -150,6 +151,7 @@ class MultibandSimBaseTask(SimBaseTask):
             buff=0.0,
             pixel_scale=pixel_scale,
             layout=self.config.layout,
+            simple_coadd_bbox=True,
         )
 
         # for fix source redshift
@@ -203,6 +205,7 @@ class MultibandSimBaseTask(SimBaseTask):
             bands=[band],
             coadd_dim=coadd_dim,
             calib_mag_zero=mag_zero,
+            simple_coadd_bbox=True,
             **galaxy_kwargs,
         )
 
@@ -415,11 +418,11 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
         default=1.0,
     )
     ra_lens = Field[float](
-        doc="halo ra [arcsec]",
-        default=0.0,
+        doc="halo ra [degree]",
+        default=200.0,
     )
     dec_lens = Field[float](
-        doc="halo dec [arcsec]",
+        doc="halo dec [degree]",
         default=0.0,
     )
     z_source = Field[float](
