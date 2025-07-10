@@ -61,6 +61,16 @@ class ShearHalo(object):
 
         if redshift > self.z_lens:
             r = shift
+            
+            # if True:
+            #     norm = np.sqrt(
+            #         r.x**2 + r.y**2
+            #     )
+            #     renorm = 30.
+            #     r_renorm = galsim.PositionD(
+            #         r.x / norm * renorm,
+            #         r.y / norm * renorm,
+            #     )
 
             lens_cosmo = LensCosmo(
                 z_lens=self.z_lens,
@@ -80,13 +90,32 @@ class ShearHalo(object):
                 search_window=50,  # largest distance to find a solution for
             )
 
+            # lensed_x_fixed, lensed_y_fixed = self.lens_eqn_solver.image_position_from_source(
+            #     r_renorm.x,
+            #     r_renorm.y,
+            #     kwargs,
+            #     min_distance=0.2,  # chance of finding solutions as close as min_distance away from each other
+            #     search_window=50,  # largest distance to find a solution for
+            # )
+
             # if lenstronomy cannot find a solution
             # do not shift
             if len(lensed_x) == 0 or len(lensed_y) == 0:
-                lensed_x, lensed_y = shift.x, shift.y
+                lensed_x, lensed_y = r.x, r.y
             else:
                 lensed_x, lensed_y = lensed_x[0], lensed_y[0]
+
+            # if len(lensed_x_fixed) == 0 or len(lensed_y_fixed) == 0:
+            #     lensed_x_fixed, lensed_y_fixed = r_renorm.x, r_renorm.y
+            # else:
+            #     lensed_x_fixed, lensed_y_fixed = (
+            #         lensed_x_fixed[0],
+            #         lensed_y_fixed[0],
+            #     )
                 
+            # f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
+            #     lensed_x_fixed, lensed_y_fixed, kwargs
+            # )
             f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
                 lensed_x, lensed_y, kwargs
             )
