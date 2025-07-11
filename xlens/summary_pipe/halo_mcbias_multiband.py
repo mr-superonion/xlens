@@ -57,7 +57,7 @@ class HaloMcBiasMultibandPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "band"),
     defaultTemplates={
-        "coaddName": "deep",
+        "coaddName": "sim",
         "dataType": "",
     },
 ):
@@ -127,7 +127,7 @@ class HaloMcBiasMultibandPipeConnections(
         storageClass="ArrowAstropy",
         dimensions=("skymap",),
     )
-    
+
     summaryPlot = cT.Output(
         doc="simple plot of summary stats",
         storageClass="Plot",
@@ -297,8 +297,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             eT (array): tangential shape
             eX (array): cross shape
             w (weight): ancal weight
-            e1_g1 (array): partial derivative of e1 with respect to g1
-            e2_g2 (array): partial derivative of e2 with respect to g2
             rT (array): tangential response,
             rX (array): cross response,
             gT_true (array): true tangential shear
@@ -497,14 +495,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ("y", "f8"),
             ("lensed_x", "f8"),
             ("lensed_y", "f8"),
-            ("dist", "f8")
+            ("dist", "f8"),
         ]
         return np.zeros(n_gal, dtype=dt)
-    
+
     @staticmethod
     def angsep(ra, dec, ra2=200.0, dec2=0.0):
-        c1 = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')
-        c2 = SkyCoord(ra=ra2*u.deg, dec=dec2*u.deg, frame='icrs')
+        c1 = SkyCoord(ra=ra * u.deg, dec=dec * u.deg, frame="icrs")
+        c2 = SkyCoord(ra=ra2 * u.deg, dec=dec2 * u.deg, frame="icrs")
         return c1.separation(c2).arcsec
 
     @staticmethod
@@ -514,19 +512,18 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         measured from +RA (east=0°), increasing CCW towards +Dec (north).
         Returns an Angle in [0,360)°.
         """
-        c1 = SkyCoord(ra1*u.deg, dec1*u.deg, frame='icrs')
-        c2 = SkyCoord(ra2*u.deg, dec2*u.deg, frame='icrs')
+        c1 = SkyCoord(ra1 * u.deg, dec1 * u.deg, frame="icrs")
+        c2 = SkyCoord(ra2 * u.deg, dec2 * u.deg, frame="icrs")
 
         # pa_north = angle east of north (0° at north, + toward east)
         pa_north = c1.position_angle(c2)
 
         # shift zero to east and make it CCW (north positive)
-        pa_ccw = (90*u.deg - pa_north).wrap_at(360*u.deg)
+        pa_ccw = (90 * u.deg - pa_north).wrap_at(360 * u.deg)
         return pa_ccw
 
     @staticmethod
     def generate_summary_plot(summary_table):
-
         area = np.mean(
             np.pi
             * (
@@ -803,7 +800,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         truth00List,
         truth01List,
     ):
-
         assert skymap.config.patchBorder == 0, "patch border must be zero"
 
         self.log.info("load truth list")
@@ -965,8 +961,12 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
             e2_g2 = np.concatenate([sr_00_res[e2g2n], sr_01_res[e2g2n]])
             w = np.concatenate([sr_00_res["fpfs_w"], sr_01_res["fpfs_w"]])
-            w_g1 = np.concatenate([sr_00_res["fpfs_dw_dg1"], sr_01_res["fpfs_dw_dg1"]])
-            w_g2 = np.concatenate([sr_00_res["fpfs_dw_dg2"], sr_01_res["fpfs_dw_dg2"]])
+            w_g1 = np.concatenate(
+                [sr_00_res["fpfs_dw_dg1"], sr_01_res["fpfs_dw_dg1"]]
+            )
+            w_g2 = np.concatenate(
+                [sr_00_res["fpfs_dw_dg2"], sr_01_res["fpfs_dw_dg2"]]
+            )
             m00 = np.concatenate([sr_00_res["fpfs_m00"], sr_01_res["fpfs_m00"]])
             m20 = np.concatenate([sr_00_res["fpfs_m20"], sr_01_res["fpfs_m20"]])
             self.log.info(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
@@ -1083,7 +1083,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             angle = self.position_angle_ccw_from_east(
                 WORLD_ORIGIN.ra.deg, WORLD_ORIGIN.dec.deg, det_ra, det_dec
             ).rad
-            
+
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, angle)
             gT_true, gX_true = self._rotate_spin_2_vec(g1_true, g2_true, angle)
@@ -1099,7 +1099,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # dist = np.array([self.angsep(ra, dec) for ra, dec in zip(det_ra, det_dec)]) # in arcsec
             dist = self.angsep(det_ra, det_dec)
             ind_dist_list.append(dist)
-            
+
             r11, r22 = self._get_response_from_w_and_der(
                 e1,
                 e2,
@@ -1200,9 +1200,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             angular_bin_edges[1:],
             (n_realization, 1),
         )
-        summary_stats["ngal_in_bin"] = (
-            ngal_in_bin_ensemble  # Shape (n_halos, n_bins)
-        )
+        summary_stats[
+            "ngal_in_bin"
+        ] = ngal_in_bin_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eT"] = eT_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eT_std"] = eT_std_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eX"] = eX_ensemble  # Shape (n_halos, n_bins)
@@ -1211,31 +1211,31 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         summary_stats["rX"] = rX_ensemble  # Shape (n_halos, n_bins)
         summary_stats["gT_true"] = gT_true_ensemble  # Shape (n_halos, n_bins)
         summary_stats["gX_true"] = gX_true_ensemble  # Shape (n_halos, n_bins)
-        summary_stats["kappa_true"] = (
-            kappa_true_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["lensed_shift"] = (
-            lensed_shift_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["radial_lensed_shift"] = (
-            radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["r_weighted_gT"] = (
-            r_weighted_gT_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["r_weighted_gX"] = (
-            r_weighted_gX_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["radial_lensed_shift"] = (
-            radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
-        )
+        summary_stats[
+            "kappa_true"
+        ] = kappa_true_ensemble  # Shape (n_halos, n_bins)
+        summary_stats[
+            "lensed_shift"
+        ] = lensed_shift_ensemble  # Shape (n_halos, n_bins)
+        summary_stats[
+            "radial_lensed_shift"
+        ] = radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
+        summary_stats[
+            "r_weighted_gT"
+        ] = r_weighted_gT_ensemble  # Shape (n_halos, n_bins)
+        summary_stats[
+            "r_weighted_gX"
+        ] = r_weighted_gX_ensemble  # Shape (n_halos, n_bins)
+        summary_stats[
+            "radial_lensed_shift"
+        ] = radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
         summary_stats["mean_dist"] = mean_dist_ensemble
-        summary_stats["median_match_dist"] = (
-            median_match_dist_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["match_failure_rate"] = (
-            match_failure_rate_ensemble  # Shape (n_halos, n_bins)
-        )
+        summary_stats[
+            "median_match_dist"
+        ] = median_match_dist_ensemble  # Shape (n_halos, n_bins)
+        summary_stats[
+            "match_failure_rate"
+        ] = match_failure_rate_ensemble  # Shape (n_halos, n_bins)
 
         summary_stats["mean_m00"] = m00_ensemble
         summary_stats["mean_m20"] = m20_ensemble
