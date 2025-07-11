@@ -32,6 +32,7 @@ from typing import Any
 import fitsio
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
+from lsst.pex.config import Field
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -41,32 +42,31 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
+from numpy.typing import NDArray
 from scipy.spatial import KDTree
+from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
 
 dm_colnames = [
-    "deblend_nChild",
-    "deblend_blendedness",
-    "deblend_peak_center_x",
-    "deblend_peak_center_y",
-    "base_Blendedness_raw",
+    "base_SdssCentroid_x",
+    "base_SdssCentroid_y",
     "base_Blendedness_abs",
-    "base_CircularApertureFlux_3_0_instFlux",
-    "base_CircularApertureFlux_3_0_instFluxErr",
-    "base_CircularApertureFlux_4_5_instFlux",
-    "base_CircularApertureFlux_4_5_instFluxErr",
-    "base_GaussianFlux_flag",
     "base_GaussianFlux_instFlux",
     "base_GaussianFlux_instFluxErr",
     "base_PsfFlux_instFlux",
     "base_PsfFlux_instFluxErr",
     "base_Variance_value",
-    "ext_photometryKron_KronFlux_instFlux",
-    "ext_photometryKron_KronFlux_instFluxErr",
     "modelfit_CModel_instFlux",
     "modelfit_CModel_instFluxErr",
     "base_ClassificationExtendedness_value",
-    "base_ClassificationSizeExtendedness_value",
-    "base_FootprintArea_value",
+    "ext_shapeHSM_HsmPsfMoments_xx",
+    "ext_shapeHSM_HsmPsfMoments_yy",
+    "ext_shapeHSM_HsmPsfMoments_xy",
+    "ext_shapeHSM_HigherOrderMomentsPSF_04",
+    "ext_shapeHSM_HigherOrderMomentsPSF_13",
+    "ext_shapeHSM_HigherOrderMomentsPSF_22",
+    "ext_shapeHSM_HigherOrderMomentsPSF_31",
+    "ext_shapeHSM_HigherOrderMomentsPSF_40",
 ]
 
 
@@ -97,6 +97,7 @@ class matchPipeConnections(
         storageClass="SourceCatalog",
         multiple=True,
         deferLoad=True,
+        minimum=0,
     )
     truth_catalog = cT.Input(
         doc="Output truth catalog",
@@ -105,6 +106,7 @@ class matchPipeConnections(
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
+        minimum=0,
     )
     catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
@@ -121,6 +123,14 @@ class matchPipeConfig(
     PipelineTaskConfig,
     pipelineConnections=matchPipeConnections,
 ):
+    mag_zero = Field[float](
+        doc="magnitude zero point of the input catalog",
+        default=27.0,
+    )
+    mag_max_truth = Field[float](
+        doc="maximum magnitude limit of truth catalog",
+        default=27.0,
+    )
 
     def validate(self):
         super().validate()
@@ -155,62 +165,116 @@ class matchPipe(PipelineTask):
         skyMap = inputs["skyMap"]
 
         dm_handles = inputs["dm_catalog"]
-        dm_handles_dict = {
-            handle.dataId["band"]: handle for handle in dm_handles
-        }
+        if len(dm_handles) == 0:
+            dm_handles_dict = None
+            dm_catalog = None
+        else:
+            dm_handles_dict = {
+                handle.dataId["band"]: handle for handle in dm_handles
+            }
+            dm_catalog = []
+            for band in dm_handles_dict.keys():
+                handle = dm_handles_dict[band]
+                cat = handle.get()
+                mask = cat["detect_isPrimary"]
+                cat = rfn.repack_fields(
+                    cat.asAstropy().as_array()[dm_colnames][mask]
+                )
+                map_dict = {name: f"{band}_" + name for name in dm_colnames}
+                dm_catalog.append(rfn.rename_fields(cat, map_dict))
+            dm_catalog = rfn.merge_arrays(dm_catalog, flatten=True)
+
         truth_handles = inputs["truth_catalog"]
-        truth_handles_dict = {
-            handle.dataId["band"]: handle for handle in truth_handles
-        }
-        truth_catalog = truth_handles_dict["i"].get().as_array()
+        if len(truth_handles) == 0:
+            truth_handles_dict = None
+            truth_catalog = None
+        else:
+            truth_handles_dict = {
+                handle.dataId["band"]: handle for handle in truth_handles
+            }
+            truth_catalog = truth_handles_dict["i"].get().as_array()
+
         anacal_catalog = inputs["anacal_catalog"].as_array()
         outputs = self.run(
-            dm_handles_dict=dm_handles_dict,
-            truth_catalog=truth_catalog,
-            anacal_catalog=anacal_catalog,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            catalog=anacal_catalog,
+            dm_catalog=dm_catalog,
+            truth_catalog=truth_catalog,
         )
         butlerQC.put(outputs, outputRefs)
         return
 
+    def match(self, ana_coords, mrc_coords, thres=6):
+        mrc_tree = KDTree(mrc_coords)
+        match_dist, match_ndx = mrc_tree.query(ana_coords)
+        # Filter on distance
+        mask = match_dist < thres
+        ana_idx = np.flatnonzero(mask)
+        mrc_idx = match_ndx[mask]
+
+        # Count how many times each mrc is matched
+        uids, mrc_counts = np.unique(mrc_idx, return_counts=True)
+        repeated_mrc = set(uids[mrc_counts > 1])
+
+        if len(repeated_mrc) > 0:
+            # Filter to unique one-to-one matches
+            is_unique = np.array([m not in repeated_mrc for m in mrc_idx])
+            uniq_ana_idx = ana_idx[is_unique]
+            uniq_mrc_idx = mrc_idx[is_unique]
+
+            # Get remaining unmatched indices
+            all_ana = set(range(len(ana_coords)))
+            all_mrc = set(range(len(mrc_coords)))
+
+            used_ana = set(uniq_ana_idx)
+            used_mrc = set(uniq_mrc_idx)
+
+            remain_ana = np.array(sorted(all_ana - used_ana))
+            remain_mrc = np.array(sorted(all_mrc - used_mrc))
+
+            # Compute distance matrix (only for remaining entries)
+            dist_matrix = cdist(ana_coords[remain_ana], mrc_coords[remain_mrc])
+            dist_matrix[dist_matrix > thres] = 1e5
+            finite_rows = np.any(dist_matrix < 1e5, axis=1)
+            finite_cols = np.any(dist_matrix < 1e5, axis=0)
+
+            if np.any(finite_rows) and np.any(finite_cols):
+                sub_dist = dist_matrix[np.ix_(finite_rows, finite_cols)]
+                row, col = linear_sum_assignment(sub_dist)
+
+                # Only keep assignments with finite distances
+                valid = sub_dist[row, col] < thres
+
+                # Recover original indices
+                ana_idx2 = remain_ana[np.flatnonzero(finite_rows)[row[valid]]]
+                mrc_idx2 = remain_mrc[np.flatnonzero(finite_cols)[col[valid]]]
+            else:
+                ana_idx2 = np.array([], dtype=int)
+                mrc_idx2 = np.array([], dtype=int)
+            final_ana_idx = np.concatenate([uniq_ana_idx, ana_idx2])
+            final_mrc_idx = np.concatenate([uniq_mrc_idx, mrc_idx2])
+            return final_ana_idx, final_mrc_idx
+        else:
+            return ana_idx, mrc_idx
+
     def merge_dm(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
         assert isinstance(self.config, matchPipeConfig)
-        # Apply quality mask to DM
-        msk = mrc["i_deblend_nChild"] == 0
-        mrc = mrc[msk]
-        mag_mrc = 27 - 2.5 * np.log10(mrc["i_base_GaussianFlux_instFlux"])
-        x_mrc = np.array(mrc["deblend_peak_center_x"])
-        y_mrc = np.array(mrc["deblend_peak_center_y"])
-
-        # Magnitude from src
-        mag = 27 - 2.5 * np.log10(src["i_flux"])
-
+        magz = self.config.mag_zero
+        mag_mrc = magz - 2.5 * np.log10(mrc["i_base_GaussianFlux_instFlux"])
+        mrc = mrc[mag_mrc < self.config.mag_max_truth]
+        x_mrc = np.array(mrc["i_base_SdssCentroid_x"])
+        y_mrc = np.array(mrc["i_base_SdssCentroid_y"])
         # Coordinates
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
         ana_coords = np.vstack(
-            (src["x1"] / pixel_scale, src["x2"] / pixel_scale)
+            (src["x1_det"] / pixel_scale, src["x2_det"] / pixel_scale)
         ).T
-        ana_tree = KDTree(ana_coords)
-        match_dist, match_ndx = ana_tree.query(mrc_coords)
-        mag_diffs = mag[match_ndx] - mag_mrc
 
-        # Filter on distance
-        mask = match_dist < 6
-        ana_idx = match_ndx[mask]
-        mrc_idx = np.flatnonzero(mask)
-        abs_diffs = np.abs(mag_diffs[mask])
-
-        # Resolve duplicates by lowest magnitude difference
-        order = np.lexsort((abs_diffs, ana_idx))
-        ana_idx_sorted = ana_idx[order]
-        mrc_idx_sorted = mrc_idx[order]
-        _, first = np.unique(ana_idx_sorted, return_index=True)
-
-        final_src = src[ana_idx_sorted[first]]
-        final_mrc = mrc[mrc_idx_sorted[first]]
-
+        src_idx, mrc_idx = self.match(ana_coords, mrc_coords)
+        final_src = src[src_idx]
+        final_mrc = mrc[mrc_idx]
         # Combine fields
         combined = rfn.merge_arrays(
             (final_src, final_mrc),
@@ -221,43 +285,30 @@ class matchPipe(PipelineTask):
 
     def merge_truth(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
         assert isinstance(self.config, matchPipeConfig)
-
         cat_ref = fitsio.read(
             os.path.join(os.environ["CATSIM_DIR"], "OneDegSq.fits")
         )
         mag_mrc = cat_ref[mrc["index"]]["i_ab"]
+        mrc = mrc[mag_mrc < self.config.mag_max_truth]
         x_mrc = np.array(mrc["image_x"])
         y_mrc = np.array(mrc["image_y"])
 
-        # Magnitude from src
-        mag = 27 - 2.5 * np.log10(src["flux"])
-
         # Coordinates
-        mrc_coords = np.vstack((x_mrc, y_mrc)).T
         ana_coords = np.vstack(
-            (src["x1"] / pixel_scale, src["x2"] / pixel_scale)
+            (src["x1_det"] / pixel_scale, src["x2_det"] / pixel_scale)
         ).T
-        ana_tree = KDTree(ana_coords)
-        match_dist, match_ndx = ana_tree.query(mrc_coords)
-        mag_diffs = mag[match_ndx] - mag_mrc
+        mrc_coords = np.vstack((x_mrc, y_mrc)).T
 
-        # Filter on distance
-        mask = match_dist < 6
-        ana_idx = match_ndx[mask]
-        mrc_idx = np.flatnonzero(mask)
-        abs_diffs = np.abs(mag_diffs[mask])
-
-        # Resolve duplicates by lowest magnitude difference
-        order = np.lexsort((abs_diffs, ana_idx))
-        ana_idx_sorted = ana_idx[order]
-        mrc_idx_sorted = mrc_idx[order]
-        _, first = np.unique(ana_idx_sorted, return_index=True)
-
-        final_src = src[ana_idx_sorted[first]]
+        src_idx, mrc_idx = self.match(ana_coords, mrc_coords)
+        final_src = src[src_idx]
+        final_mrc = mrc[mrc_idx]
         final_mrc = rfn.repack_fields(
-            mrc[mrc_idx_sorted[first]][["index", "z"]]
+            final_mrc[["index", "z"]]
         )
-        final_mrc = rfn.rename_fields(final_mrc, {"z": "redshift"})
+        final_mrc = rfn.rename_fields(
+            final_mrc,
+            {"z": "redshift", "index": "truth_index"}
+        )
 
         # Combine fields
         combined = rfn.merge_arrays(
@@ -270,35 +321,28 @@ class matchPipe(PipelineTask):
     def run(
         self,
         *,
-        dm_handles_dict: dict,
-        truth_catalog,
-        anacal_catalog,
         skyMap,
         tract: int,
         patch: int,
+        catalog: NDArray,
+        dm_catalog: NDArray | None = None,
+        truth_catalog: NDArray | None = None,
     ):
         assert isinstance(self.config, matchPipeConfig)
-        # TODO: Will be removed
-        bbox = skyMap[tract][patch].getOuterBBox()
-        truth_catalog["image_x"] = bbox.beginX + truth_catalog["image_x"]
-        truth_catalog["image_y"] = bbox.beginY + truth_catalog["image_y"]
-        # TODO: Will be removed
-
-        dm_catalog = []
-        for band in dm_handles_dict.keys():
-            handle = dm_handles_dict[band]
-            cat = rfn.repack_fields(
-                handle.get()
-                .asAstropy()
-                .to_pandas(index=False)
-                .to_records(index=False)[dm_colnames]
-            )
-            map_dict = {name: f"{band}_" + name for name in dm_colnames}
-            dm_catalog.append(rfn.rename_fields(cat, map_dict))
-        dm_catalog = rfn.merge_arrays(dm_catalog, flatten=True)
         pixel_scale = (
             skyMap[tract][patch].getWcs().getPixelScale().asDegrees() * 3600
         )
-        catalog = self.merge_dm(anacal_catalog, dm_catalog, pixel_scale)
-        catalog = self.merge_truth(catalog, truth_catalog, pixel_scale)
+
+        if dm_catalog is not None:
+            catalog = self.merge_dm(catalog, dm_catalog, pixel_scale)
+
+        if truth_catalog is not None:
+            # TODO: Will be removed
+            bbox = skyMap[tract][patch].getOuterBBox()
+            t = truth_catalog.copy()
+            t["image_x"] = bbox.beginX + t["image_x"]
+            t["image_y"] = bbox.beginY + t["image_y"]
+            # TODO: Will be removed
+            catalog = self.merge_truth(catalog, t, pixel_scale)
+
         return Struct(catalog=catalog)

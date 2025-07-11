@@ -29,8 +29,9 @@ import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
+import numpy as np
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import ConfigurableField, Field
+from lsst.pex.config import ConfigurableField, Field, FieldValidationError
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -50,7 +51,7 @@ class FpfsForcePipeConnections(
         "coaddName": "deep",
     },
 ):
-    joint_catalog = cT.Input(
+    input_catalog = cT.Input(
         doc="Source catalog with joint detection and measurement",
         name="{coaddName}Coadd_anacal_joint",
         dimensions=("skymap", "tract", "patch"),
@@ -67,7 +68,7 @@ class FpfsForcePipeConnections(
     )
     noise_corr = cT.Input(
         doc="noise correlation function",
-        name="{coaddName}Coadd_systematics_noisecorr",
+        name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
@@ -76,7 +77,7 @@ class FpfsForcePipeConnections(
     )
     catalog = cT.Output(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}Coadd_anacal_force",
+        name="{coaddName}Coadd_fpfs_force",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -101,6 +102,12 @@ class FpfsForcePipeConfig(
 
     def validate(self):
         super().validate()
+        if self.fpfs.sigma_arcsec1 < 0.0:
+            raise FieldValidationError(
+                self.fpfs.__class__.sigma_arcsec1,
+                self,
+                "sigma_arcsec1 in a wrong range",
+            )
 
     def setDefaults(self):
         super().setDefaults()
@@ -142,7 +149,7 @@ class FpfsForcePipe(PipelineTask):
             }
 
         outputs = self.run(
-            joint_catalog=inputs["joint_catalog"].as_array(),
+            detection=inputs["input_catalog"].as_array(),
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
         )
@@ -152,19 +159,35 @@ class FpfsForcePipe(PipelineTask):
     def run(
         self,
         *,
-        joint_catalog,
+        detection,
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
     ):
         assert isinstance(self.config, FpfsForcePipeConfig)
-        catalog = [joint_catalog]
+
+        if detection is not None:
+            anacal_colnames = [
+                "x1", "x2",
+                "flux", "dflux_dg1", "dflux_dg2",
+                "wsel", "dwsel_dg1", "dwsel_dg2",
+            ]
+            cat = rfn.repack_fields(
+                detection[anacal_colnames]
+            )
+            catalog = [cat]
+        else:
+            catalog = []
         for band in exposure_handles_dict.keys():
             handle = exposure_handles_dict[band]
             exposure = handle.get()
             exposure.getPsf().setCacheCapacity(self.config.psfCache)
             if correlation_handles_dict is not None:
-                handle = correlation_handles_dict[band]
-                noise_corr = handle.get()
+                noise_corr = correlation_handles_dict[band].get().getArray()
+                variance = np.amax(noise_corr)
+                noise_corr = noise_corr / variance
+                ny, nx = noise_corr.shape
+                assert noise_corr[ny // 2, nx // 2] == 1
+                self.log.debug("With correlation, variance:", variance)
             else:
                 noise_corr = None
 
@@ -174,11 +197,11 @@ class FpfsForcePipe(PipelineTask):
                 exposure=exposure,
                 seed=seed,
                 noise_corr=noise_corr,
-                detection=joint_catalog,
+                detection=detection,
                 band=band,
             )
             cat = self.fpfs.run(**data)
             catalog.append(cat)
-            del exposure
+            del exposure, data
         catalog = rfn.merge_arrays(catalog, flatten=True)
         return Struct(catalog=catalog)

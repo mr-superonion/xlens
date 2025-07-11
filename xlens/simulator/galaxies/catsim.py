@@ -10,7 +10,7 @@ from descwl_shear_sims.layout import Layout
 
 class CatSim2017Catalog(object):
     """
-    Catalog of galaxies from wldeblend
+    Catalog of galaxies from catsim2017
 
     Parameters
     ----------
@@ -58,22 +58,22 @@ class CatSim2017Catalog(object):
         self.gal_type = "wldeblend"
         self.rng = rng
 
-        self._wldeblend_cat = read_catsim2017_cat(
+        self.input_catalog = read_catsim2017_cat(
             select_observable=select_observable,
             select_lower_limit=select_lower_limit,
             select_upper_limit=select_upper_limit,
         )
-        ngal = len(self._wldeblend_cat)
-        if "prob" in self._wldeblend_cat.dtype.names and ngal > 0:
+        ngal = len(self.input_catalog)
+        if "prob" in self.input_catalog.dtype.names and ngal > 0:
             # noramlize probabilities to sum = 1
-            probabilities = self._wldeblend_cat["prob"] / np.sum(
-                self._wldeblend_cat["prob"]
+            probabilities = self.input_catalog["prob"] / np.sum(
+                self.input_catalog["prob"]
             )
         else:
             probabilities = None
 
         # one square degree catalog, convert to arcmin
-        density = self._wldeblend_cat.size / (60 * 60)
+        density = self.input_catalog.size / (60 * 60)
         if buff is None:
             buff = 0
         if isinstance(layout, str):
@@ -97,12 +97,12 @@ class CatSim2017Catalog(object):
         num = len(self)
 
         if indice_id is None:
-            integers = np.arange(0, self._wldeblend_cat.size, dtype=int)
+            integers = np.arange(0, self.input_catalog.size, dtype=int)
             self.indices = self.rng.choice(integers, size=num, p=probabilities)
         else:
             indice_min = indice_id * num
             indice_max = indice_min + num
-            if indice_min >= self._wldeblend_cat.size:
+            if indice_min >= self.input_catalog.size:
                 raise ValueError("indice_min too large")
             self.indices = (
                 np.arange(
@@ -110,7 +110,7 @@ class CatSim2017Catalog(object):
                     indice_max,
                     dtype=int,
                 )
-                % self._wldeblend_cat.size
+                % self.input_catalog.size
             )
         # do a random rotation for each galaxy
         self.angles = self.rng.uniform(low=0, high=360, size=num)
@@ -152,7 +152,7 @@ class CatSim2017Catalog(object):
             shifts.append(galsim.PositionD(sarray["dx"][i], sarray["dy"][i]))
             index = self.indices[i]
             indexes.append(index)
-            redshifts.append(self._wldeblend_cat[index]["redshift"])
+            redshifts.append(self.input_catalog[index]["redshift"])
 
         return {
             "objlist": objlist,
@@ -183,7 +183,7 @@ class CatSim2017Catalog(object):
         angle = self.angles[i]
 
         galaxy = builder.from_catalog(
-            self._wldeblend_cat[index],
+            self.input_catalog[index],
             0,
             0,
             band,

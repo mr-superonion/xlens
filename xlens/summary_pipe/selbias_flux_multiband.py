@@ -54,28 +54,28 @@ class SelBiasMultibandPipeConnections(
 ):
     src00 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_0_rot0_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src01 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot1_Coadd_anacal_{dataType}",
+        name="{coaddName}_0_rot1_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src10 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_1_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_1_rot0_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src11 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_1_rot1_Coadd_anacal_{dataType}",
+        name="{coaddName}_1_rot1_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -196,28 +196,59 @@ class SelBiasMultibandPipe(PipelineTask):
         assert isinstance(self.config, SelBiasMultibandPipeConfig)
         en = self.ename
         egn = self.egname
+        if en[-1] == "1":
+            en2 = en.replace("e1", "e2")
+            egn2 = egn.replace("e1", "e2").replace("g1", "g2")
+        else:
+            en2 = en.replace("e2", "e1")
+            egn2 = egn.replace("e2", "e1").replace("g2", "g1")
+        if "fpfs" in en:
+            emax = 0.3
+        else:
+            emax = 2.0
         wname = self.wname
         wgname = self.wgname
         fname = self.fname
         fgname = self.fgname
         msk = (~np.isnan(src[fgname])) & (~np.isnan(src[egn]))
         src = src[msk]
-        tmp = src[src[fname] > flux_min]
+
+        # selection
+        esq = src[en] ** 2 + src[en2] ** 2
+        msk = (src[fname] > flux_min) & (esq < emax)
+        tmp = src[msk]
         ell = np.sum(tmp[en] * tmp[wname])
         res = np.sum(tmp[egn] * tmp[wname] + tmp[en] * tmp[wgname])
+        del msk, tmp, esq
 
         if self.config.do_correct_selection_bias:
             dg = 0.02
             # selection
-            tmp = src[(src[fname] + dg * src[fgname]) > flux_min]
+            esq = (
+                src[en] ** 2 + src[en2] ** 2
+                + 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
+            )
+            msk = (
+                ((src[fname] + dg * src[fgname]) > flux_min) &
+                (esq < emax)
+            )
+            tmp = src[msk]
             ellp = np.sum(tmp[en] * tmp[wname])
-            del tmp
+            del tmp, esq, msk
 
             # selection
-            tmp = src[(src[fname] - dg * src[fgname]) > flux_min]
+            esq = (
+                src[en] ** 2 + src[en2] ** 2
+                - 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
+            )
+            msk = (
+                ((src[fname] - dg * src[fgname]) > flux_min) &
+                (esq < emax)
+            )
+            tmp = src[msk]
             ellm = np.sum(tmp[en] * tmp[wname])
             res_sel = (ellp - ellm) / 2.0 / dg
-            del tmp
+            del tmp, esq, msk
         else:
             res_sel = 0.0
         return ell, (res + res_sel)

@@ -22,7 +22,7 @@ import lsst.afw.image as afwImage
 import lsst.afw.math as afwMath
 import lsst.meas.algorithms as meaAlg
 import numpy as np
-from descwl_shear_sims.shear import ShearHalo, ShearRedshift
+from .perturbation import ShearHalo, ShearRedshift
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.wcs import make_dm_wcs
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
@@ -593,7 +593,7 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
             indice_id=indice_id,
         )
         # for fix source redshift
-        galaxy_catalog._wldeblend_cat["redshift"] = self.config.z_source
+        galaxy_catalog.input_catalog["redshift"] = self.config.z_source
         return galaxy_catalog
 
     def get_perturbation_object(self, **kwargs: Any):

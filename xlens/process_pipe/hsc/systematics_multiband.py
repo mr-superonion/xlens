@@ -25,14 +25,12 @@ __all__ = [
     "SystematicsMultibandPipeConnections",
 ]
 
-import glob
 import logging
 import os
 from typing import Any
 
 import fitsio
 import lsst.afw.image as afwImage
-import lsst.afw.table as afwTable
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.geom import Box2I, Extent2I, Point2D, Point2I

@@ -1,53 +1,72 @@
-import astropy.io.fits as pyfits
+import fitsio
 import healpy as hp
 import numpy as np
-from astropy.table import Table
+from numpy.lib import recfunctions as rfn
 
 
-def read_dm_catalog(filename):
-    """From LSST pipeline data to HSC catalog data
+def read_catalog(filename):
+    with fitsio.FITS(filename) as f:
+        data = f[1].read()  # Structured NumPy array
+        colnames = data.dtype.names
+
+        if "flags" not in colnames:
+            return data  # No flags column; return as-is
+        flags = data["flags"]
+        n_flag = flags.shape[1]
+
+        # Only now read the header
+        header = f[1].read_header()
+
+        # Extract new fields
+        new_fields = []
+        for i in range(n_flag):
+            name = header.get(f"TFLAG{i+1}", f"flag_{i}")
+            new_fields.append((name, flags[:, i]))
+
+        names, arrays = zip(*new_fields)
+        result = rfn.append_fields(data, names, arrays, usemask=False)
+        return result
+
+
+def get_shear_regauss(catalog, mbias, msel=0.0, asel=0.0):
+    """Returns the regauss shear in data *on single galaxy level*.
+    Note: shape weight should be added when caluculating ensemble average.
 
     Args:
-    filename (str):     fits filename to read
-
-    Returns:
-    catalog (ndarray): the prepared catalog for a subfield
+        catalog (ndarray):    input hsc catalog
+        mbias (float):      average multiplicative bias [m+dm2]
+        msel (float):       selection multiplicative bias for the sample
+        asel (float):       selection additive bias
+        Returns:
+        g1 (ndarray):       the first component of shear
+        g2 (ndarray):       the second component of shear
     """
+    if "i_hsmshaperegauss_derived_weight" in catalog.dtype.names:
+        wname = "i_hsmshaperegauss_derived_weight"
+        erms_name = "i_hsmshaperegauss_derived_rms_e"
+        e1name = "i_hsmshaperegauss_e1"
+        e2name = "i_hsmshaperegauss_e2"
+        c1name = "i_hsmshaperegauss_derived_shear_bias_c1"
+        c2name = "i_hsmshaperegauss_derived_shear_bias_c2"
+    elif "ishape_hsm_regauss_derived_shape_weight" in catalog.dtype.names:
+        wname = "ishape_hsm_regauss_derived_shape_weight"
+        erms_name = "ishape_hsm_regauss_derived_rms_e"
+        e1name = "ishape_hsm_regauss_e1"
+        e2name = "ishape_hsm_regauss_e2"
+        c1name = "ishape_hsm_regauss_derived_shear_bias_c1"
+        c2name = "ishape_hsm_regauss_derived_shear_bias_c2"
+    else:
+        raise ValueError("Cannot process the catalog")
 
-    # Read the catalog data
-    catalog = Table.read(filename)
-    col_names = catalog.colnames
-
-    # Load the header to get proper name of flags
-    header = pyfits.getheader(filename, 1)
-    n_flag = catalog["flags"].shape[1]
-    for i in range(n_flag):
-        catalog[header["TFLAG%s" % (i + 1)]] = catalog["flags"][:, i]
-
-    # Then, apply mask for permissive cuts
-    mask = (
-        (~(catalog["base_SdssCentroid_flag"]))
-        & (~catalog["ext_shapeHSM_HsmShapeRegauss_flag"])
-        & (catalog["base_ClassificationExtendedness_value"] > 0)
-        & (~np.isnan(catalog["modelfit_CModel_instFlux"]))
-        & (~np.isnan(catalog["modelfit_CModel_instFluxErr"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmShapeRegauss_resolution"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmPsfMoments_xx"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmPsfMoments_xy"]))
-        & (~np.isnan(catalog["base_Variance_value"]))
-        & (~np.isnan(catalog["modelfit_CModel_instFlux"]))
-        & (~np.isnan(catalog["modelfit_CModel_instFluxErr"]))
-        & (~np.isnan(catalog["ext_shapeHSM_HsmShapeRegauss_resolution"]))
-        & (catalog["deblend_nChild"] == 0)
-    )
-    catalog = catalog[mask]
-    if len(catalog) == 0:
-        return None
-    catalog = catalog[col_names]
-    # Add column to make a WL flag for the simulation data:
-    catalog["dm_hsc_wl_flag"] = get_wl_cuts(catalog)
-    return catalog
+    wsum = np.sum(catalog[wname])
+    eres = 1.0 - np.sum(catalog[erms_name] ** 2.0 * catalog[wname]) / wsum
+    g1 = (catalog[e1name] / 2.0 / eres - catalog[c1name]) / (1.0 + mbias)
+    g2 = (catalog[e2name] / 2.0 / eres - catalog[c2name]) / (1.0 + mbias)
+    e1pg, e2pg = get_psf_ellip(catalog)  # PSF shape
+    # correcting for selection bias
+    g1 = (g1 - e1pg * asel) / (1.0 + msel)
+    g2 = (g2 - e2pg * asel) / (1.0 + msel)
+    return g1, g2
 
 
 def get_pixel_cuts(catalog):
@@ -428,28 +447,13 @@ def get_abs_ellip_psf(catalog):
     return out
 
 
-def get_FDFC_flag(data, hpfname):
-    """Returns the Full Depth Full Color (FDFC) cut
-
-    Args:
-    data (ndarray):     input catalog array
-    hpfname (str):      healpix fname (s16a_wide2_fdfc.fits,
-                        s18a_fdfc_hp_contarea.fits, or
-                        s19a_fdfc_hp_contarea_izy-gt-5_trimmed_fd001.fits)
-    Returns:
-    mask (ndarray):     mask array for FDFC region
-    """
-    ra, dec = get_radec(data)
+def objects_in_healpix_mask(hpfname, ra, dec):
     m = hp.read_map(hpfname, nest=True, dtype=bool)
-
-    # Get flag
-    mfactor = np.pi / 180.0
-    indices_map = np.where(m)[0]
     nside = hp.get_nside(m)
-    phi = ra * mfactor
-    theta = np.pi / 2.0 - dec * mfactor
+    phi = np.deg2rad(ra)
+    theta = np.deg2rad(90.0 - dec)
     indices_obj = hp.ang2pix(nside, theta, phi, nest=True)
-    return np.in1d(indices_obj, indices_map)
+    return m[indices_obj]  # boolean array
 
 
 def get_radec(catalog):
