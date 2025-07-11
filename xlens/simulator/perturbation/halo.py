@@ -7,7 +7,6 @@ from descwl_shear_sims.shear import _get_shear_res_dict
 import numpy as np
 
 
-
 from .utils import _get_shear_res_dict
 
 
@@ -35,7 +34,7 @@ class ShearHalo(object):
         cosmo (astropy.cosmology):  cosmology object
         no_kappa (bool):            if True, turn off kappa field
         """
-
+        
         if cosmo is None:
             cosmo = Planck18
         self.cosmo = cosmo
@@ -61,7 +60,6 @@ class ShearHalo(object):
         gso, shift:
             distorted galaxy object and shift
         """
-
         if redshift > self.z_lens:
             r = shift
             
@@ -74,6 +72,7 @@ class ShearHalo(object):
             #         r.x / norm * renorm,
             #         r.y / norm * renorm,
             #     )
+
 
             lens_cosmo = LensCosmo(
                 z_lens=self.z_lens,
@@ -122,6 +121,7 @@ class ShearHalo(object):
             f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
                 lensed_x, lensed_y, kwargs
             )
+
             gamma1 = 1.0 / 2 * (f_xx - f_yy)
             gamma2 = f_xy
             if self.no_kappa:
@@ -139,5 +139,4 @@ class ShearHalo(object):
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
 
             lensed_shift = galsim.PositionD(lensed_x, lensed_y)
-
             return _get_shear_res_dict(gso, lensed_shift, gamma1, gamma2, kappa)

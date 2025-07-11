@@ -79,7 +79,6 @@ class HaloMcBiasMultibandPipeConnections(
         multiple=True,
         deferLoad=True,
     )
-
     src01List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
         name="{coaddName}_0_rot1_Coadd_anacal_{dataType}",
@@ -92,7 +91,6 @@ class HaloMcBiasMultibandPipeConnections(
         multiple=True,
         deferLoad=True,
     )
-
     truth00List = cT.Input(
         doc="input truth catalog",
         name="{coaddName}_0_rot0_Coadd_truthCatalog",
@@ -106,7 +104,6 @@ class HaloMcBiasMultibandPipeConnections(
         multiple=True,
         deferLoad=True,
     )
-
     truth01List = cT.Input(
         doc="input truth catalog",
         name="{coaddName}_0_rot1_Coadd_truthCatalog",
@@ -120,7 +117,6 @@ class HaloMcBiasMultibandPipeConnections(
         multiple=True,
         deferLoad=True,
     )
-
     outputSummary = cT.Output(
         doc="Summary statistics",
         name="{coaddName}_halo_mc_{dataType}_summary_stats",
@@ -863,6 +859,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         lensed_shift_ensemble = np.empty((len(src00List), n_bins))
         radial_lensed_shift_ensemble = np.empty((len(src00List), n_bins))
         mean_dist_ensemble = np.empty((len(src00List), n_bins))
+
         median_match_dist_ensemble = np.empty((len(src00List), n_bins))
         match_failure_rate_ensemble = np.empty((len(src00List), n_bins))
         m00_ensemble = np.empty((len(src00List), n_bins))
@@ -969,6 +966,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             )
             m00 = np.concatenate([sr_00_res["fpfs_m00"], sr_01_res["fpfs_m00"]])
             m20 = np.concatenate([sr_00_res["fpfs_m20"], sr_01_res["fpfs_m20"]])
+
             self.log.info(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
             e1_g1 = np.concatenate(
                 [
@@ -1185,6 +1183,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         per_galaxy_struct["lensed_x"] = lensed_x_ind
         per_galaxy_struct["lensed_y"] = lensed_y_ind
         per_galaxy_struct["dist"] = dist_ind
+
 
         summary_stats = self.get_summary_struct(
             n_realization,
