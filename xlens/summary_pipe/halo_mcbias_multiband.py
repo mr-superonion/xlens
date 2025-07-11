@@ -28,6 +28,7 @@ __all__ = [
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
+from lsst.utils.logging import LsstLogAdapter
 import matplotlib.pyplot as plt
 import numpy as np
 from lsst.pex.config import Field
@@ -477,6 +478,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 "median_match_dist",
                 f"({n_bins},)f8",
             ),
+            ("mean_dist", f"({n_bins},)f8"),
             (
                 "match_failure_rate",
                 f"({n_bins},)f8",
@@ -958,15 +960,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             det_x = np.concatenate([sr_00_res["x"], sr_01_res["x"]])
             det_y = np.concatenate([sr_00_res["y"], sr_01_res["y"]])
             det_ra, det_dec = wcs.pixelToSkyArray(det_x, det_y, degrees=True)
-            logger.info(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
+            print(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
 
             e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
             e2_g2 = np.concatenate([sr_00_res[e2g2n], sr_01_res[e2g2n]])
-            w = np.concatenate([sr_00_res["w"], sr_01_res["w"]])
-            w_g1 = np.concatenate([sr_00_res["w_g1"], sr_01_res["w_g1"]])
-            w_g2 = np.concatenate([sr_00_res["w_g2"], sr_01_res["w_g2"]])
-            m00 = np.concatenate([sr_00_res["m00"], sr_01_res["m00"]])
-            m20 = np.concatenate([sr_00_res["m20"], sr_01_res["m20"]])
+            w = np.concatenate([sr_00_res["fpfs_w"], sr_01_res["fpfs_w"]])
+            w_g1 = np.concatenate([sr_00_res["fpfs_dw_dg1"], sr_01_res["fpfs_dw_dg1"]])
+            w_g2 = np.concatenate([sr_00_res["fpfs_dw_dg2"], sr_01_res["fpfs_dw_dg2"]])
+            m00 = np.concatenate([sr_00_res["fpfs_m00"], sr_01_res["fpfs_m00"]])
+            m20 = np.concatenate([sr_00_res["fpfs_m20"], sr_01_res["fpfs_m20"]])
             self.log.info(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
             e1_g1 = np.concatenate(
                 [
@@ -1049,10 +1051,10 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 np.mean(lensed_y - (image_dim) / 2) < 100
             ), f"mean y should be close to the center, distance is {np.mean(lensed_y - (image_dim) / 2)}, index is {i}"
 
-            logger.info(
+            print(
                 f"lensed mean x offset: {np.mean(lensed_x - (image_dim) / 2)}, lensed mean y: {np.mean(lensed_y - (image_dim) / 2)}"
             )
-            logger.info(
+            print(
                 f"prelensed mean x offset: {np.mean(x - (image_dim) / 2)}, prelensed mean y: {np.mean(y - (image_dim) / 2)}"
             )
 
