@@ -337,6 +337,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 around 0.5
             match_failure_rate_list(array):
                 fraction of match distance larger than 2 in each radial bin
+            m00_list(array): mean of shapelet mode m00 in each radial bin
+            m20_list(array): mean of shapelet mode m20 in each radial bin
         """
 
         n_bins = len(radial_bin_edges) - 1
@@ -817,15 +819,17 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         )
 
         n_bins = 15
-        # starting from 15 arcsec
-        pixel_bin_edges = np.linspace(5 / 0.2, max_pixel, n_bins + 1)
+        # starting from 10 arcsec
+        pixel_bin_edges = np.linspace(10 / 0.2, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
         angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
+
+        image_center = 0.5 * (image_dim - 1)
 
         wcs = make_dm_wcs(
             make_wcs(
                 scale=0.2,
-                image_origin=galsim.PositionD(2499.5, 2499.5),
+                image_origin=galsim.PositionD(image_center, image_center),
                 world_origin=WORLD_ORIGIN,
             )
         )
@@ -896,19 +900,19 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             self.log.debug(
                 "truth 00 x residual is %.3f"
-                % (np.mean(truth_00_res["image_x"] - (image_dim) / 2))
+                % (np.mean(truth_00_res["image_x"] - image_center))
             )
             self.log.debug(
                 "truth 00 y residual is %.3f"
-                % (np.mean(truth_00_res["image_y"] - (image_dim) / 2))
+                % (np.mean(truth_00_res["image_y"] - image_center))
             )
             self.log.debug(
                 "truth 01 x residual is %.3f"
-                % (np.mean(truth_01_res["image_x"] - (image_dim) / 2))
+                % (np.mean(truth_01_res["image_x"] - image_center))
             )
             self.log.debug(
                 "truth 01 y residual is %.3f"
-                % (np.mean(truth_01_res["image_y"] - (image_dim) / 2))
+                % (np.mean(truth_01_res["image_y"] - image_center))
             )
 
             idx_00, match_dist_00 = self._match_input_to_det(
@@ -1043,28 +1047,28 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             # ind_det_dec_list.append(det_dec)
 
             assert (
-                np.mean(lensed_x - (image_dim) / 2) < 100
-            ), f"mean x should be close to the center, distance is {np.mean(lensed_x - (image_dim) / 2)}, index is {i}"
+                np.mean(lensed_x - image_center) < 100
+            ), f"mean x should be close to the center, distance is {np.mean(lensed_x - image_center)}, index is {i}"
             assert (
-                np.mean(lensed_y - (image_dim) / 2) < 100
-            ), f"mean y should be close to the center, distance is {np.mean(lensed_y - (image_dim) / 2)}, index is {i}"
+                np.mean(lensed_y - image_center) < 100
+            ), f"mean y should be close to the center, distance is {np.mean(lensed_y - image_center)}, index is {i}"
 
             print(
-                f"lensed mean x offset: {np.mean(lensed_x - (image_dim) / 2)}, lensed mean y: {np.mean(lensed_y - (image_dim) / 2)}"
+                f"lensed mean x offset: {np.mean(lensed_x - image_center)}, lensed mean y: {np.mean(lensed_y - image_center)}"
             )
             print(
-                f"prelensed mean x offset: {np.mean(x - (image_dim) / 2)}, prelensed mean y: {np.mean(y - (image_dim) / 2)}"
+                f"prelensed mean x offset: {np.mean(x - image_center)}, prelensed mean y: {np.mean(y - image_center)}"
             )
 
             lensed_shift = (
                 np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             )
             radial_dist_lensed = np.sqrt(
-                (lensed_x - (image_dim) / 2) ** 2
-                + (lensed_y - (image_dim) / 2) ** 2
+                (lensed_x - image_center) ** 2
+                + (lensed_y - image_center) ** 2
             )
             radial_dist = np.sqrt(
-                (x - (image_dim) / 2) ** 2 + (y - (image_dim) / 2) ** 2
+                (x - image_center) ** 2 + (y - image_center) ** 2
             )
             radial_lensed_shift = (
                 radial_dist_lensed - radial_dist
