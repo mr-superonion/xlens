@@ -134,11 +134,6 @@ class MultibandSimBaseConfig(Config):
         default=False,
     )
 
-    rngID = Field[int](
-        doc="random seed index for halo",
-        default=0,
-    )
-
     def validate(self):
         super().validate()
         if self.galId >= gal_seed_base or self.galId < 0:
