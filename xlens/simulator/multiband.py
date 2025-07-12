@@ -468,11 +468,11 @@ class MultibandSimShearTaskConfig(MultibandSimBaseConfig):
                 "test target can only be 'g1' or 'g2'",
             )
 
-        if self.test_value < 0.0 or self.test_value > 0.10:
+        if self.test_value < 0.0 or self.test_value > 0.30:
             raise FieldValidationError(
                 self.__class__.test_value,
                 self,
-                "test_value should be in [0.00, 0.10]",
+                "test_value should be in [0.00, 0.30]",
             )
 
         if self.force_pixel_center:
