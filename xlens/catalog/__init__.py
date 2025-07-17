@@ -1,3 +1,4 @@
-from . import basic, twopt
+from .basic import *
+from . import twopt
 
-__all__ = ["basic", "twopt"]
+__all__ = ["twopt"]
