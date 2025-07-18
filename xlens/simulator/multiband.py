@@ -452,6 +452,11 @@ class MultibandSimShearTaskConfig(MultibandSimBaseConfig):
         default=0.02,
     )
 
+    kappa_value = Field[float](
+        doc="kappa value to use",
+        default=None,
+    )
+
     def validate(self):
         super().validate()
         n_zbins = len(self.z_bounds) - 1
@@ -503,6 +508,7 @@ class MultibandSimShearTask(MultibandSimBaseTask):
             g_dist=self.config.test_target,
             shear_value=self.config.test_value,
             z_bounds=self.config.z_bounds,
+            kappa_value=self.config.kappa_value,
         )
 
 
