@@ -82,8 +82,8 @@ class ShearRedshift(object):
         distortion = self.get_shear(redshift, shift)
         if self.kappa is None:
             shear, gamma1, gamma2 = distortion
-            gso = gso.shear(distortion)
-            shift = shift.shear(distortion)
+            gso = gso.shear(shear)
+            shift = shift.shear(shear)
             return _get_shear_res_dict(gso, shift, gamma1=gamma1, gamma2=gamma2, kappa=0.)
         else:
             g1, g2, mu, gamma1, gamma2 = distortion
