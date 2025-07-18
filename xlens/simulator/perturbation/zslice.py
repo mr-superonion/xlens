@@ -57,11 +57,12 @@ class ShearRedshift(object):
         if self.kappa is not None:
             g1 = gamma1 / (1 - self.kappa)
             g2 = gamma2 / (1 - self.kappa)
+            mu = 1.0 / ((1 - self.kappa) ** 2 - gamma1**2 - gamma2**2)
+            return g1, g2, mu, gamma1, gamma2
         else:
             g1, g2 = gamma1, gamma2
-        
-        shear_obj = galsim.Shear(g1=g1, g2=g2)
-        return shear_obj
+            shear_obj = galsim.Shear(g1=g1, g2=g2)
+        return shear_obj, gamma1, gamma2
 
     def distort_galaxy(self, gso, shift, redshift):
         """This function distorts the galaxy's shape and position
@@ -76,7 +77,13 @@ class ShearRedshift(object):
         gso, shift:
             distorted galaxy object and shift
         """
-        shear = self.get_shear(redshift, shift)
-        gso = gso.shear(shear)
-        shift = shift.shear(shear)
-        return _get_shear_res_dict(gso, shift)
+        distortion = self.get_shear(redshift, shift)
+        if self.kappa is None:
+            shear, gamma1, gamma2 = distortion
+            gso = gso.shear(distortion)
+            shift = shift.shear(distortion)
+            return _get_shear_res_dict(gso, shift, gamma1=gamma1, gamma2=gamma2, kappa=0.)
+        else:
+            g1, g2, mu, gamma1, gamma2 = distortion
+            gso = gso.lens(g1=g1, g2=g2, mu=mu)
+            return _get_shear_res_dict(gso, shift, gamma1=gamma1, gamma2=gamma2, kappa=self.kappa)
