@@ -24,8 +24,10 @@ class ShearRedshift(object):
         self.g_dist = g_dist
         self.shear_value = shear_value
         self.shear_list = self.determine_shear_list(self.code)
-        if kappa_value is not None:
+        if kappa_value != -1:
             self.kappa = kappa_value
+        else:
+            self.kappa = None
         return
 
     def determine_shear_list(self, code):
