@@ -88,4 +88,5 @@ class ShearRedshift(object):
         else:
             g1, g2, mu, gamma1, gamma2 = distortion
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
+            shift = shift.shear(galsim.Shear(g1=g1, g2=g2))
             return _get_shear_res_dict(gso, shift, gamma1=gamma1, gamma2=gamma2, kappa=self.kappa)
