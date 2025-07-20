@@ -148,13 +148,19 @@ class HaloMcBiasMultibandPipeConfig(
 
     xname = Field[str](
         doc="detection coordinate row name",
-        default="x",
+        default="x1_det",
     )
 
     yname = Field[str](
         doc="detection coordinate column name",
-        default="y",
+        default="x2_det",
     )
+
+    wname = Field[str](
+        doc="weight column name",
+        default="wsel",
+    )
+
     mass = Field[float](
         doc="halo mass",
         default=5e-14,
@@ -208,8 +214,13 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         self.egname = lambda x, y: (
             "fpfs_d" + self.ename + str(x) + "_" + "dg" + str(y)
         )
+
         self.xname = self.config.xname
         self.yname = self.config.yname
+
+        self.wname = self.config.wname
+        self.wgname = lambda x: "d" + self.wname + "_dg" + str(x)
+
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -219,7 +230,16 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         )
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
-        outputs = self.run(**inputs)
+        
+        tract_list = []
+        patch_list = []
+        for ref in inputRefs.src00List:
+            tract = ref.dataId["tract"]
+            patch = ref.dataId["patch"]
+            tract_list.append(tract)
+            patch_list.append(patch)
+            
+        outputs = self.run(**inputs, tract_list=tract_list, patch_list=patch_list)
         butlerQC.put(outputs, outputRefs)
         return
 
@@ -873,6 +893,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         src01List,
         truth00List,
         truth01List,
+        tract_list,
+        patch_list,
     ):
         assert skymap.config.patchBorder == 0, "patch border must be zero"
 
@@ -880,8 +902,24 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         self.log.info(f"len truth00List: {len(truth00List)}")
         self.log.info(f"len truth01List: {len(truth01List)}")
 
+        print(tract_list)
+        print(patch_list)
+
+        beginX_array = []
+        beginY_array = []
+        
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0]  # in pixels
+        
+        for tract, patch in zip(tract_list, patch_list):
+            self.log.info(f"tract {tract}, patch {patch}")
+            # get the beginX and beginY from the skymap
+            bbox = skymap[tract][patch].getOuterBBox()
+            beginX_array.append(bbox.beginX)
+            beginY_array.append(bbox.beginY)
+
+        beginX_array = np.array(beginX_array)
+        beginY_array = np.array(beginY_array)
 
         max_pixel = (image_dim - 64) / 2
 
@@ -922,6 +960,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         e1g1n = self.egname(1, 1)
         e2g2n = self.egname(2, 2)
+        
+        xn = self.xname
+        yn = self.yname
+        
+        wn = self.wname
+        
+        wg1n = self.wgname(1)
+        wg2n = self.wgname(2)
+        
 
         self.log.info(
             "The length of source list is",
@@ -981,13 +1028,17 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 src01List,
                 truth00List,
                 truth01List,
+                beginX_array,
+                beginY_array,
             )
         ):
-            src00, src01, truth00, truth01 = (
+            src00, src01, truth00, truth01, beginX, beginY = (
                 cats[0],
                 cats[1],
                 cats[2],
                 cats[3],
+                cats[4],
+                cats[5],
             )
             sr_00_res = src00.get()
             sr_01_res = src01.get()
@@ -1014,15 +1065,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             idx_00, match_dist_00 = self._match_input_to_det(
                 truth_00_res["image_x"],
                 truth_00_res["image_y"],
-                sr_00_res["x"],
-                sr_00_res["y"],
+                sr_00_res[xn] / pixel_scale - beginX,
+                sr_00_res[yn] / pixel_scale - beginY,
             )
 
             idx_01, match_dist_01 = self._match_input_to_det(
                 truth_01_res["image_x"],
                 truth_01_res["image_y"],
-                sr_01_res["x"],
-                sr_01_res["y"],
+                sr_01_res[xn] / pixel_scale - beginX,
+                sr_01_res[yn] / pixel_scale - beginY,
             )
 
             match_dist = np.concatenate([match_dist_00, match_dist_01])
@@ -1052,21 +1103,21 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
             print(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
 
-            det_x = np.concatenate([sr_00_res["x"], sr_01_res["x"]])
-            det_y = np.concatenate([sr_00_res["y"], sr_01_res["y"]])
+            det_x = np.concatenate([sr_00_res[xn] / pixel_scale - beginX, sr_01_res[xn] / pixel_scale - beginX])
+            det_y = np.concatenate([sr_00_res[yn] / pixel_scale - beginY, sr_01_res[yn] / pixel_scale - beginY])
             det_ra, det_dec = wcs.pixelToSkyArray(det_x, det_y, degrees=True)
 
             e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
             e2_g2 = np.concatenate([sr_00_res[e2g2n], sr_01_res[e2g2n]])
-            w = np.concatenate([sr_00_res["fpfs_w"], sr_01_res["fpfs_w"]])
+            w = np.concatenate([sr_00_res[wn], sr_01_res[wn]])
             w_g1 = np.concatenate(
-                [sr_00_res["fpfs_dw_dg1"], sr_01_res["fpfs_dw_dg1"]]
+                [sr_00_res[wg1n], sr_01_res[wg1n]]
             )
             w_g2 = np.concatenate(
-                [sr_00_res["fpfs_dw_dg2"], sr_01_res["fpfs_dw_dg2"]]
+                [sr_00_res[wg2n], sr_01_res[wg2n]]
             )
-            m00 = np.concatenate([sr_00_res["fpfs_m00"], sr_01_res["fpfs_m00"]])
-            m20 = np.concatenate([sr_00_res["fpfs_m20"], sr_01_res["fpfs_m20"]])
+            m00 = np.concatenate([sr_00_res["fpfs_m0"], sr_01_res["fpfs_m0"]])
+            m20 = np.concatenate([sr_00_res["fpfs_m2"], sr_01_res["fpfs_m2"]])
 
             self.log.info(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
             e1_g1 = np.concatenate(
@@ -1081,29 +1132,29 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                     sr_01_res[e2g2n],
                 ]
             )
-            w = np.concatenate([sr_00_res["fpfs_w"], sr_01_res["fpfs_w"]])
+            w = np.concatenate([sr_00_res[wn], sr_01_res[wn]])
             w_g1 = np.concatenate(
                 [
-                    sr_00_res["fpfs_dw_dg1"],
-                    sr_01_res["fpfs_dw_dg1"],
+                    sr_00_res[wg1n],
+                    sr_01_res[wg1n],
                 ]
             )
             w_g2 = np.concatenate(
                 [
-                    sr_00_res["fpfs_dw_dg2"],
-                    sr_01_res["fpfs_dw_dg2"],
+                    sr_00_res[wg2n],
+                    sr_01_res[wg2n],
                 ]
             )
             m00 = np.concatenate(
                 [
-                    sr_00_res["fpfs_m00"],
-                    sr_01_res["fpfs_m00"],
+                    sr_00_res["fpfs_m0"],
+                    sr_01_res["fpfs_m0"],
                 ]
             )
             m20 = np.concatenate(
                 [
-                    sr_00_res["fpfs_m20"],
-                    sr_01_res["fpfs_m20"],
+                    sr_00_res["fpfs_m2"],
+                    sr_01_res["fpfs_m2"],
                 ]
             )
 
