@@ -453,8 +453,8 @@ class MultibandSimShearTaskConfig(MultibandSimBaseConfig):
     )
 
     kappa_value = Field[float](
-        doc="kappa value to use, -1 means no kappa",
-        default=-1.,
+        doc="kappa value to use, 0. means no kappa",
+        default=0.,
     )
 
     def validate(self):
