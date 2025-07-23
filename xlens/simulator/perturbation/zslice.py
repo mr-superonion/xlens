@@ -7,7 +7,7 @@ class ShearRedshift(object):
     """
     Constant shear in each redshift slice
     """
-    def __init__(self, z_bounds, mode, g_dist="g1", shear_value=0.02):
+    def __init__(self, z_bounds, mode, g_dist="g1", shear_value=0.02, kappa_value=None):
         assert isinstance(mode, int), "mode must be an integer"
         self.nz_bins = int(len(z_bounds) - 1)
         # nz_bins is the number of redshift bins
@@ -24,6 +24,10 @@ class ShearRedshift(object):
         self.g_dist = g_dist
         self.shear_value = shear_value
         self.shear_list = self.determine_shear_list(self.code)
+
+        # 0 means no kappa value is provided
+        self.kappa = kappa_value
+        
         return
 
     def determine_shear_list(self, code):
@@ -51,9 +55,12 @@ class ShearRedshift(object):
             gamma1, gamma2 = (0., shear)
         else:
             raise ValueError("g_dist must be either 'g1' or 'g2'")
+        
+        g1 = gamma1 / (1 - self.kappa)
+        g2 = gamma2 / (1 - self.kappa)
+        mu = 1.0 / ((1 - self.kappa) ** 2 - gamma1**2 - gamma2**2)
 
-        shear_obj = galsim.Shear(g1=gamma1, g2=gamma2)
-        return shear_obj
+        return g1, g2, mu, gamma1, gamma2
 
     def distort_galaxy(self, gso, shift, redshift):
         """This function distorts the galaxy's shape and position
@@ -68,7 +75,10 @@ class ShearRedshift(object):
         gso, shift:
             distorted galaxy object and shift
         """
-        shear = self.get_shear(redshift, shift)
-        gso = gso.shear(shear)
-        shift = shift.shear(shear)
-        return _get_shear_res_dict(gso, shift)
+        distortion = self.get_shear(redshift, shift)
+
+        g1, g2, mu, gamma1, gamma2 = distortion
+        gso = gso.lens(g1=g1, g2=g2, mu=mu)
+        shift = shift.shear(galsim.Shear(g1=g1, g2=g2))
+
+        return _get_shear_res_dict(gso, shift, gamma1=gamma1, gamma2=gamma2, kappa=self.kappa)
