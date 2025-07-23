@@ -11,8 +11,11 @@ def _ternary(n: int, n_digits: int) -> str:
 
 
 def _get_shear_res_dict(
-    gso, lensed_shift, gamma1=-1, gamma2=-1, kappa=-1
+    gso, lensed_shift, gamma1, gamma2, kappa
 ):
+
+    assert kappa >= 0, "kappa must be non-negative"
+
     shear_res_dict = {
         "gso": gso,
         "lensed_shift": lensed_shift,
