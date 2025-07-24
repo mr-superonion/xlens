@@ -212,6 +212,7 @@ class MultibandSimBaseTask(SimBaseTask):
             buff=0.0,
             pixel_scale=pixel_scale,
             layout=self.config.layout,
+            simple_coadd_bbox=True,
             sep=sep,
             indice_id=indice_id,
         )
@@ -267,6 +268,7 @@ class MultibandSimBaseTask(SimBaseTask):
             bands=[band],
             coadd_dim=coadd_dim,
             calib_mag_zero=mag_zero,
+            simple_coadd_bbox=True,
             draw_method=draw_method,
             **galaxy_kwargs,
         )
@@ -518,11 +520,11 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
         default=1.0,
     )
     ra_lens = Field[float](
-        doc="halo ra [arcsec]",
-        default=0.0,
+        doc="halo ra [degree]",
+        default=200.0,
     )
     dec_lens = Field[float](
-        doc="halo dec [arcsec]",
+        doc="halo dec [degree]",
         default=0.0,
     )
     z_source = Field[float](

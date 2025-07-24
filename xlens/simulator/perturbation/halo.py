@@ -2,6 +2,10 @@ import galsim
 from astropy.cosmology import Planck18
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel
+from lenstronomy.LensModel.Solver.lens_equation_solver import LensEquationSolver
+from descwl_shear_sims.shear import _get_shear_res_dict
+import numpy as np
+
 
 from .utils import _get_shear_res_dict
 
@@ -12,7 +16,7 @@ class ShearHalo(object):
         mass,
         conc,
         z_lens,
-        ra_lens=0.0,
+        ra_lens=200.0,
         dec_lens=0.0,
         halo_profile="NFW",
         cosmo=None,
@@ -30,6 +34,7 @@ class ShearHalo(object):
         cosmo (astropy.cosmology):  cosmology object
         no_kappa (bool):            if True, turn off kappa field
         """
+        
         if cosmo is None:
             cosmo = Planck18
         self.cosmo = cosmo
@@ -38,7 +43,8 @@ class ShearHalo(object):
         self.conc = conc
         self.no_kappa = no_kappa
         self.lens = LensModel(lens_model_list=[halo_profile])
-        self.pos_lens = galsim.PositionD(ra_lens, dec_lens)
+        self.pos_lens = galsim.PositionD(ra_lens * 3600., dec_lens * 3600.)
+        self.lens_eqn_solver = LensEquationSolver(lensModel=self.lens)
         return
 
     def distort_galaxy(self, gso, shift, redshift):
@@ -55,7 +61,18 @@ class ShearHalo(object):
             distorted galaxy object and shift
         """
         if redshift > self.z_lens:
-            r = shift - self.pos_lens
+            r = shift
+            
+            # if True:
+            #     norm = np.sqrt(
+            #         r.x**2 + r.y**2
+            #     )
+            #     renorm = 30.
+            #     r_renorm = galsim.PositionD(
+            #         r.x / norm * renorm,
+            #         r.y / norm * renorm,
+            #     )
+
 
             lens_cosmo = LensCosmo(
                 z_lens=self.z_lens,
@@ -66,7 +83,45 @@ class ShearHalo(object):
                 M=self.mass, c=self.conc
             )
             kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
-            f_xx, f_xy, f_yx, f_yy = self.lens.hessian(r.x, r.y, kwargs)
+
+            lensed_x, lensed_y = self.lens_eqn_solver.image_position_from_source(
+                r.x,
+                r.y,
+                kwargs,
+                min_distance=0.2,  # chance of finding solutions as close as min_distance away from each other
+                search_window=50,  # largest distance to find a solution for
+            )
+
+            # lensed_x_fixed, lensed_y_fixed = self.lens_eqn_solver.image_position_from_source(
+            #     r_renorm.x,
+            #     r_renorm.y,
+            #     kwargs,
+            #     min_distance=0.2,  # chance of finding solutions as close as min_distance away from each other
+            #     search_window=50,  # largest distance to find a solution for
+            # )
+
+            # if lenstronomy cannot find a solution
+            # do not shift
+            if len(lensed_x) == 0 or len(lensed_y) == 0:
+                lensed_x, lensed_y = r.x, r.y
+            else:
+                lensed_x, lensed_y = lensed_x[0], lensed_y[0]
+
+            # if len(lensed_x_fixed) == 0 or len(lensed_y_fixed) == 0:
+            #     lensed_x_fixed, lensed_y_fixed = r_renorm.x, r_renorm.y
+            # else:
+            #     lensed_x_fixed, lensed_y_fixed = (
+            #         lensed_x_fixed[0],
+            #         lensed_y_fixed[0],
+            #     )
+                
+            # f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
+            #     lensed_x_fixed, lensed_y_fixed, kwargs
+            # )
+            f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
+                lensed_x, lensed_y, kwargs
+            )
+
             gamma1 = 1.0 / 2 * (f_xx - f_yy)
             gamma2 = f_xy
             if self.no_kappa:
@@ -79,11 +134,9 @@ class ShearHalo(object):
             mu = 1.0 / ((1 - kappa) ** 2 - gamma1**2 - gamma2**2)
 
             if g1**2.0 + g2**2.0 > 0.95:
-                return gso, shift, shift, gamma1, gamma2, kappa
+                return _get_shear_res_dict(gso, shift, gamma1, gamma2, kappa)
 
-            dra, ddec = self.lens.alpha(r.x, r.y, kwargs)
             gso = gso.lens(g1=g1, g2=g2, mu=mu)
-            lensed_shift = shift + galsim.PositionD(dra, ddec)
-        return _get_shear_res_dict(
-            gso, lensed_shift, gamma1, gamma2, kappa
-        )
+
+            lensed_shift = galsim.PositionD(lensed_x, lensed_y)
+            return _get_shear_res_dict(gso, lensed_shift, gamma1, gamma2, kappa)
