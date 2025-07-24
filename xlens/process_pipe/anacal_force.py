@@ -43,6 +43,7 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 
 from ..processor.anacal import AnacalTask
+from ..processor.fpfs import FpfsMeasurementTask
 
 
 class AnacalForcePipeConnections(
@@ -101,6 +102,10 @@ class AnacalForcePipeConfig(
         target=AnacalTask,
         doc="AnaCal Task Force",
     )
+    fpfs = ConfigurableField(
+        target=FpfsMeasurementTask,
+        doc="Fpfs Source Measurement Task",
+    )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
@@ -133,6 +138,7 @@ class AnacalForcePipe(PipelineTask):
         )
         assert isinstance(self.config, AnacalForcePipeConfig)
         self.makeSubtask("anacal")
+        self.makeSubtask("fpfs")
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -175,8 +181,8 @@ class AnacalForcePipe(PipelineTask):
         patch: int,
     ):
         assert isinstance(self.config, AnacalForcePipeConfig)
-        colnames = ["flux", "dflux_dg1", "dflux_dg2", "dflux_dj1", "dflux_dj2"]
-        catalog = [detection]
+        colnames = ["flux", "dflux_dg1", "dflux_dg2"]
+        catalog = []
         for band in exposure_handles_dict.keys():
             handle = exposure_handles_dict[band]
             exposure = handle.get()
@@ -202,10 +208,15 @@ class AnacalForcePipe(PipelineTask):
                 tract=tract,
                 patch=patch,
             )
+            del exposure
+
             cat = rfn.repack_fields(self.anacal.run(**data)[colnames])
             map_dict = {name: f"{band}_" + name for name in colnames}
             renamed = rfn.rename_fields(cat, map_dict)
             catalog.append(renamed)
-            del exposure, data
+            catalog.append(
+                self.fpfs.run(**data)
+            )
+            del data
         catalog = rfn.merge_arrays(catalog, flatten=True)
         return Struct(catalog=catalog)

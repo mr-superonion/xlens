@@ -260,16 +260,24 @@ class AnacalTask(Task):
             mask_array=mask_array,
             detection=detection,
         )
-        blocks = utils.image.get_blocks(
+        data["blocks"] = utils.image.get_blocks(
             exposure.getPsf(),
             exposure.getBBox(),
             exposure.mask,
             data["pixel_scale"],
             self.config.npix,
         )
-        data["blocks"] = blocks
         if self.config.validate_psf:
             data["lsst_psf"] = exposure.getPsf()
         else:
             data["lsst_psf"] = None
+        if band is None:
+            data["base_column_name"] = None
+        else:
+            data["base_column_name"] = band + "_"
+        data["psf_object"] = utils.image.LsstPsf(
+            psf=exposure.getPsf(),
+            npix=self.config.npix,
+            lsst_bbox=exposure.getBBox(),
+        )
         return data
