@@ -24,10 +24,10 @@ class ShearRedshift(object):
         self.g_dist = g_dist
         self.shear_value = shear_value
         self.shear_list = self.determine_shear_list(self.code)
-        if kappa_value != -1:
-            self.kappa = kappa_value
-        else:
-            self.kappa = None
+
+        # 0 means no kappa value is provided
+        self.kappa = kappa_value
+        
         return
 
     def determine_shear_list(self, code):
@@ -56,15 +56,11 @@ class ShearRedshift(object):
         else:
             raise ValueError("g_dist must be either 'g1' or 'g2'")
         
-        if self.kappa is not None:
-            g1 = gamma1 / (1 - self.kappa)
-            g2 = gamma2 / (1 - self.kappa)
-            mu = 1.0 / ((1 - self.kappa) ** 2 - gamma1**2 - gamma2**2)
-            return g1, g2, mu, gamma1, gamma2
-        else:
-            g1, g2 = gamma1, gamma2
-            shear_obj = galsim.Shear(g1=g1, g2=g2)
-        return shear_obj, gamma1, gamma2
+        g1 = gamma1 / (1 - self.kappa)
+        g2 = gamma2 / (1 - self.kappa)
+        mu = 1.0 / ((1 - self.kappa) ** 2 - gamma1**2 - gamma2**2)
+
+        return g1, g2, mu, gamma1, gamma2
 
     def distort_galaxy(self, gso, shift, redshift):
         """This function distorts the galaxy's shape and position
@@ -80,13 +76,9 @@ class ShearRedshift(object):
             distorted galaxy object and shift
         """
         distortion = self.get_shear(redshift, shift)
-        if self.kappa is None:
-            shear, gamma1, gamma2 = distortion
-            gso = gso.shear(shear)
-            shift = shift.shear(shear)
-            return _get_shear_res_dict(gso, shift, gamma1=gamma1, gamma2=gamma2, kappa=0.)
-        else:
-            g1, g2, mu, gamma1, gamma2 = distortion
-            gso = gso.lens(g1=g1, g2=g2, mu=mu)
-            shift = shift.shear(galsim.Shear(g1=g1, g2=g2))
-            return _get_shear_res_dict(gso, shift, gamma1=gamma1, gamma2=gamma2, kappa=self.kappa)
+
+        g1, g2, mu, gamma1, gamma2 = distortion
+        gso = gso.lens(g1=g1, g2=g2, mu=mu)
+        shift = shift.shear(galsim.Shear(g1=g1, g2=g2))
+
+        return _get_shear_res_dict(gso, shift, gamma1=gamma1, gamma2=gamma2, kappa=self.kappa)
