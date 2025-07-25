@@ -48,5 +48,5 @@ tasks:
       mass: 8e14
       z_lens: 0.25
       z_source: 1.0
-      connections.coaddName: sim
+      connections.coaddName: sim_0
       connections.dataType: joint
