@@ -73,6 +73,7 @@ tasks:
   AnacalForceTask1:
     class: xlens.process_pipe.anacal_force.AnacalForcePipe
     config:
+      fpfs.sigma_arcsec1: 0.56
       anacal.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 

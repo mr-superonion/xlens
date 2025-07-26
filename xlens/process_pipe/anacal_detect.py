@@ -160,6 +160,7 @@ class AnacalDetectPipe(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
+        seed_offset: int = 0,
     ):
         assert isinstance(self.config, AnacalDetectPipeConfig)
         band = "i"
@@ -177,7 +178,7 @@ class AnacalDetectPipe(PipelineTask):
             noise_corr = None
 
         idGenerator = self.config.idGenerator.apply(handle.dataId)
-        seed = idGenerator.catalog_id
+        seed = idGenerator.catalog_id + seed_offset
         data = self.anacal.prepare_data(
             exposure=exposure,
             seed=seed,

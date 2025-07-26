@@ -158,17 +158,19 @@ class AnacalTask(Task):
         )
 
         if detection is not None:
-            detection["x1"] = detection["x1"] - begin_x * pixel_scale
-            detection["x2"] = detection["x2"] - begin_y * pixel_scale
-            detection["x1_det"] = detection["x1_det"] - begin_x * pixel_scale
-            detection["x2_det"] = detection["x2_det"] - begin_y * pixel_scale
-
+            det = detection.copy()
+            det["x1"] = det["x1"] - begin_x * pixel_scale
+            det["x2"] = det["x2"] - begin_y * pixel_scale
+            det["x1_det"] = det["x1_det"] - begin_x * pixel_scale
+            det["x2_det"] = det["x2_det"] - begin_y * pixel_scale
+        else:
+            det = None
         catalog = task.process_image(
             gal_array,
             psf_array,
             variance=noise_variance,
             block_list=blocks,
-            detection=detection,
+            detection=det,
             noise_array=noise_array,
             mask_array=mask_array,
         )

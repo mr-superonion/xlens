@@ -29,9 +29,12 @@ import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
+from lsst.afw.image import ExposureF
 import numpy as np
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import ConfigurableField, Field
+from lsst.pex.config import (
+    ConfigurableField, Field, ListField, FieldValidationError
+)
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -41,6 +44,7 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
+from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
@@ -110,15 +114,27 @@ class AnacalForcePipeConfig(
         doc="Size of PSF cache",
         default=100,
     )
+    fpfsBandList = ListField(
+        dtype=str,
+        doc="list of band to run force FPFS",
+        default=["r", "i", "z"],
+    )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
         super().validate()
+        if self.fpfs.sigma_arcsec1 < 0.0:
+            raise FieldValidationError(
+                self.fpfs.__class__.sigma_arcsec1,
+                self,
+                "sigma_arcsec1 in a wrong range",
+            )
 
     def setDefaults(self):
         super().setDefaults()
         self.anacal.force_size = True
         self.anacal.force_center = True
+        self.fpfs.do_compute_detect_weight = False
 
 
 class AnacalForcePipe(PipelineTask):
@@ -138,7 +154,8 @@ class AnacalForcePipe(PipelineTask):
         )
         assert isinstance(self.config, AnacalForcePipeConfig)
         self.makeSubtask("anacal")
-        self.makeSubtask("fpfs")
+        if len(self.config.fpfsBandList) > 0:
+            self.makeSubtask("fpfs")
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -170,6 +187,45 @@ class AnacalForcePipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
         return
 
+    def run_one_band(
+        self,
+        *,
+        exposure: ExposureF,
+        detection,
+        band: str,
+        seed: int,
+        noise_corr: NDArray | None = None,
+        skyMap=None,
+        tract: int = 0,
+        patch: int = 0,
+        mask_array: NDArray | None = None,
+        star_cat: NDArray | None = None,
+        **kwargs,
+    ):
+        data = self.anacal.prepare_data(
+            exposure=exposure,
+            seed=seed,
+            noise_corr=noise_corr,
+            detection=detection,
+            band=band,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
+        )
+        assert isinstance(self.config, AnacalForcePipeConfig)
+        out = []
+        colnames = ["flux", "dflux_dg1", "dflux_dg2"]
+        cat = rfn.repack_fields(
+            self.anacal.run(**data)[colnames]
+        )
+        map_dict = {name: f"{band}_" + name for name in colnames}
+        out.append(rfn.rename_fields(cat, map_dict))
+        if band in self.config.fpfsBandList:
+            out.append(
+                self.fpfs.run(**data)
+            )
+        return rfn.merge_arrays(out, flatten=True)
+
     def run(
         self,
         *,
@@ -179,9 +235,9 @@ class AnacalForcePipe(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
+        seed_offset: int = 0,
     ):
         assert isinstance(self.config, AnacalForcePipeConfig)
-        colnames = ["flux", "dflux_dg1", "dflux_dg2"]
         catalog = []
         for band in exposure_handles_dict.keys():
             handle = exposure_handles_dict[band]
@@ -197,26 +253,18 @@ class AnacalForcePipe(PipelineTask):
             else:
                 noise_corr = None
             idGenerator = self.config.idGenerator.apply(handle.dataId)
-            seed = idGenerator.catalog_id
-            data = self.anacal.prepare_data(
-                exposure=exposure,
-                seed=seed,
-                noise_corr=noise_corr,
-                detection=detection,
-                band=band,
-                skyMap=skyMap,
-                tract=tract,
-                patch=patch,
-            )
-            del exposure
-
-            cat = rfn.repack_fields(self.anacal.run(**data)[colnames])
-            map_dict = {name: f"{band}_" + name for name in colnames}
-            renamed = rfn.rename_fields(cat, map_dict)
-            catalog.append(renamed)
+            seed = idGenerator.catalog_id + seed_offset
             catalog.append(
-                self.fpfs.run(**data)
+                self.run_one_band(
+                    exposure=exposure,
+                    detection=detection,
+                    band=band,
+                    seed=seed,
+                    noise_corr=noise_corr,
+                    skyMap=skyMap,
+                    tract=tract,
+                    patch=patch,
+                )
             )
-            del data
         catalog = rfn.merge_arrays(catalog, flatten=True)
         return Struct(catalog=catalog)
