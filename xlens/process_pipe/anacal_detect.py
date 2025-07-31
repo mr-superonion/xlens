@@ -30,6 +30,7 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
+from numpy.typing import NDArray
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field
 from lsst.pipe.base import (
@@ -160,6 +161,8 @@ class AnacalDetectPipe(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
+        seed_offset: int = 0,
+        mask_array: NDArray | None = None,
     ):
         assert isinstance(self.config, AnacalDetectPipeConfig)
         band = "i"
@@ -177,7 +180,7 @@ class AnacalDetectPipe(PipelineTask):
             noise_corr = None
 
         idGenerator = self.config.idGenerator.apply(handle.dataId)
-        seed = idGenerator.catalog_id
+        seed = idGenerator.catalog_id + seed_offset
         data = self.anacal.prepare_data(
             exposure=exposure,
             seed=seed,
@@ -186,6 +189,7 @@ class AnacalDetectPipe(PipelineTask):
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            mask_array=mask_array,
         )
         catalog = self.anacal.run(**data)
         return Struct(alpha_catalog=catalog)

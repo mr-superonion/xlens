@@ -41,28 +41,24 @@ tasks:
   DetectTask1:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
-      fpfs.use_average_psf: True
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
 
   DetectTask2:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
-      fpfs.use_average_psf: True
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot1_
 
   DetectTask3:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
-      fpfs.use_average_psf: True
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot0_
 
   DetectTask4:
     class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
     config:
-      fpfs.use_average_psf: True
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot1_
 

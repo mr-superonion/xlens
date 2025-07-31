@@ -3,7 +3,6 @@ from typing import Any
 import anacal
 import astropy
 import numpy as np
-from lsst.afw.detection import InvalidPsfError
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
 from lsst.geom import Point2D
@@ -158,17 +157,19 @@ class AnacalTask(Task):
         )
 
         if detection is not None:
-            detection["x1"] = detection["x1"] - begin_x * pixel_scale
-            detection["x2"] = detection["x2"] - begin_y * pixel_scale
-            detection["x1_det"] = detection["x1_det"] - begin_x * pixel_scale
-            detection["x2_det"] = detection["x2_det"] - begin_y * pixel_scale
-
+            det = detection.copy()
+            det["x1"] = det["x1"] - begin_x * pixel_scale
+            det["x2"] = det["x2"] - begin_y * pixel_scale
+            det["x1_det"] = det["x1_det"] - begin_x * pixel_scale
+            det["x2_det"] = det["x2_det"] - begin_y * pixel_scale
+        else:
+            det = None
         catalog = task.process_image(
             gal_array,
             psf_array,
             variance=noise_variance,
             block_list=blocks,
-            detection=detection,
+            detection=det,
             noise_array=noise_array,
             mask_array=mask_array,
         )
@@ -190,7 +191,7 @@ class AnacalTask(Task):
                     )
                     if ep < 1e-2:
                         indexes.append(ic)
-                except InvalidPsfError:
+                except Exception:
                     pass
             catalog = catalog[indexes]
 
@@ -260,16 +261,25 @@ class AnacalTask(Task):
             mask_array=mask_array,
             detection=detection,
         )
-        blocks = utils.image.get_blocks(
-            exposure.getPsf(),
-            exposure.getBBox(),
-            exposure.mask,
-            data["pixel_scale"],
-            self.config.npix,
+        data["blocks"] = utils.image.get_blocks(
+            lsst_psf=exposure.getPsf(),
+            lsst_bbox=exposure.getBBox(),
+            lsst_mask=exposure.mask,
+            pixel_scale=data["pixel_scale"],
+            npix=self.config.npix,
+            psf_array=data["psf_array"],
         )
-        data["blocks"] = blocks
         if self.config.validate_psf:
             data["lsst_psf"] = exposure.getPsf()
         else:
             data["lsst_psf"] = None
+        if band is None:
+            data["base_column_name"] = None
+        else:
+            data["base_column_name"] = band + "_"
+        data["psf_object"] = utils.image.LsstPsf(
+            psf=exposure.getPsf(),
+            npix=self.config.npix,
+            lsst_bbox=exposure.getBBox(),
+        )
         return data

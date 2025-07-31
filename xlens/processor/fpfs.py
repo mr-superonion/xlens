@@ -52,10 +52,6 @@ class FpfsMeasurementConfig(Config):
         doc="threshold to determine the maximum k in Fourier space",
         default=1e-12,
     )
-    use_average_psf = Field[bool](
-        doc="whether to use average PSF over the exposure",
-        default=True,
-    )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
@@ -148,7 +144,7 @@ class FpfsMeasurementTask(Task):
         noise_array: NDArray | None,
         detection: NDArray | None,
         psf_object: utils.image.LsstPsf | None,
-        base_column_name: str | None,
+        base_column_name: str | None = None,
         begin_x: int = 0,
         begin_y: int = 0,
         **kwargs,
@@ -209,13 +205,6 @@ class FpfsMeasurementTask(Task):
         assert isinstance(self.config, FpfsMeasurementConfig)
         lsst_bbox = exposure.getBBox()
 
-        if not self.config.use_average_psf:
-            psf_object = utils.image.LsstPsf(
-                psf=exposure.getPsf(), npix=self.config.npix,
-                lsst_bbox=lsst_bbox,
-            )
-        else:
-            psf_object = None
         if band is None:
             base_column_name = None
         else:
@@ -233,6 +222,9 @@ class FpfsMeasurementTask(Task):
             mask_array=mask_array,
             detection=detection,
         )
-        data["psf_object"] = psf_object
+        data["psf_object"] = utils.image.LsstPsf(
+            psf=exposure.getPsf(), npix=self.config.npix,
+            lsst_bbox=lsst_bbox,
+        )
         data["base_column_name"] = base_column_name
         return data
