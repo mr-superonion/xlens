@@ -29,11 +29,14 @@ import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
-from lsst.afw.image import ExposureF
 import numpy as np
+from lsst.afw.image import ExposureF
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import (
-    ConfigurableField, Field, ListField, FieldValidationError
+    ConfigurableField,
+    Field,
+    FieldValidationError,
+    ListField,
 )
 from lsst.pipe.base import (
     PipelineTask,

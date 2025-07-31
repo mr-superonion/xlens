@@ -35,7 +35,8 @@ write_to = "xlens/__version__.py"
 [tool.pytest.ini_options]
 testpaths = [
     "tests/",
-    "examples/anacal/"
+    "examples/shear/",
+    "examples/cluster/",
 ]
 addopts = "--nbval --nbval-lax --nbval-current-env -vv -s"
 

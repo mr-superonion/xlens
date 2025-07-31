@@ -22,7 +22,6 @@ import lsst.afw.image as afwImage
 import lsst.afw.math as afwMath
 import lsst.meas.algorithms as meaAlg
 import numpy as np
-from .perturbation import ShearHalo, ShearRedshift
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.wcs import make_dm_wcs
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
@@ -45,6 +44,7 @@ from .multiband_defaults import (
     psf_fwhm_defaults,
     sys_npix,
 )
+from .perturbation import ShearHalo, ShearRedshift
 
 
 def get_noise_array(
@@ -451,7 +451,6 @@ class MultibandSimShearTaskConfig(MultibandSimBaseConfig):
         doc="absolute value of the shear",
         default=0.02,
     )
-
     kappa_value = Field[float](
         doc="kappa value to use, 0. means no kappa",
         default=0.,

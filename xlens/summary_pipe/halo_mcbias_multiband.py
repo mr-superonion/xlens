@@ -27,10 +27,17 @@ __all__ = [
 
 from typing import Any
 
+import astropy.units as u
+import galsim
 import lsst.pipe.base.connectionTypes as cT
-from lsst.utils.logging import LsstLogAdapter
 import matplotlib.pyplot as plt
 import numpy as np
+from astropy.coordinates import Angle, SkyCoord, position_angle
+from astropy.cosmology import Planck18
+from descwl_shear_sims.constants import WORLD_ORIGIN
+from descwl_shear_sims.wcs import make_dm_wcs, make_wcs
+from lenstronomy.Cosmo.lens_cosmo import LensCosmo
+from lenstronomy.LensModel.lens_model import LensModel
 from lsst.pex.config import Field
 from lsst.pipe.base import (
     PipelineTask,
@@ -39,19 +46,9 @@ from lsst.pipe.base import (
     Struct,
 )
 from lsst.skymap import BaseSkyMap
-
-import galsim
-from astropy.cosmology import Planck18
-from astropy.coordinates import SkyCoord, position_angle, Angle
-import astropy.units as u
-from lenstronomy.Cosmo.lens_cosmo import LensCosmo
-from lenstronomy.LensModel.lens_model import LensModel
-from scipy.spatial import cKDTree
+from lsst.utils.logging import LsstLogAdapter
 from scipy.interpolate import interp1d
-import matplotlib.pyplot as plt
-
-from descwl_shear_sims.wcs import make_wcs, make_dm_wcs
-from descwl_shear_sims.constants import WORLD_ORIGIN
+from scipy.spatial import cKDTree
 
 
 class HaloMcBiasMultibandPipeConnections(
