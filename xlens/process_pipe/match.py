@@ -43,9 +43,9 @@ from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
+from scipy.optimize import linear_sum_assignment
 from scipy.spatial import KDTree
 from scipy.spatial.distance import cdist
-from scipy.optimize import linear_sum_assignment
 
 dm_colnames = [
     "base_SdssCentroid_x",

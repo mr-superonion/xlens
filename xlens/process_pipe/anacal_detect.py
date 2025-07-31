@@ -30,7 +30,6 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from numpy.typing import NDArray
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field
 from lsst.pipe.base import (
@@ -41,6 +40,7 @@ from lsst.pipe.base import (
 )
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
+from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask
 

@@ -1,11 +1,10 @@
 import galsim
+import numpy as np
 from astropy.cosmology import Planck18
+from descwl_shear_sims.shear import _get_shear_res_dict
 from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel
 from lenstronomy.LensModel.Solver.lens_equation_solver import LensEquationSolver
-from descwl_shear_sims.shear import _get_shear_res_dict
-import numpy as np
-
 
 from .utils import _get_shear_res_dict
 
