@@ -33,7 +33,7 @@ class ShearHalo(object):
         cosmo (astropy.cosmology):  cosmology object
         no_kappa (bool):            if True, turn off kappa field
         """
-        
+
         if cosmo is None:
             cosmo = Planck18
         self.cosmo = cosmo
@@ -43,7 +43,7 @@ class ShearHalo(object):
         self.no_kappa = no_kappa
         self.lens = LensModel(lens_model_list=[halo_profile])
         self.pos_lens = galsim.PositionD(ra_lens * 3600., dec_lens * 3600.)
-        self.lens_eqn_solver = LensEquationSolver(lensModel=self.lens)
+        self.lens_solver = LensEquationSolver(lensModel=self.lens)
         return
 
     def distort_galaxy(self, gso, shift, redshift):
@@ -61,18 +61,6 @@ class ShearHalo(object):
         """
         if redshift > self.z_lens:
             r = shift
-            
-            # if True:
-            #     norm = np.sqrt(
-            #         r.x**2 + r.y**2
-            #     )
-            #     renorm = 30.
-            #     r_renorm = galsim.PositionD(
-            #         r.x / norm * renorm,
-            #         r.y / norm * renorm,
-            #     )
-
-
             lens_cosmo = LensCosmo(
                 z_lens=self.z_lens,
                 z_source=redshift,
@@ -83,21 +71,13 @@ class ShearHalo(object):
             )
             kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
 
-            lensed_x, lensed_y = self.lens_eqn_solver.image_position_from_source(
+            lensed_x, lensed_y = self.lens_solver.image_position_from_source(
                 r.x,
                 r.y,
                 kwargs,
-                min_distance=0.2,  # chance of finding solutions as close as min_distance away from each other
+                min_distance=0.2,  # finding solutions as close as min_distance
                 search_window=50,  # largest distance to find a solution for
             )
-
-            # lensed_x_fixed, lensed_y_fixed = self.lens_eqn_solver.image_position_from_source(
-            #     r_renorm.x,
-            #     r_renorm.y,
-            #     kwargs,
-            #     min_distance=0.2,  # chance of finding solutions as close as min_distance away from each other
-            #     search_window=50,  # largest distance to find a solution for
-            # )
 
             # if lenstronomy cannot find a solution
             # do not shift
@@ -106,17 +86,6 @@ class ShearHalo(object):
             else:
                 lensed_x, lensed_y = lensed_x[0], lensed_y[0]
 
-            # if len(lensed_x_fixed) == 0 or len(lensed_y_fixed) == 0:
-            #     lensed_x_fixed, lensed_y_fixed = r_renorm.x, r_renorm.y
-            # else:
-            #     lensed_x_fixed, lensed_y_fixed = (
-            #         lensed_x_fixed[0],
-            #         lensed_y_fixed[0],
-            #     )
-                
-            # f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
-            #     lensed_x_fixed, lensed_y_fixed, kwargs
-            # )
             f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
                 lensed_x, lensed_y, kwargs
             )

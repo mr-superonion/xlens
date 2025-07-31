@@ -451,7 +451,6 @@ class MultibandSimShearTaskConfig(MultibandSimBaseConfig):
         doc="absolute value of the shear",
         default=0.02,
     )
-
     kappa_value = Field[float](
         doc="kappa value to use, 0. means no kappa",
         default=0.,
