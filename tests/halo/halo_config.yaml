@@ -14,6 +14,7 @@ tasks:
       simulator.dec_lens: 0.0 # arcsec
       simulator.z_source: 1.0
       simulator.survey_name: hsc
+      simulator.draw_image_noise: True
 
   MutibandSimHalo2:
     class: xlens.sim_pipe.multibandSim.MultibandSimHaloPipe
@@ -27,17 +28,18 @@ tasks:
       simulator.dec_lens: 0.0 # arcsec
       simulator.z_source: 1.0
       simulator.survey_name: hsc
+      simulator.draw_image_noise: True
 
   FpfsTask1:
-    class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
+    class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
-      fpfs.do_noise_bias_correction: False
+      anacal.do_noise_bias_correction: True
       connections.coaddName: sim_0_rot0_
 
   FpfsTask2:
-    class: xlens.process_pipe.fpfs_joint.FpfsJointPipe
+    class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
-      fpfs.do_noise_bias_correction: False
+      fpfs.do_noise_bias_correction: True
       connections.coaddName: sim_0_rot1_
 
   SummaryTask:
@@ -46,5 +48,5 @@ tasks:
       mass: 8e14
       z_lens: 0.25
       z_source: 1.0
-      connections.coaddName: sim
+      connections.coaddName: sim_0
       connections.dataType: joint
