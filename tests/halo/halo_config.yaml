@@ -30,16 +30,16 @@ tasks:
       simulator.survey_name: hsc
       simulator.draw_image_noise: True
 
-  FpfsTask1:
+  AnaCalTask1:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
       anacal.do_noise_bias_correction: True
       connections.coaddName: sim_0_rot0_
 
-  FpfsTask2:
+  AnaCalTask2:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
-      fpfs.do_noise_bias_correction: True
+      anacal.do_noise_bias_correction: True
       connections.coaddName: sim_0_rot1_
 
   SummaryTask:
