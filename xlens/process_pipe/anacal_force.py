@@ -117,7 +117,7 @@ class AnacalForcePipeConfig(
     fpfsBandList = ListField(
         dtype=str,
         doc="list of band to run force FPFS",
-        default=["r", "i", "z"],
+        default=["g", "r", "i", "z"],
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
@@ -199,7 +199,6 @@ class AnacalForcePipe(PipelineTask):
         tract: int = 0,
         patch: int = 0,
         mask_array: NDArray | None = None,
-        star_cat: NDArray | None = None,
         **kwargs,
     ):
         data = self.anacal.prepare_data(
@@ -211,6 +210,7 @@ class AnacalForcePipe(PipelineTask):
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            mask_array=mask_array,
         )
         assert isinstance(self.config, AnacalForcePipeConfig)
         out = []
@@ -236,6 +236,7 @@ class AnacalForcePipe(PipelineTask):
         tract: int,
         patch: int,
         seed_offset: int = 0,
+        mask_array: NDArray | None = None,
     ):
         assert isinstance(self.config, AnacalForcePipeConfig)
         catalog = []
@@ -264,6 +265,7 @@ class AnacalForcePipe(PipelineTask):
                     skyMap=skyMap,
                     tract=tract,
                     patch=patch,
+                    mask_array=mask_array,
                 )
             )
         catalog = rfn.merge_arrays(catalog, flatten=True)

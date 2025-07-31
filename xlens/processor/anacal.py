@@ -3,7 +3,6 @@ from typing import Any
 import anacal
 import astropy
 import numpy as np
-from lsst.afw.detection import InvalidPsfError
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
 from lsst.geom import Point2D
@@ -192,7 +191,7 @@ class AnacalTask(Task):
                     )
                     if ep < 1e-2:
                         indexes.append(ic)
-                except InvalidPsfError:
+                except Exception:
                     pass
             catalog = catalog[indexes]
 
@@ -263,11 +262,12 @@ class AnacalTask(Task):
             detection=detection,
         )
         data["blocks"] = utils.image.get_blocks(
-            exposure.getPsf(),
-            exposure.getBBox(),
-            exposure.mask,
-            data["pixel_scale"],
-            self.config.npix,
+            lsst_psf=exposure.getPsf(),
+            lsst_bbox=exposure.getBBox(),
+            lsst_mask=exposure.mask,
+            pixel_scale=data["pixel_scale"],
+            npix=self.config.npix,
+            psf_array=data["psf_array"],
         )
         if self.config.validate_psf:
             data["lsst_psf"] = exposure.getPsf()
