@@ -117,6 +117,10 @@ class AnacalForcePipeConfig(
         doc="Size of PSF cache",
         default=100,
     )
+    size = Field[float](
+        doc="Size of Gaussian for measurement [arcsec]",
+        default=-1,
+    )
     fpfsBandList = ListField(
         dtype=str,
         doc="list of band to run force FPFS",
@@ -164,8 +168,8 @@ class AnacalForcePipe(PipelineTask):
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, AnacalForcePipeConfig)
         inputs = butlerQC.get(inputRefs)
-        tract = butlerQC.quantum.dataId["tract"]
-        patch = butlerQC.quantum.dataId["patch"]
+        tract = int(butlerQC.quantum.dataId["tract"])
+        patch = int(butlerQC.quantum.dataId["patch"])
         exposure_handles = inputs["exposure"]
         exposure_handles_dict = {
             handle.dataId["band"]: handle for handle in exposure_handles
@@ -179,6 +183,13 @@ class AnacalForcePipe(PipelineTask):
             }
         skyMap = inputs["skyMap"]
         detection = inputs["input_catalog"].as_array()
+        if self.config.size > 0:
+            detection["a1"] = self.config.size
+            detection["da1_dg1"] = 0.0
+            detection["da1_dg2"] = 0.0
+            detection["a2"] = self.config.size
+            detection["da2_dg1"] = 0.0
+            detection["da2_dg2"] = 0.0
         outputs = self.run(
             detection=detection,
             exposure_handles_dict=exposure_handles_dict,
