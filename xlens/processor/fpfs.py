@@ -8,7 +8,7 @@ from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
-from ..utils.random import image_noise_base, num_rot
+from ..utils.random import num_rot
 
 
 class FpfsMeasurementConfig(Config):
@@ -93,11 +93,11 @@ class FpfsMeasurementConfig(Config):
                 self,
                 "sigma_arcsec2 in a wrong range",
             )
-        if self.noiseId < 0 or self.noiseId >= image_noise_base // 2:
+        if self.noiseId < 0:
             raise FieldValidationError(
                 self.__class__.noiseId,
                 self,
-                "We require 0 <= noiseId < %d" % (image_noise_base // 2),
+                "We require noiseId >=0",
             )
         if self.rotId >= num_rot:
             raise FieldValidationError(
@@ -185,8 +185,8 @@ class FpfsMeasurementTask(Task):
         *,
         exposure: ExposureF,
         seed: int,
+        band: str,
         noise_corr: NDArray | None = None,
-        band: str | None = None,
         mask_array: NDArray | None = None,
         star_cat: NDArray | None = None,
         detection: NDArray | None = None,
@@ -221,6 +221,7 @@ class FpfsMeasurementTask(Task):
             star_cat=star_cat,
             mask_array=mask_array,
             detection=detection,
+            band=band,
         )
         data["psf_object"] = utils.image.LsstPsf(
             psf=exposure.getPsf(), npix=self.config.npix,

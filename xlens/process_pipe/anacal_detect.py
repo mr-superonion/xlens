@@ -183,6 +183,7 @@ class AnacalDetectPipe(PipelineTask):
         seed = idGenerator.catalog_id + seed_offset
         data = self.anacal.prepare_data(
             exposure=exposure,
+            band=band,
             seed=seed,
             noise_corr=noise_corr,
             detection=None,
