@@ -113,6 +113,10 @@ class AnacalForcePipeConfig(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
     )
+    do_fpfs = Field[bool](
+        doc="Whether to drun fpfs task",
+        default=False,
+    )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
@@ -120,11 +124,6 @@ class AnacalForcePipeConfig(
     size = Field[float](
         doc="Size of Gaussian for measurement [arcsec]",
         default=-1,
-    )
-    fpfsBandList = ListField(
-        dtype=str,
-        doc="list of band to run force FPFS",
-        default=["g", "r", "i", "z"],
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
@@ -161,7 +160,7 @@ class AnacalForcePipe(PipelineTask):
         )
         assert isinstance(self.config, AnacalForcePipeConfig)
         self.makeSubtask("anacal")
-        if len(self.config.fpfsBandList) > 0:
+        if self.config.do_fpfs:
             self.makeSubtask("fpfs")
         return
 
@@ -234,7 +233,7 @@ class AnacalForcePipe(PipelineTask):
         )
         map_dict = {name: f"{band}_" + name for name in colnames}
         out.append(rfn.rename_fields(cat, map_dict))
-        if band in self.config.fpfsBandList:
+        if self.config.do_fpfs:
             out.append(
                 self.fpfs.run(**data)
             )
