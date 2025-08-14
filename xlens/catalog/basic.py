@@ -776,43 +776,6 @@ def get_wl_cuts(catalog):
     return wlflag
 
 
-def get_mask_visit_104994(data):
-    """In S19A, We found that visit 104994 has tracking errors, but that visit
-    contributes to coadds, we remove this region from the catalog level
-
-    Args:
-    data (ndarray): input catalog
-
-    Returns:
-    mask (ndarray): mask removing the problematic region
-    """
-    ra, dec = get_radec(data)
-
-    def _calDistanceAngle(a1, d1):
-        """Returns the angular distance on sphere
-        a1 (ndarray): ra of galaxies
-        d1 (ndarray): dec of galaxies
-        """
-        a2 = 130.43
-        d2 = -1.02
-        a1_f64 = np.array(a1, dtype=np.float64) * np.pi / 180.0
-        d1_f64 = np.array(d1, dtype=np.float64) * np.pi / 180.0
-        a2_f64 = np.array(a2, dtype=np.float64) * np.pi / 180.0
-        d2_f64 = np.array(d2, dtype=np.float64) * np.pi / 180.0
-        return (
-            np.arccos(
-                np.cos(d1_f64) * np.cos(d2_f64) * np.cos(a1_f64 - a2_f64)
-                + np.sin(d1_f64) * np.sin(d2_f64)
-            )
-            / np.pi
-            * 180.0
-        )
-
-    d = _calDistanceAngle(ra, dec)
-    mask = (ra > 130.5) & (ra < 131.5) & (dec < -1.5)
-    return (d > 0.80) & (~mask)
-
-
 def get_binarystar_flags(data):
     """Returns the flags for binary stars (|e|>0.8 & logR<1.8-0.1r)
 
@@ -833,49 +796,9 @@ def get_binarystar_flags(data):
     return mask
 
 
-def get_mask_G09_good_seeing(data):
-    """Gets the mask for the good-seeing region with large high order PSF shape
-    residuals
-
-    Parameters:
-    data (ndarray):     HSC shape catalog data
-
-    Returns:
-    mm (ndarray):       mask array [if False, in the good-seeing region]
-    """
-    (ra, dec) = get_radec(data)
-    mm = (ra >= 132.5) & (ra <= 140.0) & (dec >= 1.6) & (dec < 5.2)
-    mm = ~mm
-    return mm
-
-
-def fix_nan(catalog, key):
-    """Fixes NaN entries."""
-    x = catalog[key]
-    mask = np.isnan(x) | np.isinf(x)
-    n_fix = mask.astype(int).sum()
-    if n_fix > 0:
-        catalog[key][mask] = 0.0
-    return
-
-
 def _nan_array(n):
     """Creates an NaN array."""
     out = np.empty(n)
     out.fill(np.nan)
     return out
 
-
-def del_colnull(data):
-    """Deletes the '_isnull' column from the catalog downloaded from database
-
-    Args:
-    data (ndarray):     catalog downloaded from database
-
-    Returns:
-    data (ndarray):     catalog after removing '_isnull' column
-    """
-    colns = data.dtype.names
-    colns2 = [cn for cn in colns if "_isnull" not in cn]
-    data = data[colns2]
-    return data
