@@ -60,6 +60,10 @@ class FpfsMeasurementConfig(Config):
         doc="whether to compute detection mode",
         default=True,
     )
+    use_average_psf = Field[bool](
+        doc="whether to compute detection mode",
+        default=True,
+    )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
         default=[],
@@ -222,9 +226,13 @@ class FpfsMeasurementTask(Task):
             mask_array=mask_array,
             detection=detection,
         )
-        data["psf_object"] = utils.image.LsstPsf(
-            psf=exposure.getPsf(), npix=self.config.npix,
-            lsst_bbox=lsst_bbox,
-        )
+
         data["base_column_name"] = base_column_name
+        if not self.config.use_average_psf:
+            data["psf_object"] = utils.image.LsstPsf(
+                psf=exposure.getPsf(), npix=self.config.npix,
+                lsst_bbox=lsst_bbox,
+            )
+        else:
+           data["psf_object"] = None
         return data
