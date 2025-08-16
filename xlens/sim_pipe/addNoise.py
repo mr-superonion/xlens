@@ -36,16 +36,13 @@ class MultibandSimPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch", "band"),
     defaultTemplates={
-        "inputCoaddName": "deep",
-        "outputCoaddName": "sim",
-        "mode": 0,
-        "rotId": 0,
+        "coaddName": "deep",
         "noiseId": 0,
     },
 ):
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
-        name="{inputCoaddName}Coadd_systematics_noisecorr",
+        name="deepCoadd_systematics_noisecorr",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
@@ -53,13 +50,13 @@ class MultibandSimPipeConnections(
     )
     exposure = cT.Input(
         doc="Input simulated coadd exposure",
-        name="{outputCoaddName}_{mode}_rot{rotId}_Coadd_calexp",
+        name="{coaddName}Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
     outputExposure = cT.Output(
         doc="Output simulated coadd exposure",
-        name="{outputCoaddName}_noise{noiseId}_{mode}_rot{rotId}_Coadd_calexp",
+        name="{coaddName}noise{noiseId}_Coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
@@ -75,12 +72,14 @@ class AddNoisePipeConfig(
     idGenerator = SkyMapIdGeneratorConfig.make_field()
     survey_name = Field[str](
         doc="Name of the survey",
-        default="LSST",
+        default="lsst",
     )
+
     rotId = Field[int](
         doc="number of rotations",
         default=0,
     )
+
     noiseId = Field[int](
         doc="random seed for noise, 0 <= noiseId < 10",
         default=0,
@@ -88,10 +87,6 @@ class AddNoisePipeConfig(
 
     def validate(self):
         super().validate()
-        if self.rotId >= num_rot:
-            raise FieldValidationError(
-                self.__class__.rotId, self, "rotId needs to be smaller than 2"
-            )
         if self.noiseId < 0 or self.noiseId >= 10:
             raise FieldValidationError(
                 self.__class__.noiseId, self, "We require 0 <= noiseId < 10"
