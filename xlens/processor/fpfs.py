@@ -209,11 +209,9 @@ class FpfsMeasurementTask(Task):
         assert isinstance(self.config, FpfsMeasurementConfig)
         lsst_bbox = exposure.getBBox()
 
-        if band is None:
-            base_column_name = None
-        else:
-            base_column_name = band + "_"
+        base_column_name = band + "_"
         data = utils.image.prepare_data(
+            band=band,
             exposure=exposure,
             seed=seed,
             noiseId=self.config.noiseId,
@@ -225,7 +223,6 @@ class FpfsMeasurementTask(Task):
             star_cat=star_cat,
             mask_array=mask_array,
             detection=detection,
-            band=band,
         )
 
         data["base_column_name"] = base_column_name

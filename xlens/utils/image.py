@@ -305,6 +305,7 @@ def get_blocks(
 
 def prepare_data(
     *,
+    band: str,
     exposure: ExposureF,
     seed: int,
     noiseId: int = 0,
@@ -319,7 +320,6 @@ def prepare_data(
     star_cat: NDArray | None = None,
     mask_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
-    band: str = "i",
     **kwargs,
 ):
     """Prepares the data from LSST exposure
