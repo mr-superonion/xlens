@@ -61,7 +61,7 @@ class FpfsJointPipeConnections(
         doc="noise correlation function",
         name="{coaddName}Coadd_systematics_noisecorr",
         storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
+        dimensions=("skymap", "tract"),
         minimum=0,
         multiple=True,
         deferLoad=True,

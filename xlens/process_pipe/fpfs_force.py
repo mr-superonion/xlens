@@ -69,7 +69,7 @@ class FpfsForcePipeConnections(
         doc="noise correlation function",
         name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
+        dimensions=("skymap", "tract"),
         minimum=0,
         multiple=True,
         deferLoad=True,
