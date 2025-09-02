@@ -70,6 +70,7 @@ from scipy.spatial.distance import cdist
 # "base_PsfFlux_instFluxErr",
 # "base_Variance_value",
 
+
 class matchPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
@@ -85,7 +86,7 @@ class matchPipeConnections(
     )
     anacal_catalog = cT.Input(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_force",
+        name="{coaddName}Coadd_anacal_joint",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,
@@ -144,7 +145,8 @@ class matchPipeConfig(
             "r": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
             "i": "base_SdssCentroid_x, base_SdssCentroid_y, "
                  "base_GaussianFlux_instFlux, base_GaussianFlux_instFluxErr, "
-                 "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
+                 "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr, "
+                 "base_SdssShape_xx, base_SdssShape_yy, base_SdssShape_xy",
             "z": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
             "y": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
         },
@@ -221,6 +223,12 @@ class matchPipe(PipelineTask):
             truth_catalog = truth_handles_dict["i"].get().as_array()
 
         anacal_catalog = inputs["anacal_catalog"].as_array()
+        index = np.arange(len(anacal_catalog))
+        anacal_catalog = rfn.append_fields(
+            anacal_catalog, names="index",
+            data=index, dtypes="i4", usemask=False,
+        )
+
         outputs = self.run(
             skyMap=skyMap,
             tract=tract,
