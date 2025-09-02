@@ -56,6 +56,7 @@ class HaloMcBiasMultibandPipeConnections(
     dimensions=("skymap", "band"),
     defaultTemplates={
         "coaddName": "deep",
+        "noiseString": "",
         "dataType": "",
         "version": "",
     },
@@ -68,7 +69,7 @@ class HaloMcBiasMultibandPipeConnections(
     )
     src00List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_rot0_Coadd_anacal_{dataType}",
+        name="{coaddName}_rot0_{noiseString}Coadd_anacal_{dataType}",
         dimensions=(
             "skymap",
             "tract",
@@ -80,7 +81,7 @@ class HaloMcBiasMultibandPipeConnections(
     )
     src01List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_rot1_Coadd_anacal_{dataType}",
+        name="{coaddName}_rot1_{noiseString}Coadd_anacal_{dataType}",
         dimensions=(
             "skymap",
             "tract",

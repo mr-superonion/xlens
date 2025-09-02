@@ -61,7 +61,7 @@ jobs:
     - name: Test with pytest
       shell: bash -l {0}
       run: |
-        wget https://www.cosmo.bnl.gov/www/esheldon/data/catsim.tar.gz
-        tar xvfz catsim.tar.gz
-        export CATSIM_DIR=$(realpath catsim)
+        wget https://github.com/mr-superonion/xlens/releases/download/v0.3.0/catsim-v4.tar.gz
+        tar xvfz catsim-v4.tar.gz
+        export CATSIM_DIR=$(realpath catsim-v4)
         pytest
