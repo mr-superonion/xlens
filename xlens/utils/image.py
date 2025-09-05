@@ -144,7 +144,7 @@ def resize_array(
         return array
 
 
-class LsstPsf(anacal.psf.PyPsf):
+class LsstPsf(anacal.psf.BasePsf):
     def __init__(self, psf, npix, lsst_bbox=None):
         super().__init__()
         self.psf = psf

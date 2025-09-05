@@ -36,7 +36,6 @@ from lsst.pex.config import (
     ConfigurableField,
     Field,
     FieldValidationError,
-    ListField,
 )
 from lsst.pipe.base import (
     PipelineTask,
@@ -215,6 +214,7 @@ class AnacalForcePipe(PipelineTask):
         mask_array: NDArray | None = None,
         **kwargs,
     ):
+        assert isinstance(self.config, AnacalForcePipeConfig)
         data = self.anacal.prepare_data(
             exposure=exposure,
             seed=seed,
@@ -226,7 +226,6 @@ class AnacalForcePipe(PipelineTask):
             patch=patch,
             mask_array=mask_array,
         )
-        assert isinstance(self.config, AnacalForcePipeConfig)
         out = []
         colnames = ["flux", "dflux_dg1", "dflux_dg2"]
         cat = rfn.repack_fields(
