@@ -70,7 +70,7 @@ class AnacalDetectPipeConnections(
         doc="noise correlation function",
         name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
+        dimensions=("skymap", "tract"),
         minimum=0,
         multiple=True,
         deferLoad=True,
@@ -183,6 +183,7 @@ class AnacalDetectPipe(PipelineTask):
         seed = idGenerator.catalog_id + seed_offset
         data = self.anacal.prepare_data(
             exposure=exposure,
+            band=band,
             seed=seed,
             noise_corr=noise_corr,
             detection=None,

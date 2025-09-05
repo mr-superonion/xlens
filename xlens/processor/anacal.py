@@ -79,12 +79,11 @@ class AnacalConfig(Config):
                 self,
                 "sigma_arcsec in a wrong range",
             )
-        n_min = utils.random.image_noise_base // 2
-        if self.noiseId < 0 or self.noiseId >= n_min:
+        if self.noiseId < 0:
             raise FieldValidationError(
                 self.__class__.noiseId,
                 self,
-                "We require 0 <= noiseId < %d" % (n_min),
+                "We require noiseId >=0",
             )
         if self.rotId >= utils.random.num_rot:
             raise FieldValidationError(
@@ -221,10 +220,10 @@ class AnacalTask(Task):
     def prepare_data(
         self,
         *,
+        band: str,
         exposure: ExposureF,
         seed: int,
         noise_corr: NDArray | None = None,
-        band: str | None = None,
         skyMap=None,
         tract: int = 0,
         patch: int = 0,
@@ -260,6 +259,7 @@ class AnacalTask(Task):
             star_cat=star_cat,
             mask_array=mask_array,
             detection=detection,
+            band=band,
         )
         data["blocks"] = utils.image.get_blocks(
             lsst_psf=exposure.getPsf(),

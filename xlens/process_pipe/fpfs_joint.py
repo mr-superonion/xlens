@@ -61,7 +61,7 @@ class FpfsJointPipeConnections(
         doc="noise correlation function",
         name="{coaddName}Coadd_systematics_noisecorr",
         storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
+        dimensions=("skymap", "tract"),
         minimum=0,
         multiple=True,
         deferLoad=True,
@@ -169,6 +169,7 @@ class FpfsJointPipe(PipelineTask):
         idGenerator = self.config.idGenerator.apply(handle.dataId)
         seed = idGenerator.catalog_id
         data = self.fpfs.prepare_data(
+            band=band,
             exposure=exposure,
             seed=seed,
             noise_corr=noise_corr,

@@ -58,7 +58,7 @@ class MultibandSimPipeConnections(
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
         name="{inputCoaddName}Coadd_systematics_noisecorr",
-        dimensions=("skymap", "tract", "patch", "band"),
+        dimensions=("skymap", "tract"),
         storageClass="ImageF",
         multiple=False,
         minimum=0,

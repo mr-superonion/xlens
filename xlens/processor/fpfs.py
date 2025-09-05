@@ -8,7 +8,7 @@ from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
-from ..utils.random import image_noise_base, num_rot
+from ..utils.random import num_rot
 
 
 class FpfsMeasurementConfig(Config):
@@ -97,11 +97,11 @@ class FpfsMeasurementConfig(Config):
                 self,
                 "sigma_arcsec2 in a wrong range",
             )
-        if self.noiseId < 0 or self.noiseId >= image_noise_base // 2:
+        if self.noiseId < 0:
             raise FieldValidationError(
                 self.__class__.noiseId,
                 self,
-                "We require 0 <= noiseId < %d" % (image_noise_base // 2),
+                "We require noiseId >=0",
             )
         if self.rotId >= num_rot:
             raise FieldValidationError(
@@ -158,14 +158,10 @@ class FpfsMeasurementTask(Task):
             fpfs_peaks_dtype = np.dtype([
                 ('y', np.float64),
                 ('x', np.float64),
-                ('is_peak', np.int32),
-                ('mask_value', np.int32),
             ])
             det = np.zeros(len(detection), dtype=fpfs_peaks_dtype)
             det["x"] = detection["x1_det"] / pixel_scale - begin_x
             det["y"] = detection["x2_det"] / pixel_scale - begin_y
-            det["is_peak"] = 1
-            det["mask_value"] = 0
         else:
             det = None
         catalog = anacal.fpfs.process_image(
@@ -189,8 +185,8 @@ class FpfsMeasurementTask(Task):
         *,
         exposure: ExposureF,
         seed: int,
+        band: str,
         noise_corr: NDArray | None = None,
-        band: str | None = None,
         mask_array: NDArray | None = None,
         star_cat: NDArray | None = None,
         detection: NDArray | None = None,
@@ -209,11 +205,9 @@ class FpfsMeasurementTask(Task):
         assert isinstance(self.config, FpfsMeasurementConfig)
         lsst_bbox = exposure.getBBox()
 
-        if band is None:
-            base_column_name = None
-        else:
-            base_column_name = band + "_"
+        base_column_name = band + "_"
         data = utils.image.prepare_data(
+            band=band,
             exposure=exposure,
             seed=seed,
             noiseId=self.config.noiseId,

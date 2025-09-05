@@ -36,7 +36,6 @@ from lsst.pex.config import (
     ConfigurableField,
     Field,
     FieldValidationError,
-    ListField,
 )
 from lsst.pipe.base import (
     PipelineTask,
@@ -85,7 +84,7 @@ class AnacalForcePipeConnections(
         doc="noise correlation function",
         name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
+        dimensions=("skymap", "tract"),
         minimum=0,
         multiple=True,
         deferLoad=True,
@@ -113,25 +112,29 @@ class AnacalForcePipeConfig(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
     )
+    do_fpfs = Field[bool](
+        doc="Whether to drun fpfs task",
+        default=False,
+    )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
     )
-    fpfsBandList = ListField(
-        dtype=str,
-        doc="list of band to run force FPFS",
-        default=["g", "r", "i", "z"],
+    size = Field[float](
+        doc="Size of Gaussian for measurement [arcsec]",
+        default=-1,
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
         super().validate()
-        if self.fpfs.sigma_arcsec1 < 0.0:
-            raise FieldValidationError(
-                self.fpfs.__class__.sigma_arcsec1,
-                self,
-                "sigma_arcsec1 in a wrong range",
-            )
+        if self.do_fpfs:
+            if self.fpfs.sigma_arcsec1 < 0.0:
+                raise FieldValidationError(
+                    self.fpfs.fields["sigma_arcsec1"],
+                    self,
+                    "sigma_arcsec1 in a wrong range",
+                )
 
     def setDefaults(self):
         super().setDefaults()
@@ -157,15 +160,15 @@ class AnacalForcePipe(PipelineTask):
         )
         assert isinstance(self.config, AnacalForcePipeConfig)
         self.makeSubtask("anacal")
-        if len(self.config.fpfsBandList) > 0:
+        if self.config.do_fpfs:
             self.makeSubtask("fpfs")
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, AnacalForcePipeConfig)
         inputs = butlerQC.get(inputRefs)
-        tract = butlerQC.quantum.dataId["tract"]
-        patch = butlerQC.quantum.dataId["patch"]
+        tract = int(butlerQC.quantum.dataId["tract"])
+        patch = int(butlerQC.quantum.dataId["patch"])
         exposure_handles = inputs["exposure"]
         exposure_handles_dict = {
             handle.dataId["band"]: handle for handle in exposure_handles
@@ -179,6 +182,13 @@ class AnacalForcePipe(PipelineTask):
             }
         skyMap = inputs["skyMap"]
         detection = inputs["input_catalog"].as_array()
+        if self.config.size > 0:
+            detection["a1"] = self.config.size
+            detection["da1_dg1"] = 0.0
+            detection["da1_dg2"] = 0.0
+            detection["a2"] = self.config.size
+            detection["da2_dg1"] = 0.0
+            detection["da2_dg2"] = 0.0
         outputs = self.run(
             detection=detection,
             exposure_handles_dict=exposure_handles_dict,
@@ -204,6 +214,7 @@ class AnacalForcePipe(PipelineTask):
         mask_array: NDArray | None = None,
         **kwargs,
     ):
+        assert isinstance(self.config, AnacalForcePipeConfig)
         data = self.anacal.prepare_data(
             exposure=exposure,
             seed=seed,
@@ -215,7 +226,6 @@ class AnacalForcePipe(PipelineTask):
             patch=patch,
             mask_array=mask_array,
         )
-        assert isinstance(self.config, AnacalForcePipeConfig)
         out = []
         colnames = ["flux", "dflux_dg1", "dflux_dg2"]
         cat = rfn.repack_fields(
@@ -223,7 +233,7 @@ class AnacalForcePipe(PipelineTask):
         )
         map_dict = {name: f"{band}_" + name for name in colnames}
         out.append(rfn.rename_fields(cat, map_dict))
-        if band in self.config.fpfsBandList:
+        if self.config.do_fpfs:
             out.append(
                 self.fpfs.run(**data)
             )

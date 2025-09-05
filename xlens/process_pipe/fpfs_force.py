@@ -69,7 +69,7 @@ class FpfsForcePipeConnections(
         doc="noise correlation function",
         name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
+        dimensions=("skymap", "tract"),
         minimum=0,
         multiple=True,
         deferLoad=True,
@@ -193,11 +193,11 @@ class FpfsForcePipe(PipelineTask):
             idGenerator = self.config.idGenerator.apply(handle.dataId)
             seed = idGenerator.catalog_id
             data = self.fpfs.prepare_data(
+                band=band,
                 exposure=exposure,
                 seed=seed,
                 noise_corr=noise_corr,
                 detection=detection,
-                band=band,
             )
             cat = self.fpfs.run(**data)
             catalog.append(cat)

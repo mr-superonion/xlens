@@ -32,7 +32,7 @@ from typing import Any
 import fitsio
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.pex.config import Field
+from lsst.pex.config import Field, DictField
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -47,27 +47,28 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial import KDTree
 from scipy.spatial.distance import cdist
 
-dm_colnames = [
-    "base_SdssCentroid_x",
-    "base_SdssCentroid_y",
-    "base_Blendedness_abs",
-    "base_GaussianFlux_instFlux",
-    "base_GaussianFlux_instFluxErr",
-    "base_PsfFlux_instFlux",
-    "base_PsfFlux_instFluxErr",
-    "base_Variance_value",
-    "modelfit_CModel_instFlux",
-    "modelfit_CModel_instFluxErr",
-    "base_ClassificationExtendedness_value",
-    "ext_shapeHSM_HsmPsfMoments_xx",
-    "ext_shapeHSM_HsmPsfMoments_yy",
-    "ext_shapeHSM_HsmPsfMoments_xy",
-    "ext_shapeHSM_HigherOrderMomentsPSF_04",
-    "ext_shapeHSM_HigherOrderMomentsPSF_13",
-    "ext_shapeHSM_HigherOrderMomentsPSF_22",
-    "ext_shapeHSM_HigherOrderMomentsPSF_31",
-    "ext_shapeHSM_HigherOrderMomentsPSF_40",
-]
+# dm_colnames = [
+#     "base_SdssCentroid_x",
+#     "base_SdssCentroid_y",
+#     "base_GaussianFlux_instFlux",
+#     "base_GaussianFlux_instFluxErr",
+#     "modelfit_CModel_instFlux",
+#     "modelfit_CModel_instFluxErr",
+#     "ext_shapeHSM_HsmPsfMoments_xx",
+#     "ext_shapeHSM_HsmPsfMoments_yy",
+#     "ext_shapeHSM_HsmPsfMoments_xy",
+#     "ext_shapeHSM_HigherOrderMomentsPSF_04",
+#     "ext_shapeHSM_HigherOrderMomentsPSF_13",
+#     "ext_shapeHSM_HigherOrderMomentsPSF_22",
+#     "ext_shapeHSM_HigherOrderMomentsPSF_31",
+#     "ext_shapeHSM_HigherOrderMomentsPSF_40",
+# ]
+
+# "base_Blendedness_abs",
+# "base_ClassificationExtendedness_value",
+# "base_PsfFlux_instFlux",
+# "base_PsfFlux_instFluxErr",
+# "base_Variance_value",
 
 
 class matchPipeConnections(
@@ -85,7 +86,7 @@ class matchPipeConnections(
     )
     anacal_catalog = cT.Input(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_force",
+        name="{coaddName}Coadd_anacal_joint",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,
@@ -131,6 +132,25 @@ class matchPipeConfig(
         doc="maximum magnitude limit of truth catalog",
         default=27.0,
     )
+    do_select_primary = Field[bool](
+        doc="whether select primary detection",
+        default=True,
+    )
+    band_column_names = DictField(
+        keytype=str,
+        itemtype=str,
+        doc="column names for each band",
+        default={
+            "g": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
+            "r": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
+            "i": "base_SdssCentroid_x, base_SdssCentroid_y, "
+                 "base_GaussianFlux_instFlux, base_GaussianFlux_instFluxErr, "
+                 "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr, "
+                 "base_SdssShape_xx, base_SdssShape_yy, base_SdssShape_xy",
+            "z": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
+            "y": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
+        },
+    )
 
     def validate(self):
         super().validate()
@@ -160,8 +180,8 @@ class matchPipe(PipelineTask):
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, matchPipeConfig)
         inputs = butlerQC.get(inputRefs)
-        tract = butlerQC.quantum.dataId["tract"]
-        patch = butlerQC.quantum.dataId["patch"]
+        tract = int(butlerQC.quantum.dataId["tract"])
+        patch = int(butlerQC.quantum.dataId["patch"])
         skyMap = inputs["skyMap"]
 
         dm_handles = inputs["dm_catalog"]
@@ -174,12 +194,20 @@ class matchPipe(PipelineTask):
             }
             dm_catalog = []
             for band in dm_handles_dict.keys():
+                bs = self.config.band_column_names[band]
+                dm_colnames = [c.strip() for c in bs.split(",")]
+
                 handle = dm_handles_dict[band]
                 cat = handle.get()
-                mask = cat["detect_isPrimary"]
-                cat = rfn.repack_fields(
-                    cat.asAstropy().as_array()[dm_colnames][mask]
-                )
+                if self.config.do_select_primary:
+                    mask = cat["detect_isPrimary"]
+                    cat = rfn.repack_fields(
+                        cat.asAstropy().as_array()[dm_colnames][mask]
+                    )
+                else:
+                    cat = rfn.repack_fields(
+                        cat.asAstropy().as_array()[dm_colnames]
+                    )
                 map_dict = {name: f"{band}_" + name for name in dm_colnames}
                 dm_catalog.append(rfn.rename_fields(cat, map_dict))
             dm_catalog = rfn.merge_arrays(dm_catalog, flatten=True)
@@ -195,6 +223,12 @@ class matchPipe(PipelineTask):
             truth_catalog = truth_handles_dict["i"].get().as_array()
 
         anacal_catalog = inputs["anacal_catalog"].as_array()
+        index = np.arange(len(anacal_catalog))
+        anacal_catalog = rfn.append_fields(
+            anacal_catalog, names="index",
+            data=index, dtypes="i4", usemask=False,
+        )
+
         outputs = self.run(
             skyMap=skyMap,
             tract=tract,

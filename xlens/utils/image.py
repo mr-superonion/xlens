@@ -144,7 +144,7 @@ def resize_array(
         return array
 
 
-class LsstPsf(anacal.psf.PyPsf):
+class LsstPsf(anacal.psf.BasePsf):
     def __init__(self, psf, npix, lsst_bbox=None):
         super().__init__()
         self.psf = psf
@@ -305,6 +305,7 @@ def get_blocks(
 
 def prepare_data(
     *,
+    band: str,
     exposure: ExposureF,
     seed: int,
     noiseId: int = 0,
@@ -333,7 +334,7 @@ def prepare_data(
     Returns:
         (dict)
     """
-    from .random import get_noise_seed, image_noise_base
+    from .random import get_noise_seed
 
     pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
     mag_zero = (
@@ -403,15 +404,12 @@ def prepare_data(
     noise_std = np.sqrt(noise_variance)
 
     if do_noise_bias_correction:
-        noise_seed = (
-            get_noise_seed(
-                seed=seed,
-                noiseId=noiseId,
-                rotId=rotId,
-            )
-            + image_noise_base // 2
-            # make sure the seed is different from
-            # noise seed for simulation
+        noise_seed = get_noise_seed(
+            galaxy_seed=seed,
+            noiseId=noiseId,
+            rotId=rotId,
+            band=band,
+            is_sim=False,
         )
         ny, nx = gal_array.shape
         if noise_corr is None:

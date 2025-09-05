@@ -32,7 +32,6 @@ from ..utils.image import resize_array
 from ..utils.random import (
     gal_seed_base,
     get_noise_seed,
-    image_noise_base,
     num_rot,
 )
 from .base import SimBaseTask
@@ -112,7 +111,7 @@ class MultibandSimBaseConfig(Config):
         default=False,
     )
     galId = Field[int](
-        doc="random seed index, 0 <= galId < 10",
+        doc="random seed index for galaxy, 0 <= galId < 10",
         default=0,
     )
     rotId = Field[int](
@@ -120,7 +119,7 @@ class MultibandSimBaseConfig(Config):
         default=0,
     )
     noiseId = Field[int](
-        doc="random seed for noise, 0 <= noiseId < 10",
+        doc="random seed index for noise, 0 <= noiseId < 10",
         default=0,
     )
     use_real_psf = Field[bool](
@@ -146,11 +145,11 @@ class MultibandSimBaseConfig(Config):
                 self,
                 "rotId needs to be smaller than 2",
             )
-        if self.noiseId < 0 or self.noiseId >= image_noise_base // 2:
+        if self.noiseId < 0:
             raise FieldValidationError(
                 self.__class__.noiseId,
                 self,
-                "We require 0 <= noiseId < %d" % (image_noise_base // 2),
+                "We require noiseId >=0 ",
             )
         if self.layout not in ["grid", "hex", "random"]:
             raise FieldValidationError(
@@ -309,8 +308,8 @@ class MultibandSimBaseTask(SimBaseTask):
         # Prepare the random number generator and basic parameters
         rotId = self.config.rotId
         survey_name = self.config.survey_name
-        seed_gal = seed * gal_seed_base + self.config.galId
-        rng = np.random.RandomState(seed_gal)
+        galaxy_seed = seed * gal_seed_base + self.config.galId
+        rng = np.random.RandomState(galaxy_seed)
 
         # Get the pixel scale in arcseconds per pixel
         pixel_scale = wcs.getPixelScale().asArcseconds()
@@ -411,9 +410,11 @@ class MultibandSimBaseTask(SimBaseTask):
 
         if self.config.draw_image_noise:
             seed_noise = get_noise_seed(
-                seed=seed,
+                galaxy_seed=galaxy_seed,
                 noiseId=self.config.noiseId,
                 rotId=self.config.rotId,
+                band=band,
+                is_sim=True,
             )
             noise_array = get_noise_array(
                 seed_noise=seed_noise,
