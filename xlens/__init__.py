@@ -2,7 +2,7 @@ from . import (
     catalog,
     process_pipe,
     processor,
-    putils,
+    utils,
     sim_pipe,
     simulator,
     summary_pipe,
@@ -11,7 +11,7 @@ from .__version__ import __version__  # noqa
 
 __all__ = [
     "catalog",
-    "putils",
+    "utils",
     "simulator",
     "processor",
     "sim_pipe",

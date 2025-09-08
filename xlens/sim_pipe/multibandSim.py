@@ -61,7 +61,7 @@ class MultibandSimPipeConnections(
         dimensions=("skymap", "tract"),
         storageClass="ImageF",
         multiple=False,
-        minimum=0,
+        # minimum=0,
     )
     psfImage = cT.Input(
         doc="image for PSF model for simulation",
@@ -69,7 +69,7 @@ class MultibandSimPipeConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
-        minimum=0,
+        # minimum=0,
     )
     outputExposure = cT.Output(
         doc="Output simulated coadd exposure",
