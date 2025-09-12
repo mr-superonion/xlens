@@ -1,5 +1,6 @@
-import numpy as np
 import hashlib
+
+import numpy as np
 
 # 90 degree rotation of the scene
 num_rot = 2

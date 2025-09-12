@@ -2,10 +2,10 @@ from . import (
     catalog,
     process_pipe,
     processor,
-    utils,
     sim_pipe,
     simulator,
     summary_pipe,
+    utils,
 )
 from .__version__ import __version__  # noqa
 

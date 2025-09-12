@@ -24,6 +24,7 @@ import lsst.meas.algorithms as meaAlg
 import numpy as np
 from descwl_shear_sims.sim import make_sim
 from descwl_shear_sims.wcs import make_dm_wcs
+from lsst.afw.cameraGeom.testUtils import DetectorWrapper
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from lsst.pipe.base import Struct
 from numpy.typing import NDArray
@@ -406,7 +407,11 @@ class MultibandSimBaseTask(SimBaseTask):
         exp_out.setPsf(kernel_psf)
         exp_out.setWcs(dm_wcs)
         exp_out.getMaskedImage().variance.array[:, :] = variance
-        del data, photo_calib, kernel_psf, dm_wcs
+        filter_label = afwImage.FilterLabel(band=band, physical=band)
+        exp_out.setFilter(filter_label)
+        detector = DetectorWrapper().detector
+        exp_out.setDetector(detector)
+        del data, photo_calib, kernel_psf, dm_wcs, filter_label, detector
 
         if self.config.draw_image_noise:
             seed_noise = get_noise_seed(
@@ -441,7 +446,16 @@ class MultibandSimShearTaskConfig(MultibandSimBaseConfig):
         default=[-0.01, 20.0],
     )
     mode = Field[int](
-        doc="number of rotations",
+        doc=(
+            "Note that there are three options in each redshift bin\n"
+            "+ 0: g=-0.02;\n"
+            "+ 1: g=0.02;\n"
+            "+ 2: g=0.00\n\n"
+            "For example, if the number of redshift bins is 4 (with z_bounds: "
+            "[0., 0.5, 1.0, 1.5, 2.0]), and mode = 7 which in ternary "
+            "is '0021' - this means the shear is (-0.02, -0.02, 0., 0.02) in "
+            "each bin, respectively."
+        ),
         default=0,
     )
     test_target = Field[str](
@@ -534,7 +548,7 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
         default=0.0,
     )
     z_source = Field[float](
-        doc="source redshift",
+        doc="source galaxy redshift",
         default=None,
     )
 

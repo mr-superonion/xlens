@@ -1,5 +1,6 @@
 from . import (
     base,
+    wcs,
     galaxies,
     multiband,
     multiband_defaults,
@@ -8,6 +9,7 @@ from . import (
 
 __all__ = [
     "base",
+    "wcs",
     "multiband",
     "perturbation",
     "multiband_defaults",

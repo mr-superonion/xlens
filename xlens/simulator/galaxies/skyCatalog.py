@@ -2,7 +2,6 @@ import os
 
 import galsim
 import numpy as np
-from descwl_shear_sims.constants import SCALE
 from descwl_shear_sims.layout import Layout
 
 from .cache_tools import cached_catalog_read
@@ -36,21 +35,25 @@ class OpenUniverse2024RubinRomanCatalog(object):
     indice_id: None | int
         galaxy index to use, use galaxies in the range between indice_id * num
         and (indice_id + 1) * num
+    simple_coadd_bbox: optional, bool. Default: False
+        Whether to force the center of coadd boundary box (which is the default
+        center single exposure) at the world_origin
     """
 
     def __init__(
         self,
         *,
         rng,
-        layout="random",
+        layout: Layout | str = "random",
         coadd_dim=None,
         buff=None,
-        pixel_scale=SCALE,
+        pixel_scale=0.2,
         select_observable=None,
         select_lower_limit=None,
         select_upper_limit=None,
         sep=None,
         indice_id=None,
+        simple_coadd_bbox=False,
     ):
         self.gal_type = "wldeblend"
         self.rng = rng
@@ -68,7 +71,13 @@ class OpenUniverse2024RubinRomanCatalog(object):
         density = len(self.input_catalog) / area_tot_arcmin
 
         if isinstance(layout, str):
-            self.layout = Layout(layout, coadd_dim, buff, pixel_scale)
+            self.layout = Layout(
+                layout,
+                coadd_dim,
+                buff,
+                pixel_scale,
+                simple_coadd_bbox=simple_coadd_bbox,
+            )
         else:
             assert isinstance(layout, Layout)
             self.layout = layout
@@ -138,31 +147,6 @@ class OpenUniverse2024RubinRomanCatalog(object):
             "redshifts": redshifts,
             "indexes": indexes,
         }
-
-    def _resize_dimension(
-        self, *, new_coadd_dim, new_buff, new_pixel_scale, new_layout="random"
-    ):
-        """
-        resize the pixel scale,
-        preserving all the galaxy properties
-
-        Parameters
-        ----------
-        new_coadd_dim: int
-            new coadd dimension
-
-        new_buff: int
-            new buffer length
-
-        new_pixel_scale: float
-            new pixel scale
-        """
-        self.layout = Layout(
-            new_layout,
-            new_coadd_dim,
-            new_buff,
-            new_pixel_scale,
-        )
 
     def _get_galaxy(self, survey, i):
         """

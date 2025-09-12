@@ -3,9 +3,9 @@ import os
 import descwl
 import galsim
 import numpy as np
-from descwl_shear_sims.cache_tools import cached_catalog_read
-from descwl_shear_sims.constants import SCALE
 from descwl_shear_sims.layout import Layout
+
+from .cache_tools import cached_catalog_read
 
 
 class CatSim2017Catalog(object):
@@ -47,7 +47,7 @@ class CatSim2017Catalog(object):
         layout: Layout | str = "random",
         coadd_dim=None,
         buff=None,
-        pixel_scale=SCALE,
+        pixel_scale=0.2,
         select_observable=None,
         select_lower_limit=None,
         select_upper_limit=None,

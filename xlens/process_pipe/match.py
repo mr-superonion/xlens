@@ -32,7 +32,7 @@ from typing import Any
 import fitsio
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.pex.config import Field, DictField
+from lsst.pex.config import DictField, Field
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
