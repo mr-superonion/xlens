@@ -10,7 +10,7 @@ def test_wcs():
     config.numRings = 120
     config.projection = "TAN"
     config.tractOverlap = 1.0 / 60  # degrees
-    config.pixelScale = 0.168  # arcsec/pixel
+    config.pixelScale = 0.168  # arcsec/pixel (HSC)
     skymap = RingsSkyMap(config)
     tract_info = skymap[16012]
 

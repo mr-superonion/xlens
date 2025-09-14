@@ -1,5 +1,4 @@
 from . import (
-    base,
     wcs,
     galaxies,
     multiband,
@@ -8,7 +7,6 @@ from . import (
 )
 
 __all__ = [
-    "base",
     "wcs",
     "multiband",
     "perturbation",

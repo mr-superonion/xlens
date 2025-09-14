@@ -20,6 +20,7 @@ import galsim
 import lsst
 import lsst.afw.image as afwImage
 import lsst.afw.math as afwMath
+from lsst.pipe.base import Task
 import lsst.meas.algorithms as meaAlg
 import numpy as np
 from descwl_shear_sims.sim import make_sim
@@ -35,9 +36,7 @@ from ..utils.random import (
     get_noise_seed,
     num_rot,
 )
-from .base import SimBaseTask
-from .galaxies.catsim import CatSim2017Catalog
-from .galaxies.skyCatalog import OpenUniverse2024RubinRomanCatalog
+from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
 from .multiband_defaults import (
     mag_zero_defaults,
     noise_variance_defaults,
@@ -72,6 +71,19 @@ def get_noise_array(
             * noise_std
         )
     return noise_array
+
+
+class SimBaseTask(Task):
+    _DefaultName = "SimBaseTask"
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        pass
+
+    def get_perturbation_object(self, **kwargs: Any) -> object:
+        raise NotImplementedError(
+            "'get_perturbation_object' must be implemented by subclasses."
+        )
 
 
 class MultibandSimBaseConfig(Config):
