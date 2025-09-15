@@ -4,6 +4,8 @@ from . import (
     multiband,
     multiband_defaults,
     perturbation,
+    layout,
+    catalog,
 )
 
 __all__ = [
@@ -12,4 +14,6 @@ __all__ = [
     "perturbation",
     "multiband_defaults",
     "galaxies",
+    "layout",
+    "catalog",
 ]

@@ -1,55 +1,7 @@
 import numpy as np
 
-from ..constants import SCALE
 
-
-def get_pair_shifts(*, rng, sep, pixel_scale=SCALE):
-    """
-    get a set of gridded shifts, with random shifts at the pixel scale
-
-    Parameters
-    ----------
-    rng: numpy.random.RandomState
-        The random number generator
-    sep: float
-        Separation of pair in arcsec
-    pixel_scale: float, optional
-        pixel scale
-
-    Returns
-    -------
-    shifts: array
-        Array with dx, dy offset fields for each point, in arcsec
-    """
-
-    shifts = np.zeros(2, dtype=[('dx', 'f8'), ('dy', 'f8')])
-
-    angle = rng.uniform(low=0, high=np.pi)
-    shift_radius = sep / 2
-
-    xdither, ydither = pixel_scale * rng.uniform(low=-0.5, high=0.5, size=2)
-
-    dx1 = np.cos(angle)*shift_radius
-    dy1 = np.sin(angle)*shift_radius
-    dx2 = -dx1
-    dy2 = -dy1
-
-    dx1 += xdither
-    dy1 += ydither
-
-    dx2 += xdither
-    dy2 += ydither
-
-    shifts['dx'][0] = dx1
-    shifts['dy'][0] = dy1
-
-    shifts['dx'][1] = dx2
-    shifts['dy'][1] = dy2
-
-    return shifts
-
-
-def get_grid_shifts(*, rng, dim, buff, pixel_scale, spacing):
+def get_grid_shifts(*, rng, dim, pixel_scale, spacing):
     """
     get a set of gridded shifts, with random shifts at the pixel scale
 
@@ -59,8 +11,6 @@ def get_grid_shifts(*, rng, dim, buff, pixel_scale, spacing):
         The random number generator
     dim: int
         Dimensions of the final image
-    buff: int
-        Buffer region where no objects will be drawn.
     pixel_scale: float
         pixel scale
     spacing: float
@@ -73,7 +23,7 @@ def get_grid_shifts(*, rng, dim, buff, pixel_scale, spacing):
         arcsec
     """
 
-    width = (dim - 2*buff) * pixel_scale
+    width = dim * pixel_scale
     n_on_side = int(dim / spacing * pixel_scale)
 
     ntot = n_on_side**2
@@ -101,11 +51,10 @@ def get_grid_shifts(*, rng, dim, buff, pixel_scale, spacing):
         & (shifts['dy'] <= pos_bounds[1])
     )
     shifts = shifts[msk]
-
     return shifts
 
 
-def get_hex_shifts(*, rng, dim, buff, pixel_scale, spacing):
+def get_hex_shifts(*, rng, dim, pixel_scale, spacing):
     """
     get a set of hex grid shifts, with random shifts at the pixel scale
 
@@ -115,8 +64,6 @@ def get_hex_shifts(*, rng, dim, buff, pixel_scale, spacing):
         The random number generator
     dim: int
         Dimensions of the final image
-    buff: int
-        Buffer region where no objects will be drawn.
     pixel_scale: float
         pixel scale
     spacing: float
@@ -130,7 +77,7 @@ def get_hex_shifts(*, rng, dim, buff, pixel_scale, spacing):
     """
     from hexalattice.hexalattice import create_hex_grid
 
-    width = (dim - 2*buff) * pixel_scale
+    width = dim * pixel_scale
     n_on_side = int(width / spacing) + 1
 
     nx = int(n_on_side * np.sqrt(2))
@@ -164,11 +111,10 @@ def get_hex_shifts(*, rng, dim, buff, pixel_scale, spacing):
     shifts = np.zeros(ntot, dtype=[('dx', 'f8'), ('dy', 'f8')])
     shifts["dx"] = upos
     shifts["dy"] = vpos
-
     return shifts
 
 
-def get_random_shifts(*, rng, dim, buff, pixel_scale, size):
+def get_random_shifts(*, rng, dim, pixel_scale, size):
     """
     get a set of random shifts in a square, with random shifts at the pixel
     scale
@@ -179,8 +125,6 @@ def get_random_shifts(*, rng, dim, buff, pixel_scale, size):
         The random number generator
     dim: int
         Dimensions of the final image
-    buff: int
-        Buffer region where no objects will be drawn.
     pixel_scale: float
         pixel scale
     size: int
@@ -193,11 +137,9 @@ def get_random_shifts(*, rng, dim, buff, pixel_scale, size):
         arcsec
     """
 
-    halfwidth = (dim - 2*buff)/2.0
+    halfwidth = dim / 2.0
     if halfwidth < 0:
-        print(dim, buff, halfwidth)
-        # prevent user using a buffer that is too large
-        raise ValueError("dim - 2*buff < 0")
+        raise ValueError("dim < 0")
 
     low = -halfwidth * pixel_scale
     high = halfwidth * pixel_scale
@@ -206,11 +148,10 @@ def get_random_shifts(*, rng, dim, buff, pixel_scale, size):
 
     shifts['dx'] = rng.uniform(low=low, high=high, size=size)
     shifts['dy'] = rng.uniform(low=low, high=high, size=size)
-
     return shifts
 
 
-def get_random_disk_shifts(*, rng, dim, buff, pixel_scale, size):
+def get_random_disk_shifts(*, rng, dim, pixel_scale, size):
     """Gets a set of random shifts on a disk, with random shifts at the
     pixel scale
 
@@ -220,8 +161,6 @@ def get_random_disk_shifts(*, rng, dim, buff, pixel_scale, size):
         The random number generator
     dim: int
         Dimensions of the final image
-    buff: int
-        Buffer region where no objects will be drawn.
     pixel_scale: float
         pixel scale
     size: int
@@ -234,10 +173,9 @@ def get_random_disk_shifts(*, rng, dim, buff, pixel_scale, size):
         arcsec
     """
 
-    radius = (dim - 2 * buff) / 2.0 * pixel_scale
+    radius = dim / 2.0 * pixel_scale
     if radius < 0:
-        # prevent user using a buffer that is too large
-        raise ValueError("dim - 2 * buff < 0")
+        raise ValueError("radius < 0")
     radius_square = radius**2.
 
     # evenly distributed within a radius, min(nx, ny)*rfrac

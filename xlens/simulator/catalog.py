@@ -16,36 +16,53 @@
 from typing import Any
 
 import lsst
+import galsim
 import numpy as np
 from lsst.pex.config import Config, Field, FieldValidationError
 from lsst.pipe.base import Struct
 
-from ..utils.random import gal_seed_base
+from ..utils.random import num_rot
+
 from lsst.pipe.base import Task
-from .galaxies.catsim import CatSim2017Catalog
-from .galaxies.skyCatalog import OpenUniverse2024RubinRomanCatalog
+from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
+from .layout import Layout
+
+
+def _rotate_pos(pos, theta):
+    """Rotates coordinates by an angle theta
+
+    Args:
+        pos (PositionD):a galsim position
+        theta (float):  rotation angle [rads]
+    Returns:
+        x2 (ndarray):   rotated coordiantes [x]
+        y2 (ndarray):   rotated coordiantes [y]
+    """
+    x = pos.x
+    y = pos.y
+    cost = np.cos(theta)
+    sint = np.sin(theta)
+    x2 = cost * x - sint * y
+    y2 = sint * x + cost * y
+    return galsim.PositionD(x=x2, y=y2)
 
 
 class PrepareGalaxyConfig(Config):
-    survey_name = Field[str](
-        doc="Name of the survey",
-        default="LSST",
+    galaxy_type = Field[str](
+        doc="galaxy type",
+        default="catsim2017",
     )
     layout = Field[str](
         doc="Layout of the galaxy distribution (random, grid, hex)",
         default="random",
     )
-    galaxy_type = Field[str](
-        doc="galaxy type",
-        default="catsim2017",
-    )
-    extend_ratio = Field[float](
-        doc="The ratio to extend for the size of simulated image",
-        default=1.06,
-    )
-    sep = Field[float](
+    sep_arcsec = Field[float](
         doc="separation distance (arcsec) between galaxies (for grid and hex)",
         default=11.0,
+    )
+    pad_arcsec = Field[float](
+        doc="padding distance (arcsec)",
+        default=20.0,
     )
     order_truth_catalog = Field[bool](
         doc="Whether to keep the order in truth catalog",
@@ -55,38 +72,20 @@ class PrepareGalaxyConfig(Config):
         doc="whether to include stars in the simulation",
         default=False,
     )
-    galId = Field[int](
-        doc="random seed index for galaxy, 0 <= galId < 10",
-        default=0,
-    )
-    use_real_psf = Field[bool](
-        doc="whether to use real PSF",
-        default=False,
-    )
-    force_pixel_center = Field[bool](
-        doc="whether to force galaxies at pixel center",
-        default=False,
-    )
 
     def validate(self):
         super().validate()
-        if self.galId >= gal_seed_base or self.galId < 0:
-            raise FieldValidationError(
-                self.__class__.galId,
-                self,
-                "We require 0 <= galId < %d" % (gal_seed_base),
-            )
         if self.layout not in ["grid", "hex", "random"]:
             raise FieldValidationError(
                 self.__class__.layout,
                 self,
                 "We require layout in ['grid', 'hex', 'random']",
             )
-        if self.sep <= 0:
+        if self.sep_arcsec <= 0:
             raise FieldValidationError(
-                self.__class__.sep,
+                self.__class__.sep_arcsec,
                 self,
-                "We require sep > 0.0 arcsec",
+                "We require sep_arcsec > 0.0 arcsec",
             )
         if self.galaxy_type not in ["catsim2017", "RomanRubin2024"]:
             raise FieldValidationError(
@@ -97,7 +96,6 @@ class PrepareGalaxyConfig(Config):
 
     def setDefaults(self):
         super().setDefaults()
-        self.survey_name = self.survey_name.lower()
 
 
 class PrepareGalaxyTask(Task):
@@ -109,60 +107,17 @@ class PrepareGalaxyTask(Task):
         assert isinstance(self.config, PrepareGalaxyConfig)
         pass
 
-    def prepare_galaxy_catalog(
-        self,
-        *,
-        rng: np.random.RandomState,
-        dim: int,
-        pixel_scale: float,
-        sep: float = 11.0,
-        indice_id=None,
-        **kwargs,
-    ):
-        assert isinstance(self.config, PrepareGalaxyConfig)
-        # prepare galaxy catalog
-        coadd_dim = dim - 10
-        # galaxy catalog;
-        if self.config.galaxy_type == "catsim2017":
-            GalClass = CatSim2017Catalog
-        elif self.config.galaxy_type == "RomanRubin2024":
-            GalClass = OpenUniverse2024RubinRomanCatalog
-        else:
-            raise ValueError("invalid galaxy_type")
-        galaxy_catalog = GalClass(
-            rng=rng,
-            coadd_dim=coadd_dim,
-            buff=0.0,
-            pixel_scale=pixel_scale,
-            layout=self.config.layout,
-            simple_coadd_bbox=True,
-            sep=sep,
-            indice_id=indice_id,
-        )
-        if self.config.force_pixel_center:
-            galaxy_catalog.shifts_array["dx"] = (
-                np.floor(galaxy_catalog.shifts_array["dx"] / pixel_scale)
-                * pixel_scale
-                + pixel_scale / 2.0
-            )
-            galaxy_catalog.shifts_array["dy"] = (
-                np.floor(galaxy_catalog.shifts_array["dy"] / pixel_scale)
-                * pixel_scale
-                + pixel_scale / 2.0
-            )
-        return galaxy_catalog
-
-
     def run(
         self,
         *,
-        band: str,
-        seed: int,
-        boundaryBox,
+        rng: np.random.RandomState,
         wcs: lsst.afw.geom.SkyWcs,
+        boundary_box: lsst.geom.Box2I,
         patch: int = 0,
         **kwargs,
     ):
+
+        rotate_list = [np.pi / num_rot * i for i in range(num_rot)]
         assert isinstance(self.config, PrepareGalaxyConfig)
         if self.config.order_truth_catalog and self.config.layout in [
             "grid",
@@ -172,23 +127,26 @@ class PrepareGalaxyTask(Task):
         else:
             indice_id = None
 
-        # Prepare the random number generator and basic parameters
-        galaxy_seed = seed * gal_seed_base + self.config.galId
-        rng = np.random.RandomState(galaxy_seed)
-
-        # Get the pixel scale in arcseconds per pixel
-        pixel_scale = wcs.getPixelScale().asArcseconds()
-        width = boundaryBox.getWidth()
-        height = boundaryBox.getHeight()
-
-        dim = int(max(width, height) * self.config.extend_ratio)
-        galaxy_catalog = self.prepare_galaxy_catalog(
+        if self.config.galaxy_type == "catsim2017":
+            GalClass = CatSim2017Catalog
+        elif self.config.galaxy_type == "RomanRubin2024":
+            GalClass = OpenUniverse2024RubinRomanCatalog
+        else:
+            raise ValueError("invalid galaxy_type")
+        layout = Layout(
+            layout_name=self.config.layout,
+            wcs=wcs,
+            boundary_box=boundary_box,
+            pad_arcsec=self.config.pad_arcsec,
+            sep_arcsec=self.config.sep_arcsec,
+        )
+        theta0 = rotate_list[self.config.rotId]
+        galaxy_catalog = GalClass(
             rng=rng,
-            dim=dim,
-            pixel_scale=pixel_scale,
-            sep=self.config.sep,
+            layout=layout,
             indice_id=indice_id,
         )
-        return
-
-
+        array = galaxy_catalog.to_array()
+        return Struct(
+            outputCatalog=array
+        )

@@ -21,30 +21,21 @@ class BaseGalaxyCatalog(ABC):
     Subclasses must implement:
       - _read_catalog(...)
       - _compute_density(cat)
-      - _generate_galaxy(survey, entry)
+      - _generate_galaxy(entry, mag_zero, band, **kwargs)
     Optionally override:
       - _probabilities_for_sampling(cat) -> Optional[np.ndarray]
-      - _get_redshift(index, entry) -> float
     """
 
     def __init__(
         self,
         *,
         rng: np.random.RandomState,
-        layout: Layout | str = "random",
-        coadd_dim: int | None = None,
-        buff: int | None = None,
-        pixel_scale: float = 0.2,
+        layout: Layout,
+        indice_id: int | None = None,
         select_observable: list[str] | str | None = None,
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
-        sep: float | None = None,
-        indice_id: int | None = None,
-        simple_coadd_bbox: bool = False,
     ):
-        self.gal_type = "wldeblend"
-        self.rng = rng
-
         # subclass: read & (optionally) filter the catalog
         self.input_catalog = self._read_catalog(
             select_observable=select_observable,
@@ -54,39 +45,28 @@ class BaseGalaxyCatalog(ABC):
 
         # density drives how many objects the layout will place
         density = self._compute_density(self.input_catalog)
-
-        # layout construction
-        if isinstance(layout, str):
-            self.layout = Layout(
-                layout_name=layout,
-                coadd_dim=coadd_dim,
-                buff=0 if buff is None else buff,
-                pixel_scale=pixel_scale,
-                simple_coadd_bbox=simple_coadd_bbox,
-            )
-        else:
-            assert isinstance(layout, Layout)
-            self.layout = layout
-
         # positions to place galaxies
-        self.shifts_array = self.layout.get_shifts(
-            rng=rng, density=density, sep=sep
+        self.shifts_array = layout.get_shifts(
+            rng=rng, density=density
         )
 
         # choose which catalog rows populate those positions
         num = len(self)
         probs = self._probabilities_for_sampling(self.input_catalog)
+        catalog_size = len(self.input_catalog)
         if indice_id is None:
-            self.indices = self._draw_indices(
-                num, len(self.input_catalog), probs,
-            )
+            integers = np.arange(0, catalog_size, dtype=int)
+            self.indices = rng.choice(integers, size=num, p=probs)
         else:
-            self.indices = self._block_indices(
-                num, len(self.input_catalog), indice_id,
+            indice_min = indice_id * num
+            indice_max = indice_min + num
+            if indice_min >= catalog_size:
+                raise ValueError("indice_min too large")
+            self.indices = (
+                np.arange(indice_min, indice_max, dtype=int) % catalog_size
             )
-
         # random orientation for each placed galaxy
-        self.angles = self.rng.uniform(low=0.0, high=360.0, size=num)
+        self.angles = rng.uniform(low=0.0, high=360.0, size=num)
 
     # ---------- required subclass hooks ----------
 
@@ -106,7 +86,9 @@ class BaseGalaxyCatalog(ABC):
         """Return object surface density in objects / arcmin^2."""
 
     @abstractmethod
-    def _generate_galaxy(self, *, survey: Any, entry: Any) -> galsim.GSObject:
+    def _generate_galaxy(
+        self, *, entry: Any, mag_zero: float, band: str, **kwargs
+    ) -> galsim.GSObject:
         """Build and return a GalSim GSObject from one catalog entry."""
 
 
@@ -114,33 +96,87 @@ class BaseGalaxyCatalog(ABC):
         """Optional per-row sampling probabilities. Default: None (uniform)."""
         return None
 
-    def _get_redshift(self, index: int, entry: Any) -> float:
-        """Default redshift accessor tries two common patterns."""
-        # try both column-access styles
-        try:
-            return entry["redshift"]
-        except Exception:
-            return self.input_catalog["redshift"][index]
-
     def __len__(self) -> int:
         return len(self.shifts_array)
 
-    def _draw_indices(
-        self, num: int, catalog_size: int, probs: np.ndarray | None
-    ) -> np.ndarray:
-        integers = np.arange(0, catalog_size, dtype=int)
-        return self.rng.choice(integers, size=num, p=probs)
+    @classmethod
+    def from_array(
+        cls,
+        *,
+        table: np.ndarray,
+        select_observable: list[str] | str | None = None,
+        select_lower_limit: Iterable[float] | None = None,
+        select_upper_limit: Iterable[float] | None = None,
+    ) -> "BaseGalaxyCatalog":
+        """
+        Build a catalog directly from a table structured array.
 
-    def _block_indices(
-        self, num: int, catalog_size: int, indice_id: int
-    ) -> np.ndarray:
-        indice_min = indice_id * num
-        indice_max = indice_min + num
-        if indice_min >= catalog_size:
-            raise ValueError("indice_min too large")
-        return (np.arange(indice_min, indice_max, dtype=int) % catalog_size)
+        Parameters
+        ----------
+        table : np.ndarray
+            Structured array with columns 'dx', 'dy', 'indices', 'angles'.
+        select_observable, select_lower_limit, select_upper_limit
+            Passed to _read_catalog(...) so subclasses can load/filter
+            input_catalog.
+        """
+        # Create instance without running __init__
+        self = cls.__new__(cls)
 
-    def get_objlist(self, *, survey: Any) -> dict[str, list]:
+        # Load catalog (subclass hook)
+        self.input_catalog = self._read_catalog(
+            select_observable=select_observable,
+            select_lower_limit=select_lower_limit,
+            select_upper_limit=select_upper_limit,
+        )
+
+        # Validate fields
+        for col in ("dx", "dy", "indices", "angles"):
+            if col not in table.dtype.names:
+                raise ValueError(
+                    f"Missing required column '{col}' in table array"
+                )
+
+        # Build shifts_array with (dx,dy)
+        self.shifts_array = np.array(
+            list(zip(table["dx"], table["dy"])),
+            dtype=[("dx", "f8"), ("dy", "f8")]
+        )
+        # Store indices and angles
+        self.indices = np.asarray(table["indices"], dtype=int)
+        self.angles = np.asarray(table["angles"], dtype=float)
+
+        cat_size = len(self.input_catalog)
+        if (self.indices < 0).any() or (self.indices >= cat_size).any():
+            raise IndexError(
+                "Indices in table array out of range for input_catalog"
+            )
+        return self
+
+    def to_array(self) -> np.ndarray:
+        """
+        Export the current catalog placement to a structured array.
+
+        Returns
+        -------
+        np.ndarray
+            Structured array with columns ('dx','dy','indices','angles'),
+            suitable for saving to disk or reloading with from_catalog().
+        """
+        n = len(self)
+        dtype = [
+            ("dx", "f8"),
+            ("dy", "f8"),
+            ("indices", "i8"),
+            ("angles", "f8"),
+        ]
+        arr = np.empty(n, dtype=dtype)
+        arr["dx"] = self.shifts_array["dx"]
+        arr["dy"] = self.shifts_array["dy"]
+        arr["indices"] = self.indices
+        arr["angles"] = self.angles
+        return arr
+
+    def get_objlist(self, *, mag_zero: float, band: str) -> dict[str, list]:
         """
         Returns
         -------
@@ -157,13 +193,15 @@ class BaseGalaxyCatalog(ABC):
         for i in range(len(self)):
             idx = self.indices[i]
             entry = self.input_catalog[idx]
-            gal = self._generate_galaxy(survey=survey, entry=entry).rotate(
+            gal = self._generate_galaxy(
+                entry=entry, mag_zero=mag_zero, band=band,
+            ).rotate(
                 self.angles[i] * galsim.degrees
             )
 
             objlist.append(gal)
             shifts.append(galsim.PositionD(sarray["dx"][i], sarray["dy"][i]))
-            redshifts.append(self._get_redshift(idx, entry))
+            redshifts.append(entry["redshift"])
             indexes.append(idx)
 
         return {
@@ -245,10 +283,11 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
                 return p / p_sum
         return None
 
-    def _generate_galaxy(self, *, survey, entry) -> galsim.GSObject:
-        band = survey.filter_band
+    def _generate_galaxy(
+        self, *, entry, mag_zero, band, **kwargs,
+    ) -> galsim.GSObject:
         ab_magnitude = entry[band + "_ab"]
-        total_flux = survey.get_flux(ab_magnitude)
+        total_flux = 10 ** ((mag_zero - ab_magnitude) / 2.5)
 
         # split flux among components
         total_fluxnorm = (
@@ -271,7 +310,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             hlr_d = np.sqrt(max(a_d, 0.0) * max(b_d, 0.0))
             q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(entry["pa_disk"])
-            disk = galsim.Exponential(flux=disk_flux, half_light_radius=hlr_d).shear(
+            disk = galsim.Exponential(
+                flux=disk_flux, half_light_radius=hlr_d
+            ).shear(
                 q=q_d, beta=beta_d * galsim.radians
             )
             components.append(disk)
@@ -369,14 +410,16 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         )
         return len(cat) / area_tot_arcmin
 
-    def _generate_galaxy(self, *, survey, entry) -> galsim.GSObject:
+    def _generate_galaxy(
+        self, *, entry, mag_zero, band, survey_name, **kwargs,
+    ) -> galsim.GSObject:
         """
         entry is a row of the columnar table (supports dict-like access).
         """
-        band = survey.filter_band
-        sname = survey.descwl_survey.survey_name.lower()
-        if sname == "hsc":
+        if survey_name == "hsc":
             sname = "lsst"
+        else:
+            sname = survey_name
 
         bulge_hlr = entry["spheroidHalfLightRadiusArcsec"]
         disk_hlr = entry["diskHalfLightRadiusArcsec"]
@@ -388,7 +431,7 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         )
 
         mag = entry[f"{sname}_mag_{band}"]
-        flux = survey.get_flux(mag)
+        flux = 10 ** ((mag_zero - mag) / 2.5)
         bulge_frac = entry[f"{sname}_bulgefrac_{band}"]
 
         bulge = galsim.Sersic(

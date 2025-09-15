@@ -1,199 +1,196 @@
-import coord
-import galsim
-import lsst.geom as geom
+import math
+import lsst
 import numpy as np
-from lsst.afw.geom import makeSkyWcs
-from lsst.geom import Point2D
 
 from .shifts import (
     get_grid_shifts,
     get_hex_shifts,
-    get_pair_shifts,
     get_random_disk_shifts,
     get_random_shifts,
 )
 
-# spacing of the square grid in arcsec
-GRID_SPACING = 11.0
-
-# spacing of the hex grid in arcsec
-HEX_SPACING = 11.0
-
-# density of random layout (not wldeblend) per square arcmin
-RANDOM_DENSITY = 80
-
-WORLD_ORIGIN = galsim.CelestialCoord(
-    ra=200 * galsim.degrees,
-    dec=0 * galsim.degrees,
-)
+GRID_SPACING = 11.0      # arcsec
+HEX_SPACING = 11.0       # arcsec
+RANDOM_DENSITY = 80.0    # per arcmin^2
 
 
+class Layout:
+    """
+    Generate object positions on a coadd (flat sky), returning absolute
+    **arcsec** coordinates in a structured array with fields ('dx','dy').
 
-class Layout(object):
+    Workflow
+    --------
+    1) Read center in pixels from `boundary_box.getCenterX/Y()` and convert to
+       arcseconds via `wcs.getPixelScale().asArcseconds()`.
+    2) Build a square sampling region based on the bbox, padded by 20″ on each
+    side.
+    3) Call the helper function to get **center-relative arcsec** shifts.
+    4) Add the (arcsec) center to make **absolute** arcsec coordinates.
+
+    Parameters
+    ----------
+    layout_name : {'grid','hex','random','random_disk'}
+        Layout pattern for placing objects.
+    wcs : SkyWcs-like
+        Used to obtain pixel scale via `getPixelScale().asArcseconds()`.
+    boundary_box : lsst.geom.Box2I or Box2D
+        Pixel bounding box defining the coadd region.
+    pad_arcsec: float, optional
+        padding (arcsec) in x and y, which can be negative; defaults to 20
+    sep_arcsec : float or None, optional
+        Spacing (arcsec) for 'grid'/'hex'; defaults to
+        GRID_SPACING/HEX_SPACING.
+
+    Notes
+    -----
+    - All helper functions are expected to accept a `numpy.random.RandomState`
+      and to return a structured array with fields ('dx','dy') in
+      **arcseconds**, relative to the center of boundary box.
+    - Returned `dx, dy` are **arcseconds**, absolute on the coadd tangent
+      plane.
+    """
+
     def __init__(
         self,
-        layout_name,
-        coadd_dim=None,
-        buff=0.0,
-        pixel_scale=0.2,
-        world_origin=WORLD_ORIGIN,
-        simple_coadd_bbox=False,
+        *,
+        layout_name: str,
+        wcs: lsst.afw.geom.SkyWcs,
+        boundary_box: lsst.geom.Box2I,
+        pad_arcsec: float = 20.0,
+        sep_arcsec: float | None = None,
     ):
-        """
-        Layout object to make position shifts for galaxy and star objects
-        The scale of the layout is coadd_dim * pixel_scale. The shifts is
-        defined on coadd image (flat sky) with repect to the center of coadd
-        boundary box.
+        self.sep = sep_arcsec
+        # Pixel scale (arcsec/pixel)
+        pixel_scale_arcsec = float(wcs.getPixelScale().asArcseconds())
 
-        Parameters
-        ----------
-        layout_name: string
-            'grid', 'pair', 'hex', or 'random'
-        coadd_dim: int | None
-            Dimensions of final coadd
-        buff: int, optional
-            Buffer region where no objects will be drawn.  Default 0.
-        pixel_scale: float
-            pixel scale of coadd image
-        world_origin: galsim.CelestialCoord
-            sky coordinate of the reference point (sky coordinate of the center
-            of large box)
-        simple_coadd_bbox: bool. Default: False
-            If set to True, the coadd boundary box is centered at world_origin;
-            that is, the center of the coadd boundary box is the image origin;
-            else the center of the coadd boundary box has an offset to the
-            world_orgin, and it is not the image origin
-        """
-        self.pixel_scale = pixel_scale
-        self.layout_name = layout_name
-        if layout_name == 'random':
-            if coadd_dim is None:
-                raise ValueError("Please input `coadd_dim` for random layout")
-            # need to calculate number of objects first this layout is random
-            # in a square
-            if (coadd_dim - 2*buff) < 2:
-                self.area = (2*pixel_scale/60)**2.  # [arcmin^2]
-            else:
-                # [arcmin^2]
-                self.area = ((coadd_dim - 2*buff)*pixel_scale/60)**2
-        elif layout_name == 'random_disk':
-            if coadd_dim is None:
-                raise ValueError(
-                    "Please input `coadd_dim` for random_disk layout"
+        # Box geometry (pixels)
+        width = float(boundary_box.getWidth())
+        height = float(boundary_box.getHeight())
+
+        # Coadd center in pixels (legacy getters), then convert to arcsec
+        x_center_pix = float(boundary_box.getCenterX())
+        y_center_pix = float(boundary_box.getCenterY())
+        self._x_center_arcsec = x_center_pix * pixel_scale_arcsec
+        self._y_center_arcsec = y_center_pix * pixel_scale_arcsec
+
+        # Square dimension with 20″ padding on each side
+        pad_pix = pad_arcsec / pixel_scale_arcsec
+        dim_pix = max(width, height) + 2.0 * pad_pix
+        self._dim_pixels = int(math.ceil(dim_pix))
+
+        self._pixscale_arcsec = pixel_scale_arcsec
+        self._name = layout_name
+
+        # Precompute area (arcmin^2) for Poisson mean when needed
+        if layout_name in ("random", "random_disk"):
+            if layout_name == "random":
+                side_arcmin = (self._dim_pixels * self._pixscale_arcsec) / 60.0
+                # ensure tiny positive area for very small boxes
+                self._area_arcmin2 = max(
+                    side_arcmin**2, (2.0 * self._pixscale_arcsec / 60.0) ** 2
                 )
-            # need to calculate number of objects first
-            # this layout_name is random in a circle
-            if (coadd_dim - 2*buff) < 2:
-                radius = 2.*pixel_scale/60
-                self.area = np.pi*radius**2
             else:
-                radius = (coadd_dim/2. - buff)*pixel_scale/60
-                self.area = np.pi*radius**2  # [arcmin^2]
-        elif layout_name == "hex":
-            self.area = 0
-        elif layout_name == "grid":
-            self.area = 0
-        elif layout_name == "pair":
-            return
+                radius_arcmin = max(
+                    (self._dim_pixels * 0.5 * self._pixscale_arcsec) / 60.0,
+                    (2.0 * self._pixscale_arcsec / 60.0)
+                )
+                self._area_arcmin2 = math.pi * radius_arcmin**2
         else:
-            raise ValueError("layout_name can only be 'random', 'random_disk' \
-                    'hex', 'grid' or 'pair'!")
-        self.coadd_dim = coadd_dim
-        self.buff = buff
+            self._area_arcmin2 = 0.0
 
-        if simple_coadd_bbox:
-            self.wcs, self.bbox = make_coadd_dm_wcs_simple(
-                coadd_dim,
-                pixel_scale=pixel_scale,
-            )
-        else:
-            self.wcs, self.bbox = make_coadd_dm_wcs(
-                coadd_dim,
-                pixel_scale=pixel_scale,
-            )
-        return
+
+    @property
+    def pixel_scale_arcsec(self) -> float:
+        """Arcseconds per pixel."""
+        return self._pixscale_arcsec
+
+    @property
+    def dim_pixels(self) -> int:
+        """Square dimension (pixels) used for layout generation (includes
+        padding)."""
+        return self._dim_pixels
+
+    @property
+    def area_arcmin2(self) -> float:
+        """Area used for Poisson draws (/arcmin^2). Zero for 'grid'/'hex'."""
+        return self._area_arcmin2
+
+    # ---------- Main API ----------
 
     def get_shifts(
         self,
-        rng,
-        density=RANDOM_DENSITY,
-        sep=None,
-    ):
+        *,
+        rng: np.random.RandomState,
+        density: float = RANDOM_DENSITY,
+    ) -> np.ndarray:
         """
-        Make position shifts for objects. The position shifts
+        Generate absolute coadd-plane positions
+        (dtype=[('dx','f8'),('dy','f8')], arcsec).
 
-        rng: numpy.random.RandomState
-            Numpy random state
-        density: float, optional
-            galaxy number density [/arcmin^2] ,default set to RANDOM_DENSITY
-        sep: float, optional
-            The separation in arcseconds for layout='pair', 'grid' or 'hex'
+        Parameters
+        ----------
+        rng : numpy.random.RandomState
+            Random number generator (old NumPy RNG API).
+        density : float, optional
+            Number density (/arcmin^2) for 'random'/'random_disk'. Ignored for
+            'grid'/'hex'.
+
+        Returns
+        -------
+        shifts : np.ndarray
+            Structured array with fields ("dx","dy"), **arcseconds**, absolute.
         """
-
-        if self.layout_name == 'pair':
-            if sep is None:
-                raise ValueError(f'send sep= for layout {self.layout_name}')
-            shifts = get_pair_shifts(
-                rng=rng,
-                sep=sep,
-                pixel_scale=self.pixel_scale
+        sep = self.sep
+        if not isinstance(rng, np.random.RandomState):
+            raise TypeError(
+                "rng must be numpy.random.RandomState (old generator)"
             )
-        else:
-            if self.layout_name == 'grid':
-                if sep is None:
-                    sep = GRID_SPACING
-                shifts = get_grid_shifts(
-                    rng=rng,
-                    dim=self.coadd_dim,
-                    buff=self.buff,
-                    pixel_scale=self.pixel_scale,
-                    spacing=sep,
-                )
-            elif self.layout_name == 'hex':
-                if sep is None:
-                    sep = HEX_SPACING
-                shifts = get_hex_shifts(
-                    rng=rng,
-                    dim=self.coadd_dim,
-                    buff=self.buff,
-                    pixel_scale=self.pixel_scale,
-                    spacing=sep,
-                )
-            elif self.layout_name == 'random':
-                # area covered by objects
-                if self.area <= 0:
-                    raise ValueError(
-                        f"nonpositive area for layout {self.layout_name}"
-                    )
-                if density != 0:
-                    nobj_mean = max(self.area * density, 1)
-                else:
-                    nobj_mean = 0.0
-                nobj = rng.poisson(nobj_mean)
+
+        if self._name == "grid":
+            spacing = float(sep if sep is not None else GRID_SPACING)
+            shifts = get_grid_shifts(
+                rng=rng,
+                dim=self._dim_pixels,
+                pixel_scale=self._pixscale_arcsec,
+                spacing=spacing,
+            )
+
+        elif self._name == "hex":
+            spacing = float(sep if sep is not None else HEX_SPACING)
+            shifts = get_hex_shifts(
+                rng=rng,
+                dim=self._dim_pixels,
+                pixel_scale=self._pixscale_arcsec,
+                spacing=spacing,
+            )
+
+        elif self._name in ("random", "random_disk"):
+            if self._area_arcmin2 <= 0.0:
+                raise ValueError(f"Non-positive area for layout '{self._name}'")
+
+            lam = max(self._area_arcmin2 * max(density, 0.0), 0.0)
+            nobj = int(rng.poisson(lam))
+
+            if self._name == "random":
                 shifts = get_random_shifts(
                     rng=rng,
-                    dim=self.coadd_dim,
-                    buff=self.buff,
-                    pixel_scale=self.pixel_scale,
-                    size=nobj,
-                )
-            elif self.layout_name == 'random_disk':
-                if self.area <= 0:
-                    raise ValueError(
-                        f"nonpositive area for layout {self.layout_name}"
-                    )
-                if density != 0:
-                    nobj_mean = max(self.area * density, 1)
-                else:
-                    nobj_mean = 0.0
-                nobj = rng.poisson(nobj_mean)
-                shifts = get_random_disk_shifts(
-                    rng=rng,
-                    dim=self.coadd_dim,
-                    buff=self.buff,
-                    pixel_scale=self.pixel_scale,
+                    dim=self._dim_pixels,
+                    pixel_scale=self._pixscale_arcsec,
                     size=nobj,
                 )
             else:
-                raise ValueError("bad layout: '%s'" % self.layout_name)
+                shifts = get_random_disk_shifts(
+                    rng=rng,
+                    dim=self._dim_pixels,
+                    pixel_scale=self._pixscale_arcsec,
+                    size=nobj,
+                )
+
+        else:
+            raise ValueError(f"Unknown layout_name '{self._name}'")
+
+        # center-relative (arcsec) -> absolute (arcsec)
+        shifts["dx"] += self._x_center_arcsec
+        shifts["dy"] += self._y_center_arcsec
         return shifts

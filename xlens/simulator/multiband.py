@@ -23,20 +23,17 @@ import lsst.afw.math as afwMath
 from lsst.pipe.base import Task
 import lsst.meas.algorithms as meaAlg
 import numpy as np
-from descwl_shear_sims.sim import make_sim
-from descwl_shear_sims.wcs import make_dm_wcs
 from lsst.afw.cameraGeom.testUtils import DetectorWrapper
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from lsst.pipe.base import Struct
 from numpy.typing import NDArray
+from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
 
-from ..utils.image import resize_array
 from ..utils.random import (
     gal_seed_base,
     get_noise_seed,
     num_rot,
 )
-from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
 from .multiband_defaults import (
     mag_zero_defaults,
     noise_variance_defaults,
@@ -87,36 +84,16 @@ class SimBaseTask(Task):
 
 
 class MultibandSimBaseConfig(Config):
-    survey_name = Field[str](
-        doc="Name of the survey",
-        default="LSST",
-    )
-    layout = Field[str](
-        doc="Layout of the galaxy distribution (random, grid, hex)",
-        default="random",
-    )
     galaxy_type = Field[str](
         doc="galaxy type",
         default="catsim2017",
     )
-    extend_ratio = Field[float](
-        doc="The ratio to extend for the size of simulated image",
-        default=1.06,
-    )
-    sep = Field[float](
-        doc="separation distance (arcsec) between galaxies (for grid and hex)",
-        default=11.0,
-    )
-    order_truth_catalog = Field[bool](
-        doc="Whether to keep the order in truth catalog",
-        default=False,
+    survey_name = Field[str](
+        doc="Name of the survey",
+        default="LSST",
     )
     include_pixel_masks = Field[bool](
         doc="whether to include pixel masks in the simulation",
-        default=False,
-    )
-    include_stars = Field[bool](
-        doc="whether to include stars in the simulation",
         default=False,
     )
     draw_image_noise = Field[bool](
@@ -139,10 +116,6 @@ class MultibandSimBaseConfig(Config):
         doc="whether to use real PSF",
         default=False,
     )
-    force_pixel_center = Field[bool](
-        doc="whether to force galaxies at pixel center",
-        default=False,
-    )
 
     def validate(self):
         super().validate()
@@ -163,18 +136,6 @@ class MultibandSimBaseConfig(Config):
                 self.__class__.noiseId,
                 self,
                 "We require noiseId >=0 ",
-            )
-        if self.layout not in ["grid", "hex", "random"]:
-            raise FieldValidationError(
-                self.__class__.layout,
-                self,
-                "We require layout in ['grid', 'hex', 'random']",
-            )
-        if self.sep <= 0:
-            raise FieldValidationError(
-                self.__class__.sep,
-                self,
-                "We require sep > 0.0 arcsec",
             )
         if self.galaxy_type not in ["catsim2017", "RomanRubin2024"]:
             raise FieldValidationError(
@@ -201,133 +162,78 @@ class MultibandSimBaseTask(SimBaseTask):
     def prepare_galaxy_catalog(
         self,
         *,
-        rng: np.random.RandomState,
-        dim: int,
-        pixel_scale: float,
-        sep: float = 11.0,
-        indice_id=None,
-        **kwargs,
+        catalog,
     ):
         assert isinstance(self.config, MultibandSimBaseConfig)
-        # prepare galaxy catalog
-        coadd_dim = dim - 10
-        # galaxy catalog;
         if self.config.galaxy_type == "catsim2017":
             GalClass = CatSim2017Catalog
         elif self.config.galaxy_type == "RomanRubin2024":
             GalClass = OpenUniverse2024RubinRomanCatalog
         else:
             raise ValueError("invalid galaxy_type")
-        galaxy_catalog = GalClass(
-            rng=rng,
-            coadd_dim=coadd_dim,
-            buff=0.0,
-            pixel_scale=pixel_scale,
-            layout=self.config.layout,
-            simple_coadd_bbox=True,
-            sep=sep,
-            indice_id=indice_id,
-        )
-        if self.config.force_pixel_center:
-            galaxy_catalog.shifts_array["dx"] = (
-                np.floor(galaxy_catalog.shifts_array["dx"] / pixel_scale)
-                * pixel_scale
-                + pixel_scale / 2.0
-            )
-            galaxy_catalog.shifts_array["dy"] = (
-                np.floor(galaxy_catalog.shifts_array["dy"] / pixel_scale)
-                * pixel_scale
-                + pixel_scale / 2.0
-            )
+        galaxy_catalog = GalClass.from_array(table=catalog)
         return galaxy_catalog
 
     def simulate_images(
         self,
         *,
-        rng: np.random.RandomState,
+        wcs: lsst.afw.geom.SkyWcs,
+        boundary_box: lsst.geom.Box2I,
         galaxy_catalog,
         shear_obj,
         psf_obj,
         rotId: int,
         band: str,
-        coadd_dim: int,
         mag_zero: float,
         draw_method: str = "auto",
+        survey_name: str = "lsst",
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimBaseConfig)
-        galaxy_kwargs = {
-            "survey_name": self.config.survey_name.upper(),
-            "star_catalog": None,
-            "dither": False,
-            "rotate": False,
-            "cosmic_rays": False,
-            "bad_columns": False,
-            "star_bleeds": False,
-            "noise_factor": 0.0,
-            "draw_gals": True,
-            "draw_stars": False,
-            "draw_bright": False,
-            "draw_noise": False,
-        }
-
-        res = make_sim(
-            rng=rng,
-            galaxy_catalog=galaxy_catalog,
-            shear_obj=shear_obj,
-            psf=psf_obj,
-            theta0=self.rotate_list[rotId],
-            bands=[band],
-            coadd_dim=coadd_dim,
-            calib_mag_zero=mag_zero,
-            simple_coadd_bbox=True,
-            draw_method=draw_method,
-            **galaxy_kwargs,
+        theta0 = self.rotate_list[rotId]
+        objlist = galaxy_catalog.get_objlist(
+            mag_zero=mag_zero, band=band, survey_name=survey_name,
         )
 
-        # write galaxy images
-        image = res["band_data"][band][0].getMaskedImage().image.array
-        truth = res["truth_info"]
-        se_wcs = res["se_wcs"][band][0]
-        del res
-        dm_wcs = make_dm_wcs(se_wcs)
-        return image, truth, dm_wcs
+        return make_exp(
+            wcs=wcs,
+            boundary_box=boundary_box,
+            gal_list=objlist["objlist"],
+            shifts=objlist["shifts"],
+            redshifts=objlist["redshifts"],
+            indexes=objlist["indexes"],
+            psf=psf_obj,
+            shear_obj=shear_obj,
+            draw_method=draw_method,
+            theta0=theta0,
+        )
 
     def run(
         self,
         *,
         band: str,
         seed: int,
-        boundaryBox,
+        boundary_box: lsst.geom.Box2I,
         wcs: lsst.afw.geom.SkyWcs,
+        catalog,
         psfImage: afwImage.ImageF | None = None,
         noiseCorrImage: afwImage.ImageF | None = None,
         exposure: afwImage.ExposureF | None = None,
-        patch: int = 0,
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimBaseConfig)
         if self.config.use_real_psf:
             if psfImage is None:
                 raise IOError("Do not have PSF input model")
-        if self.config.order_truth_catalog and self.config.layout in [
-            "grid",
-            "hex",
-        ]:
-            indice_id = patch
-        else:
-            indice_id = None
 
         # Prepare the random number generator and basic parameters
         rotId = self.config.rotId
         survey_name = self.config.survey_name
-        galaxy_seed = seed * gal_seed_base + self.config.galId
-        rng = np.random.RandomState(galaxy_seed)
 
         # Get the pixel scale in arcseconds per pixel
         pixel_scale = wcs.getPixelScale().asArcseconds()
-        width = boundaryBox.getWidth()
-        height = boundaryBox.getHeight()
+        width = boundary_box.getWidth()
+        height = boundary_box.getHeight()
         mag_zero = mag_zero_defaults[self.config.survey_name]
         zero_flux = 10.0 ** (0.4 * mag_zero)
         photo_calib = afwImage.makePhotoCalibFromCalibZeroPoint(zero_flux)
@@ -382,50 +288,35 @@ class MultibandSimBaseTask(SimBaseTask):
             self.log.debug("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
 
-        dim = int(max(width, height) * self.config.extend_ratio)
-        galaxy_catalog = self.prepare_galaxy_catalog(
-            rng=rng,
-            dim=dim,
-            pixel_scale=pixel_scale,
-            sep=self.config.sep,
-            indice_id=indice_id,
-        )
-        if dim % 2 == 1:
-            dim = dim + 1
-        coadd_dim = dim - 10
+        galaxy_catalog = self.prepare_galaxy_catalog(catalog=catalog)
         shear_obj = self.get_perturbation_object()
-        data, truth_catalog, dm_wcs = self.simulate_images(
-            rng=rng,
+        data, truth_catalog = self.simulate_images(
+            boundary_box=boundary_box,
+            wcs=wcs,
             galaxy_catalog=galaxy_catalog,
             shear_obj=shear_obj,
             psf_obj=psf_galsim,
             rotId=rotId,
             band=band,
-            coadd_dim=coadd_dim,
             mag_zero=mag_zero,
             draw_method=draw_method,
-        )
-        self.log.debug(f"current shape of data is {data.shape}")
-        self.log.debug(f"resizing data to {height} x {width}")
-        data, truth_catalog = resize_array(
-            data,
-            (height, width),
-            truth_catalog,
+            survey_name=survey_name,
         )
 
-        exp_out = afwImage.ExposureF(boundaryBox)
+        exp_out = afwImage.ExposureF(boundary_box)
         exp_out.getMaskedImage().image.array[:, :] = data
         exp_out.setPhotoCalib(photo_calib)
         exp_out.setPsf(kernel_psf)
-        exp_out.setWcs(dm_wcs)
+        exp_out.setWcs(wcs)
         exp_out.getMaskedImage().variance.array[:, :] = variance
         filter_label = afwImage.FilterLabel(band=band, physical=band)
         exp_out.setFilter(filter_label)
         detector = DetectorWrapper().detector
         exp_out.setDetector(detector)
-        del data, photo_calib, kernel_psf, dm_wcs, filter_label, detector
+        del data, photo_calib, kernel_psf, filter_label, detector
 
         if self.config.draw_image_noise:
+            galaxy_seed = seed * gal_seed_base + self.config.galId
             seed_noise = get_noise_seed(
                 galaxy_seed=galaxy_seed,
                 noiseId=self.config.noiseId,
@@ -508,13 +399,6 @@ class MultibandSimShearTaskConfig(MultibandSimBaseConfig):
                 "test_value should be in [0.00, 0.30]",
             )
 
-        if self.force_pixel_center:
-            if self.mode != 2 or self.rotId != 0:
-                raise FieldValidationError(
-                    self.__class__.force_pixel_center,
-                    self,
-                    "Cannot force galaxies at pixel center",
-                )
 
     def setDefaults(self):
         super().setDefaults()
@@ -589,12 +473,6 @@ class MultibandSimHaloTaskConfig(MultibandSimBaseConfig):
                 self,
                 "halo redshift is larger than source redshift",
             )
-        if self.force_pixel_center:
-            raise FieldValidationError(
-                self.__class__.force_pixel_center,
-                self,
-                "Cannot force galaxies at pixel center",
-            )
 
     def setDefaults(self):
         super().setDefaults()
@@ -611,20 +489,11 @@ class MultibandSimHaloTask(MultibandSimBaseTask):
     def prepare_galaxy_catalog(
         self,
         *,
-        rng: np.random.RandomState,
-        dim: int,
-        pixel_scale: float,
-        sep: float = 11.0,
-        indice_id=None,
-        **kwargs,
+        catalog,
     ):
         assert isinstance(self.config, MultibandSimHaloTaskConfig)
         galaxy_catalog = super().prepare_galaxy_catalog(
-            rng=rng,
-            dim=dim,
-            pixel_scale=pixel_scale,
-            sep=sep,
-            indice_id=indice_id,
+            catalog=catalog,
         )
         # for fix source redshift
         galaxy_catalog.input_catalog["redshift"] = self.config.z_source
