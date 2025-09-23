@@ -19,8 +19,7 @@ def get_grid_shifts(*, rng, dim, pixel_scale, spacing):
     Returns
     -------
     shifts: array
-        Array with dx, dy offset fields for each point, in
-        arcsec
+        Array with x, y in the image plane
     """
 
     width = dim * pixel_scale
@@ -31,7 +30,7 @@ def get_grid_shifts(*, rng, dim, pixel_scale, spacing):
     # ix/iy are really on the sky
     grid = spacing*(np.arange(n_on_side) - (n_on_side-1)/2)
 
-    shifts = np.zeros(ntot, dtype=[('dx', 'f8'), ('dy', 'f8')])
+    shifts = np.zeros(ntot, dtype=[("dx", "f8"), ("dy", "f8")])
 
     i = 0
     for ix in range(n_on_side):
@@ -39,16 +38,16 @@ def get_grid_shifts(*, rng, dim, pixel_scale, spacing):
             dx = grid[ix] + pixel_scale * rng.uniform(low=-0.5, high=0.5)
             dy = grid[iy] + pixel_scale * rng.uniform(low=-0.5, high=0.5)
 
-            shifts['dx'][i] = dx
-            shifts['dy'][i] = dy
+            shifts["dx"][i] = dx
+            shifts["dy"][i] = dy
             i += 1
 
     pos_bounds = (-width/2, width/2)
     msk = (
-        (shifts['dx'] >= pos_bounds[0])
-        & (shifts['dx'] <= pos_bounds[1])
-        & (shifts['dy'] >= pos_bounds[0])
-        & (shifts['dy'] <= pos_bounds[1])
+        (shifts["dx"] >= pos_bounds[0])
+        & (shifts["dx"] <= pos_bounds[1])
+        & (shifts["dy"] >= pos_bounds[0])
+        & (shifts["dy"] <= pos_bounds[1])
     )
     shifts = shifts[msk]
     return shifts
@@ -108,7 +107,7 @@ def get_hex_shifts(*, rng, dim, pixel_scale, spacing):
     vpos = vpos[msk]
 
     ntot = upos.shape[0]
-    shifts = np.zeros(ntot, dtype=[('dx', 'f8'), ('dy', 'f8')])
+    shifts = np.zeros(ntot, dtype=[("dx", "f8"), ("dy", "f8")])
     shifts["dx"] = upos
     shifts["dy"] = vpos
     return shifts
@@ -144,10 +143,10 @@ def get_random_shifts(*, rng, dim, pixel_scale, size):
     low = -halfwidth * pixel_scale
     high = halfwidth * pixel_scale
 
-    shifts = np.zeros(size, dtype=[('dx', 'f8'), ('dy', 'f8')])
+    shifts = np.zeros(size, dtype=[("dx", "f8"), ("dy", "f8")])
 
-    shifts['dx'] = rng.uniform(low=low, high=high, size=size)
-    shifts['dy'] = rng.uniform(low=low, high=high, size=size)
+    shifts["dx"] = rng.uniform(low=low, high=high, size=size)
+    shifts["dy"] = rng.uniform(low=low, high=high, size=size)
     return shifts
 
 
@@ -182,7 +181,7 @@ def get_random_disk_shifts(*, rng, dim, pixel_scale, size):
     rarray = np.sqrt(radius_square*rng.rand(size))   # radius
     tarray = rng.uniform(0., 2*np.pi, size)   # theta (0, pi/nrot)
 
-    shifts = np.zeros(size, dtype=[('dx', 'f8'), ('dy', 'f8')])
-    shifts['dx'] = rarray*np.cos(tarray)
-    shifts['dy'] = rarray*np.sin(tarray)
+    shifts = np.zeros(size, dtype=[("dx", "f8"), ("dy", "f8")])
+    shifts["dx"] = rarray*np.cos(tarray)
+    shifts["dy"] = rarray*np.sin(tarray)
     return shifts

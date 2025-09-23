@@ -2,39 +2,60 @@ description: The pipeline specialized for testing image simulation.
 instrument: lsst.obs.subaru.HyperSuprimeCam
 
 tasks:
-  MutibandSim1:
-    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
+  Catalog1:
+    class: xlens.simulator.catalog.CatalogShearTask
     config:
-      simulator.survey_name: hsc
-      simulator.mode: 0
-      simulator.rotId: 0
+      mode: 0
+      rotId: 0
       connections.mode: 0
       connections.rotId: 0
-
-  MutibandSim2:
-    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
+  Catalog2:
+    class: xlens.simulator.catalog.CatalogShearTask
     config:
-      simulator.survey_name: hsc
-      simulator.mode: 0
-      simulator.rotId: 1
+      mode: 0
+      rotId: 1
       connections.mode: 0
       connections.rotId: 1
-
-  MutibandSim3:
-    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
+  Catalog3:
+    class: xlens.simulator.catalog.CatalogShearTask
     config:
-      simulator.survey_name: hsc
-      simulator.mode: 1
-      simulator.rotId: 0
+      mode: 1
+      rotId: 0
       connections.mode: 1
       connections.rotId: 0
-
-  MutibandSim4:
-    class: xlens.sim_pipe.multibandSim.MultibandSimShearPipe
+  Catalog4:
+    class: xlens.simulator.catalog.CatalogShearTask
     config:
-      simulator.survey_name: hsc
-      simulator.mode: 1
-      simulator.rotId: 1
+      mode: 1
+      rotId: 1
+      connections.mode: 1
+      connections.rotId: 1
+  MutibandSim1:
+    class: xlens.simulator.sim.MultibandSimTask
+    config:
+      survey_name: hsc
+      rotId: 0
+      connections.mode: 0
+      connections.rotId: 0
+  MutibandSim2:
+    class: xlens.simulator.sim.MultibandSimTask
+    config:
+      survey_name: hsc
+      rotId: 1
+      connections.mode: 0
+      connections.rotId: 1
+  MutibandSim3:
+    class: xlens.simulator.sim.MultibandSimTask
+    config:
+      survey_name: hsc
+      rotId: 0
+      connections.mode: 1
+      connections.rotId: 0
+  MutibandSim4:
+    class: xlens.simulator.sim.MultibandSimTask
+    config:
+      survey_name: hsc
+      rotId: 1
       connections.mode: 1
       connections.rotId: 1
 
@@ -45,7 +66,6 @@ tasks:
       anacal.do_noise_bias_correction: False
       anacal.validate_psf: True
       connections.coaddName: sim_0_rot0_
-
   AnacalDetectTask2:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
@@ -53,7 +73,6 @@ tasks:
       anacal.do_noise_bias_correction: False
       anacal.validate_psf: True
       connections.coaddName: sim_0_rot1_
-
   AnacalDetectTask3:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
@@ -61,7 +80,6 @@ tasks:
       anacal.do_noise_bias_correction: False
       anacal.validate_psf: True
       connections.coaddName: sim_1_rot0_
-
   AnacalDetectTask4:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
@@ -76,28 +94,24 @@ tasks:
       fpfs.sigma_arcsec1: 0.56
       anacal.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
-
   FpfsForceTask1:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
       fpfs.sigma_arcsec1: 0.52
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
-
   FpfsForceTask2:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
       fpfs.sigma_arcsec1: 0.52
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot1_
-
   FpfsForceTask3:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
       fpfs.sigma_arcsec1: 0.52
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot0_
-
   FpfsForceTask4:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
@@ -106,7 +120,7 @@ tasks:
       connections.coaddName: sim_1_rot1_
 
   SelectBiasTask:
-    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasMultibandPipe
+    class: xlens.analysis.selbias.SelBiasMultibandPipe
     config:
       shape_name: "fpfs_e1"
       dshape_name: "fpfs_de1"
@@ -117,15 +131,13 @@ tasks:
       do_correct_selection_bias: True
       connections.dataType: anacal_joint
       connections.coaddName: sim
-
   Summary:
-    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasSummaryMultibandPipe
+    class: xlens.analysis.selbias.SelBiasSummaryMultibandPipe
     config:
       connections.dataType: fpfs_force
       connections.coaddName: sim
-
   SelectBiasTask2:
-    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasMultibandPipe
+    class: xlens.analysis.selbias.SelBiasMultibandPipe
     config:
       shape_name: "i_fpfs1_e1"
       dshape_name: "i_fpfs1_de1"
@@ -136,9 +148,8 @@ tasks:
       do_correct_selection_bias: True
       connections.dataType: fpfs_force
       connections.coaddName: sim
-
   Summary2:
-    class: xlens.summary_pipe.selbias_flux_multiband.SelBiasSummaryMultibandPipe
+    class: xlens.analysis.selbias.SelBiasSummaryMultibandPipe
     config:
       connections.dataType: fpfs_force
       connections.coaddName: sim

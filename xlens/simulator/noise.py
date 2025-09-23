@@ -15,6 +15,7 @@
 #
 from typing import Any
 
+import anacal
 import lsst.afw.image as afwImage
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
@@ -26,13 +27,40 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
     Struct,
 )
+from numpy.typing import NDArray
 
-from ..simulator.multiband import get_noise_array
-from ..simulator.multiband_defaults import noise_variance_defaults
-from ..utils.random import get_noise_seed, num_rot
+from ..utils.random import gal_seed_base, get_noise_seed
+from .defaults import noise_variance_defaults
 
 
-class MultibandSimPipeConnections(
+def get_noise_array(
+    *,
+    seed_noise: int,
+    noise_std: float,
+    noise_corr: NDArray | None,
+    shape: tuple[int, int],
+    pixel_scale: float,
+) -> NDArray:
+    if noise_corr is None:
+        noise_array = np.random.RandomState(seed_noise).normal(
+            scale=noise_std,
+            size=shape,
+        )
+    else:
+        noise_array = (
+            anacal.noise.simulate_noise(
+                seed=seed_noise,
+                correlation=noise_corr,
+                nx=shape[1],
+                ny=shape[0],
+                scale=pixel_scale,
+            )
+            * noise_std
+        )
+    return noise_array
+
+
+class AddNoisePipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch", "band"),
     defaultTemplates={
@@ -54,7 +82,7 @@ class MultibandSimPipeConnections(
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
-    outputExposure = cT.Output(
+    simExposure = cT.Output(
         doc="Output simulated coadd exposure",
         name="{coaddName}noise{noiseId}_Coadd_calexp",
         storageClass="ExposureF",
@@ -67,19 +95,21 @@ class MultibandSimPipeConnections(
 
 class AddNoisePipeConfig(
     PipelineTaskConfig,
-    pipelineConnections=MultibandSimPipeConnections,
+    pipelineConnections=AddNoisePipeConnections,
 ):
     idGenerator = SkyMapIdGeneratorConfig.make_field()
     survey_name = Field[str](
         doc="Name of the survey",
         default="lsst",
     )
-
+    galId = Field[int](
+        doc="random seed index for galaxy, 0 <= galId < 10",
+        default=0,
+    )
     rotId = Field[int](
         doc="number of rotations",
         default=0,
     )
-
     noiseId = Field[int](
         doc="random seed for noise, 0 <= noiseId < 10",
         default=0,
@@ -143,10 +173,13 @@ class AddNoisePipe(PipelineTask):
             assert noise_corr[ny // 2, nx // 2] == 1
             self.log.debug("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
+        galaxy_seed = seed * gal_seed_base + self.config.galId
         seed_noise = get_noise_seed(
-            seed=seed,
+            galaxy_seed=galaxy_seed,
             noiseId=self.config.noiseId,
             rotId=self.config.rotId,
+            band=band,
+            is_sim=True,
         )
         height, width = exposure.getMaskedImage().image.array.shape
         wcs = exposure.getWcs()
@@ -161,5 +194,4 @@ class AddNoisePipe(PipelineTask):
         exposure.getMaskedImage().image.array[:, :] = (
             exposure.getMaskedImage().image.array[:, :] + noise_array
         )
-
-        return Struct(outputExposure=exposure)
+        return Struct(simExposure=exposure)

@@ -1,10 +1,9 @@
 from . import (
+    analysis,
     catalog,
     process_pipe,
     processor,
-    sim_pipe,
     simulator,
-    summary_pipe,
     utils,
 )
 from .__version__ import __version__  # noqa
@@ -14,7 +13,6 @@ __all__ = [
     "utils",
     "simulator",
     "processor",
-    "sim_pipe",
-    "summary_pipe",
+    "analysis",
     "process_pipe",
 ]

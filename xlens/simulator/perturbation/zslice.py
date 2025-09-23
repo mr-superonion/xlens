@@ -49,7 +49,7 @@ class ShearRedshift(object):
             shear = 0.0
         return shear
 
-    def get_shear(self, redshift, shift=None):
+    def get_shear(self, redshift):
         shear = self._get_zshear(redshift=redshift)
         if self.g_dist == 'g1':
             gamma1, gamma2 = (shear, 0.)
@@ -63,32 +63,27 @@ class ShearRedshift(object):
         mu = 1.0 / ((1 - self.kappa) ** 2 - gamma1**2 - gamma2**2)
         return g1, g2, mu, gamma1, gamma2
 
-    def distort_galaxy(self, gso, shift, redshift):
+    def distort_galaxy(self, src):
         """This function distorts the galaxy's shape and position
         Parameters
         ---------
-        gso (galsim object):        galsim galaxy
-        shift (galsim.PositionD):   position of the galaxy
-        redshift (float):           redshift of galaxy
+        src (np.array):        row of structured array
 
         Returns
         ---------
-        gso, shift:
-            distorted galaxy object and shift
+            distorted galaxy position and lensing distortions
         """
-        distortion = self.get_shear(redshift, shift)
+        distortion = self.get_shear(src["redshift"])
 
         g1, g2, mu, gamma1, gamma2 = distortion
-        gso = gso.lens(g1=g1, g2=g2, mu=mu)
         mat = galsim.Shear(g1=g1, g2=g2).getMatrix() * np.sqrt(mu)
-        lensed_shfit = galsim.PositionD(
-            shift.x * mat[0, 0] + shift.y * mat[0, 1],
-            shift.x * mat[1, 0] + shift.y * mat[1, 1],
-        )
+        lensed_x = src["dx"] * mat[0, 0] + src["dy"] * mat[0, 1]
+        lensed_y = src["dx"] * mat[1, 0] + src["dy"] * mat[1, 1]
         return _get_shear_res_dict(
-            gso=gso,
-            lensed_shift=lensed_shfit,
+            lensed_x=lensed_x,
+            lensed_y=lensed_y,
             gamma1=gamma1,
             gamma2=gamma2,
-            kappa=self.kappa
+            kappa=self.kappa,
+            has_finite_shear=True,
         )

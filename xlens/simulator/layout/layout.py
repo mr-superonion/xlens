@@ -1,4 +1,5 @@
 import math
+
 import lsst
 import numpy as np
 
@@ -9,15 +10,15 @@ from .shifts import (
     get_random_shifts,
 )
 
-GRID_SPACING = 11.0      # arcsec
-HEX_SPACING = 11.0       # arcsec
+GRID_SPACING = 12.0      # arcsec
+HEX_SPACING = 12.0       # arcsec
 RANDOM_DENSITY = 80.0    # per arcmin^2
 
 
 class Layout:
     """
     Generate object positions on a coadd (flat sky), returning absolute
-    **arcsec** coordinates in a structured array with fields ('dx','dy').
+    **arcsec** coordinates in a structured array with fields ("dx","dy").
 
     Workflow
     --------
@@ -45,7 +46,7 @@ class Layout:
     Notes
     -----
     - All helper functions are expected to accept a `numpy.random.RandomState`
-      and to return a structured array with fields ('dx','dy') in
+      and to return a structured array with fields ("dx","dy") in
       **arcseconds**, relative to the center of boundary box.
     - Returned `dx, dy` are **arcseconds**, absolute on the coadd tangent
       plane.
@@ -126,7 +127,7 @@ class Layout:
     ) -> np.ndarray:
         """
         Generate absolute coadd-plane positions
-        (dtype=[('dx','f8'),('dy','f8')], arcsec).
+        (dtype=[("dx","f8"),("dy","f8")], arcsec).
 
         Parameters
         ----------
@@ -189,8 +190,4 @@ class Layout:
 
         else:
             raise ValueError(f"Unknown layout_name '{self._name}'")
-
-        # center-relative (arcsec) -> absolute (arcsec)
-        shifts["dx"] += self._x_center_arcsec
-        shifts["dy"] += self._y_center_arcsec
         return shifts

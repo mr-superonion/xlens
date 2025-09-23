@@ -75,7 +75,7 @@ class AnacalDetectPipeConnections(
         multiple=True,
         deferLoad=True,
     )
-    alpha_catalog = cT.Output(
+    output_catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
         name="{coaddName}Coadd_anacal_joint",
         dimensions=("skymap", "tract", "patch"),
@@ -129,8 +129,8 @@ class AnacalDetectPipe(PipelineTask):
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, AnacalDetectPipeConfig)
         inputs = butlerQC.get(inputRefs)
-        tract = butlerQC.quantum.dataId["tract"]
-        patch = butlerQC.quantum.dataId["patch"]
+        tract = int(butlerQC.quantum.dataId["tract"])
+        patch = int(butlerQC.quantum.dataId["patch"])
         exposure_handles = inputs["exposure"]
         exposure_handles_dict = {
             handle.dataId["band"]: handle for handle in exposure_handles
@@ -193,4 +193,4 @@ class AnacalDetectPipe(PipelineTask):
             mask_array=mask_array,
         )
         catalog = self.anacal.run(**data)
-        return Struct(alpha_catalog=catalog)
+        return Struct(output_catalog=catalog)
