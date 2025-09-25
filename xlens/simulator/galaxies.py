@@ -45,7 +45,6 @@ class BaseGalaxyCatalog(ABC):
         select_upper_limit: Iterable[float] | None = None,
         use_field_distortion: bool = False,
     ):
-
         self.prepare_tract_info(tract_info, use_field_distortion)
         wcs = tract_info.getWcs()
         ps = float(wcs.getPixelScale().asArcseconds())
@@ -320,7 +319,6 @@ class BaseGalaxyCatalog(ABC):
                         center=image_pos, wcs=None, method=draw_method,
                         scale=self.pixel_scale,
                     )
-
                 b = stamp.bounds & image.bounds
                 if b.isDefined():
                     image[b] += stamp[b]

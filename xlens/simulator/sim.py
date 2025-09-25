@@ -126,6 +126,10 @@ class MultibandSimConfig(
         doc="Whether to draw image noise in the simulation",
         default=False,
     )
+    use_field_distortion = Field[bool](
+        doc="Whether to include field distortion when drawing objects",
+        default=False,
+    )
     galId = Field[int](
         doc="random seed index for galaxy, 0 <= galId < 10",
         default=0,
@@ -208,6 +212,7 @@ class MultibandSimTask(PipelineTask):
         galaxy_catalog = GalClass.from_array(
             tract_info=tract_info,
             table=catalog,
+            use_field_distortion=self.config.use_field_distortion,
         )
         gal_array = galaxy_catalog.draw(
             patch_id=patch_id,
