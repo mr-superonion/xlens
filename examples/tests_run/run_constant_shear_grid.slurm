@@ -20,6 +20,6 @@ for mode in 1 0; do
       --kappa 0.0 \
       --target g2 \
       --start 0 \
-      --end 20 \
+      --end 50 \
       --layout grid
 done

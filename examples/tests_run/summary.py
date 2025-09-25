@@ -4,6 +4,7 @@ import argparse
 from astropy.stats import sigma_clipped_stats
 
 
+N_cpus = 1024
 # Parse command-line arguments
 parser = argparse.ArgumentParser(
     description="Run constant shear simulation with MPI"
@@ -19,10 +20,17 @@ parser.add_argument("--layout", type=str, default="grid", help="layout")
 args = parser.parse_args()
 shear_value = args.shear
 test_target = args.target
+if args.target == "g1":
+    en = "e1s"
+    rn = "R1s"
+elif args.target == "g2":
+    en = "e2s"
+    rn = "R2s"
+else:
+    raise ValueError("do not support target %s" % targs.target)
+
 
 rng = np.random.default_rng()
-
-
 pscratch = os.environ.get("PSCRATCH", ".")
 outdir = os.path.join(
     pscratch,
@@ -36,18 +44,18 @@ e1s_mode1 = []
 R1s_mode0 = []
 R1s_mode1 = []
 NN = []
-for rank in range(1024):
+for rank in range(N_cpus):
     e1s_mode0.append(
-        np.load(f'{outdir}/e1s_mode0_rot0_rank{rank:05d}.npy').flatten()
+        np.load(f'{outdir}/{en}_mode0_rot0_rank{rank:05d}.npy').flatten()
     )
     e1s_mode1.append(
-        np.load(f'{outdir}/e1s_mode1_rot0_rank{rank:05d}.npy').flatten()
+        np.load(f'{outdir}/{en}_mode1_rot0_rank{rank:05d}.npy').flatten()
     )
     R1s_mode0.append(
-        np.load(f'{outdir}/R1s_mode0_rot0_rank{rank:05d}.npy').flatten()
+        np.load(f'{outdir}/{rn}_mode0_rot0_rank{rank:05d}.npy').flatten()
     )
     R1s_mode1.append(
-        np.load(f'{outdir}/R1s_mode1_rot0_rank{rank:05d}.npy').flatten()
+        np.load(f'{outdir}/{rn}_mode1_rot0_rank{rank:05d}.npy').flatten()
     )
     NN.append(np.load(f'{outdir}/Ns_mode0_rot0_rank{rank:05d}.npy').flatten())
 
@@ -89,6 +97,7 @@ c = np.sum(e1s_mode1 + e1s_mode0) / np.sum(R1s_mode1 + R1s_mode0)
 area = (
     (3900 * 3900) * (0.2 / 60.0) **2.0
 )  # arcmin
+print(area)
 mean, median, std = sigma_clipped_stats(
     (e1s_mode1 / NN) / (np.sum(R1s_mode1) / np.sum(NN)),
     sigma=5.0
