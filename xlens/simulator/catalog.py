@@ -84,7 +84,7 @@ class CatalogConfig(
         doc="number of rotations",
         default=0,
     )
-    pad_ratio = Field[float](
+    extend_ratio = Field[float](
         doc="ratio of padded coverage length of galaxy catalog",
         default=1.08,
     )
@@ -149,7 +149,7 @@ class CatalogTask(PipelineTask):
             rng=rng,
             tract_info=tract_info,
             layout_name=self.config.layout,
-            pad_ratio=self.config.pad_ratio,
+            extend_ratio=self.config.extend_ratio,
         )
         return galaxy_catalog
 

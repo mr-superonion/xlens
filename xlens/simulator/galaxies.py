@@ -43,7 +43,7 @@ class BaseGalaxyCatalog(ABC):
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
         use_field_distortion: bool = False,
-        pad_ratio: float = 1.08,
+        extend_ratio: float = 1.08,
     ):
         self.prepare_tract_info(tract_info, use_field_distortion)
         wcs = tract_info.getWcs()
@@ -54,7 +54,7 @@ class BaseGalaxyCatalog(ABC):
             layout_name=layout_name,
             wcs=wcs,
             boundary_box=bbox,
-            pad_ratio=pad_ratio,
+            extend_ratio=extend_ratio,
         )
         self.input_catalog = self._read_catalog(
             select_observable=select_observable,

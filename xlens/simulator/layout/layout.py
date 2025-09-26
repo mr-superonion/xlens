@@ -59,9 +59,9 @@ class Layout:
         wcs: lsst.afw.geom.SkyWcs,
         boundary_box: lsst.geom.Box2I,
         sep_arcsec: float | None = None,
-        pad_ratio: float = 1.08,
+        extend_ratio: float = 1.08,
     ):
-        assert pad_ratio > 0.8 and pad_ratio < 1.2
+        assert extend_ratio > 0.8 and extend_ratio < 1.2
         self.sep = sep_arcsec
         # Pixel scale (arcsec/pixel)
         pixel_scale_arcsec = float(wcs.getPixelScale().asArcseconds())
@@ -76,7 +76,7 @@ class Layout:
         self._x_center_arcsec = x_center_pix * pixel_scale_arcsec
         self._y_center_arcsec = y_center_pix * pixel_scale_arcsec
 
-        dim_pix = max(width, height) * pad_ratio
+        dim_pix = max(width, height) * extend_ratio
         self._dim_pixels = int(math.ceil(dim_pix))
 
         self._pixscale_arcsec = pixel_scale_arcsec
