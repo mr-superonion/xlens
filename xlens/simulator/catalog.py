@@ -84,7 +84,7 @@ class CatalogConfig(
         doc="number of rotations",
         default=0,
     )
-    pad_ratio = Field[int](
+    pad_ratio = Field[float](
         doc="ratio of padded coverage length of galaxy catalog",
         default=1.08,
     )
