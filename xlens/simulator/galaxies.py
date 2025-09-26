@@ -37,13 +37,13 @@ class BaseGalaxyCatalog(ABC):
         rng: np.random.RandomState,
         tract_info: lsst.skymap.tractInfo.ExplicitTractInfo,
         layout_name: str,
-        pad_arcsec: float = 20.0,
         sep_arcsec: float | None = None,
         indice_id: int | None = None,
         select_observable: list[str] | str | None = None,
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
         use_field_distortion: bool = False,
+        pad_ratio: float = 1.08,
     ):
         self.prepare_tract_info(tract_info, use_field_distortion)
         wcs = tract_info.getWcs()
@@ -54,6 +54,7 @@ class BaseGalaxyCatalog(ABC):
             layout_name=layout_name,
             wcs=wcs,
             boundary_box=bbox,
+            pad_ratio=pad_ratio,
         )
         self.input_catalog = self._read_catalog(
             select_observable=select_observable,

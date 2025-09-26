@@ -84,6 +84,10 @@ class CatalogConfig(
         doc="number of rotations",
         default=0,
     )
+    pad_ratio = Field[int](
+        doc="ratio of padded coverage length of galaxy catalog",
+        default=1.08,
+    )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
@@ -145,6 +149,7 @@ class CatalogTask(PipelineTask):
             rng=rng,
             tract_info=tract_info,
             layout_name=self.config.layout,
+            pad_ratio=self.config.pad_ratio,
         )
         return galaxy_catalog
 
