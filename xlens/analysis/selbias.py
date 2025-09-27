@@ -196,12 +196,17 @@ class SelBiasMultibandPipe(PipelineTask):
         assert isinstance(self.config, SelBiasMultibandPipeConfig)
         en = self.ename
         egn = self.egname
-        if en[-1] == "1":
-            en2 = en.replace("e1", "e2")
-            egn2 = egn.replace("e1", "e2").replace("g1", "g2")
-        else:
-            en2 = en.replace("e2", "e1")
-            egn2 = egn.replace("e2", "e1").replace("g2", "g1")
+        comp = en[-1]
+        if comp not in {"1", "2"}:
+            raise ValueError(f"Ellipticity column {en} must end with '1' or '2'")
+        comp2 = "2" if comp == "1" else "1"
+
+        en2 = en[:-1] + comp2
+
+        prefix, sep, shear_suffix = egn.rpartition("_dg")
+        if not sep or not prefix.endswith(comp):
+            raise ValueError(f"Unexpected shear response column format: {egn}")
+        egn2 = prefix[:-1] + comp2 + sep + shear_suffix
         if "fpfs" in en:
             emax = 0.3
         else:
