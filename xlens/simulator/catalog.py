@@ -135,7 +135,9 @@ class CatalogTask(PipelineTask):
         self.rotate_list = [np.pi / num_rot * i for i in range(num_rot)]
         pass
 
-    def get_perturbation_object(self, **kwargs: Any) -> object:
+    def get_perturbation_object(
+        self, tract_info, seed: int, **kwargs: Any
+    ) -> object:
         raise NotImplementedError(
             "'get_perturbation_object' must be implemented by subclasses."
         )
@@ -182,7 +184,7 @@ class CatalogTask(PipelineTask):
         )
         theta0 = self.rotate_list[self.config.rotId]
         galaxy_catalog.rotate(theta0)
-        shear_obj = self.get_perturbation_object()
+        shear_obj = self.get_perturbation_object(tract_info, seed)
         galaxy_catalog.lens(shear_obj)
         return Struct(truthCatalog=galaxy_catalog.data)
 
@@ -284,7 +286,7 @@ class CatalogShearTask(CatalogTask):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
 
-    def get_perturbation_object(self, **kwargs: Any):
+    def get_perturbation_object(self, tract_info, seed: int, **kwargs: Any):
         assert isinstance(self.config, CatalogShearTaskConfig)
         return ShearRedshift(
             mode=self.config.mode,
@@ -370,7 +372,7 @@ class CatalogHaloTask(CatalogTask):
             galaxy_catalog.set_z_source(self.config.z_source)
         return galaxy_catalog
 
-    def get_perturbation_object(self, **kwargs: Any):
+    def get_perturbation_object(self, tract_info, seed: int, **kwargs: Any):
         assert isinstance(self.config, CatalogHaloTaskConfig)
         return ShearHalo(
             mass=self.config.mass,
