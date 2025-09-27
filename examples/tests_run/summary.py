@@ -276,20 +276,43 @@ def per_rank_work(ids_chunk, outdir, flux_list, emax, dg, target):
     )
 
 
-def bootstrap_m(rng, e_pos, e_neg, R_pos, R_neg, shear_value, nsamp=10000):
-    """
-    e_pos/e_neg/R_pos/R_neg: (Nsamples_total, ncut)
-    return: ms (nsamp, ncut)
+def bootstrap_m(
+    rng, e_pos, e_neg, R_pos, R_neg, shear_value, nsamp=10000
+):  # noqa: N802 - keep historical name
+    """Bootstrap estimates of the multiplicative and additive biases.
+
+    Parameters
+    ----------
+    rng : numpy.random.Generator
+        RNG used to draw bootstrap indices.
+    e_pos, e_neg, R_pos, R_neg : ndarray
+        Arrays with shape ``(Nsamples_total, ncut)`` containing the per-object
+        ellipticity and response measurements for positive/negative shear.
+    shear_value : float
+        True shear amplitude used in the simulations.
+    nsamp : int, optional
+        Number of bootstrap realizations to draw.
+
+    Returns
+    -------
+    tuple of ndarray
+        ``(ms, cs)`` each of shape ``(nsamp, ncut)`` containing the bootstrap
+        draws of the multiplicative and additive biases respectively.
     """
     N, ncut = e_pos.shape
     ms = np.zeros((nsamp, ncut))
+    cs = np.zeros((nsamp, ncut))
     for i in range(nsamp):
         k = rng.integers(0, N, size=N, endpoint=False)
-        num = np.sum(e_pos[k] - e_neg[k], axis=0)
         den = np.sum(R_pos[k] + R_neg[k], axis=0)
-        new_gamma = num / den
+
+        num_m = np.sum(e_pos[k] - e_neg[k], axis=0)
+        new_gamma = num_m / den
         ms[i] = new_gamma / shear_value - 1.0
-    return ms
+
+        num_c = np.sum(e_pos[k] + e_neg[k], axis=0)
+        cs[i] = num_c / den
+    return ms, cs
 
 
 def main():
@@ -360,7 +383,7 @@ def main():
         neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
 
         rng = np.random.default_rng(0)
-        ms = bootstrap_m(
+        ms, cs = bootstrap_m(
             rng,
             all_E_pos,
             all_E_neg,
@@ -375,6 +398,10 @@ def main():
         sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
         mean_m = np.mean(ms, axis=0)
 
+        ord_cs = np.sort(cs, axis=0)
+        sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
+        mean_c = np.mean(cs, axis=0)
+
         # Summary
         print("==============================================")
         print(f"Outdir: {outdir}")
@@ -386,6 +413,7 @@ def main():
         print("c (per flux cut):", c)
         print("n_eff (per flux cut):", neff)
         print("m 1-sigma (bootstrap):", sigma_m)
+        print("c 1-sigma (bootstrap):", sigma_c)
         print("==============================================")
 
 
