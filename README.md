@@ -33,4 +33,18 @@ wget https://github.com/mr-superonion/xlens/releases/download/v0.3.0/catsim-v4.t
 tar xvfz catsim-v4.tar.gz
 export CATSIM_DIR=$(realpath catsim-v4)
 ```
+## Examples
+Examples can be found [here](https://github.com/mr-superonion/xlens/blob/main/examples/).
+
+## Development
+
+Before sending pull request, please make sure that the modified code passed the
+pytest and flake8 tests. Run the following commands under the root directory
+for the tests:
+
+```shell
+flake8
+pytest -vv
+```
+----
 
