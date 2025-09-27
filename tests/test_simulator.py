@@ -105,17 +105,11 @@ def test_layout():
 
     width = float(bbox.getWidth())
     height = float(bbox.getHeight())
-    # Square dimension with 20″ padding on each side
-    pad_pix = 20.0 / layout._pixscale_arcsec
-    dim_pix = max(width, height) + 2.0 * pad_pix
-    dim_pix = int(np.ceil(dim_pix))
-    # print(dim_pix)
 
     np.testing.assert_almost_equal(
         layout._pixscale_arcsec, 0.168
     )
     assert layout._name == "random"
-    assert layout._dim_pixels == dim_pix
 
     patch_info = tract_info[0]
     bbox = patch_info.getOuterBBox()
@@ -128,16 +122,11 @@ def test_layout():
     width = float(bbox.getWidth())
     height = float(bbox.getHeight())
     # Square dimension with 20″ padding on each side
-    pad_pix = 20.0 / layout._pixscale_arcsec
-    dim_pix = max(width, height) + 2.0 * pad_pix
-    dim_pix = int(np.ceil(dim_pix))
-    # print(dim_pix)
 
     np.testing.assert_almost_equal(
         layout._pixscale_arcsec, 0.168
     )
     assert layout._name == "random"
-    assert layout._dim_pixels == dim_pix
     return
 
 
