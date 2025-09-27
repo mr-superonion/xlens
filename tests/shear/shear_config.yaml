@@ -134,7 +134,7 @@ tasks:
   Summary:
     class: xlens.analysis.selbias.SelBiasSummaryMultibandPipe
     config:
-      connections.dataType: fpfs_force
+      connections.dataType: anacal_joint
       connections.coaddName: sim
   # SelectBiasTask2:
   #   class: xlens.analysis.selbias.SelBiasMultibandPipe
