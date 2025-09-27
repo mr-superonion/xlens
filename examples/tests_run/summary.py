@@ -38,12 +38,6 @@ def parse_args():
         default=0.02,
         help="True shear amplitude |g| used in sims.",
     )
-    p.add_argument(
-        "--shear_dirname",
-        type=str,
-        default=None,
-        help="Override folder name for shear (e.g. 'shear02'). If not set, computed from --shear.",
-    )
     # ID range
     p.add_argument(
         "--min-id",
@@ -103,12 +97,8 @@ def parse_flux_list(s: str):
     return [float(x) for x in s.split(",")] if s else [20.0, 40.0, 60.0]
 
 
-def outdir_path(pscratch, layout, target, shear, shear_dirname):
-    sd = (
-        shear_dirname
-        if shear_dirname is not None
-        else f"shear{int(shear*100):02d}"
-    )
+def outdir_path(pscratch, layout, target, shear):
+    sd = f"shear{int(shear*100):02d}"
     return os.path.join(pscratch, f"constant_shear_{layout}", target, sd)
 
 
@@ -145,17 +135,19 @@ def measure_shear_flux_cut(src, flux_min, emax=0.3, dg=0.02):
             + w0 * src["fpfs_de2_dg2"][m0]
         )
     )
-
     def sel_term(comp: int):
         e = src[f"fpfs_e{comp}"]
         de = src[f"fpfs_de{comp}_dg{comp}"]
         df = src[f"dflux_dg{comp}"]
+        comp2 = int(3 - comp)
+        e2 = src[f"fpfs_e{comp2}"]
+        de2 = src[f"fpfs_de{comp2}_dg{comp}"]
 
-        esq_p = esq0 + 2.0 * dg * e * de
+        esq_p = esq0 + 2.0 * dg * (e * de + e2 * de2)
         m_p = ((src["flux"] + dg * df) > flux_min) & (esq_p < emax * emax)
         ellp = np.sum(src["wsel"][m_p] * e[m_p])
 
-        esq_m = esq0 - 2.0 * dg * e * de
+        esq_m = esq0 - 2.0 * dg * (e * de + e2 * de2)
         m_m = ((src["flux"] - dg * df) > flux_min) & (esq_m < emax * emax)
         ellm = np.sum(src["wsel"][m_m] * e[m_m])
         return (ellp - ellm) / (2.0 * dg)
@@ -176,8 +168,6 @@ def per_rank_work(ids_chunk, outdir, flux_list, emax, dg, target):
     E_neg = []
     R_pos = []
     R_neg = []
-    N_pos = []
-    N_neg = []
 
     for i, sid in enumerate(ids_chunk):
         ppos = cat_path(outdir, sid, mode=1)  # +g
@@ -220,7 +210,7 @@ def per_rank_work(ids_chunk, outdir, flux_list, emax, dg, target):
         R_neg.append(R_neg_row)
 
     if len(E_pos) == 0:
-        z = (np.zeros((0, ncut)),) * 6
+        z = (np.zeros((0, ncut)),) * 4
         return z
 
     return (
@@ -255,7 +245,7 @@ def main():
 
     flux_list = parse_flux_list(args.flux_mins)
     outdir = outdir_path(
-        args.pscratch, args.layout, args.target, args.shear, args.shear_dirname
+        args.pscratch, args.layout, args.target, args.shear
     )
     # Build full ID list [min_id, max_id], split across ranks
     if args.max_id < args.min_id:
@@ -288,8 +278,6 @@ def main():
         all_E_neg = np.vstack([g[1] for g in gathered if g[1].size])
         all_R_pos = np.vstack([g[2] for g in gathered if g[2].size])
         all_R_neg = np.vstack([g[3] for g in gathered if g[3].size])
-        all_N_pos = np.vstack([g[4] for g in gathered if g[4].size])
-        all_N_neg = np.vstack([g[5] for g in gathered if g[5].size])
 
         if all_E_pos.size == 0 or all_E_neg.size == 0:
             raise SystemExit(
@@ -311,8 +299,7 @@ def main():
         ) ** 2.0
 
         clipped_mean, clipped_median, clipped_std = sigma_clipped_stats(
-            (all_E_pos / all_N_pos)
-            / (np.sum(all_R_pos, axis=0) / np.sum(all_N_pos, axis=0)),
+            all_E_pos / np.average(all_R_pos, axis=0),
             sigma=5.0,
         )
         neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2

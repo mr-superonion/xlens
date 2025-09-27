@@ -20,7 +20,7 @@ export PSCRATCH="$SCRATCH"
 script=/sdf/home/x/xiangchl/code/xlens/examples/tests_run/constant_shear.py
 
 for mode in 1 0; do
-    srun -n 600 python "$script" \
+    mpirun -n 600 python "$script" \
       --mode "$mode" \
       --rot 0 \
       --shear 0.02 \

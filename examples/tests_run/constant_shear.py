@@ -41,7 +41,7 @@ parser.add_argument("--kappa", type=float, default=0.02, help="Kappa value")
 parser.add_argument("--layout", type=str, default="grid", help="layout")
 args = parser.parse_args()
 
-shear_mode = args.mode
+shear_mode = int(args.mode)
 shear_value = args.shear
 kappa_value = args.kappa
 rot_id = args.rot
@@ -134,9 +134,7 @@ os.makedirs(outdir, exist_ok=True)
 # Run Simulation & Measurement
 # ------------------------------
 for i in range(istart, iend):
-    j = i - istart
     sim_seed = i * size + rank
-
     truth_catalog = cat_task.run(
         tract_info=skymap[tract_id],
         seed=sim_seed,
@@ -168,4 +166,3 @@ for i in range(istart, iend):
     # clean up
     del prep, sim_result, truth_catalog, catalog
     gc.collect()
-
