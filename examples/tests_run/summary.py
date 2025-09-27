@@ -1,4 +1,59 @@
 #!/usr/bin/env python3
+"""
+summary.py -- Aggregate shear measurements over many catalogs with MPI.
+
+This script reads per-simulation catalogs (for both shear_mode=0 and 1),
+computes shear statistics across flux cuts, and reduces the results across MPI
+ranks into a single summary output.
+
+Usage
+-----
+Run with mpirun/mpiexec (recommended):
+
+    mpirun -n <N> python summary.py \
+        --emax 0.3 \
+        --layout grid \
+        --target g1 \
+        --shear 0.02 \
+        --min-id 0 \
+        --max-id 30000
+
+Arguments
+---------
+--emax <float>          Maximum ellipticity cut (e.g., 0.3).
+--layout <str>          Scene/layout name (e.g., "grid").
+--target <str>          Target shear component to summarize (e.g., "g1" or "g2").
+--shear <float>         Applied shear magnitude (e.g., 0.02).
+--min-id <int>          Inclusive lower bound of simulation IDs to process.
+--max-id <int>          Exclusive upper bound of simulation IDs to process.
+
+Input/Output
+------------
+- Expects per-ID FITS catalogs at:
+    {outdir}/cat-<ID:05d>-mode<MODE>.fits
+  where MODE in {0, 1}.
+
+- Produces rank-wise partial results that are reduced to final summary arrays.
+
+MPI Notes
+---------
+- Each rank iterates over a disjoint subset of IDs in [min-id, max-id).
+- Rank 0 gathers and writes the final combined results.
+
+Requirements
+------------
+- Python 3.9+
+- mpi4py, numpy, fitsio (and any project-specific deps)
+
+Example
+-------
+# 128 ranks spanning IDs 0..29999:
+mpirun -n 128 python summary.py \
+    --emax 0.3 --layout grid \
+    --target g1 --shear 0.02 \
+    --min-id 0 --max-id 30000
+"""
+
 import os
 import argparse
 import numpy as np
@@ -9,7 +64,7 @@ from astropy.stats import sigma_clipped_stats
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="MPI: measure + aggregate from cat-%05d-mode%d.fits over a given ID range."
+        description="measure + aggregate from catalogs over a given ID range."
     )
     # Directory layout and naming
     p.add_argument(
