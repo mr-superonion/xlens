@@ -136,20 +136,20 @@ tasks:
     config:
       connections.dataType: fpfs_force
       connections.coaddName: sim
-  SelectBiasTask2:
-    class: xlens.analysis.selbias.SelBiasMultibandPipe
-    config:
-      shape_name: "i_fpfs1_e1"
-      dshape_name: "i_fpfs1_de1"
-      flux_name: "flux"
-      dflux_name: "dflux"
-      weight_name: "wsel"
-      dweight_name: "dwsel"
-      do_correct_selection_bias: True
-      connections.dataType: fpfs_force
-      connections.coaddName: sim
-  Summary2:
-    class: xlens.analysis.selbias.SelBiasSummaryMultibandPipe
-    config:
-      connections.dataType: fpfs_force
-      connections.coaddName: sim
+  # SelectBiasTask2:
+  #   class: xlens.analysis.selbias.SelBiasMultibandPipe
+  #   config:
+  #     shape_name: "i_fpfs1_e1"
+  #     dshape_name: "i_fpfs1_de1"
+  #     flux_name: "flux"
+  #     dflux_name: "dflux"
+  #     weight_name: "wsel"
+  #     dweight_name: "dwsel"
+  #     do_correct_selection_bias: True
+  #     connections.dataType: fpfs_force
+  #     connections.coaddName: sim
+  # Summary2:
+  #   class: xlens.analysis.selbias.SelBiasSummaryMultibandPipe
+  #   config:
+  #     connections.dataType: fpfs_force
+  #     connections.coaddName: sim
