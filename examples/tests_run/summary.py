@@ -27,7 +27,7 @@ elif args.target == "g2":
     en = "e2s"
     rn = "R2s"
 else:
-    raise ValueError("do not support target %s" % targs.target)
+    raise ValueError("do not support target %s" % args.target)
 
 
 rng = np.random.default_rng()
@@ -46,28 +46,33 @@ R1s_mode1 = []
 NN = []
 for rank in range(N_cpus):
     e1s_mode0.append(
-        np.load(f'{outdir}/{en}_mode0_rot0_rank{rank:05d}.npy').flatten()
+        np.load(f'{outdir}/{en}_mode0_rot0_rank{rank:05d}.npy')
     )
     e1s_mode1.append(
-        np.load(f'{outdir}/{en}_mode1_rot0_rank{rank:05d}.npy').flatten()
+        np.load(f'{outdir}/{en}_mode1_rot0_rank{rank:05d}.npy')
     )
     R1s_mode0.append(
-        np.load(f'{outdir}/{rn}_mode0_rot0_rank{rank:05d}.npy').flatten()
+        np.load(f'{outdir}/{rn}_mode0_rot0_rank{rank:05d}.npy')
     )
     R1s_mode1.append(
-        np.load(f'{outdir}/{rn}_mode1_rot0_rank{rank:05d}.npy').flatten()
+        np.load(f'{outdir}/{rn}_mode1_rot0_rank{rank:05d}.npy')
     )
-    NN.append(np.load(f'{outdir}/Ns_mode0_rot0_rank{rank:05d}.npy').flatten())
+    NN.append(
+        np.load(f'{outdir}/Ns_mode0_rot0_rank{rank:05d}.npy')
+    )
 
-e1s_mode0 = np.hstack(e1s_mode0)
-e1s_mode1 = np.hstack(e1s_mode1)
-R1s_mode0 = np.hstack(R1s_mode0)
-R1s_mode1 = np.hstack(R1s_mode1)
-NN = np.hstack(NN)
+print(e1s_mode0[0])
+e1s_mode0 = np.vstack(e1s_mode0)
+e1s_mode1 = np.vstack(e1s_mode1)
+R1s_mode0 = np.vstack(R1s_mode0)
+R1s_mode1 = np.vstack(R1s_mode1)
+NN = np.vstack(NN)
+
 
 def m_bootstrap(ep, em, Rp, Rm, Nsample=10000):
-    N = len(ep)
-    ms = np.zeros(Nsample)
+    N = ep.shape[0]
+    ncut = ep.shape[-1]
+    ms = np.zeros((Nsample, ncut))
     for i in range(Nsample):
         k = rng.choice(N, N, replace=True)
         new_gamma = np.sum(ep[k] - em[k]) / np.sum(Rp[k] + Rm[k])
@@ -75,34 +80,25 @@ def m_bootstrap(ep, em, Rp, Rm, Nsample=10000):
         ms[i] = m
     return ms
 
-def neff_bootstrap(ep, Rp, Nsample=10000):
-    N = len(ep)
-    ms = np.zeros(Nsample)
-    R = np.average(Rp)
-    for i in range(Nsample):
-        k = rng.choice(N, N, replace=True)
-        ms[i] = np.average(ep[k]) / R
-    area = (
-        (3900 * 3900) * (0.2 / 60.0) **2.0
-    )  # arcmin
-    std = np.std(ms)
-    neff = (0.26 / std) ** 2.0 / area / N
-    return
+
 
 m = (
-    np.sum(e1s_mode1 - e1s_mode0) / np.sum(R1s_mode1 + R1s_mode0)
+    np.sum(
+        e1s_mode1 - e1s_mode0, axis=0
+    ) / np.sum(R1s_mode1 + R1s_mode0, axis=0)
 ) / shear_value - 1
-c = np.sum(e1s_mode1 + e1s_mode0) / np.sum(R1s_mode1 + R1s_mode0)
+c = np.sum(
+    e1s_mode1 + e1s_mode0, axis=0
+) / np.sum(R1s_mode1 + R1s_mode0, axis=0)
 
 area = (
     (3900 * 3900) * (0.2 / 60.0) **2.0
 )  # arcmin
 print(area)
 mean, median, std = sigma_clipped_stats(
-    (e1s_mode1 / NN) / (np.sum(R1s_mode1) / np.sum(NN)),
+    (e1s_mode1 / NN) / (np.sum(R1s_mode1, axis=0) / np.sum(NN, axis=0)),
     sigma=5.0
 )
-neff_bootstrap(e1s_mode1, R1s_mode1)
 neff = (0.26 / std) ** 2.0 / area
 print(neff)
 print(np.average(NN) / area)

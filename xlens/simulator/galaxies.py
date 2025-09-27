@@ -54,6 +54,7 @@ class BaseGalaxyCatalog(ABC):
             layout_name=layout_name,
             wcs=wcs,
             boundary_box=bbox,
+            sep_arcsec=sep_arcsec,
             extend_ratio=extend_ratio,
         )
         self.input_catalog = self._read_catalog(
@@ -284,7 +285,12 @@ class BaseGalaxyCatalog(ABC):
         gal = gal.lens(g1=g1, g2=g2, mu=mu)
         return gal
 
-    def draw(self, *, patch_id, psf_obj, mag_zero, band, draw_method="auto"):
+    def draw(
+        self, *, patch_id,
+        psf_obj, mag_zero, band,
+        draw_method="auto",
+        nn_trunc=None,
+    ):
         patch_info = self.tract_info[patch_id]
         outer_bbox = patch_info.getOuterBBox()
         xmin = outer_bbox.getMinX()
@@ -314,11 +320,13 @@ class BaseGalaxyCatalog(ABC):
                     local_wcs = wcs_gs.local(image_pos=image_pos)
                     stamp = convolved_object.drawImage(
                         center=image_pos, wcs=local_wcs, method=draw_method,
+                        nx=nn_trunc, ny=nn_trunc,
                     )
                 else:
                     stamp = convolved_object.drawImage(
                         center=image_pos, wcs=None, method=draw_method,
                         scale=self.pixel_scale,
+                        nx=nn_trunc, ny=nn_trunc,
                     )
                 b = stamp.bounds & image.bounds
                 if b.isDefined():

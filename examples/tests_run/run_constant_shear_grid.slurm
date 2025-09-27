@@ -19,7 +19,7 @@ for mode in 1 0; do
       --shear 0.02 \
       --kappa 0.0 \
       --target g2 \
-      --start 50 \
-      --end 100 \
+      --start 0 \
+      --end 50 \
       --layout grid
 done

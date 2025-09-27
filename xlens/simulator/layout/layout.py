@@ -37,11 +37,11 @@ class Layout:
         Used to obtain pixel scale via `getPixelScale().asArcseconds()`.
     boundary_box : lsst.geom.Box2I or Box2D
         Pixel bounding box defining the coadd region.
-    pad_arcsec: float, optional
-        padding (arcsec) in x and y, which can be negative; defaults to 20
     sep_arcsec : float or None, optional
         Spacing (arcsec) for 'grid'/'hex'; defaults to
         GRID_SPACING/HEX_SPACING.
+    extend_ratio: float, optional
+        extention ratio in x and y; defaults to 1.08
 
     Notes
     -----

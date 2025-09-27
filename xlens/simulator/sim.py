@@ -146,6 +146,10 @@ class MultibandSimConfig(
         doc="whether to use real PSF",
         default=False,
     )
+    truncate_stamp_size = Field[int](
+        doc="truncation size of stamps",
+        default=-1,
+    )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
@@ -214,12 +218,17 @@ class MultibandSimTask(PipelineTask):
             table=catalog,
             use_field_distortion=self.config.use_field_distortion,
         )
+        if self.config.truncate_stamp_size <= 0:
+            nn_trunc = None
+        else:
+            nn_trunc = self.config.truncate_stamp_size
         gal_array = galaxy_catalog.draw(
             patch_id=patch_id,
             psf_obj=psf_obj,
             mag_zero=mag_zero,
             band=band,
             draw_method=draw_method,
+            nn_trunc=nn_trunc,
         )
         return gal_array
 

@@ -2,10 +2,10 @@
 import os
 import argparse
 import gc
-import json
 
 import numpy as np
 from mpi4py import MPI
+import fitsio
 
 from lsst.skymap.discreteSkyMap import (
     DiscreteSkyMapConfig, DiscreteSkyMap
@@ -20,6 +20,7 @@ from xlens.simulator.sim import (
 from xlens.process_pipe.anacal_detect import (
     AnacalDetectPipeConfig, AnacalDetectPipe
 )
+
 
 # ------------------------------
 # Argument Parsing
@@ -47,6 +48,12 @@ rot_id = args.rot
 test_target = args.target
 istart = args.start
 iend = args.end
+if args.layout == "random":
+    extend_ratio = 1.08
+elif args.layout == "grid":
+    extend_ratio = 0.92
+else:
+    raise ValueError("Cannot support layout")
 
 # ------------------------------
 # MPI Setup
@@ -86,11 +93,14 @@ cfg_cat.kappa_value = kappa_value
 cfg_cat.test_value = shear_value
 cfg_cat.test_target = test_target
 cfg_cat.layout = args.layout
+cfg_cat.extend_ratio = extend_ratio
+cfg_cat.sep_arcsec = 14
 cat_task = CatalogShearTask(config=cfg_cat)
 
 cfg_sim = MultibandSimConfig()
 cfg_sim.survey_name = "lsst"
 cfg_sim.draw_image_noise = True
+cfg_sim.truncate_stamp_size = 65
 sim_task = MultibandSimTask(config=cfg_sim)
 
 # ------------------------------
@@ -109,14 +119,16 @@ samples_per_rank = iend - istart
 if samples_per_rank <= 0:
     raise ValueError(f"Invalid range: start={istart}, end={iend}")
 
-# ------------------------------
-# Local Buffers (per-rank)
-# ------------------------------
-e1s = np.zeros(samples_per_rank, dtype=np.float64)
-e2s = np.zeros(samples_per_rank, dtype=np.float64)
-R1s = np.zeros(samples_per_rank, dtype=np.float64)
-R2s = np.zeros(samples_per_rank, dtype=np.float64)
-Ns  = np.zeros(samples_per_rank, dtype=np.float64)
+# Outdir layout:
+#   $PSCRATCH/constant_shear_isolated/<target>/anacal_blends_shearXX/
+pscratch = os.environ.get("PSCRATCH", ".")
+outdir = os.path.join(
+    pscratch,
+    f"constant_shear_{args.layout}",
+    test_target,
+    f"shear{int(shear_value * 100):02d}",
+)
+os.makedirs(outdir, exist_ok=True)
 
 # ------------------------------
 # Run Simulation & Measurement
@@ -149,48 +161,70 @@ for i in range(istart, iend):
         patch=patch_id,
     )
     catalog = det_task.anacal.run(**prep)
-
-    # Shear Estimation
-    e1 = catalog["wsel"] * catalog["fpfs_e1"]
-    de1_dg1 = (
-        catalog["dwsel_dg1"] * catalog["fpfs_e1"] +
-        catalog["wsel"] * catalog["fpfs_de1_dg1"]
+    fitsio.write(
+        os.path.join(outdir, "cat-%05d.fits" % sim_seed),
+        catalog,
     )
-
-    e2 = catalog["wsel"] * catalog["fpfs_e2"]
-    de2_dg2 = (
-        catalog["dwsel_dg2"] * catalog["fpfs_e2"] +
-        catalog["wsel"] * catalog["fpfs_de2_dg2"]
-    )
-
-    e1s[j] = np.sum(e1)
-    e2s[j] = np.sum(e2)
-    R1s[j] = np.sum(de1_dg1)
-    R2s[j] = np.sum(de2_dg2)
-    Ns[j] = float(len(catalog))
-
     # clean up
     del prep, sim_result, truth_catalog, catalog
     gc.collect()
 
-# ------------------------------
-# Save Results (per-rank, no Gather)
-# ------------------------------
-# Outdir layout:
-#   $PSCRATCH/constant_shear_isolated/<target>/anacal_blends_shearXX/
-pscratch = os.environ.get("PSCRATCH", ".")
-outdir = os.path.join(
-    pscratch,
-    f"constant_shear_{args.layout}",
-    test_target,
-    f"shear{int(shear_value * 100):02d}",
-)
-os.makedirs(outdir, exist_ok=True)
 
-pp = f"_mode{shear_mode}_rot{rot_id}_rank{rank:05d}"
-np.save(os.path.join(outdir, f"e1s{pp}.npy"), e1s)
-np.save(os.path.join(outdir, f"e2s{pp}.npy"), e2s)
-np.save(os.path.join(outdir, f"R1s{pp}.npy"), R1s)
-np.save(os.path.join(outdir, f"R2s{pp}.npy"), R2s)
-np.save(os.path.join(outdir, f"Ns{pp}.npy"), Ns)
-print(f"[rank {rank}] wrote outputs to {outdir}")
+# def measure_shear_flux_cut(src, flux_min, emax=0.3, dg=0.02):
+#     """
+#     Returns:
+#         e1, R11, e2, R22, N
+#     """
+#     esq0 = src["fpfs_e1"]**2 + src["fpfs_e2"]**2
+#     m0 = (src["flux"] > flux_min) & (esq0 < emax*emax)
+#     nn = np.sum(m0)
+
+#     w0 = src["wsel"][m0]
+#     e1 = np.sum(w0 * src["fpfs_e1"][m0])
+#     e2 = np.sum(w0 * src["fpfs_e2"][m0])
+
+#     r1 = np.sum(
+#         src["dwsel_dg1"][m0] * src["fpfs_e1"][m0] +
+#         w0 * src["fpfs_de1_dg1"][m0]
+#     )
+#     r2 = np.sum(
+#         src["dwsel_dg2"][m0] * src["fpfs_e2"][m0] +
+#         w0 * src["fpfs_de2_dg2"][m0]
+#     )
+
+#     def sel_term(comp: int) -> np.float64:
+#         e = src[f"fpfs_e{comp}"]
+#         de = src[f"fpfs_de{comp}_dg{comp}"]
+#         df = src[f"dflux_dg{comp}"]
+
+#         esq_p = esq0 + 2.0*dg*e*de
+#         m_p = ((src["flux"] + dg*df) > flux_min) & (esq_p < emax*emax)
+#         ellp = np.sum(src["wsel"][m_p] * e[m_p])
+
+#         esq_m = esq0 - 2.0*dg*e*de
+#         m_m = ((src["flux"] - dg*df) > flux_min) & (esq_m < emax*emax)
+#         ellm = np.sum(src["wsel"][m_m] * e[m_m])
+
+#         return (ellp - ellm) / (2.0*dg)
+
+#     r1_sel = sel_term(1)
+#     r2_sel = sel_term(2)
+#     return e1, (r1 + r1_sel), e2, (r2 + r2_sel), nn
+# # ------------------------------
+# # Local Buffers (per-rank)
+# # ------------------------------
+# flux_list = [20, 40, 60]
+# ncut = len(flux_list)
+# e1s = np.zeros((samples_per_rank, ncut), dtype=np.float64)
+# e2s = np.zeros((samples_per_rank, ncut), dtype=np.float64)
+# R1s = np.zeros((samples_per_rank, ncut), dtype=np.float64)
+# R2s = np.zeros((samples_per_rank, ncut), dtype=np.float64)
+# Ns = np.zeros((samples_per_rank, ncut), dtype=np.float64)
+
+# for iflux, flux_min in enumerate(flux_list):
+#     e1, r1, e2, r2, nn = measure_shear_flux_cut(catalog, flux_min=flux_min)
+#     e1s[j, iflux] = e1
+#     e2s[j, iflux] = e2
+#     R1s[j, iflux] = r1
+#     R2s[j, iflux] = r2
+#     Ns[j, iflux] = nn

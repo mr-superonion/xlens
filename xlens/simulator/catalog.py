@@ -84,6 +84,10 @@ class CatalogConfig(
         doc="number of rotations",
         default=0,
     )
+    sep_arcsec = Field[float](
+        doc="Spacing (arcsec) for 'grid'/'hex' layout",
+        default=12.0,
+    )
     extend_ratio = Field[float](
         doc="ratio of padded coverage length of galaxy catalog",
         default=1.08,
@@ -149,6 +153,7 @@ class CatalogTask(PipelineTask):
             rng=rng,
             tract_info=tract_info,
             layout_name=self.config.layout,
+            sep_arcsec=self.config.sep_arcsec,
             extend_ratio=self.config.extend_ratio,
         )
         return galaxy_catalog
