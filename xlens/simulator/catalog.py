@@ -14,6 +14,8 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
+"""Pipeline task that prepares truth catalogs for image simulations."""
+
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
@@ -47,6 +49,7 @@ class CatalogConnections(
         "rotId": 0,
     },
 ):
+    """Butler connection definitions for truth catalog generation."""
     skymap = cT.Input(
         doc="SkyMap to use in processing",
         name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
@@ -68,6 +71,7 @@ class CatalogConfig(
     PipelineTaskConfig,
     pipelineConnections=CatalogConnections,
 ):
+    """Configuration options used by :class:`CatalogTask`."""
     galaxy_type = Field[str](
         doc="galaxy type",
         default="catsim2017",
@@ -123,6 +127,8 @@ class CatalogTask(PipelineTask):
     _DefaultName = "CatalogTask"
     ConfigClass = CatalogConfig
 
+    """Task that creates lensed galaxy catalogs for downstream simulations."""
+
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         assert isinstance(self.config, CatalogConfig)
@@ -140,6 +146,7 @@ class CatalogTask(PipelineTask):
         seed,
         tract_info,
     ):
+        """Instantiate a galaxy catalog class based on the configuration."""
         assert isinstance(self.config, CatalogConfig)
         if self.config.galaxy_type == "catsim2017":
             GalClass = CatSim2017Catalog
@@ -166,6 +173,7 @@ class CatalogTask(PipelineTask):
         seed: int,
         **kwargs,
     ):
+        """Generate a truth catalog with the configured lensing perturbations."""
         assert isinstance(self.config, CatalogConfig)
         galaxy_seed = seed * gal_seed_base + self.config.galId
         galaxy_catalog = self.prepare_galaxy_catalog(

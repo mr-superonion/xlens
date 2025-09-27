@@ -1,24 +1,12 @@
-#
-# LSST Data Management System
-# Copyright 20082014 LSST Corpoalphan.
-#
-# This product includes software developed by the
-# LSST Project (http://www.lsst.org/).
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.    See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the LSST License Statement and
-# the GNU General Public License along with this program.  If not,
-# see <http://www.lsstcorp.org/LegalNotices/>.
-#
+"""Image utilities for working with LSST exposures and PSF models.
+
+This module collects helper routines that are repeatedly used across
+``xlens`` when generating or post-processing simulated images.  The
+implementations originate from the LSST Science Pipelines, and the
+docstrings have been expanded here to clarify how they interact with the
+rest of ``xlens``.
+"""
+
 
 from typing import Any, List
 
@@ -43,17 +31,26 @@ badMaskDefault = [
 ]
 
 
-def subpixel_shift(image: NDArray, shift_x: int, shift_y: int):
-    """
-    Perform a subpixel shift on a 2D image using the Fourier shift theorem.
+def subpixel_shift(image: NDArray, shift_x: float, shift_y: float) -> NDArray:
+    """Shift an image by arbitrary subpixel offsets using Fourier methods.
 
-    Args:
-    image (NDArray): 2D numpy array representing the image to be shifted.
-    shift_x (float): Subpixel shift in the x-direction.
-    shift_y (float): Subpixel shift in the y-direction.
+    Parameters
+    ----------
+    image
+        Two-dimensional array containing the image that should be shifted.
+    shift_x
+        Desired shift in the x-direction, expressed in pixel units.  The
+        value can be any real number; positive values move the image towards
+        larger x.
+    shift_y
+        Desired shift in the y-direction, expressed in pixel units.  Positive
+        values move the image towards larger y.
 
-    Returns:
-    shifted_image (NDArray): 2D numpy array representing the shifted image.
+    Returns
+    -------
+    numpy.ndarray
+        The shifted image.  The output has the same shape as the input and is
+        guaranteed to be real-valued.
     """
     # Get the image size
     ny, nx = image.shape
@@ -86,15 +83,29 @@ def resize_array(
     target_shape: tuple[int, int] = (64, 64),
     truth_catalog=None,
 ):
-    """This is a util function to resize array to the target shape
-    Args:
-    array (NDArray): input array
-    target_shape (tuple): output array's shape
-    truth_catalog: truth catalog with image coordinates that need to be resized
+    """Resize an image-like array to a square target shape.
 
-    Returns:
-    array (NDArray): output array with the target shape
-    truth_catalog: resized truth catalog
+    The function first crops the array symmetrically if it is larger than the
+    requested output size and then applies zero-padding when the array is too
+    small.  When a truth catalog is provided, its pixel coordinates are
+    updated so they remain consistent with the resized image.
+
+    Parameters
+    ----------
+    array
+        Input array to resize.  The array is assumed to be two-dimensional.
+    target_shape
+        Tuple of ``(height, width)`` describing the requested output shape.
+    truth_catalog
+        Optional truth catalog whose ``image_*`` and ``prelensed_image_*``
+        columns are updated in place so that they refer to the resized image.
+
+    Returns
+    -------
+    numpy.ndarray or tuple
+        The resized array.  If ``truth_catalog`` was provided, the function
+        returns a tuple ``(array, truth_catalog)`` with the mutated catalog as
+        the second element.
     """
     target_height, target_width = target_shape
     input_height, input_width = array.shape
@@ -145,6 +156,8 @@ def resize_array(
 
 
 class LsstPsf(anacal.psf.BasePsf):
+    """Adapter that exposes an LSST PSF model with an ``anacal`` interface."""
+
     def __init__(self, psf, npix, lsst_bbox=None):
         super().__init__()
         self.psf = psf
@@ -160,6 +173,7 @@ class LsstPsf(anacal.psf.BasePsf):
             self.y_min = min_corner.getY()
 
     def draw(self, x, y):
+        """Evaluate the PSF image centered on the requested pixel position."""
         this_psf = self.psf.computeImage(
             lsst_geom.Point2D(x + self.x_min, y + self.y_min)
         ).getArray()
@@ -175,9 +189,12 @@ def get_psf_array(
     dg: int = 250,
     lsst_mask: None | MaskX = None,
 ):
-    """
-    Compute the average PSF over a grid, excluding regions flagged with
-    INEXACT_PSF.
+    """Compute an average PSF image over a regular grid.
+
+    The function samples the provided LSST PSF model at a grid of points
+    across the bounding box and averages the resulting images.  Pixels that
+    are flagged as ``INEXACT_PSF`` in the optional mask are excluded from the
+    average, mimicking the behaviour in the LSST pipelines.
 
     Parameters
     ----------
@@ -194,8 +211,8 @@ def get_psf_array(
 
     Returns
     -------
-    out : np.ndarray
-        Averaged PSF as a 2D array of shape (npix, npix).
+    out : numpy.ndarray
+        Averaged PSF as a 2D array of shape ``(npix, npix)``.
     """
     x_min, y_min = lsst_bbox.getMin().getX(), lsst_bbox.getMin().getY()
     x_max, y_max = lsst_bbox.getMax().getX(), lsst_bbox.getMax().getY()
