@@ -28,16 +28,10 @@ __all__ = [
 from typing import Any
 
 import astropy.units as u
-import galsim
 import lsst.pipe.base.connectionTypes as cT
 import matplotlib.pyplot as plt
 import numpy as np
-from astropy.coordinates import Angle, SkyCoord, position_angle
-from astropy.cosmology import Planck18
-from descwl_shear_sims.constants import WORLD_ORIGIN
-from descwl_shear_sims.wcs import make_dm_wcs, make_wcs
-from lenstronomy.Cosmo.lens_cosmo import LensCosmo
-from lenstronomy.LensModel.lens_model import LensModel
+from astropy.coordinates import SkyCoord
 from lsst.pex.config import Field
 from lsst.pipe.base import (
     PipelineTask,
@@ -97,9 +91,7 @@ class HaloMcBiasMultibandPipeConnections(
         storageClass="ArrowAstropy",
         dimensions=(
             "skymap",
-            "band",
             "tract",
-            "patch",
         ),
         multiple=True,
         deferLoad=True,
@@ -110,9 +102,7 @@ class HaloMcBiasMultibandPipeConnections(
         storageClass="ArrowAstropy",
         dimensions=(
             "skymap",
-            "band",
             "tract",
-            "patch",
         ),
         multiple=True,
         deferLoad=True,
@@ -218,7 +208,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         self.wname = self.config.wname
         self.wgname = lambda x: "d" + self.wname + "_dg" + str(x)
-
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -228,16 +217,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         )
         # Retrieve the filename of the input exposure
         inputs = butlerQC.get(inputRefs)
-        
-        tract_list = []
-        patch_list = []
+
+        tractList = []
         for ref in inputRefs.src00List:
-            tract = ref.dataId["tract"]
-            patch = ref.dataId["patch"]
-            tract_list.append(tract)
-            patch_list.append(patch)
-            
-        outputs = self.run(**inputs, tract_list=tract_list, patch_list=patch_list)
+            tract_id = ref.dataId["tract"]
+            tractList.append(tract_id)
+
+        outputs = self.run(
+            **inputs, tractList=tractList,
+        )
         butlerQC.put(outputs, outputRefs)
         return
 
@@ -338,19 +326,26 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             m20 (array): fpfs shapelet mode m20
             all_true_gT (array): true tangential shear of all input objects
             all_true_gX (array): true cross shear of matched objects
-            all_true_dist (array): angular distance from the halo center for all input objects
+            all_true_dist (array):
+                angular distance from the halo center for all input objects
 
         Returns:
             eT(array): sum of eT in each radial bin
             eX(array): sum of eX in each radial bin
             rT(array): sum of tangential resposne in each radial bin
             rX(array): sum of radial response in each radial bin
-            gT_true_matched(array): sum of true tangential shear of matched objects in each radial bin
-            gX_true_matched(array): sum of true cross shear of matched objects in each radial bin
-            gT_true (array): sum of true tangential shear calculated with distance in each radial bin
-            gX_true (array): sum of true cross shear calculated with distance in each radial bin
-            all_true_gT(array): mean of true tangential shear of all input objects in each radial bin
-            all_true_gX(array): mean of true cross shear of all input objects in each radial bin
+            gT_true_matched(array):
+                sum of true tangential shear of matches in each radial bin
+            gX_true_matched(array):
+                sum of true cross shear of matches in each radial bin
+            gT_true (array):
+                sum of true tan shear in each radial bin
+            gX_true (array):
+                sum of true cross shear in each radial bin
+            all_true_gT(array):
+                mean of true tan shear of all input objects in each radial bin
+            all_true_gX(array):
+                mean of true cross shear of all input objects in each radial bin
             kappa_true(array): sum of true convergence in each radial bin
             lensed_shift(array): mean of lensed shift in each radial bin
             radial_lensed_shift(array):
@@ -428,8 +423,12 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             all_true_gT_list.append(np.mean(all_true_gT[all_mask]))
             all_true_gX_list.append(np.mean(all_true_gX[all_mask]))
             kappa_true_list.append(np.sum(kappa_true[mask]))
-            r_weighted_gT_matched_list.append(np.sum(gT_true_matched[mask] * rT[mask]))
-            r_weighted_gX_matched_list.append(np.sum(gX_true_matched[mask] * rX[mask]))
+            r_weighted_gT_matched_list.append(
+                np.sum(gT_true_matched[mask] * rT[mask])
+            )
+            r_weighted_gX_matched_list.append(
+                np.sum(gX_true_matched[mask] * rX[mask])
+            )
             r_weighted_gT_list.append(np.sum(gT_true[mask] * rT[mask]))
             r_weighted_gX_list.append(np.sum(gX_true[mask] * rX[mask]))
             ngal_in_bin.append(np.sum(mask))
@@ -491,8 +490,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         # Query the nearest neighbors in the tree for each point in det_coord
         distance, idx = tree.query(det_coord, distance_upper_bound=1000)
 
-        # Check if the median match are within the threshold
-        # assert np.all(distance <= 1.), f"Match failed, {np.max(distance):.02f}"
         assert (
             np.median(distance) <= 1.0
         ), f"distance is too large, max distance is {np.max(distance)}"
@@ -628,9 +625,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             (sigma_eX / mean_rX) ** 2 + (mean_eX * sigma_rX / mean_rX**2) ** 2
         )
 
-        true_gX_matched = np.mean(summary_table["r_weighted_gX_matched"], axis=0) / np.mean(
-            summary_table["rX"], axis=0
-        )
+        true_gX_matched = np.mean(
+            summary_table["r_weighted_gX_matched"], axis=0
+        ) / np.mean(summary_table["rX"], axis=0)
 
         true_gX = np.mean(summary_table["r_weighted_gX"], axis=0) / np.mean(
             summary_table["rX"], axis=0
@@ -680,9 +677,9 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         sigma_gT = np.sqrt(
             (sigma_eT / mean_rT) ** 2 + (mean_eT * sigma_rT / mean_rT**2) ** 2
         )
-        true_gT_matched = np.mean(summary_table["r_weighted_gT_matched"], axis=0) / np.mean(
-            summary_table["rT"], axis=0
-        )
+        true_gT_matched = np.mean(
+            summary_table["r_weighted_gT_matched"], axis=0
+        ) / np.mean(summary_table["rT"], axis=0)
         true_gT = np.mean(summary_table["r_weighted_gT"], axis=0) / np.mean(
             summary_table["rT"], axis=0
         )
@@ -706,11 +703,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             label="r weighted true gT",
         )
 
-        # axes[0, 1].plot(
-        #     angular_bin_mid[start:],
-        #     np.mean(summary_table["all_true_gT"], axis=0)[start:],
-        #     label="input gT",
-        # )
         axes[0, 1].legend()
         axes[0, 1].set_xlabel("arcmin")
         axes[0, 1].set_ylabel(r"$g^T$")
@@ -722,9 +714,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             yerr=(sigma_gT / np.abs(true_gT))[start:],
         )
         axes[1, 1].set_ylabel(r"$g^T_{m}/g^T_{t} - 1$")
-        # axes[1,1].set_ylim(-0.15, 0.15)
-
-        # axes[1,0].errorbar()
 
         axes[3, 0].errorbar(
             angular_bin_mid,
@@ -886,38 +875,21 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
     def run(
         self,
+        *,
         skymap,
         src00List,
         src01List,
         truth00List,
         truth01List,
-        tract_list,
-        patch_list,
+        tractList,
+        **kwargs,
     ):
-        assert skymap.config.patchBorder == 0, "patch border must be zero"
-
         self.log.info("load truth list")
         self.log.info(f"len truth00List: {len(truth00List)}")
         self.log.info(f"len truth01List: {len(truth01List)}")
 
-        print(tract_list)
-        print(patch_list)
-
-        beginX_array = []
-        beginY_array = []
-        
         pixel_scale = skymap.config.pixelScale  # arcsec per pixel
         image_dim = skymap.config.patchInnerDimensions[0]  # in pixels
-        
-        for tract, patch in zip(tract_list, patch_list):
-            self.log.info(f"tract {tract}, patch {patch}")
-            # get the beginX and beginY from the skymap
-            bbox = skymap[tract][patch].getOuterBBox()
-            beginX_array.append(bbox.beginX)
-            beginY_array.append(bbox.beginY)
-
-        beginX_array = np.array(beginX_array)
-        beginY_array = np.array(beginY_array)
 
         max_pixel = (image_dim - 64) / 2
 
@@ -934,23 +906,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         # starting from 15 arcsec
         pixel_bin_edges = np.linspace(15.0 / 0.2, max_pixel, n_bins + 1)
         angular_bin_edges = pixel_bin_edges * pixel_scale
-        angular_bin_mids = (angular_bin_edges[1:] + angular_bin_edges[:-1]) / 2
-
-        # image center in numpy convention
-        image_center = 0.5 * (image_dim - 1)
-        print("image center in pixel", image_center)
-
-        # only the image center in make_wcs needs galsim position
-        gs_image_center = 0.5 * (image_dim + 1)
-        print("image center in galsim", gs_image_center)
-
-        wcs = make_dm_wcs(
-            make_wcs(
-                scale=0.2,
-                image_origin=galsim.PositionD(gs_image_center, gs_image_center),
-                world_origin=WORLD_ORIGIN,
-            )
-        )
 
         en = self.ename
         e1n = "fpfs_" + en + "1"
@@ -958,15 +913,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         e1g1n = self.egname(1, 1)
         e2g2n = self.egname(2, 2)
-        
+
         xn = self.xname
         yn = self.yname
-        
+
         wn = self.wname
-        
+
         wg1n = self.wgname(1)
         wg2n = self.wgname(2)
-        
 
         self.log.info(
             "The length of source list is",
@@ -1002,9 +956,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         m00_ensemble = np.empty((len(src00List), n_bins))
         m20_ensemble = np.empty((len(src00List), n_bins))
 
-        all_gT_true_ensemble = np.empty((len(src00List), n_bins))
-        all_gX_true_ensemble = np.empty((len(src00List), n_bins))
-
         # detection length arrays
         ind_rT_list = []
         ind_gT_true_list = []
@@ -1014,64 +965,39 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         ind_lensed_x_list = []
         ind_lensed_y_list = []
 
-        # truth length arrays, we have a list here and we will go over all patches
-        all_true_ra_list = []
-        all_true_dec_list = []
-        all_true_g1_list = []
-        all_true_g2_list = []
-
         for i, cats in enumerate(
             zip(
                 src00List,
                 src01List,
                 truth00List,
                 truth01List,
-                beginX_array,
-                beginY_array,
+                tractList,
             )
         ):
-            src00, src01, truth00, truth01, beginX, beginY = (
+            src00, src01, truth00, truth01, tract_id = (
                 cats[0],
                 cats[1],
                 cats[2],
                 cats[3],
                 cats[4],
-                cats[5],
             )
             sr_00_res = src00.get()
             sr_01_res = src01.get()
             truth_00_res = truth00.get()
             truth_01_res = truth01.get()
 
-            self.log.debug(
-                "truth 00 x residual is %.3f"
-                % (np.mean(truth_00_res["image_x"] - image_center))
-            )
-            self.log.debug(
-                "truth 00 y residual is %.3f"
-                % (np.mean(truth_00_res["image_y"] - image_center))
-            )
-            self.log.debug(
-                "truth 01 x residual is %.3f"
-                % (np.mean(truth_01_res["image_x"] - image_center))
-            )
-            self.log.debug(
-                "truth 01 y residual is %.3f"
-                % (np.mean(truth_01_res["image_y"] - image_center))
-            )
-
             idx_00, match_dist_00 = self._match_input_to_det(
                 truth_00_res["image_x"],
                 truth_00_res["image_y"],
-                sr_00_res[xn] / pixel_scale - beginX,
-                sr_00_res[yn] / pixel_scale - beginY,
+                sr_00_res[xn] / pixel_scale,
+                sr_00_res[yn] / pixel_scale,
             )
 
             idx_01, match_dist_01 = self._match_input_to_det(
                 truth_01_res["image_x"],
                 truth_01_res["image_y"],
-                sr_01_res[xn] / pixel_scale - beginX,
-                sr_01_res[yn] / pixel_scale - beginY,
+                sr_01_res[xn] / pixel_scale,
+                sr_01_res[yn] / pixel_scale,
             )
 
             match_dist = np.concatenate([match_dist_00, match_dist_01])
@@ -1101,19 +1027,26 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
             print(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
 
-            det_x = np.concatenate([sr_00_res[xn] / pixel_scale - beginX, sr_01_res[xn] / pixel_scale - beginX])
-            det_y = np.concatenate([sr_00_res[yn] / pixel_scale - beginY, sr_01_res[yn] / pixel_scale - beginY])
+            det_x = np.concatenate(
+                [
+                    sr_00_res[xn] / pixel_scale,
+                    sr_01_res[xn] / pixel_scale,
+                ]
+            )
+            det_y = np.concatenate(
+                [
+                    sr_00_res[yn] / pixel_scale,
+                    sr_01_res[yn] / pixel_scale,
+                ]
+            )
+            wcs = skymap[tract_id].getWcs()
             det_ra, det_dec = wcs.pixelToSkyArray(det_x, det_y, degrees=True)
 
             e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
             e2_g2 = np.concatenate([sr_00_res[e2g2n], sr_01_res[e2g2n]])
             w = np.concatenate([sr_00_res[wn], sr_01_res[wn]])
-            w_g1 = np.concatenate(
-                [sr_00_res[wg1n], sr_01_res[wg1n]]
-            )
-            w_g2 = np.concatenate(
-                [sr_00_res[wg2n], sr_01_res[wg2n]]
-            )
+            w_g1 = np.concatenate([sr_00_res[wg1n], sr_01_res[wg1n]])
+            w_g2 = np.concatenate([sr_00_res[wg2n], sr_01_res[wg2n]])
             m00 = np.concatenate([sr_00_res["fpfs_m0"], sr_01_res["fpfs_m0"]])
             m20 = np.concatenate([sr_00_res["fpfs_m2"], sr_01_res["fpfs_m2"]])
 
@@ -1182,8 +1115,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ]
             )
 
-            # all_true_x = np.concatenate([truth_00_res["image_x"], truth_01_res["image_x"]])
-            # all_true_y = np.concatenate([truth_00_res["image_y"], truth_01_res["image_y"]])
             all_true_ra = np.concatenate(
                 [truth_00_res["ra"], truth_01_res["ra"]]
             )
@@ -1207,51 +1138,38 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ind_lensed_x_list.append(lensed_x)
             ind_lensed_y_list.append(lensed_y)
 
-            assert (
-                np.mean(lensed_x - image_center) < 100
-            ), f"mean x should be close to the center, distance is {np.mean(lensed_x - image_center)}, index is {i}"
-            assert (
-                np.mean(lensed_y - image_center) < 100
-            ), f"mean y should be close to the center, distance is {np.mean(lensed_y - image_center)}, index is {i}"
-
-            print(
-                f"lensed mean x offset: {np.mean(lensed_x - image_center)}, lensed mean y: {np.mean(lensed_y - image_center)}"
-            )
-            print(
-                f"prelensed mean x offset: {np.mean(x - image_center)}, prelensed mean y: {np.mean(y - image_center)}"
-            )
-
+            pix_origin = wcs.getPixelOrigin()
             lensed_shift = (
                 np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             )
             radial_dist_lensed = np.sqrt(
-                (lensed_x - image_center) ** 2 + (lensed_y - image_center) ** 2
+                (lensed_x - pix_origin.x) ** 2 + (lensed_y - pix_origin.y) ** 2
             )
             radial_dist = np.sqrt(
-                (x - image_center) ** 2 + (y - image_center) ** 2
+                (x - pix_origin.x) ** 2 + (y - pix_origin.y) ** 2
             )
             radial_lensed_shift = (
                 radial_dist_lensed - radial_dist
             ) * pixel_scale
 
-            self.log.info(
-                f"mean radial lensed shift: {np.mean(radial_lensed_shift)}"
-            )
-
+            sky_origin = wcs.getSkyOrigin()
+            sky_ra = sky_origin.getRa().asDegrees()
+            sky_dec = sky_origin.getDec().asDegrees()
             angle = self.position_angle_ccw_from_east(
-                WORLD_ORIGIN.ra.deg, WORLD_ORIGIN.dec.deg, det_ra, det_dec
+                sky_ra, sky_dec, det_ra, det_dec
             ).rad
-
             all_true_angle = self.position_angle_ccw_from_east(
-                WORLD_ORIGIN.ra.deg,
-                WORLD_ORIGIN.dec.deg,
+                sky_ra,
+                sky_dec,
                 all_true_ra,
                 all_true_dec,
             ).rad
 
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, angle)
-            gT_true_matched, gX_true_matched = self._rotate_spin_2_vec(g1_true, g2_true, angle)
+            gT_true_matched, gX_true_matched = self._rotate_spin_2_vec(
+                g1_true, g2_true, angle
+            )
             all_true_gT, all_true_gX = self._rotate_spin_2_vec(
                 all_true_g1, all_true_g2, all_true_angle
             )
@@ -1262,15 +1180,19 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             all_true_dist = self.angsep(all_true_ra, all_true_dec)
 
             ind_dist_list.append(dist)
-            
+
             dist_sort_idx = np.argsort(all_true_dist)
             dist_sorted = all_true_dist[dist_sort_idx]
             gT_sorted = all_true_gT[dist_sort_idx]
             gX_sorted = all_true_gX[dist_sort_idx]
 
-            gT_interp = interp1d(dist_sorted, gT_sorted, bounds_error=False, fill_value=np.nan)
-            gX_interp = interp1d(dist_sorted, gX_sorted, bounds_error=False, fill_value=np.nan)
-            
+            gT_interp = interp1d(
+                dist_sorted, gT_sorted, bounds_error=False, fill_value=np.nan
+            )
+            gX_interp = interp1d(
+                dist_sorted, gX_sorted, bounds_error=False, fill_value=np.nan
+            )
+
             gT_true = gT_interp(dist)
             gX_true = gX_interp(dist)
 
@@ -1391,54 +1313,58 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             angular_bin_edges[1:],
             (n_realization, 1),
         )
-        summary_stats[
-            "ngal_in_bin"
-        ] = ngal_in_bin_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["ngal_in_bin"] = (
+            ngal_in_bin_ensemble  # Shape (n_halos, n_bins)
+        )
         summary_stats["eT"] = eT_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eT_std"] = eT_std_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eX"] = eX_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eX_std"] = eX_std_ensemble  # Shape (n_halos, n_bins)
         summary_stats["rT"] = rT_ensemble  # Shape (n_halos, n_bins)
         summary_stats["rX"] = rX_ensemble  # Shape (n_halos, n_bins)
-        summary_stats["gT_true_matched"] = gT_true_matched_ensemble  # Shape (n_halos, n_bins)
-        summary_stats["gX_true_matched"] = gX_true_matched_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["gT_true_matched"] = (
+            gT_true_matched_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["gX_true_matched"] = (
+            gX_true_matched_ensemble  # Shape (n_halos, n_bins)
+        )
         summary_stats["gT_true"] = gT_true_ensemble  # Shape (n_halos, n_bins)
         summary_stats["gX_true"] = gX_true_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "all_true_gT"
-        ] = all_true_gT_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["all_true_gT"] = (
+            all_true_gT_ensemble  # Shape (n_halos, n_bins)
+        )
         summary_stats["all_true_gX"] = all_true_gX_ensemble  # Shape
-        summary_stats[
-            "kappa_true"
-        ] = kappa_true_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "lensed_shift"
-        ] = lensed_shift_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "radial_lensed_shift"
-        ] = radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "r_weighted_gT_matched"
-        ] = r_weighted_gT_matched_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "r_weighted_gX_matched"
-        ] = r_weighted_gX_matched_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "r_weighted_gT"
-        ] = r_weighted_gT_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "r_weighted_gX"
-        ] = r_weighted_gX_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "radial_lensed_shift"
-        ] = radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["kappa_true"] = (
+            kappa_true_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["lensed_shift"] = (
+            lensed_shift_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["radial_lensed_shift"] = (
+            radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["r_weighted_gT_matched"] = (
+            r_weighted_gT_matched_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["r_weighted_gX_matched"] = (
+            r_weighted_gX_matched_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["r_weighted_gT"] = (
+            r_weighted_gT_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["r_weighted_gX"] = (
+            r_weighted_gX_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["radial_lensed_shift"] = (
+            radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
+        )
         summary_stats["mean_dist"] = mean_dist_ensemble
-        summary_stats[
-            "median_match_dist"
-        ] = median_match_dist_ensemble  # Shape (n_halos, n_bins)
-        summary_stats[
-            "match_failure_rate"
-        ] = match_failure_rate_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["median_match_dist"] = (
+            median_match_dist_ensemble  # Shape (n_halos, n_bins)
+        )
+        summary_stats["match_failure_rate"] = (
+            match_failure_rate_ensemble  # Shape (n_halos, n_bins)
+        )
 
         summary_stats["mean_m00"] = m00_ensemble
         summary_stats["mean_m20"] = m20_ensemble

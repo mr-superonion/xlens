@@ -1,320 +1,393 @@
+#!/usr/bin/env python
+#
+# simple example with ring test (rotating intrinsic galaxies)
+# Copyright 20230916 Xiangchong Li.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+from typing import Any
+
 import galsim
+import lsst.afw.image as afwImage
+import lsst.afw.math as afwMath
+import lsst.meas.algorithms as meaAlg
+import lsst.pipe.base.connectionTypes as cT
 import numpy as np
+from lsst.afw.cameraGeom.testUtils import DetectorWrapper
+from lsst.meas.base import SkyMapIdGeneratorConfig
+from lsst.pex.config import Field, FieldValidationError
+from lsst.pipe.base import (
+    PipelineTask,
+    PipelineTaskConfig,
+    PipelineTaskConnections,
+    Struct,
+)
+from lsst.pipe.tasks.coaddBase import makeSkyInfo
+from lsst.skymap import BaseSkyMap
 
-SIM_INCLUSION_PADDING = 200
+from ..utils.random import (
+    gal_seed_base,
+    get_noise_seed,
+    num_rot,
+)
+from .defaults import (
+    mag_zero_defaults,
+    noise_variance_defaults,
+    psf_fwhm_defaults,
+    sys_npix,
+)
+from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
+from .noise import get_noise_array
 
 
-def get_objlist(*, galaxy_catalog, survey, star_catalog=None, noise=None):
-    """
-    get the objlist and shifts, possibly combining the galaxy catalog
-    with a star catalog
-
-    Parameters
-    ----------
-    galaxy_catalog: catalog
-        e.g. WLDeblendGalaxyCatalog
-    survey: descwl Survey
-        For the appropriate band
-    star_catalog: catalog
-        e.g. StarCatalog
-    noise: float
-        Needed for star catalog
-
-    Returns
-    -------
-    objlist, shifts
-        objlist is a list of galsim GSObject with transformations applied.
-        Shifts is an array with fields dx and dy for each object
-    """
-    gal_res = galaxy_catalog.get_objlist(
-        survey=survey,
+class MultibandSimConnections(
+    PipelineTaskConnections,
+    dimensions=("skymap", "tract", "patch", "band"),
+    defaultTemplates={
+        "coaddName": "deep",
+        "simCoaddName": "sim",
+        "mode": 0,
+        "rotId": 0,
+    },
+):
+    skymap = cT.Input(
+        doc="SkyMap to use in processing",
+        name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
+        storageClass="SkyMap",
+        dimensions=("skymap",),
+    )
+    truthCatalog = cT.Input(
+        doc="Output truth catalog",
+        name="{simCoaddName}_{mode}_rot{rotId}_Coadd_truthCatalog",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap", "tract"),
+    )
+    exposure = cT.Input(
+        doc="Input coadd exposure",
+        name="{coaddName}Coadd_calexp",
+        storageClass="ExposureF",
+        dimensions=("skymap", "tract", "patch", "band"),
+        multiple=False,
+        minimum=0,
+    )
+    noiseCorrImage = cT.Input(
+        doc="image for noise correlation function",
+        name="{coaddName}Coadd_systematics_noisecorr",
+        dimensions=("skymap", "tract"),
+        storageClass="ImageF",
+        multiple=False,
+        minimum=0,
+    )
+    psfImage = cT.Input(
+        doc="image for PSF model for simulation",
+        name="{coaddName}Coadd_systematics_psfcentered",
+        dimensions=("skymap", "tract", "patch", "band"),
+        storageClass="ImageF",
+        multiple=False,
+        minimum=0,
+    )
+    simExposure = cT.Output(
+        doc="Output simulated coadd exposure",
+        name="{simCoaddName}_{mode}_rot{rotId}_Coadd_calexp",
+        storageClass="ExposureF",
+        dimensions=("skymap", "tract", "patch", "band"),
     )
 
-    if star_catalog is not None:
-        assert noise is not None
-        star_res = star_catalog.get_objlist(
-            survey=survey, noise=noise,
-        )
-
-    else:
-        star_res = {
-            "star_objlist": None,
-            "star_shifts": None,
-            "bright_objlist": None,
-            "bright_shifts": None,
-            "bright_mags": None,
-        }
-    gal_res.update(star_res)
-    return gal_res
-
-res = get_objlist(
-    galaxy_catalog=galaxy_catalog,
-    survey=survey,
-    star_catalog=star_catalog,
-    noise=noise_for_gsparams,
-)
+    def __init__(self, *, config=None):
+        super().__init__(config=config)
 
 
-def get_bright_info_struct():
-    dt = [
-        ("ra", "f8"),
-        ("dec", "f8"),
-        ("radius_pixels", "f4"),
-        ("has_bleed", bool),
-    ]
-    return np.zeros(1, dtype=dt)
-
-
-def get_truth_info_struct():
-    dt = [
-        ("index", "i4"),
-        ("ra", "f8"),
-        ("dec", "f8"),
-        ("shift_x", "f8"),
-        ("shift_y", "f8"),
-        ("lensed_shift_x", "f8"),
-        ("lensed_shift_y", "f8"),
-        ("z", "f8"),
-        ("image_x", "f8"),
-        ("image_y", "f8"),
-        ("prelensed_image_x", "f8"),
-        ("prelensed_image_y", "f8"),
-        ("prelensed_ra", "f8"),
-        ("prelensed_dec", "f8"),
-        ("kappa", "f8"),
-        ("gamma1", "f8"),
-        ("gamma2", "f8"),]
-    return np.zeros(1, dtype=dt)
-
-
-def _roate_pos(pos, theta):
-    """Rotates coordinates by an angle theta
-
-    Args:
-        pos (PositionD):a galsim position
-        theta (float):  rotation angle [rads]
-    Returns:
-        x2 (ndarray):   rotated coordiantes [x]
-        y2 (ndarray):   rotated coordiantes [y]
-    """
-    x = pos.x
-    y = pos.y
-    cost = np.cos(theta)
-    sint = np.sin(theta)
-    x2 = cost * x - sint * y
-    y2 = sint * x + cost * y
-    return galsim.PositionD(x=x2, y=y2)
-
-
-def _draw_objects(
-    *,
-    image,
-    objlist,
-    shifts,
-    redshifts,
-    psf,
-    draw_method,
-    coadd_bbox_cen_gs_skypos,
-    rng,
-    shear_obj=None,
-    theta0=None,
-    indexes=None,
+class MultibandSimConfig(
+    PipelineTaskConfig,
+    pipelineConnections=MultibandSimConnections,
 ):
-    """
-    draw objects and return the input galaxy catalog.
 
-    Returns
-    -------
-        truth_info: structured array
-        fields are
-        index: index in the input galaxy catalog
-        ra, dec: sky position of input galaxies
-        z: redshift of input galaxies
-        image_x, image_y: image position of input galaxies
-    """
+    galaxy_type = Field[str](
+        doc="galaxy type",
+        default="catsim2017",
+    )
+    survey_name = Field[str](
+        doc="Name of the survey",
+        default="LSST",
+    )
+    include_pixel_masks = Field[bool](
+        doc="whether to include pixel masks in the simulation",
+        default=False,
+    )
+    draw_image_noise = Field[bool](
+        doc="Whether to draw image noise in the simulation",
+        default=False,
+    )
+    use_field_distortion = Field[bool](
+        doc="Whether to include field distortion when drawing objects",
+        default=False,
+    )
+    galId = Field[int](
+        doc="random seed index for galaxy, 0 <= galId < 10",
+        default=0,
+    )
+    rotId = Field[int](
+        doc="number of rotations",
+        default=0,
+    )
+    noiseId = Field[int](
+        doc="random seed index for noise, 0 <= noiseId < 10",
+        default=0,
+    )
+    use_real_psf = Field[bool](
+        doc="whether to use real PSF",
+        default=False,
+    )
+    truncate_stamp_size = Field[int](
+        doc="truncation size of stamps",
+        default=-1,
+    )
+    idGenerator = SkyMapIdGeneratorConfig.make_field()
 
-    wcs = image.wcs
-    kw = {}
-    if draw_method == "phot":
-        kw["maxN"] = 1_000_000
-        kw["rng"] = galsim.BaseDeviate(seed=rng.randint(low=0, high=2**30))
-
-    if redshifts is None:
-        # set redshifts to -1 if not sepcified
-        redshifts = np.ones(len(objlist)) * -1.0
-
-    if indexes is None:
-        # set input galaxy indexes to -1 if not sepcified
-        indexes = np.ones(len(objlist)) * -1.0
-
-    truth_info = []
-
-    for obj, shift, z, ind in zip(objlist, shifts, redshifts, indexes):
-
-        if theta0 is not None:
-            ang = theta0 * galsim.radians
-            # rotation on intrinsic galaxies comes before shear distortion
-            obj = obj.rotate(ang)
-            shift = _roate_pos(shift, theta0)
-
-        if shear_obj is not None:
-            distor_res = shear_obj.distort_galaxy(obj, shift, z)
-            obj = distor_res["gso"]
-            lensed_shift = distor_res["lensed_shift"]
-            gamma1 = distor_res["gamma1"]
-            gamma2 = distor_res["gamma2"]
-            kappa = distor_res["kappa"]
-        else:
-            lensed_shift = shift
-            gamma1, gamma2, kappa = 0.0, 0.0, 0.0
-
-        # Deproject from u,v onto sphere. Then use wcs to get to image pos.
-        world_pos = coadd_bbox_cen_gs_skypos.deproject(
-            lensed_shift.x * galsim.arcsec,
-            lensed_shift.y * galsim.arcsec,
-        )
-
-        image_pos = wcs.toImage(world_pos)
-
-        prelensed_world_pos = coadd_bbox_cen_gs_skypos.deproject(
-            shift.x * galsim.arcsec,
-            shift.y * galsim.arcsec,
-        )
-        prelensed_image_pos = wcs.toImage(prelensed_world_pos)
-
-        if (
-            (image.bounds.xmin - SIM_INCLUSION_PADDING) <
-            image_pos.x < (image.bounds.xmax + SIM_INCLUSION_PADDING)
-        ) and (
-            (image.bounds.ymin - SIM_INCLUSION_PADDING)
-            < image_pos.y < (image.bounds.ymax + SIM_INCLUSION_PADDING)
-        ):
-            local_wcs = wcs.local(image_pos=image_pos)
-            convolved_object = galsim.Convolve(obj, psf)
-            stamp = convolved_object.drawImage(
-                center=image_pos, wcs=local_wcs, method=draw_method, **kw
+    def validate(self):
+        super().validate()
+        if self.galId >= gal_seed_base or self.galId < 0:
+            raise FieldValidationError(
+                self.__class__.galId,
+                self,
+                "We require 0 <= galId < %d" % (gal_seed_base),
+            )
+        if self.rotId >= num_rot:
+            raise FieldValidationError(
+                self.__class__.rotId,
+                self,
+                "rotId needs to be smaller than 2",
+            )
+        if self.noiseId < 0:
+            raise FieldValidationError(
+                self.__class__.noiseId,
+                self,
+                "We require noiseId >=0 ",
+            )
+        if self.galaxy_type not in ["catsim2017", "RomanRubin2024"]:
+            raise FieldValidationError(
+                self.__class__.galaxy_type,
+                self,
+                "We require galaxy_type in ['catsim2017', 'RomanRubin2024']",
             )
 
-            b = stamp.bounds & image.bounds
-            if b.isDefined():
-                image[b] += stamp[b]
-
-        info = get_truth_info_struct()
-        info["index"] = (ind,)
-        info["ra"] = world_pos.ra / galsim.degrees
-        info["dec"] = world_pos.dec / galsim.degrees
-        info["shift_x"] = (shift.x,)
-        info["shift_y"] = (shift.y,)
-        info["lensed_shift_x"] = (lensed_shift.x,)
-        info["lensed_shift_y"] = (lensed_shift.y,)
-        info["z"] = (z,)
-        info["image_x"] = (image_pos.x - 1,)
-        info["image_y"] = (image_pos.y - 1,)
-        info["gamma1"] = (gamma1,)
-        info["gamma2"] = (gamma2,)
-        info["kappa"] = (kappa,)
-        info["prelensed_image_x"] = (prelensed_image_pos.x - 1,)
-        info["prelensed_image_y"] = (prelensed_image_pos.y - 1,)
-        info["prelensed_ra"] = (prelensed_world_pos.ra / galsim.degrees,)
-        info["prelensed_dec"] = (prelensed_world_pos.dec / galsim.degrees,)
-
-        truth_info.append(info)
-    return truth_info
+    def setDefaults(self):
+        super().setDefaults()
+        self.survey_name = self.survey_name.lower()
 
 
-def make_exp(
-    *,
-    rng,
-    gal_list,
-    shifts,
-    redshifts,
-    dim,
-    psf,
-    shear_obj,
-    coadd_bbox_cen_gs_skypos=None,
-    rotate=False,
-    draw_method="auto",
-    theta0=0.0,
-    pixel_scale=0.2,
-    calib_mag_zero=30.0,
-    indexes=None,
-    se_wcs=None,
-):
-    """
-    Make an Signle Exposure (SE) observation
+class MultibandSimTask(PipelineTask):
+    _DefaultName = "MultibandSimTask"
+    ConfigClass = MultibandSimConfig
 
-    Parameters
-    ----------
-    rng: numpy.random.RandomState
-        The random number generator
-    gal_list: list
-        List of GSObj
-    shifts: array
-        List of PositionD representing offsets
-    dim: int
-        Dimension of image
-    psf: GSObject or PowerSpectrumPSF
-        the psf
-    coadd_bbox_cen_gs_skypos: galsim.CelestialCoord, optional
-        The sky position of the center (origin) of the coadd we
-        will make, as a galsim object not stack object
-    theta0: float
-        rotation angle of intrinsic galaxies and positions [for ring test],
-        default 0, in units of radians
-    pixel_scale: float
-        pixel scale of single exposure in arcsec
-    calib_mag_zero: float
-        magnitude zero point after calibration
-    indexes: list
-        list of indexes in the input galaxy catalog, default: None
-    se_wcs: galsim WCS
-        wcs for single exposure, default: None
-    Returns
-    -------
-    gal_array: array of galaxy image
-    truth_info: structured array
-        fields are
-        index: index in the input catalog
-        ra, dec: sky position of input galaxies
-        z: redshift of input galaxies
-        image_x, image_y: image position of input galaxies
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        assert isinstance(self.config, MultibandSimConfig)
+        self.rotate_list = [np.pi / num_rot * i for i in range(num_rot)]
+        pass
 
-    """
-    # dims = [int(dim)] * 2
-    # cen = (np.array(dims) + 1) / 2
-    # se_origin = galsim.PositionD(x=cen[1], y=cen[0])
-    # se_wcs = make_se_wcs(
-    #     pixel_scale=pixel_scale,
-    #     image_origin=se_origin,
-    #     world_origin=coadd_bbox_cen_gs_skypos,
-    #     dither=dither,
-    #     dither_size=dither_size,
-    #     rotate=rotate,
-    #     rng=rng,
-    # )
-    # cen = se_wcs.crpix
-    # se_origin = galsim.PositionD(x=cen[1], y=cen[0])
-    # pixel_area = se_wcs.pixelArea(se_origin)
-    # if not (pixel_area - pixel_scale ** 2.0) < pixel_scale ** 2.0 / 100.0:
-    #     raise ValueError("The input se_wcs has wrong pixel scale")
+    def simulate_images(
+        self,
+        *,
+        catalog,
+        psf_obj,
+        tract_info,
+        patch_id: int,
+        band: str,
+        mag_zero: float,
+        draw_method: str = "auto",
+        **kwargs,
+    ):
+        assert isinstance(self.config, MultibandSimConfig)
+        if self.config.galaxy_type == "catsim2017":
+            GalClass = CatSim2017Catalog
+        elif self.config.galaxy_type == "RomanRubin2024":
+            GalClass = OpenUniverse2024RubinRomanCatalog
+        else:
+            raise ValueError("invalid galaxy_type")
+        galaxy_catalog = GalClass.from_array(
+            tract_info=tract_info,
+            table=catalog,
+            use_field_distortion=self.config.use_field_distortion,
+        )
+        if self.config.truncate_stamp_size <= 0:
+            nn_trunc = None
+        else:
+            nn_trunc = self.config.truncate_stamp_size
+        gal_array = galaxy_catalog.draw(
+            patch_id=patch_id,
+            psf_obj=psf_obj,
+            mag_zero=mag_zero,
+            band=band,
+            draw_method=draw_method,
+            nn_trunc=nn_trunc,
+        )
+        return gal_array
 
+    def runQuantum(self, butlerQC, inputRefs, outputRefs) -> None:
+        assert butlerQC.quantum.dataId is not None
+        inputs = butlerQC.get(inputRefs)
 
-    image = galsim.Image(dim, dim, wcs=se_wcs)
-    assert shifts is not None
-    truth_info = _draw_objects(
-        image=image,
-        objlist=gal_list,
-        shifts=shifts,
-        redshifts=redshifts,
-        psf=psf,
-        draw_method=draw_method,
-        coadd_bbox_cen_gs_skypos=coadd_bbox_cen_gs_skypos,
-        rng=rng,
-        shear_obj=shear_obj,
-        theta0=theta0,
-        indexes=indexes,
-    )
-    return {
-        "gal_array": image.array,
-        "truth_info": truth_info,
-    }
+        # band name
+        assert butlerQC.quantum.dataId is not None
+        band = butlerQC.quantum.dataId["band"]
+        patch_id = butlerQC.quantum.dataId["patch"]
+        inputs["band"] = band
+        inputs["patch_id"] = patch_id
+
+        # Get unique integer ID for IdFactory and RNG seeds; only the latter
+        # should really be used as the IDs all come from the input catalog.
+        idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
+        seed = idGenerator.catalog_id
+        inputs["seed"] = seed
+
+        skymap = butlerQC.get(inputRefs.skymap)
+        sky_info = makeSkyInfo(
+            skymap,
+            tractId=butlerQC.quantum.dataId["tract"],
+            patchId=butlerQC.quantum.dataId["patch"],
+        )
+        tract_info = sky_info.tractInfo
+        inputs["tract_info"] = tract_info
+
+        outputs = self.run(**inputs)
+        butlerQC.put(outputs, outputRefs)
+        return
+
+    def run(
+        self,
+        *,
+        tract_info,
+        patch_id: int,
+        band: str,
+        seed: int,
+        truthCatalog,
+        psfImage: afwImage.ImageF | None = None,
+        noiseCorrImage: afwImage.ImageF | None = None,
+        exposure: afwImage.ExposureF | None = None,
+        **kwargs,
+    ):
+        assert isinstance(self.config, MultibandSimConfig)
+        if self.config.use_real_psf:
+            if psfImage is None:
+                raise IOError("Do not have PSF input model")
+
+        # Prepare the random number generator and basic parameters
+        survey_name = self.config.survey_name
+
+        boundary_box = tract_info[patch_id].getOuterBBox()
+        wcs = tract_info.getWcs()
+        pixel_scale = wcs.getPixelScale().asArcseconds()
+
+        mag_zero = mag_zero_defaults[self.config.survey_name]
+        zero_flux = 10.0 ** (0.4 * mag_zero)
+        photo_calib = afwImage.makePhotoCalibFromCalibZeroPoint(zero_flux)
+
+        if exposure is not None:
+            self.log.debug("Using the real pixel mask")
+            mask_array = exposure.getMaskedImage().mask.array
+            assert mag_zero == 2.5 * np.log10(
+                exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()
+            )
+        else:
+            self.log.debug("Do not use the real pixel mask")
+            mask_array = 0.0
+
+        # Obtain PSF object for Galsim
+        if psfImage is not None and self.config.use_real_psf:
+            psf_galsim = galsim.InterpolatedImage(
+                galsim.Image(psfImage.getArray()),
+                scale=pixel_scale,
+                flux=1.0,
+            )
+            draw_method = "no_pixel"
+        else:
+            psf_fwhm = psf_fwhm_defaults[band][survey_name]
+            psf_galsim = galsim.Moffat(fwhm=psf_fwhm, beta=2.5)
+            psf_array = psf_galsim.drawImage(
+                nx=sys_npix,
+                ny=sys_npix,
+                scale=pixel_scale,
+                wcs=None,
+            ).array
+            psfImage = afwImage.ImageF(sys_npix, sys_npix)
+            assert psfImage is not None
+            psfImage.array[:, :] = psf_array
+            draw_method = "auto"
+
+        # and psf kernel for the LSST exposure
+        kernel = afwMath.FixedKernel(psfImage.convertD())
+        kernel_psf = meaAlg.KernelPsf(kernel)
+
+        galaxy_array = self.simulate_images(
+            catalog=truthCatalog,
+            psf_obj=psf_galsim,
+            tract_info=tract_info,
+            patch_id=patch_id,
+            band=band,
+            mag_zero=mag_zero,
+            draw_method=draw_method,
+        )
+
+        # Obtain Noise correlation array
+        if noiseCorrImage is None:
+            noise_corr = None
+            variance = noise_variance_defaults[band][survey_name]
+            self.log.debug("No correlation, variance:", variance)
+        else:
+            noise_corr = noiseCorrImage.getArray()
+            variance = np.amax(noise_corr)
+            noise_corr = noise_corr / variance
+            ny, nx = noise_corr.shape
+            assert noise_corr[ny // 2, nx // 2] == 1
+            self.log.debug("With correlation, variance:", variance)
+        noise_std = np.sqrt(variance)
+
+        exp_out = afwImage.ExposureF(boundary_box)
+        exp_out.getMaskedImage().image.array[:, :] = galaxy_array
+
+        exp_out.setPhotoCalib(photo_calib)
+        exp_out.setPsf(kernel_psf)
+        exp_out.setWcs(wcs)
+        exp_out.getMaskedImage().variance.array[:, :] = variance
+        filter_label = afwImage.FilterLabel(band=band, physical=band)
+        exp_out.setFilter(filter_label)
+        detector = DetectorWrapper().detector
+        exp_out.setDetector(detector)
+        del photo_calib, kernel_psf, filter_label, detector
+
+        if self.config.draw_image_noise:
+            galaxy_seed = seed * gal_seed_base + self.config.galId
+            seed_noise = get_noise_seed(
+                galaxy_seed=galaxy_seed,
+                noiseId=self.config.noiseId,
+                rotId=self.config.rotId,
+                band=band,
+                is_sim=True,
+            )
+            noise_array = get_noise_array(
+                seed_noise=seed_noise,
+                noise_std=noise_std,
+                noise_corr=noise_corr,
+                shape=galaxy_array.shape,
+                pixel_scale=pixel_scale,
+            )
+            exp_out.getMaskedImage().image.array[:, :] = (
+                exp_out.getMaskedImage().image.array[:, :] + noise_array
+            )
+            del noise_array
+        exp_out.getMaskedImage().mask.array[:, :] = mask_array
+        del mask_array, galaxy_array
+
+        outputs = Struct(
+            simExposure=exp_out,
+        )
+        return outputs

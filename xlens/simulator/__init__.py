@@ -1,15 +1,21 @@
 from . import (
-    wcs,
+    catalog,
+    defaults,
     galaxies,
-    multiband,
-    multiband_defaults,
+    layout,
+    noise,
     perturbation,
+    sim,
+    wcs,
 )
 
 __all__ = [
     "wcs",
-    "multiband",
+    "sim",
     "perturbation",
-    "multiband_defaults",
+    "defaults",
     "galaxies",
+    "layout",
+    "catalog",
+    "noise",
 ]

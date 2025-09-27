@@ -322,7 +322,7 @@ class matchPipe(PipelineTask):
         cat_ref = fitsio.read(
             os.path.join(os.environ["CATSIM_DIR"], "OneDegSq.fits")
         )
-        mag_mrc = cat_ref[mrc["index"]]["i_ab"]
+        mag_mrc = cat_ref[mrc["indices"]]["i_ab"]
         mrc = mrc[mag_mrc < self.config.mag_max_truth]
         x_mrc = np.array(mrc["image_x"])
         y_mrc = np.array(mrc["image_y"])
@@ -337,11 +337,11 @@ class matchPipe(PipelineTask):
         final_src = src[src_idx]
         final_mrc = mrc[mrc_idx]
         final_mrc = rfn.repack_fields(
-            final_mrc[["index", "z"]]
+            final_mrc[["indices", "redshift"]]
         )
         final_mrc = rfn.rename_fields(
             final_mrc,
-            {"z": "redshift", "index": "truth_index"}
+            {"indices": "truth_index"}
         )
 
         # Combine fields
@@ -371,12 +371,6 @@ class matchPipe(PipelineTask):
             catalog = self.merge_dm(catalog, dm_catalog, pixel_scale)
 
         if truth_catalog is not None:
-            # TODO: Will be removed
-            bbox = skyMap[tract][patch].getOuterBBox()
-            t = truth_catalog.copy()
-            t["image_x"] = bbox.beginX + t["image_x"]
-            t["image_y"] = bbox.beginY + t["image_y"]
-            # TODO: Will be removed
-            catalog = self.merge_truth(catalog, t, pixel_scale)
+            catalog = self.merge_truth(catalog, truth_catalog, pixel_scale)
 
         return Struct(catalog=catalog)

@@ -215,7 +215,7 @@ class SelBiasMultibandPipe(PipelineTask):
 
         # selection
         esq = src[en] ** 2 + src[en2] ** 2
-        msk = (src[fname] > flux_min) & (esq < emax)
+        msk = (src[fname] > flux_min) & (esq < emax ** 2.0)
         tmp = src[msk]
         ell = np.sum(tmp[en] * tmp[wname])
         res = np.sum(tmp[egn] * tmp[wname] + tmp[en] * tmp[wgname])
@@ -253,7 +253,7 @@ class SelBiasMultibandPipe(PipelineTask):
             res_sel = 0.0
         return ell, (res + res_sel)
 
-    def run(self, src00, src01, src10, src11):
+    def run(self, *, src00, src10, src01=None, src11=None, **kwargs):
         assert isinstance(self.config, SelBiasMultibandPipeConfig)
         ncuts = len(self.config.flux_cuts)
         em = np.zeros(ncuts)
@@ -264,9 +264,11 @@ class SelBiasMultibandPipe(PipelineTask):
         for ic, flux_min in enumerate(self.config.flux_cuts):
             ell00, res00 = self.measure_shear_flux_cut(src00, flux_min)
             ell10, res10 = self.measure_shear_flux_cut(src10, flux_min)
-            ell01, res01 = self.measure_shear_flux_cut(src01, flux_min)
-            ell11, res11 = self.measure_shear_flux_cut(src11, flux_min)
-
+            if (src01 is None) or (src11 is None):
+                ell01, res01, ell11, res11 = (0.0, 0.0, 0.0, 0.0)
+            else:
+                ell01, res01 = self.measure_shear_flux_cut(src01, flux_min)
+                ell11, res11 = self.measure_shear_flux_cut(src11, flux_min)
             em[ic] = ell00 + ell01
             ep[ic] = ell10 + ell11
             rm[ic] = res00 + res01
@@ -359,7 +361,7 @@ class SelBiasSummaryMultibandPipe(PipelineTask):
         self.run(**inputs)
         return
 
-    def run(self, summary_list):
+    def run(self, *, summary_list, **kwargs):
         assert isinstance(self.config, SelBiasSummaryMultibandPipeConfig)
         up1 = []
         up2 = []

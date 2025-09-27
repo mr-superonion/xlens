@@ -1,6 +1,5 @@
 import galsim
 import lsst.geom as geom
-import numpy as np
 from lsst.afw.geom import makeSkyWcs
 
 RAD2ASEC = 206264.80624709636
@@ -24,12 +23,12 @@ def make_galsim_tanwcs(tract_info):
     pix_center = skyWcs.skyToPixel(sky_center)
     x0 = pix_center.getX()
     y0 = pix_center.getY()
-    lin = skyWcs.linearizePixelToSky(sky_center, geom.radians)
-    J = np.array(lin.getLinear().getMatrix(), dtype=np.float64)
-    # Convert to arcsec/pixel for GalSim
-    J_arcsec = J * RAD2ASEC
+    # lin = skyWcs.linearizePixelToSky(sky_center, geom.radians)
+    # J = np.array(lin.getLinear().getMatrix(), dtype=np.float64)
+    # J_arcsec = J * RAD2ASEC
+    J_arcsec = skyWcs.getCdMatrix() * 3600
     aff = galsim.AffineTransform(
-        dudx=J_arcsec[0, 0], dudy=J_arcsec[0, 1],
+        dudx=-J_arcsec[0, 0], dudy=-J_arcsec[0, 1],
         dvdx=J_arcsec[1, 0], dvdy=J_arcsec[1, 1],
         origin=galsim.PositionD(x0, y0),
     )
@@ -61,9 +60,7 @@ def make_dm_wcs(wcs_gs):
     if wcs_gs.wcs_type == 'TAN':
         crpix = wcs_gs.crpix
         stack_crpix = geom.Point2D(crpix[0], crpix[1])
-        cd_matrix = wcs_gs.jacobian(
-            galsim.PositionD(crpix[0], crpix[1])
-        ).getMatrix() / 3600.0
+        cd_matrix = wcs_gs.cd
 
         crval = geom.SpherePoint(
             wcs_gs.center.ra.rad,

@@ -6,6 +6,4 @@ astropy
 fitsio
 lenstronomy
 matplotlib
-metadetect
 anacal==0.6.3
-lsstdesc-wl-shear-sims==0.4.5

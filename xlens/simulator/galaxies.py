@@ -4,9 +4,14 @@ from abc import ABC, abstractmethod
 from typing import Any, Iterable
 
 import galsim
+import lsst
 import numpy as np
 from astropy.table import Table
-from descwl_shear_sims.layout import Layout
+
+from .layout import Layout
+from .wcs import make_galsim_tanwcs
+
+SIM_INCLUSION_PADDING = 200  # pixels
 
 
 @functools.lru_cache(maxsize=8)
@@ -21,31 +26,37 @@ class BaseGalaxyCatalog(ABC):
     Subclasses must implement:
       - _read_catalog(...)
       - _compute_density(cat)
-      - _generate_galaxy(survey, entry)
+      - _generate_galaxy(entry, mag_zero, band, **kwargs)
     Optionally override:
       - _probabilities_for_sampling(cat) -> Optional[np.ndarray]
-      - _get_redshift(index, entry) -> float
     """
 
     def __init__(
         self,
         *,
         rng: np.random.RandomState,
-        layout: Layout | str = "random",
-        coadd_dim: int | None = None,
-        buff: int | None = None,
-        pixel_scale: float = 0.2,
+        tract_info: lsst.skymap.tractInfo.ExplicitTractInfo,
+        layout_name: str,
+        sep_arcsec: float | None = None,
+        indice_id: int | None = None,
         select_observable: list[str] | str | None = None,
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
-        sep: float | None = None,
-        indice_id: int | None = None,
-        simple_coadd_bbox: bool = False,
+        use_field_distortion: bool = False,
+        extend_ratio: float = 1.08,
     ):
-        self.gal_type = "wldeblend"
-        self.rng = rng
-
-        # subclass: read & (optionally) filter the catalog
+        self.prepare_tract_info(tract_info, use_field_distortion)
+        wcs = tract_info.getWcs()
+        ps = float(wcs.getPixelScale().asArcseconds())
+        self.pixel_scale = ps
+        bbox = tract_info.getBBox()
+        layout = Layout(
+            layout_name=layout_name,
+            wcs=wcs,
+            boundary_box=bbox,
+            sep_arcsec=sep_arcsec,
+            extend_ratio=extend_ratio,
+        )
         self.input_catalog = self._read_catalog(
             select_observable=select_observable,
             select_lower_limit=select_lower_limit,
@@ -54,39 +65,65 @@ class BaseGalaxyCatalog(ABC):
 
         # density drives how many objects the layout will place
         density = self._compute_density(self.input_catalog)
-
-        # layout construction
-        if isinstance(layout, str):
-            self.layout = Layout(
-                layout_name=layout,
-                coadd_dim=coadd_dim,
-                buff=0 if buff is None else buff,
-                pixel_scale=pixel_scale,
-                simple_coadd_bbox=simple_coadd_bbox,
-            )
-        else:
-            assert isinstance(layout, Layout)
-            self.layout = layout
-
         # positions to place galaxies
-        self.shifts_array = self.layout.get_shifts(
-            rng=rng, density=density, sep=sep
+        shifts_array = layout.get_shifts(
+            rng=rng, density=density
         )
 
         # choose which catalog rows populate those positions
-        num = len(self)
+        num = len(shifts_array)
         probs = self._probabilities_for_sampling(self.input_catalog)
+        catalog_size = len(self.input_catalog)
         if indice_id is None:
-            self.indices = self._draw_indices(
-                num, len(self.input_catalog), probs,
-            )
+            integers = np.arange(0, catalog_size, dtype=int)
+            indices = rng.choice(integers, size=num, p=probs)
         else:
-            self.indices = self._block_indices(
-                num, len(self.input_catalog), indice_id,
+            indice_min = indice_id * num
+            indice_max = indice_min + num
+            if indice_min >= catalog_size:
+                raise ValueError("indice_min too large")
+            indices = (
+                np.arange(indice_min, indice_max, dtype=int) % catalog_size
             )
-
         # random orientation for each placed galaxy
-        self.angles = self.rng.uniform(low=0.0, high=360.0, size=num)
+        angles = rng.uniform(low=0.0, high=360.0, size=num)
+        self.dtype = [
+            ("indices", "i8"),
+            ("redshift", "f8"),
+            ("angles", "f8"),
+            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),
+            ("dx", "f8"), ("dy", "f8"),
+            ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec
+            ("image_x", "f8"), ("image_y", "f8"),
+            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),
+            ("has_finite_shear", "bool"),
+        ]
+        self.data = np.zeros(num, dtype=self.dtype)
+        self.data["dx"] = shifts_array["dx"]
+        self.data["dy"] = shifts_array["dy"]
+        self.data["indices"] = indices
+        self.data["angles"] = angles
+        self.lensed = False
+        self.data["prelensed_image_x"] = self.x_center + self.data["dx"] / ps
+        self.data["prelensed_image_y"] = self.y_center + self.data["dy"] / ps
+        self.data["image_x"] = self.x_center + self.data["dx"] / ps
+        self.data["image_y"] = self.y_center + self.data["dy"] / ps
+        self.data["has_finite_shear"] = np.ones(num, dtype=bool)
+        self.data["redshift"] = self.input_catalog["redshift"][indices]
+        return
+
+    def set_z_source(self, redshift):
+        self.data["redshift"][:] = redshift
+        return
+
+    def prepare_tract_info(self, tract_info, use_field_distortion):
+        self.tract_info = tract_info
+        bbox = tract_info.getBBox()   # lsst.geom.Box2I
+        center_pix = bbox.getCenter()
+        self.x_center = center_pix.getX()
+        self.y_center = center_pix.getY()
+        self.use_field_distortion = use_field_distortion
+        return
 
     # ---------- required subclass hooks ----------
 
@@ -106,7 +143,9 @@ class BaseGalaxyCatalog(ABC):
         """Return object surface density in objects / arcmin^2."""
 
     @abstractmethod
-    def _generate_galaxy(self, *, survey: Any, entry: Any) -> galsim.GSObject:
+    def _generate_galaxy(
+        self, *, entry: Any, mag_zero: float, band: str, **kwargs
+    ) -> galsim.GSObject:
         """Build and return a GalSim GSObject from one catalog entry."""
 
 
@@ -114,64 +153,185 @@ class BaseGalaxyCatalog(ABC):
         """Optional per-row sampling probabilities. Default: None (uniform)."""
         return None
 
-    def _get_redshift(self, index: int, entry: Any) -> float:
-        """Default redshift accessor tries two common patterns."""
-        # try both column-access styles
-        try:
-            return entry["redshift"]
-        except Exception:
-            return self.input_catalog["redshift"][index]
-
     def __len__(self) -> int:
-        return len(self.shifts_array)
+        return len(self.data)
 
-    def _draw_indices(
-        self, num: int, catalog_size: int, probs: np.ndarray | None
-    ) -> np.ndarray:
-        integers = np.arange(0, catalog_size, dtype=int)
-        return self.rng.choice(integers, size=num, p=probs)
+    @classmethod
+    def from_array(
+        cls,
+        *,
+        table: np.ndarray,
+        tract_info: lsst.skymap.tractInfo.ExplicitTractInfo,
+        select_observable: list[str] | str | None = None,
+        select_lower_limit: Iterable[float] | None = None,
+        select_upper_limit: Iterable[float] | None = None,
+        use_field_distortion: bool = False,
+    ) -> "BaseGalaxyCatalog":
+        """
+        Build a catalog directly from a table structured array.
 
-    def _block_indices(
-        self, num: int, catalog_size: int, indice_id: int
-    ) -> np.ndarray:
-        indice_min = indice_id * num
-        indice_max = indice_min + num
-        if indice_min >= catalog_size:
-            raise ValueError("indice_min too large")
-        return (np.arange(indice_min, indice_max, dtype=int) % catalog_size)
+        Parameters
+        ----------
+        table : np.ndarray
+            Structured array with columns 'dx', 'dy', 'indices', 'angles'.
+        select_observable, select_lower_limit, select_upper_limit
+            Passed to _read_catalog(...) so subclasses can load/filter
+            input_catalog.
+        """
+        # Create instance without running __init__
+        self = cls.__new__(cls)
+        self.prepare_tract_info(tract_info, use_field_distortion)
+        wcs = tract_info.getWcs()
+        self.pixel_scale = float(wcs.getPixelScale().asArcseconds())
 
-    def get_objlist(self, *, survey: Any) -> dict[str, list]:
+        # Load catalog (subclass hook)
+        self.input_catalog = self._read_catalog(
+            select_observable=select_observable,
+            select_lower_limit=select_lower_limit,
+            select_upper_limit=select_upper_limit,
+        )
+
+        # Validate fields
+        for col in ("dx", "dy", "indices", "angles"):
+            if col not in table.dtype.names:
+                raise ValueError(
+                    f"Missing required column '{col}' in table array"
+                )
+        input_size = len(self.input_catalog)
+        if (
+            (table["indices"] < 0).any() or
+            (table["indices"] >= input_size).any()
+        ):
+            raise IndexError(
+                "Indices in table array out of range for input_catalog"
+            )
+        self.data = table
+        self.lensed = False
+        return self
+
+    def rotate(self, theta, degrees=False):
+        """Rotate by an angle theta (radians)."""
+        if self.lensed:
+            raise ValueError("Cannot rotate a lensed catalog")
+        if degrees:
+            theta = theta / np.pi * 180.0
+
+        c, s = np.cos(theta), np.sin(theta)
+        x = c * self.data["dx"] - s * self.data["dy"]
+        y = s * self.data["dx"] + c * self.data["dy"]
+        self.data["dx"] = x
+        self.data["dy"] = y
+        self.data["angles"] = self.data["angles"] + theta
+        ps = self.pixel_scale
+        self.data["prelensed_image_x"] = self.x_center + self.data["dx"] / ps
+        self.data["prelensed_image_y"] = self.y_center + self.data["dy"] / ps
+        self.data["image_x"] = self.x_center + self.data["dx"] / ps
+        self.data["image_y"] = self.y_center + self.data["dy"] / ps
+        wcs = self.tract_info.getWcs()
+        ra, dec = wcs.pixelToSkyArray(
+            x=self.data["image_x"],
+            y=self.data["image_y"],
+            degrees=True,
+        )
+        self.data["ra"] = ra
+        self.data["dec"] = dec
+        return
+
+    def lens(self, shear_obj):
+        if self.lensed:
+            raise ValueError("Cannot lens a lensed catalog")
+        ps = self.pixel_scale
+        self.data["prelensed_image_x"] = self.x_center + self.data["dx"] / ps
+        self.data["prelensed_image_y"] = self.y_center + self.data["dy"] / ps
+        num = len(self.data)
+        for _ in range(num):
+            src = self.data[_]
+            distort_res = shear_obj.distort_galaxy(src)
+            self.data[_]["dx"] = distort_res["dx"]
+            self.data[_]["dy"] = distort_res["dy"]
+            self.data[_]["gamma1"] = distort_res["gamma1"]
+            self.data[_]["gamma2"] = distort_res["gamma2"]
+            self.data[_]["kappa"] = distort_res["kappa"]
+            self.data[_]["has_finite_shear"] = distort_res["has_finite_shear"]
+        self.data["image_x"] = self.x_center + self.data["dx"] / ps
+        self.data["image_y"] = self.y_center + self.data["dy"] / ps
+        wcs = self.tract_info.getWcs()
+        ra, dec = wcs.pixelToSkyArray(
+            x=self.data["image_x"],
+            y=self.data["image_y"],
+            degrees=True,
+        )
+        self.data["ra"] = ra
+        self.data["dec"] = dec
+        self.lensed = True
+        return
+
+    def get_obj(self, *, ind, mag_zero: float, band: str) -> dict[str, list]:
         """
         Returns
         -------
-        {
-          "objlist": [GSObject, ...],
-          "shifts":  [galsim.PositionD, ...],
-          "redshifts": [float, ...],
-          "indexes": [int, ...],
-        }
         """
-        sarray = self.shifts_array
-        objlist, shifts, redshifts, indexes = [], [], [], []
+        src = self.data[ind]
+        entry = self.input_catalog[src["indices"]]
+        gal = self._generate_galaxy(
+            entry=entry, mag_zero=mag_zero, band=band,
+        ).rotate(
+            src["angles"] * galsim.radians
+        )
+        gamma1, gamma2, kappa = src["gamma1"], src["gamma2"], src["kappa"]
+        g1 = gamma1 / (1 - kappa)
+        g2 = gamma2 / (1 - kappa)
+        mu = 1.0 / ((1 - kappa) ** 2 - gamma1**2 - gamma2**2)
+        gal = gal.lens(g1=g1, g2=g2, mu=mu)
+        return gal
 
-        for i in range(len(self)):
-            idx = self.indices[i]
-            entry = self.input_catalog[idx]
-            gal = self._generate_galaxy(survey=survey, entry=entry).rotate(
-                self.angles[i] * galsim.degrees
-            )
-
-            objlist.append(gal)
-            shifts.append(galsim.PositionD(sarray["dx"][i], sarray["dy"][i]))
-            redshifts.append(self._get_redshift(idx, entry))
-            indexes.append(idx)
-
-        return {
-            "objlist": objlist,
-            "shifts": shifts,
-            "redshifts": redshifts,
-            "indexes": indexes,
-        }
+    def draw(
+        self, *, patch_id,
+        psf_obj, mag_zero, band,
+        draw_method="auto",
+        nn_trunc=None,
+    ):
+        patch_info = self.tract_info[patch_id]
+        outer_bbox = patch_info.getOuterBBox()
+        xmin = outer_bbox.getMinX()
+        ymin = outer_bbox.getMinY()
+        xmax = outer_bbox.getMaxX()
+        ymax = outer_bbox.getMaxY()
+        width = outer_bbox.getWidth()
+        height = outer_bbox.getHeight()
+        wcs_gs = make_galsim_tanwcs(self.tract_info)
+        image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
+        for i, src in enumerate(self.data):
+            if (
+                (xmin - SIM_INCLUSION_PADDING) <
+                src["image_x"] < (xmax + SIM_INCLUSION_PADDING)
+            ) and (
+                (ymin - SIM_INCLUSION_PADDING)
+                < src["image_y"] < (ymax + SIM_INCLUSION_PADDING)
+            ) and src["has_finite_shear"]:
+                image_pos = galsim.PositionD(
+                    x=src["image_x"], y=src["image_y"]
+                )
+                gal_obj = self.get_obj(
+                    ind=i, mag_zero=mag_zero, band=band
+                )
+                convolved_object = galsim.Convolve([gal_obj, psf_obj])
+                if self.use_field_distortion:
+                    local_wcs = wcs_gs.local(image_pos=image_pos)
+                    stamp = convolved_object.drawImage(
+                        center=image_pos, wcs=local_wcs, method=draw_method,
+                        nx=nn_trunc, ny=nn_trunc,
+                    )
+                else:
+                    stamp = convolved_object.drawImage(
+                        center=image_pos, wcs=None, method=draw_method,
+                        scale=self.pixel_scale,
+                        nx=nn_trunc, ny=nn_trunc,
+                    )
+                b = stamp.bounds & image.bounds
+                if b.isDefined():
+                    image[b] += stamp[b]
+        return image.array
 
 
 # --------------------------------------------
@@ -245,10 +405,11 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
                 return p / p_sum
         return None
 
-    def _generate_galaxy(self, *, survey, entry) -> galsim.GSObject:
-        band = survey.filter_band
+    def _generate_galaxy(
+        self, *, entry, mag_zero, band, **kwargs,
+    ) -> galsim.GSObject:
         ab_magnitude = entry[band + "_ab"]
-        total_flux = survey.get_flux(ab_magnitude)
+        total_flux = 10 ** ((mag_zero - ab_magnitude) / 2.5)
 
         # split flux among components
         total_fluxnorm = (
@@ -271,7 +432,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             hlr_d = np.sqrt(max(a_d, 0.0) * max(b_d, 0.0))
             q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(entry["pa_disk"])
-            disk = galsim.Exponential(flux=disk_flux, half_light_radius=hlr_d).shear(
+            disk = galsim.Exponential(
+                flux=disk_flux, half_light_radius=hlr_d
+            ).shear(
                 q=q_d, beta=beta_d * galsim.radians
             )
             components.append(disk)
@@ -369,14 +532,16 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         )
         return len(cat) / area_tot_arcmin
 
-    def _generate_galaxy(self, *, survey, entry) -> galsim.GSObject:
+    def _generate_galaxy(
+        self, *, entry, mag_zero, band, survey_name, **kwargs,
+    ) -> galsim.GSObject:
         """
         entry is a row of the columnar table (supports dict-like access).
         """
-        band = survey.filter_band
-        sname = survey.descwl_survey.survey_name.lower()
-        if sname == "hsc":
+        if survey_name == "hsc":
             sname = "lsst"
+        else:
+            sname = survey_name
 
         bulge_hlr = entry["spheroidHalfLightRadiusArcsec"]
         disk_hlr = entry["diskHalfLightRadiusArcsec"]
@@ -388,7 +553,7 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         )
 
         mag = entry[f"{sname}_mag_{band}"]
-        flux = survey.get_flux(mag)
+        flux = 10 ** ((mag_zero - mag) / 2.5)
         bulge_frac = entry[f"{sname}_bulgefrac_{band}"]
 
         bulge = galsim.Sersic(
