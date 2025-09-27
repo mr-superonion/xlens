@@ -181,6 +181,26 @@ class LsstPsf(anacal.psf.BasePsf):
         return this_psf
 
 
+def truncate_square(arr: NDArray, rcut: int) -> None:
+    """Truncate the input array with square
+
+    Args:
+    arr (ndarray): image array
+    rcut (int): radius of the square (width / 2)
+    """
+    if len(arr.shape) != 2 or arr.shape[0] != arr.shape[1]:
+        raise ValueError("Input array must be a 2D square array")
+    npix = arr.shape[0]
+    npix2 = npix // 2
+    assert rcut < npix2, "truncation radius too large."
+    if rcut < npix2 - 1:
+        arr[: npix2 - rcut, :] = 0
+        arr[npix2 + rcut + 1 :, :] = 0
+        arr[:, : npix2 - rcut] = 0
+        arr[:, npix2 + rcut + 1 :] = 0
+    return
+
+
 def get_psf_array(
     *,
     lsst_psf,
@@ -253,7 +273,7 @@ def get_psf_array(
 
     out /= ncount
     psf_rcut = npix // 2 - 2
-    anacal.fpfs.base.truncate_square(out, psf_rcut)
+    truncate_square(out, psf_rcut)
     return out
 
 
