@@ -162,7 +162,7 @@ for i in range(istart, iend):
     )
     catalog = det_task.anacal.run(**prep)
     fitsio.write(
-        os.path.join(outdir, "cat-%05d.fits" % sim_seed),
+        os.path.join(outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)),
         catalog,
     )
     # clean up
