@@ -88,15 +88,15 @@ class BaseGalaxyCatalog(ABC):
         # random orientation for each placed galaxy
         angles = rng.uniform(low=0.0, high=360.0, size=num)
         self.dtype = [
-            ("indices", "i8"),
-            ("redshift", "f8"),
-            ("angles", "f8"),
-            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),
-            ("dx", "f8"), ("dy", "f8"),
-            ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec
-            ("image_x", "f8"), ("image_y", "f8"),
-            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),
-            ("has_finite_shear", "bool"),
+            ("indices", "i8"),                     # index in the input catalog
+            ("redshift", "f8"),                    # galaxy redshift
+            ("angles", "f8"),                     # rotation angle [radians]
+            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),    # lensing distortion
+            ("dx", "f8"), ("dy", "f8"),        # shifts from center of tract [arcsec]
+            ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec [degrees]
+            ("image_x", "f8"), ("image_y", "f8"),    # post-lensed position on the tract plane [pixel]
+            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),    # pre-lensed position on the tract plane [pixel]
+            ("has_finite_shear", "bool"),    # is the shear a finite number [bool]
         ]
         self.data = np.zeros(num, dtype=self.dtype)
         self.data["dx"] = shifts_array["dx"]
