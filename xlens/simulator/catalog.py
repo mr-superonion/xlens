@@ -96,6 +96,28 @@ class CatalogConfig(
         doc="ratio of padded coverage length of galaxy catalog",
         default=1.08,
     )
+    select_observable = ListField[str](
+        doc=(
+            "Optional catalog observable names used to filter galaxies. "
+            "When provided, each name is paired with the corresponding "
+            "lower and/or upper limits."
+        ),
+        default=[],
+    )
+    select_lower_limit = ListField[float](
+        doc=(
+            "Lower limits for the observables listed in ``select_observable``. "
+            "Leave empty to disable minimum filtering for a quantity."
+        ),
+        default=[],
+    )
+    select_upper_limit = ListField[float](
+        doc=(
+            "Upper limits for the observables listed in ``select_observable``. "
+            "Leave empty to disable maximum filtering for a quantity."
+        ),
+        default=[],
+    )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
@@ -118,6 +140,34 @@ class CatalogConfig(
                 self,
                 "We require galaxy_type in ['catsim2017', 'RomanRubin2024']",
             )
+        lists = {
+            "select_observable": self.select_observable,
+            "select_lower_limit": self.select_lower_limit,
+            "select_upper_limit": self.select_upper_limit,
+        }
+
+        def _is_empty(value):
+            return value is None or len(value) == 0
+
+        if any(not _is_empty(v) for v in lists.values()):
+            if _is_empty(self.select_observable):
+                raise FieldValidationError(
+                    self.__class__.select_observable,
+                    self,
+                    "select_observable must be provided when selection limits "
+                    "are specified.",
+                )
+
+            lengths = {
+                len(v) for v in lists.values() if not _is_empty(v)
+            }
+            if len(lengths) > 1:
+                raise FieldValidationError(
+                    self.__class__.select_observable,
+                    self,
+                    "select_observable, select_lower_limit, and "
+                    "select_upper_limit must have identical lengths.",
+                )
 
     def setDefaults(self):
         super().setDefaults()
@@ -158,12 +208,43 @@ class CatalogTask(PipelineTask):
             raise ValueError("invalid galaxy_type")
 
         rng = np.random.RandomState(seed)
+        select_observable = (
+            list(self.config.select_observable)
+            if self.config.select_observable is not None
+            else []
+        )
+        select_lower_limit = (
+            list(self.config.select_lower_limit)
+            if self.config.select_lower_limit is not None
+            else []
+        )
+        select_upper_limit = (
+            list(self.config.select_upper_limit)
+            if self.config.select_upper_limit is not None
+            else []
+        )
+
         galaxy_catalog = GalClass(
             rng=rng,
             tract_info=tract_info,
             layout_name=self.config.layout,
             sep_arcsec=self.config.sep_arcsec,
             extend_ratio=self.config.extend_ratio,
+            select_observable=(
+                select_observable
+                if select_observable
+                else None
+            ),
+            select_lower_limit=(
+                select_lower_limit
+                if select_lower_limit
+                else None
+            ),
+            select_upper_limit=(
+                select_upper_limit
+                if select_upper_limit
+                else None
+            ),
         )
         return galaxy_catalog
 
