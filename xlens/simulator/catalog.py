@@ -253,6 +253,12 @@ class CatalogShearTaskConfig(
     def validate(self):
         super().validate()
         n_zbins = len(self.z_bounds) - 1
+        if n_zbins < 1:
+            raise FieldValidationError(
+                self.__class__.z_bounds,
+                self,
+                "number of redshif bins: %d is less than 1" % n_zbins,
+            )
         mode_max = 3 ** (n_zbins)
         if self.mode >= mode_max:
             raise FieldValidationError(
