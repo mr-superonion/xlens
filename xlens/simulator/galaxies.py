@@ -86,7 +86,7 @@ class BaseGalaxyCatalog(ABC):
                 np.arange(indice_min, indice_max, dtype=int) % catalog_size
             )
         # random orientation for each placed galaxy
-        angles = rng.uniform(low=0.0, high=360.0, size=num)
+        angles = rng.uniform(low=0.0, high=2.0*np.pi, size=num)
         self.dtype = [
             ("indices", "i8"),                     # index in the input catalog
             ("redshift", "f8"),                    # galaxy redshift
