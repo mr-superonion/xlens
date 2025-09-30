@@ -53,6 +53,8 @@ from .defaults import (
     psf_fwhm_defaults,
     sys_npix,
 )
+from .bat import draw_ia
+from .wcs import make_galsim_tanwcs
 from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
 from .noise import get_noise_array
 
@@ -455,3 +457,172 @@ class MultibandSimTask(PipelineTask):
             simExposure=exp_out,
         )
         return outputs
+
+
+class IASimConnections(MultibandSimConnections):
+    """Butler connections for :class:`IASimTask`.
+
+    The intrinsic-alignment simulator uses the same datasets as
+    :class:`MultibandSimTask` so this subclass only exists for clarity.
+    """
+
+
+class IASimConfig(MultibandSimConfig):
+    """Configuration for :class:`IASimTask` including IA parameters."""
+
+    pipelineConnections = IASimConnections
+
+    ia_amplitude = Field[float](
+        doc="Amplitude of the BATSim intrinsic-alignment distortion.",
+        default=0.0,
+    )
+    ia_beta = Field[float](
+        doc="Beta parameter passed to the BATSim IA transform.",
+        default=0.0,
+    )
+    ia_phi = Field[float](
+        doc="Orientation angle (radians) for the IA distortion field.",
+        default=0.0,
+    )
+    ia_clip_radius = Field[float](
+        doc="Clip radius in units of half-light radii for the IA transform.",
+        default=3.0,
+    )
+    ia_stamp_size = Field[int](
+        doc="Size (pixels) of the postage stamp drawn with BATSim.",
+        default=96,
+    )
+
+    def validate(self):  # noqa: D401
+        super().validate()
+        if self.ia_stamp_size <= 0:
+            raise FieldValidationError(
+                self.__class__.ia_stamp_size,
+                self,
+                "We require ia_stamp_size to be a positive integer.",
+            )
+
+
+class IASimTask(MultibandSimTask):
+    """Task that draws coadds using intrinsic-alignment distortions."""
+
+    _DefaultName = "IASimTask"
+    ConfigClass = IASimConfig
+
+    def simulate_images(
+        self,
+        *,
+        catalog,
+        psf_obj,
+        tract_info,
+        patch_id: int,
+        band: str,
+        mag_zero: float,
+        draw_method: str = "auto",
+        **kwargs,
+    ):
+        """Render galaxies with BATSim intrinsic-alignment distortions."""
+
+        assert isinstance(self.config, IASimConfig)
+        try:  # pragma: no cover - optional dependency
+            import batsim  # noqa: F401
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "IASimTask requires the optional 'batsim' dependency."
+            ) from exc
+
+        if self.config.galaxy_type == "catsim2017":
+            GalClass = CatSim2017Catalog
+        elif self.config.galaxy_type == "RomanRubin2024":
+            GalClass = OpenUniverse2024RubinRomanCatalog
+        else:  # pragma: no cover - defensive
+            raise ValueError("invalid galaxy_type")
+
+        galaxy_catalog = GalClass.from_array(
+            tract_info=tract_info,
+            table=catalog,
+            use_field_distortion=self.config.use_field_distortion,
+        )
+
+        if self.config.truncate_stamp_size <= 0:
+            nn_trunc = None
+        else:
+            nn_trunc = self.config.truncate_stamp_size
+
+        return self._draw_catalog_with_ia(
+            galaxy_catalog=galaxy_catalog,
+            patch_id=patch_id,
+            psf_obj=psf_obj,
+            mag_zero=mag_zero,
+            band=band,
+            draw_method=draw_method,
+            nn_trunc=nn_trunc,
+        )
+
+    def _draw_catalog_with_ia(
+        self,
+        *,
+        galaxy_catalog,
+        patch_id: int,
+        psf_obj,
+        mag_zero: float,
+        band: str,
+        draw_method: str,
+        nn_trunc,
+    ):
+        if self.config.use_field_distortion:
+            raise RuntimeError(
+                "IASimTask does not yet support use_field_distortion=True."
+            )
+
+        patch_info = galaxy_catalog.tract_info[patch_id]
+        outer_bbox = patch_info.getOuterBBox()
+        xmin = outer_bbox.getMinX()
+        ymin = outer_bbox.getMinY()
+        xmax = outer_bbox.getMaxX()
+        ymax = outer_bbox.getMaxY()
+        width = outer_bbox.getWidth()
+        height = outer_bbox.getHeight()
+
+        wcs_gs = make_galsim_tanwcs(galaxy_catalog.tract_info)
+        image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
+
+        stamp_size = nn_trunc if nn_trunc is not None else self.config.ia_stamp_size
+        if stamp_size <= 0:
+            raise RuntimeError("Intrinsic-alignment stamp size must be positive.")
+
+        for i, src in enumerate(galaxy_catalog.data):
+            if (
+                (xmin - SIM_INCLUSION_PADDING)
+                < src["image_x"]
+                < (xmax + SIM_INCLUSION_PADDING)
+            ) and (
+                (ymin - SIM_INCLUSION_PADDING)
+                < src["image_y"]
+                < (ymax + SIM_INCLUSION_PADDING)
+            ) and src["has_finite_shear"]:
+                image_pos = galsim.PositionD(
+                    x=src["image_x"], y=src["image_y"]
+                )
+                gal_obj = galaxy_catalog.get_obj(
+                    ind=i, mag_zero=mag_zero, band=band
+                )
+                stamp = draw_ia(
+                    amplitude=self.config.ia_amplitude,
+                    beta=self.config.ia_beta,
+                    phi=self.config.ia_phi,
+                    clip_radius=self.config.ia_clip_radius,
+                    stamp_size=stamp_size,
+                    gal_obj=gal_obj,
+                    psf_obj=psf_obj,
+                    image_pos=image_pos,
+                    draw_method=draw_method,
+                    pixel_scale=galaxy_catalog.pixel_scale,
+                    nn_trunc=nn_trunc,
+                    entry=src,
+                )
+                b = stamp.bounds & image.bounds
+                if b.isDefined():
+                    image[b] += stamp[b]
+
+        return image.array
