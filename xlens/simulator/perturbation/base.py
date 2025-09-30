@@ -27,7 +27,7 @@ class BasePerturbation:
     on :meth:`distort_galaxy` for catalog updates.
     """
 
-    def distort_galaxy(self, src: Any) -> dict[str, Any]:  # pragma: no cover - interface definition
+    def distort_galaxy(self, src: Any) -> dict[str, Any]:  # pragma: no cover
         """Return the distorted position and shear information for a galaxy.
 
         Parameters
@@ -50,7 +50,9 @@ class BasePerturbation:
     # NOTE: The ``entry`` argument is unused in the default implementation but
     # is provided so that subclasses have access to the full catalog record if
     # needed for bespoke drawing logic.
-    def apply_to_galaxy(self, gal_obj: galsim.GSObject, *, source_row, entry) -> galsim.GSObject:
+    def apply_to_galaxy(
+        self, gal_obj: galsim.GSObject, *, source_row, entry
+    ) -> galsim.GSObject:
         """Apply the stored shear values to the ``galsim`` object.
 
         Parameters
@@ -97,7 +99,9 @@ class BasePerturbation:
         using GalSim's standard routines.
         """
 
-        distorted = self.apply_to_galaxy(gal_obj, source_row=source_row, entry=entry)
+        distorted = self.apply_to_galaxy(
+            gal_obj, source_row=source_row, entry=entry,
+        )
         convolved_object = galsim.Convolve([distorted, psf_obj])
         if local_wcs is not None:
             stamp = convolved_object.drawImage(
