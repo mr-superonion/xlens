@@ -165,6 +165,9 @@ def test_galaxies_init():
 
 def test_galaxies_draw():
     from xlens.simulator.perturbation import ShearHalo, ShearRedshift
+    from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+    config = MultibandSimConfig()
+    simtask = MultibandSimTask(config=config)
 
     # Set up the configuration
     slist = [
@@ -192,14 +195,16 @@ def test_galaxies_draw():
         )
         psf_fwhm = 0.8
         psf_galsim = galsim.Moffat(fwhm=psf_fwhm, beta=2.5)
-        gal_data1 = catalog.draw(
+        gal_data1 = simtask.draw_catalog(
+            galaxy_catalog=catalog,
             patch_id=0,
             psf_obj=psf_galsim,
             mag_zero=30,
             band="i"
         )
         catalog.rotate(np.pi / 2.0)
-        gal_data2 = catalog.draw(
+        gal_data2 = simtask.draw_catalog(
+            galaxy_catalog=catalog,
             patch_id=0,
             psf_obj=psf_galsim,
             mag_zero=30,
@@ -208,7 +213,8 @@ def test_galaxies_draw():
         assert np.average(np.abs(gal_data1 - np.rot90(gal_data2))) < 1e-4
         shear_obj = slist[ii]
         catalog.lens(shear_obj)
-        catalog.draw(
+        simtask.draw_catalog(
+            galaxy_catalog=catalog,
             patch_id=0,
             psf_obj=psf_galsim,
             mag_zero=30,

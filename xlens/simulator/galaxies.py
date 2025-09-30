@@ -10,8 +10,7 @@ from astropy.table import Table
 
 from .layout import Layout
 from .wcs import make_galsim_tanwcs
-
-SIM_INCLUSION_PADDING = 200  # pixels
+from . import mog
 
 
 @functools.lru_cache(maxsize=8)
@@ -42,10 +41,9 @@ class BaseGalaxyCatalog(ABC):
         select_observable: list[str] | str | None = None,
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
-        use_field_distortion: bool = False,
         extend_ratio: float = 1.08,
     ):
-        self.prepare_tract_info(tract_info, use_field_distortion)
+        self.prepare_tract_info(tract_info)
         wcs = tract_info.getWcs()
         ps = float(wcs.getPixelScale().asArcseconds())
         self.pixel_scale = ps
@@ -118,13 +116,12 @@ class BaseGalaxyCatalog(ABC):
         self.data["redshift"][:] = redshift
         return
 
-    def prepare_tract_info(self, tract_info, use_field_distortion):
+    def prepare_tract_info(self, tract_info):
         self.tract_info = tract_info
         bbox = tract_info.getBBox()   # lsst.geom.Box2I
         center_pix = bbox.getCenter()
         self.x_center = center_pix.getX()
         self.y_center = center_pix.getY()
-        self.use_field_distortion = use_field_distortion
         return
 
     # ---------- required subclass hooks ----------
@@ -146,10 +143,9 @@ class BaseGalaxyCatalog(ABC):
 
     @abstractmethod
     def _generate_galaxy(
-        self, *, entry: Any, mag_zero: float, band: str, **kwargs
+        self, *, entry: Any, mag_zero: float, band: str, use_mog=False, **kwargs
     ) -> galsim.GSObject:
         """Build and return a GalSim GSObject from one catalog entry."""
-
 
     @abstractmethod
     def _half_light_radius(self, catalog) -> np.ndarray:
@@ -177,7 +173,6 @@ class BaseGalaxyCatalog(ABC):
         select_observable: list[str] | str | None = None,
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
-        use_field_distortion: bool = False,
     ) -> "BaseGalaxyCatalog":
         """
         Build a catalog directly from a table structured array.
@@ -192,7 +187,7 @@ class BaseGalaxyCatalog(ABC):
         """
         # Create instance without running __init__
         self = cls.__new__(cls)
-        self.prepare_tract_info(tract_info, use_field_distortion)
+        self.prepare_tract_info(tract_info)
         wcs = tract_info.getWcs()
         self.pixel_scale = float(wcs.getPixelScale().asArcseconds())
 
@@ -233,7 +228,7 @@ class BaseGalaxyCatalog(ABC):
         for name in table.dtype.names:
             if name in self.data.dtype.names:
                 self.data[name] = table[name]
-        self.lensed = False
+        self.lensed = True
         return self
 
     def rotate(self, theta, degrees=False):
@@ -293,7 +288,9 @@ class BaseGalaxyCatalog(ABC):
         self.lensed = True
         return
 
-    def get_obj(self, *, ind, mag_zero: float, band: str) -> dict[str, list]:
+    def get_obj(
+            self, *, ind, mag_zero: float, band: str, use_mog=False,
+        ) -> dict[str, list]:
         """
         Returns
         -------
@@ -301,8 +298,9 @@ class BaseGalaxyCatalog(ABC):
         src = self.data[ind]
         entry = self.input_catalog[src["indices"]]
         gal = self._generate_galaxy(
-            entry=entry, mag_zero=mag_zero, band=band,
-        ).rotate(
+            entry=entry, mag_zero=mag_zero, band=band, use_mog=use_mog,
+        )
+        gal = gal.rotate(
             src["angles"] * galsim.radians
         )
         gamma1, gamma2, kappa = src["gamma1"], src["gamma2"], src["kappa"]
@@ -311,54 +309,6 @@ class BaseGalaxyCatalog(ABC):
         mu = 1.0 / ((1 - kappa) ** 2 - gamma1**2 - gamma2**2)
         gal = gal.lens(g1=g1, g2=g2, mu=mu)
         return gal
-
-    def draw(
-        self, *, patch_id,
-        psf_obj, mag_zero, band,
-        draw_method="auto",
-        nn_trunc=None,
-    ):
-        patch_info = self.tract_info[patch_id]
-        outer_bbox = patch_info.getOuterBBox()
-        xmin = outer_bbox.getMinX()
-        ymin = outer_bbox.getMinY()
-        xmax = outer_bbox.getMaxX()
-        ymax = outer_bbox.getMaxY()
-        width = outer_bbox.getWidth()
-        height = outer_bbox.getHeight()
-        wcs_gs = make_galsim_tanwcs(self.tract_info)
-        image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
-        for i, src in enumerate(self.data):
-            if (
-                (xmin - SIM_INCLUSION_PADDING) <
-                src["image_x"] < (xmax + SIM_INCLUSION_PADDING)
-            ) and (
-                (ymin - SIM_INCLUSION_PADDING)
-                < src["image_y"] < (ymax + SIM_INCLUSION_PADDING)
-            ) and src["has_finite_shear"]:
-                image_pos = galsim.PositionD(
-                    x=src["image_x"], y=src["image_y"]
-                )
-                gal_obj = self.get_obj(
-                    ind=i, mag_zero=mag_zero, band=band
-                )
-                convolved_object = galsim.Convolve([gal_obj, psf_obj])
-                if self.use_field_distortion:
-                    local_wcs = wcs_gs.local(image_pos=image_pos)
-                    stamp = convolved_object.drawImage(
-                        center=image_pos, wcs=local_wcs, method=draw_method,
-                        nx=nn_trunc, ny=nn_trunc,
-                    )
-                else:
-                    stamp = convolved_object.drawImage(
-                        center=image_pos, wcs=None, method=draw_method,
-                        scale=self.pixel_scale,
-                        nx=nn_trunc, ny=nn_trunc,
-                    )
-                b = stamp.bounds & image.bounds
-                if b.isDefined():
-                    image[b] += stamp[b]
-        return image.array
 
 
 # --------------------------------------------
@@ -436,8 +386,12 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         return np.sqrt(catalog["a_d"] * catalog["b_d"])
 
     def _generate_galaxy(
-        self, *, entry, mag_zero, band, **kwargs,
+        self, *, entry, mag_zero, band, use_mog=False, **kwargs,
     ) -> galsim.GSObject:
+        if use_mog:
+            _simulator = mog
+        else:
+            _simulator = galsim
         ab_magnitude = entry[band + "_ab"]
         total_flux = 10 ** ((mag_zero - ab_magnitude) / 2.5)
 
@@ -459,7 +413,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         # Disk
         if disk_flux > 0:
             a_d, b_d = entry["a_d"], entry["b_d"]
-            hlr_d = np.sqrt(max(a_d, 0.0) * max(b_d, 0.0))
+            hlr_d = np.sqrt(a_d * b_d)
             q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(entry["pa_disk"])
             disk = galsim.Exponential(
@@ -472,7 +426,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         # Bulge
         if bulge_flux > 0:
             a_b, b_b = entry["a_b"], entry["b_b"]
-            hlr_b = np.sqrt(max(a_b, 0.0) * max(b_b, 0.0))
+            hlr_b = np.sqrt(a_b * b_b)
             q_b = (b_b / a_b) if a_b > 0 else 1.0
             beta_b = np.radians(entry["pa_bulge"])
             bulge = galsim.DeVaucouleurs(
@@ -566,11 +520,15 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         return catalog["diskHalfLightRadiusArcsec"]
 
     def _generate_galaxy(
-        self, *, entry, mag_zero, band, survey_name, **kwargs,
+        self, *, entry, mag_zero, band, survey_name, use_mog=False, **kwargs,
     ) -> galsim.GSObject:
         """
         entry is a row of the columnar table (supports dict-like access).
         """
+        if use_mog:
+            _simulator = mog
+        else:
+            _simulator = galsim
         if survey_name == "hsc":
             sname = "lsst"
         else:
@@ -589,11 +547,11 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         flux = 10 ** ((mag_zero - mag) / 2.5)
         bulge_frac = entry[f"{sname}_bulgefrac_{band}"]
 
-        bulge = galsim.Sersic(
-            4, half_light_radius=bulge_hlr, flux=flux * bulge_frac
+        bulge = _simulator.DeVaucouleurs(
+            flux=flux * bulge_frac, half_light_radius=bulge_hlr
         ).shear(g1=bulge_e1, g2=bulge_e2)
-        disk = galsim.Sersic(
-            1, half_light_radius=disk_hlr, flux=flux * (1.0 - bulge_frac)
+        disk = _simulator.Exponential(
+            flux=flux * (1.0 - bulge_frac), half_light_radius=disk_hlr,
         ).shear(g1=disk_e1, g2=disk_e2)
 
         gal = (bulge + disk).withFlux(flux)

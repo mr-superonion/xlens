@@ -8,6 +8,7 @@ from . import (
     sim,
     wcs,
     bat,
+    mog,
 )
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "layout",
     "catalog",
     "noise",
-    "bat"
+    "bat",
+    "mog",
 ]
