@@ -36,7 +36,7 @@ from ..utils.random import (
     num_rot,
 )
 from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
-from .perturbation import IaTransformDistort, ShearHalo, ShearRedshift
+from .perturbation import ShearHalo, ShearRedshift
 
 
 class CatalogConnections(
@@ -466,58 +466,4 @@ class CatalogHaloTask(CatalogTask):
             conc=self.config.conc,
             z_lens=self.config.z_lens,
             no_kappa=self.config.no_kappa,
-        )
-
-
-class CatalogIaTransformTaskConfig(
-    CatalogConfig,
-    pipelineConnections=CatalogConnections,
-):
-    amplitude = Field[float](
-        doc="Amplitude parameter passed to BATSim IaTransform (A)",
-        default=0.00136207,
-    )
-    beta = Field[float](
-        doc="Beta parameter passed to BATSim IaTransform",
-        default=0.82404653,
-    )
-    phi = Field[float](
-        doc="Orientation angle of the transform in degrees",
-        default=0.0,
-    )
-    clip_radius = Field[float](
-        doc="Radius multiplier used to clip the transform (in HLR units)",
-        default=5.0,
-    )
-    stamp_size = Field[int](
-        doc="Default size of the postage stamp drawn via BATSim",
-        default=48,
-    )
-
-    def validate(self):
-        super().validate()
-        if self.stamp_size <= 0:
-            raise FieldValidationError(
-                self.__class__.stamp_size,
-                self,
-                "stamp_size must be a positive integer",
-            )
-
-
-class CatalogIaTransformTask(CatalogTask):
-    _DefaultName = "CatalogIaTransformTask"
-    ConfigClass = CatalogIaTransformTaskConfig
-
-    def __init__(self, **kwargs: Any):
-        super().__init__(**kwargs)
-        assert isinstance(self.config, CatalogIaTransformTaskConfig)
-
-    def get_perturbation_object(self, tract_info, seed: int, **kwargs: Any):
-        assert isinstance(self.config, CatalogIaTransformTaskConfig)
-        return IaTransformDistort(
-            amplitude=self.config.amplitude,
-            beta=self.config.beta,
-            phi=np.deg2rad(self.config.phi),
-            clip_radius=self.config.clip_radius,
-            stamp_size=self.config.stamp_size,
         )
