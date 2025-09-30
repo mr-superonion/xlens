@@ -7,6 +7,7 @@ from . import (
     perturbation,
     sim,
     wcs,
+    bat,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "layout",
     "catalog",
     "noise",
+    "bat"
 ]
