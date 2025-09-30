@@ -233,9 +233,6 @@ class BaseGalaxyCatalog(ABC):
         for name in table.dtype.names:
             if name in self.data.dtype.names:
                 self.data[name] = table[name]
-        if "hlr" not in table.dtype.names and len(table) > 0:
-            indices = self.data["indices"].astype(int)
-            self.data["hlr"] = self._build_hlr_array(indices)
         self.lensed = False
         return self
 
@@ -436,9 +433,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         return None
 
     def _half_light_radius(self, catalog) -> np.ndarray:
-        a_d = np.maximum(np.asarray(catalog["a_d"], dtype=float), 0.0)
-        b_d = np.maximum(np.asarray(catalog["b_d"], dtype=float), 0.0)
-        return np.sqrt(a_d * b_d)
+        return np.sqrt(catalog["a_d"] * catalog["b_d"])
 
     def _generate_galaxy(
         self, *, entry, mag_zero, band, **kwargs,
@@ -568,16 +563,7 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         return len(cat) / area_tot_arcmin
 
     def _half_light_radius(self, catalog) -> np.ndarray:
-        disk_major = np.asarray(
-            catalog["diskHalfLightRadiusArcsec"], dtype=float
-        )
-        disk_e1 = np.asarray(catalog["diskEllipticity1"], dtype=float)
-        disk_e2 = np.asarray(catalog["diskEllipticity2"], dtype=float)
-        ellipticity = np.hypot(disk_e1, disk_e2)
-        axis_ratio = (1.0 - ellipticity) / (1.0 + ellipticity)
-        axis_ratio = np.clip(axis_ratio, 0.0, None)
-        disk_minor = disk_major * axis_ratio
-        return np.sqrt(np.maximum(disk_major, 0.0) * np.maximum(disk_minor, 0.0))
+        return catalog["diskHalfLightRadiusArcsec"]
 
     def _generate_galaxy(
         self, *, entry, mag_zero, band, survey_name, **kwargs,
