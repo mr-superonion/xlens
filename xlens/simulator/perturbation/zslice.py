@@ -1,11 +1,10 @@
 import galsim
 import numpy as np
 
-from .base import BasePerturbation
 from .utils import _get_shear_res_dict, _ternary
 
 
-class ShearRedshift(BasePerturbation):
+class ShearRedshift(object):
     """
     Constant shear in each redshift slice
     """
