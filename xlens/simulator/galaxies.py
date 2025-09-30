@@ -86,17 +86,18 @@ class BaseGalaxyCatalog(ABC):
                 np.arange(indice_min, indice_max, dtype=int) % catalog_size
             )
         # random orientation for each placed galaxy
-        angles = rng.uniform(low=0.0, high=2.0*np.pi, size=num)
+        angles = rng.uniform(low=0.0, high=360.0, size=num)
         self.dtype = [
-            ("indices", "i8"),                     # index in the input catalog
-            ("redshift", "f8"),                    # galaxy redshift
-            ("angles", "f8"),                     # rotation angle [radians]
-            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),    # lensing distortion
-            ("dx", "f8"), ("dy", "f8"),        # shifts from center of tract [arcsec]
-            ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec [degrees]
-            ("image_x", "f8"), ("image_y", "f8"),    # post-lensed position on the tract plane [pixel]
-            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),    # pre-lensed position on the tract plane [pixel]
-            ("has_finite_shear", "bool"),    # is the shear a finite number [bool]
+            ("indices", "i8"),
+            ("redshift", "f8"),
+            ("angles", "f8"),
+            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),
+            ("dx", "f8"), ("dy", "f8"),
+            ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec
+            ("image_x", "f8"), ("image_y", "f8"),
+            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),
+            ("has_finite_shear", "bool"),
+            ("hlr", "f8"),
         ]
         self.data = np.zeros(num, dtype=self.dtype)
         self.data["dx"] = shifts_array["dx"]
@@ -110,6 +111,7 @@ class BaseGalaxyCatalog(ABC):
         self.data["image_y"] = self.y_center + self.data["dy"] / ps
         self.data["has_finite_shear"] = np.ones(num, dtype=bool)
         self.data["redshift"] = self.input_catalog["redshift"][indices]
+        self.data["hlr"] = self._build_hlr_array(indices)
         return
 
     def set_z_source(self, redshift):
@@ -147,6 +149,16 @@ class BaseGalaxyCatalog(ABC):
         self, *, entry: Any, mag_zero: float, band: str, **kwargs
     ) -> galsim.GSObject:
         """Build and return a GalSim GSObject from one catalog entry."""
+
+
+    @abstractmethod
+    def _half_light_radius(self, catalog) -> np.ndarray:
+        """Return galaxy half-light radii (arcsec) for the given entries."""
+
+    def _build_hlr_array(self, indices: np.ndarray) -> np.ndarray:
+        catalog = self.input_catalog[indices]
+        hlr = self._half_light_radius(catalog)
+        return np.asarray(hlr, dtype=float)
 
 
     def _probabilities_for_sampling(self, cat: Any) -> np.ndarray | None:
@@ -205,7 +217,22 @@ class BaseGalaxyCatalog(ABC):
             raise IndexError(
                 "Indices in table array out of range for input_catalog"
             )
-        self.data = table
+        self.dtype = [
+            ("indices", "i8"),
+            ("redshift", "f8"),
+            ("angles", "f8"),
+            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),
+            ("dx", "f8"), ("dy", "f8"),
+            ("ra", "f8"), ("dec", "f8"),
+            ("image_x", "f8"), ("image_y", "f8"),
+            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),
+            ("has_finite_shear", "bool"),
+            ("hlr", "f8"),
+        ]
+        self.data = np.zeros(len(table), dtype=self.dtype)
+        for name in table.dtype.names:
+            if name in self.data.dtype.names:
+                self.data[name] = table[name]
         self.lensed = False
         return self
 
@@ -405,6 +432,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
                 return p / p_sum
         return None
 
+    def _half_light_radius(self, catalog) -> np.ndarray:
+        return np.sqrt(catalog["a_d"] * catalog["b_d"])
+
     def _generate_galaxy(
         self, *, entry, mag_zero, band, **kwargs,
     ) -> galsim.GSObject:
@@ -531,6 +561,9 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
             60.0**2 * (180.0 / np.pi) ** 2 * 4.0 * np.pi / (12.0 * 32.0**2)
         )
         return len(cat) / area_tot_arcmin
+
+    def _half_light_radius(self, catalog) -> np.ndarray:
+        return catalog["diskHalfLightRadiusArcsec"]
 
     def _generate_galaxy(
         self, *, entry, mag_zero, band, survey_name, **kwargs,
