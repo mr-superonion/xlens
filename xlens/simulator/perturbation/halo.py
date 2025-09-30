@@ -4,10 +4,11 @@ from lenstronomy.Cosmo.lens_cosmo import LensCosmo
 from lenstronomy.LensModel.lens_model import LensModel
 from lenstronomy.LensModel.Solver.lens_equation_solver import LensEquationSolver
 
+from .base import BasePerturbation
 from .utils import _get_shear_res_dict
 
 
-class ShearHalo(object):
+class ShearHalo(BasePerturbation):
     def __init__(
         self,
         *,

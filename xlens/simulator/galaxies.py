@@ -9,6 +9,7 @@ import numpy as np
 from astropy.table import Table
 
 from .layout import Layout
+from .perturbation.base import BasePerturbation, IdentityPerturbation
 from .wcs import make_galsim_tanwcs
 
 SIM_INCLUSION_PADDING = 200  # pixels
@@ -87,17 +88,7 @@ class BaseGalaxyCatalog(ABC):
             )
         # random orientation for each placed galaxy
         angles = rng.uniform(low=0.0, high=2.0*np.pi, size=num)
-        self.dtype = [
-            ("indices", "i8"),                     # index in the input catalog
-            ("redshift", "f8"),                    # galaxy redshift
-            ("angles", "f8"),                     # rotation angle [radians]
-            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),    # lensing distortion
-            ("dx", "f8"), ("dy", "f8"),        # shifts from center of tract [arcsec]
-            ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec [degrees]
-            ("image_x", "f8"), ("image_y", "f8"),    # post-lensed position on the tract plane [pixel]
-            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),    # pre-lensed position on the tract plane [pixel]
-            ("has_finite_shear", "bool"),    # is the shear a finite number [bool]
-        ]
+        self.dtype = self._base_dtype()
         self.data = np.zeros(num, dtype=self.dtype)
         self.data["dx"] = shifts_array["dx"]
         self.data["dy"] = shifts_array["dy"]
@@ -110,6 +101,8 @@ class BaseGalaxyCatalog(ABC):
         self.data["image_y"] = self.y_center + self.data["dy"] / ps
         self.data["has_finite_shear"] = np.ones(num, dtype=bool)
         self.data["redshift"] = self.input_catalog["redshift"][indices]
+        self.data["hlr"] = self._build_hlr_array(indices)
+        self._perturbation: BasePerturbation = IdentityPerturbation()
         return
 
     def set_z_source(self, redshift):
@@ -205,7 +198,16 @@ class BaseGalaxyCatalog(ABC):
             raise IndexError(
                 "Indices in table array out of range for input_catalog"
             )
-        self.data = table
+        self.dtype = self._base_dtype()
+        self.data = np.zeros(len(table), dtype=self.dtype)
+        for name in table.dtype.names:
+            if name in self.data.dtype.names:
+                self.data[name] = table[name]
+        missing = (~np.isfinite(self.data["hlr"]) | (self.data["hlr"] <= 0.0))
+        if np.any(missing):
+            self.data["hlr"][missing] = self._build_hlr_array(
+                self.data["indices"][missing]
+            )
         self.lensed = False
         return self
 
@@ -237,6 +239,39 @@ class BaseGalaxyCatalog(ABC):
         self.data["dec"] = dec
         return
 
+    def _base_dtype(self):
+        return [
+            ("indices", "i8"),                     # index in the input catalog
+            ("redshift", "f8"),                    # galaxy redshift
+            ("angles", "f8"),                     # rotation angle [radians]
+            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),    # lensing distortion
+            ("dx", "f8"), ("dy", "f8"),        # shifts from center of tract [arcsec]
+            ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec [degrees]
+            ("image_x", "f8"), ("image_y", "f8"),    # post-lensed position on the tract plane [pixel]
+            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),    # pre-lensed position on the tract plane [pixel]
+            ("has_finite_shear", "bool"),    # is the shear a finite number [bool]
+            ("hlr", "f8"),                     # galaxy half-light radius [arcsec]
+        ]
+
+    def _build_hlr_array(self, indices: np.ndarray) -> np.ndarray:
+        indices = np.atleast_1d(indices)
+        hlr_values = np.full(indices.shape, np.nan, dtype=float)
+        for i, idx in enumerate(indices):
+            try:
+                entry = self.input_catalog[int(idx)]
+            except (IndexError, TypeError, ValueError):
+                hlr = None
+            else:
+                hlr = self._half_light_radius(entry)
+            if hlr is None or not np.isfinite(hlr) or hlr <= 0:
+                hlr_values[i] = np.nan
+            else:
+                hlr_values[i] = float(hlr)
+        return hlr_values
+
+    def _half_light_radius(self, entry) -> float | None:
+        return None
+
     def lens(self, shear_obj):
         if self.lensed:
             raise ValueError("Cannot lens a lensed catalog")
@@ -264,26 +299,23 @@ class BaseGalaxyCatalog(ABC):
         self.data["ra"] = ra
         self.data["dec"] = dec
         self.lensed = True
+        if isinstance(shear_obj, BasePerturbation):
+            self._perturbation = shear_obj
+        else:
+            self._perturbation = IdentityPerturbation()
         return
 
-    def get_obj(self, *, ind, mag_zero: float, band: str) -> dict[str, list]:
-        """
-        Returns
-        -------
-        """
+    def _build_intrinsic_galaxy(
+        self, *, ind: int, mag_zero: float, band: str
+    ) -> tuple[galsim.GSObject, Any]:
         src = self.data[ind]
         entry = self.input_catalog[src["indices"]]
         gal = self._generate_galaxy(
-            entry=entry, mag_zero=mag_zero, band=band,
-        ).rotate(
-            src["angles"] * galsim.radians
-        )
-        gamma1, gamma2, kappa = src["gamma1"], src["gamma2"], src["kappa"]
-        g1 = gamma1 / (1 - kappa)
-        g2 = gamma2 / (1 - kappa)
-        mu = 1.0 / ((1 - kappa) ** 2 - gamma1**2 - gamma2**2)
-        gal = gal.lens(g1=g1, g2=g2, mu=mu)
-        return gal
+            entry=entry,
+            mag_zero=mag_zero,
+            band=band,
+        ).rotate(src["angles"] * galsim.radians)
+        return gal, entry
 
     def draw(
         self, *, patch_id,
@@ -312,22 +344,25 @@ class BaseGalaxyCatalog(ABC):
                 image_pos = galsim.PositionD(
                     x=src["image_x"], y=src["image_y"]
                 )
-                gal_obj = self.get_obj(
+                gal_obj, entry = self._build_intrinsic_galaxy(
                     ind=i, mag_zero=mag_zero, band=band
                 )
-                convolved_object = galsim.Convolve([gal_obj, psf_obj])
-                if self.use_field_distortion:
-                    local_wcs = wcs_gs.local(image_pos=image_pos)
-                    stamp = convolved_object.drawImage(
-                        center=image_pos, wcs=local_wcs, method=draw_method,
-                        nx=nn_trunc, ny=nn_trunc,
-                    )
-                else:
-                    stamp = convolved_object.drawImage(
-                        center=image_pos, wcs=None, method=draw_method,
-                        scale=self.pixel_scale,
-                        nx=nn_trunc, ny=nn_trunc,
-                    )
+                local_wcs = (
+                    wcs_gs.local(image_pos=image_pos)
+                    if self.use_field_distortion
+                    else None
+                )
+                stamp = self._perturbation.draw_stamp(
+                    gal_obj=gal_obj,
+                    psf_obj=psf_obj,
+                    image_pos=image_pos,
+                    draw_method=draw_method,
+                    pixel_scale=self.pixel_scale,
+                    local_wcs=local_wcs,
+                    nn_trunc=nn_trunc,
+                    source_row=src,
+                    entry=entry,
+                )
                 b = stamp.bounds & image.bounds
                 if b.isDefined():
                     image[b] += stamp[b]
@@ -404,6 +439,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             if p_sum > 0:
                 return p / p_sum
         return None
+
+    def _half_light_radius(self, entry) -> float | None:
+        return float(np.sqrt(float(entry["a_d"]) * float(entry["b_d"])))
 
     def _generate_galaxy(
         self, *, entry, mag_zero, band, **kwargs,
@@ -532,6 +570,15 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         )
         return len(cat) / area_tot_arcmin
 
+    def _half_light_radius(self, entry) -> float | None:
+        major = float(entry["diskHalfLightRadiusArcsec"])
+        ellipticity = float(
+            np.hypot(entry["diskEllipticity1"], entry["diskEllipticity2"])
+        )
+        axis_ratio = (1.0 - ellipticity) / (1.0 + ellipticity)
+        minor = major * max(axis_ratio, 0.0)
+        return float(np.sqrt(major * minor))
+
     def _generate_galaxy(
         self, *, entry, mag_zero, band, survey_name, **kwargs,
     ) -> galsim.GSObject:
@@ -544,10 +591,13 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
             sname = survey_name
 
         bulge_hlr = entry["spheroidHalfLightRadiusArcsec"]
-        disk_hlr = entry["diskHalfLightRadiusArcsec"]
+        disk_major = float(entry["diskHalfLightRadiusArcsec"])
 
         # shear-ellipticity components
         disk_e1, disk_e2 = entry["diskEllipticity1"], entry["diskEllipticity2"]
+        disk_ellipticity = float(np.hypot(disk_e1, disk_e2))
+        disk_axis_ratio = (1.0 - disk_ellipticity) / (1.0 + disk_ellipticity)
+        disk_hlr = np.sqrt(disk_major * (disk_major * max(disk_axis_ratio, 0.0)))
         bulge_e1, bulge_e2 = (
             entry["spheroidEllipticity1"], entry["spheroidEllipticity2"]
         )
