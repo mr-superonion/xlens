@@ -162,6 +162,10 @@ class MultibandSimConfig(
         doc="whether to use real PSF",
         default=False,
     )
+    use_mog = Field[bool](
+        doc="whether to use use multi-Gaussian approximation",
+        default=False,
+    )
     truncate_stamp_size = Field[int](
         doc="truncation size of stamps",
         default=-1,
@@ -309,7 +313,8 @@ class MultibandSimTask(PipelineTask):
                     x=src["image_x"], y=src["image_y"]
                 )
                 gal_obj = galaxy_catalog.get_obj(
-                    ind=i, mag_zero=mag_zero, band=band
+                    ind=i, mag_zero=mag_zero, band=band,
+                    use_mog=self.config.use_mog,
                 )
                 convolved_object = galsim.Convolve([gal_obj, psf_obj])
                 if self.config.use_field_distortion:
@@ -614,7 +619,8 @@ class IASimTask(MultibandSimTask):
                     x=src["image_x"], y=src["image_y"]
                 )
                 gal_obj = galaxy_catalog.get_obj(
-                    ind=i, mag_zero=mag_zero, band=band
+                    ind=i, mag_zero=mag_zero, band=band,
+                    use_mog=self.config.use_mog,
                 )
                 stamp = draw_ia(
                     amplitude=self.config.ia_amplitude,

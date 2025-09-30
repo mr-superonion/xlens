@@ -247,3 +247,45 @@ def test_sim_task():
     )
     assert np.sum(out.simExposure.image.array) > 0.0
     return
+
+
+def test_galaxies_draw_mog_consistency():
+    from types import MethodType
+    from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+
+    config = MultibandSimConfig()
+    config.use_mog=False
+    simtask = MultibandSimTask(config=config)
+
+    tract_info = skymap0[0]
+    rng = np.random.RandomState(0)
+    catalog = xlens.simulator.galaxies.CatSim2017Catalog(
+        rng=rng,
+        tract_info=tract_info,
+        layout_name="random",
+    )
+    psf_galsim = galsim.Moffat(fwhm=0.8, beta=2.5)
+
+    image_default = simtask.draw_catalog(
+        galaxy_catalog=catalog,
+        patch_id=0,
+        psf_obj=psf_galsim,
+        mag_zero=30,
+        band="i",
+    )
+
+    config = MultibandSimConfig()
+    config.use_mog=True
+    simtask = MultibandSimTask(config=config)
+    image_mog = simtask.draw_catalog(
+        galaxy_catalog=catalog,
+        patch_id=0,
+        psf_obj=psf_galsim,
+        mag_zero=30,
+        band="i",
+    )
+    diff = np.abs(image_default - image_mog)
+    baseline = np.max(np.abs(image_default))
+    assert np.mean(diff) / baseline < 5e-4
+    assert np.max(diff) / baseline < 1e-1
+    return

@@ -416,7 +416,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             hlr_d = np.sqrt(a_d * b_d)
             q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(entry["pa_disk"])
-            disk = galsim.Exponential(
+            disk = _simulator.Exponential(
                 flux=disk_flux, half_light_radius=hlr_d
             ).shear(
                 q=q_d, beta=beta_d * galsim.radians
@@ -429,7 +429,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             hlr_b = np.sqrt(a_b * b_b)
             q_b = (b_b / a_b) if a_b > 0 else 1.0
             beta_b = np.radians(entry["pa_bulge"])
-            bulge = galsim.DeVaucouleurs(
+            bulge = _simulator.DeVaucouleurs(
                 flux=bulge_flux, half_light_radius=hlr_b
             ).shear(q=q_b, beta=beta_b * galsim.radians)
             components.append(bulge)
