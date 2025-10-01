@@ -325,7 +325,7 @@ class matchPipe(PipelineTask):
             self.log.info("Caching truth catalog reference from %s", path)
             self._cat_ref = fitsio.read(
                 path,
-                columns=["i_ab", "indices", "redshift"],
+                columns=["i_ab"],
             )
         cat_ref = self._cat_ref
         mag_mrc = cat_ref[mrc["indices"]]["i_ab"]
