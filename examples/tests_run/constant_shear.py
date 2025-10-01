@@ -1,26 +1,22 @@
 #!/usr/bin/env python3
-import os
 import argparse
 import gc
+import os
 
-import numpy as np
-from mpi4py import MPI
 import fitsio
+import numpy as np
+from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
+from mpi4py import MPI
 
-from lsst.skymap.discreteSkyMap import (
-    DiscreteSkyMapConfig, DiscreteSkyMap
+from xlens.process_pipe.anacal_detect import (
+    AnacalDetectPipe,
+    AnacalDetectPipeConfig,
 )
 from xlens.simulator.catalog import (
     CatalogShearTask,
     CatalogShearTaskConfig,
 )
-from xlens.simulator.sim import (
-    MultibandSimConfig, MultibandSimTask
-)
-from xlens.process_pipe.anacal_detect import (
-    AnacalDetectPipeConfig, AnacalDetectPipe
-)
-
+from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
 
 # ------------------------------
 # Argument Parsing

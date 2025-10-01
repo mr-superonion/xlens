@@ -8,9 +8,9 @@ import lsst
 import numpy as np
 from astropy.table import Table
 
+from . import mog
 from .layout import Layout
 from .wcs import make_galsim_tanwcs
-from . import mog
 
 
 @functools.lru_cache(maxsize=8)

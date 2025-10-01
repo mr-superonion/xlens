@@ -1,7 +1,9 @@
 """Utilities for applying BATSim transforms."""
-import numpy as np
 from typing import Any
+
 import galsim
+import numpy as np
+
 try:  # pragma: no cover - optional dependency
     import batsim
 except ImportError:  # pragma: no cover - optional dependency

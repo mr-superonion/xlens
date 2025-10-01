@@ -1,8 +1,8 @@
 import galsim
 import lsst.geom as geom
 import numpy as np
-from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 import pytest
+from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 
 import xlens
 
@@ -256,6 +256,7 @@ def test_sim_task():
 
 def test_galaxies_draw_mog_consistency():
     from types import MethodType
+
     from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
 
     config = MultibandSimConfig()

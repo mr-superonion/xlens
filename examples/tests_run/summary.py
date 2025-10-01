@@ -54,12 +54,13 @@ mpirun -n 128 python summary.py \
     --min-id 0 --max-id 30000
 """
 
-import os
 import argparse
-import numpy as np
+import os
+
 import fitsio
-from mpi4py import MPI
+import numpy as np
 from astropy.stats import sigma_clipped_stats
+from mpi4py import MPI
 
 
 def parse_args():

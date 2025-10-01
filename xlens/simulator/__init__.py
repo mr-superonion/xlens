@@ -1,14 +1,14 @@
 from . import (
+    bat,
     catalog,
     defaults,
     galaxies,
     layout,
+    mog,
     noise,
     perturbation,
     sim,
     wcs,
-    bat,
-    mog,
 )
 
 __all__ = [
