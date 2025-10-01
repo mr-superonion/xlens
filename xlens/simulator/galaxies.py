@@ -386,7 +386,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
 
     def _half_light_radius(self, catalog) -> np.ndarray:
         return np.sqrt(
-            max(catalog["a_d"], 1e-9) * max(catalog["b_d"], 1e-9)
+            np.maximum(catalog["a_d"], 1e-9) * np.maximum(catalog["b_d"], 1e-9)
         )
 
     def _generate_galaxy(
