@@ -59,6 +59,7 @@ from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
 from .noise import get_noise_array
 
 SIM_INCLUSION_PADDING = 200  # pixels
+DEFAULT_BAT_STAMP_SIZE = 65
 
 
 class MultibandSimConnections(
@@ -165,6 +166,10 @@ class MultibandSimConfig(
     use_mog = Field[bool](
         doc="whether to use use multi-Gaussian approximation",
         default=False,
+    )
+    include_point_source = Field[bool](
+        doc="whether to include point sources in galaxies (agn or knots)",
+        default=True,
     )
     truncate_stamp_size = Field[int](
         doc="truncation size of stamps",
@@ -289,6 +294,7 @@ class MultibandSimTask(PipelineTask):
         band: str,
         draw_method: str="auto",
         nn_trunc: None | int=None,
+        **kwargs,
     ):
         assert isinstance(self.config, MultibandSimConfig)
         patch_info = galaxy_catalog.tract_info[patch_id]
@@ -315,6 +321,7 @@ class MultibandSimTask(PipelineTask):
                 gal_obj = galaxy_catalog.get_obj(
                     ind=i, mag_zero=mag_zero, band=band,
                     use_mog=self.config.use_mog,
+                    include_point_source=self.config.include_point_source,
                 )
                 convolved_object = galsim.Convolve([gal_obj, psf_obj])
                 if self.config.use_field_distortion:
@@ -549,19 +556,9 @@ class IASimConfig(MultibandSimConfig):
         doc="Clip radius in units of half-light radii for the IA transform.",
         default=3.0,
     )
-    ia_stamp_size = Field[int](
-        doc="Size (pixels) of the postage stamp drawn with BATSim.",
-        default=96,
-    )
 
     def validate(self):  # noqa: D401
         super().validate()
-        if self.ia_stamp_size <= 0:
-            raise FieldValidationError(
-                self.__class__.ia_stamp_size,
-                self,
-                "We require ia_stamp_size to be a positive integer.",
-            )
 
 
 class IASimTask(MultibandSimTask):
@@ -579,7 +576,7 @@ class IASimTask(MultibandSimTask):
         mag_zero: float,
         band: str,
         draw_method: str="auto",
-        nn_trunc: None | int=None,
+        **kwargs,
     ):
         assert isinstance(self.config, IASimConfig)
         if self.config.use_field_distortion:
@@ -599,12 +596,6 @@ class IASimTask(MultibandSimTask):
         wcs_gs = make_galsim_tanwcs(galaxy_catalog.tract_info)
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
 
-        stamp_size = (
-            nn_trunc if nn_trunc is not None else self.config.ia_stamp_size
-        )
-        if stamp_size <= 0:
-            raise RuntimeError("Intrinsic-alignment stamp size must be positive.")
-
         for i, src in enumerate(galaxy_catalog.data):
             if (
                 (xmin - SIM_INCLUSION_PADDING)
@@ -621,19 +612,19 @@ class IASimTask(MultibandSimTask):
                 gal_obj = galaxy_catalog.get_obj(
                     ind=i, mag_zero=mag_zero, band=band,
                     use_mog=self.config.use_mog,
+                    include_point_source=self.config.include_point_source,
                 )
                 stamp = draw_ia(
                     amplitude=self.config.ia_amplitude,
                     beta=self.config.ia_beta,
                     phi=self.config.ia_phi,
                     clip_radius=self.config.ia_clip_radius,
-                    stamp_size=stamp_size,
+                    stamp_size=DEFAULT_BAT_STAMP_SIZE,
                     gal_obj=gal_obj,
                     psf_obj=psf_obj,
                     image_pos=image_pos,
                     draw_method=draw_method,
                     pixel_scale=galaxy_catalog.pixel_scale,
-                    nn_trunc=nn_trunc,
                     entry=src,
                 )
                 b = stamp.bounds & image.bounds

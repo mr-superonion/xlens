@@ -2,6 +2,7 @@ import galsim
 import lsst.geom as geom
 import numpy as np
 from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
+import pytest
 
 import xlens
 
@@ -187,7 +188,7 @@ def test_galaxies_draw():
     ]
     for ii, tract_id in enumerate([0, 1200]):
         tract_info = skymap0[tract_id]
-        rng = np.random.RandomState(0)
+        rng = np.random.RandomState(ii)
         catalog = xlens.simulator.galaxies.CatSim2017Catalog(
             rng=rng,
             tract_info=tract_info,
@@ -210,7 +211,11 @@ def test_galaxies_draw():
             mag_zero=30,
             band="i"
         )
-        assert np.average(np.abs(gal_data1 - np.rot90(gal_data2))) < 1e-4
+        print(
+
+        )
+        re = np.max(np.abs(gal_data1 - np.rot90(gal_data2))) / np.max(gal_data1)
+        assert re < 1e-4
         shear_obj = slist[ii]
         catalog.lens(shear_obj)
         simtask.draw_catalog(
@@ -289,3 +294,59 @@ def test_galaxies_draw_mog_consistency():
     assert np.mean(diff) / baseline < 5e-4
     assert np.max(diff) / baseline < 1e-1
     return
+
+
+@pytest.mark.skipif(
+    xlens.simulator.bat.batsim is None,
+    reason="BATSim is required for IASim rendering",
+)
+def test_iasim():
+    from xlens.simulator.catalog import CatalogShearTask, CatalogShearTaskConfig
+    from xlens.simulator.sim import (
+        IASimConfig,
+        IASimTask,
+        MultibandSimConfig,
+        MultibandSimTask,
+    )
+
+    tract_info = skymap0[0]
+
+    catalog_config = CatalogShearTaskConfig()
+    catalog_config.mode = 2
+    catalog_config.test_value = 0.0
+    catalog_task = CatalogShearTask(config=catalog_config)
+    truth_catalog = catalog_task.run(tract_info=tract_info, seed=0).truthCatalog
+
+    multiband_config = MultibandSimConfig()
+    multiband_config.use_mog = False
+    multiband_task = MultibandSimTask(config=multiband_config)
+    multiband_output = multiband_task.run(
+        tract_info=tract_info,
+        patch_id=0,
+        band="i",
+        seed=0,
+        truthCatalog=truth_catalog,
+    )
+
+    ia_config = IASimConfig()
+    ia_config.use_mog = False
+    ia_config.ia_amplitude = 0.0
+    ia_task = IASimTask(config=ia_config)
+    ia_output = ia_task.run(
+        tract_info=tract_info,
+        patch_id=0,
+        band="i",
+        seed=0,
+        truthCatalog=truth_catalog,
+    )
+
+    multiband_image = multiband_output.simExposure.image.array
+    ia_image = ia_output.simExposure.image.array
+
+    diff = np.abs(multiband_image - ia_image)
+    baseline = np.max(np.abs(multiband_image))
+
+    assert np.mean(diff) / baseline < 5e-4
+    assert np.max(diff) / baseline < 5e-1
+    return
+    assert np.mean(diff) / baseline < 5e-4

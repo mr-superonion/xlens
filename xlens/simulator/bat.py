@@ -1,4 +1,5 @@
 """Utilities for applying BATSim transforms."""
+import numpy as np
 from typing import Any
 import galsim
 try:  # pragma: no cover - optional dependency
@@ -18,10 +19,12 @@ def draw_ia(
     image_pos: galsim.PositionD,
     draw_method: str,
     pixel_scale: float,
-    nn_trunc,
     entry,
 ) -> galsim.Image:
     """Draw a postage stamp using the BATSim intrinsic alignment transform."""
+
+    if batsim is None:
+        raise ImportError("Cannot import batsim")
 
     hlr = float(entry["hlr"])
     transform_obj = batsim.IaTransform(
@@ -32,6 +35,11 @@ def draw_ia(
         phi=phi,
         clip_radius=clip_radius,
     )
+    x_d = image_pos.x
+    y_d = image_pos.y
+    x_i = np.round(x_d).astype(int)
+    y_i = np.round(y_d).astype(int)
+
     gal_img = batsim.simulate_galaxy(
         ngrid=stamp_size,
         pix_scale=pixel_scale,
@@ -39,10 +47,11 @@ def draw_ia(
         transform_obj=transform_obj,
         psf_obj=psf_obj,
         draw_method=draw_method,
+        delta_image_x=(x_d - x_i),
+        delta_image_y=(y_d - y_i),
     )
-
     stamp = galsim.ImageF(gal_img, scale=pixel_scale)
-    stamp.setCenter(image_pos.x, image_pos.y)
+    stamp.setCenter(x_i, y_i)
     return stamp
 
 
@@ -53,7 +62,6 @@ def draw_flexion(
     image_pos: galsim.PositionD,
     draw_method: str,
     pixel_scale: float,
-    nn_trunc,
     entry,
 ) -> galsim.Image:
     """Draw a postage stamp using the BATSim flexion transform."""

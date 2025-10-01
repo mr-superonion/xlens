@@ -290,6 +290,7 @@ class BaseGalaxyCatalog(ABC):
 
     def get_obj(
             self, *, ind, mag_zero: float, band: str, use_mog=False,
+            include_point_source=True,
         ) -> dict[str, list]:
         """
         Returns
@@ -299,6 +300,7 @@ class BaseGalaxyCatalog(ABC):
         entry = self.input_catalog[src["indices"]]
         gal = self._generate_galaxy(
             entry=entry, mag_zero=mag_zero, band=band, use_mog=use_mog,
+            include_point_source=include_point_source,
         )
         gal = gal.rotate(
             src["angles"] * galsim.radians
@@ -383,39 +385,45 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         return None
 
     def _half_light_radius(self, catalog) -> np.ndarray:
-        return np.sqrt(catalog["a_d"] * catalog["b_d"])
+        return np.sqrt(
+            max(catalog["a_d"], 1e-9) * max(catalog["b_d"], 1e-9)
+        )
 
     def _generate_galaxy(
-        self, *, entry, mag_zero, band, use_mog=False, **kwargs,
+        self, *, entry, mag_zero, band, use_mog=False,
+        include_point_source=True, **kwargs,
     ) -> galsim.GSObject:
         if use_mog:
             _simulator = mog
         else:
             _simulator = galsim
-        ab_magnitude = entry[band + "_ab"]
+        dd = entry.copy()
+        if not include_point_source:
+            dd["fluxnorm_agn"] = 0.0
+        ab_magnitude = dd[band + "_ab"]
         total_flux = 10 ** ((mag_zero - ab_magnitude) / 2.5)
 
         # split flux among components
         total_fluxnorm = (
-            entry["fluxnorm_disk"] + entry["fluxnorm_bulge"]
-            + entry["fluxnorm_agn"]
+            dd["fluxnorm_disk"] + dd["fluxnorm_bulge"]
+            + dd["fluxnorm_agn"]
         )
         # guard against zero to avoid NaNs
         if total_fluxnorm <= 0:
-            return galsim.Gaussian(flux=total_flux, sigma=1e-8)
+            return galsim.Gaussian(flux=total_flux, sigma=1e-4)
 
-        disk_flux = entry["fluxnorm_disk"] / total_fluxnorm * total_flux
-        bulge_flux = entry["fluxnorm_bulge"] / total_fluxnorm * total_flux
-        agn_flux = entry["fluxnorm_agn"] / total_fluxnorm * total_flux
+        disk_flux = dd["fluxnorm_disk"] / total_fluxnorm * total_flux
+        bulge_flux = dd["fluxnorm_bulge"] / total_fluxnorm * total_flux
+        agn_flux = dd["fluxnorm_agn"] / total_fluxnorm * total_flux
 
         components = []
 
         # Disk
         if disk_flux > 0:
-            a_d, b_d = entry["a_d"], entry["b_d"]
+            a_d, b_d = dd["a_d"], dd["b_d"]
             hlr_d = np.sqrt(a_d * b_d)
             q_d = (b_d / a_d) if a_d > 0 else 1.0
-            beta_d = np.radians(entry["pa_disk"])
+            beta_d = np.radians(dd["pa_disk"])
             disk = _simulator.Exponential(
                 flux=disk_flux, half_light_radius=hlr_d
             ).shear(
@@ -425,10 +433,10 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
 
         # Bulge
         if bulge_flux > 0:
-            a_b, b_b = entry["a_b"], entry["b_b"]
+            a_b, b_b = dd["a_b"], dd["b_b"]
             hlr_b = np.sqrt(a_b * b_b)
             q_b = (b_b / a_b) if a_b > 0 else 1.0
-            beta_b = np.radians(entry["pa_bulge"])
+            beta_b = np.radians(dd["pa_bulge"])
             bulge = _simulator.DeVaucouleurs(
                 flux=bulge_flux, half_light_radius=hlr_b
             ).shear(q=q_b, beta=beta_b * galsim.radians)
@@ -436,11 +444,11 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
 
         # AGN (nearly point-like)
         if agn_flux > 0:
-            components.append(galsim.Gaussian(flux=agn_flux, sigma=1e-8))
+            components.append(galsim.Gaussian(flux=agn_flux, sigma=1e-4))
 
         if not components:
             # fallback if all fluxes zero
-            return galsim.Gaussian(flux=total_flux, sigma=1e-8)
+            return galsim.Gaussian(flux=total_flux, sigma=1e-4)
 
         return galsim.Add(components)
 
