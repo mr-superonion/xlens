@@ -175,6 +175,7 @@ class matchPipe(PipelineTask):
             config=config, log=log, initInputs=initInputs, **kwargs
         )
         assert isinstance(self.config, matchPipeConfig)
+        self._cat_ref: np.ndarray | None = None
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -319,9 +320,14 @@ class matchPipe(PipelineTask):
 
     def merge_truth(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
         assert isinstance(self.config, matchPipeConfig)
-        cat_ref = fitsio.read(
-            os.path.join(os.environ["CATSIM_DIR"], "OneDegSq.fits")
-        )
+        if self._cat_ref is None:
+            path = os.path.join(os.environ["CATSIM_DIR"], "OneDegSq.fits")
+            self.log.info("Caching truth catalog reference from %s", path)
+            self._cat_ref = fitsio.read(
+                path,
+                columns=["i_ab", "indices", "redshift"],
+            )
+        cat_ref = self._cat_ref
         mag_mrc = cat_ref[mrc["indices"]]["i_ab"]
         mrc = mrc[mag_mrc < self.config.mag_max_truth]
         x_mrc = np.array(mrc["image_x"])
