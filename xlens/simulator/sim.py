@@ -59,7 +59,7 @@ from .noise import get_noise_array
 from .wcs import make_galsim_tanwcs
 
 SIM_INCLUSION_PADDING = 200  # pixels
-DEFAULT_BAT_STAMP_SIZE = 65
+DEFAULT_BAT_STAMP_SIZE = 64
 
 
 class MultibandSimConnections(

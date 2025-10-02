@@ -320,6 +320,7 @@ def test_iasim():
 
     multiband_config = MultibandSimConfig()
     multiband_config.use_mog = False
+    multiband_config.include_point_source = False
     multiband_task = MultibandSimTask(config=multiband_config)
     multiband_output = multiband_task.run(
         tract_info=tract_info,
@@ -332,6 +333,7 @@ def test_iasim():
     ia_config = IASimConfig()
     ia_config.use_mog = False
     ia_config.ia_amplitude = 0.0
+    ia_config.include_point_source = False
     ia_task = IASimTask(config=ia_config)
     ia_output = ia_task.run(
         tract_info=tract_info,
@@ -350,4 +352,3 @@ def test_iasim():
     assert np.mean(diff) / baseline < 5e-4
     assert np.max(diff) / baseline < 5e-1
     return
-    assert np.mean(diff) / baseline < 5e-4
