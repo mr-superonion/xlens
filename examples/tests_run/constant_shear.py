@@ -108,7 +108,7 @@ detect_config.anacal.force_size = False
 detect_config.anacal.num_epochs = 6
 detect_config.anacal.do_noise_bias_correction = True
 detect_config.do_fpfs = True
-detect_config.fpfs.sigma_arcsec = 0.40 * np.sqrt(2.0)
+detect_config.fpfs.sigma_shapelets = 0.40 * np.sqrt(2.0)
 detect_config.anacal.validate_psf = False
 det_task = AnacalDetectPipe(config=detect_config)
 if rank == 0:

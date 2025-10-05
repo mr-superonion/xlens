@@ -104,8 +104,8 @@ class FpfsJointPipeConfig(
 
     def setDefaults(self):
         super().setDefaults()
-        self.fpfs.sigma_arcsec1 = -1
-        self.fpfs.sigma_arcsec2 = -1
+        self.fpfs.sigma_shapelets1 = -1
+        self.fpfs.sigma_shapelets2 = -1
         self.fpfs.do_compute_detect_weight = True
 
 
