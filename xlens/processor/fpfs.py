@@ -20,16 +20,16 @@ class FpfsMeasurementConfig(Config):
         doc="Sources to be removed if too close to boundary",
         default=32,
     )
-    sigma_arcsec = Field[float](
+    sigma_shapelets = Field[float](
         doc="Shapelet's Gaussian kernel size for detection",
         default=0.52,
     )
-    sigma_arcsec1 = Field[float](
+    sigma_shapelets1 = Field[float](
         doc="Shapelet's Gaussian kernel size for measurement",
         optional=True,
         default=-1,
     )
-    sigma_arcsec2 = Field[float](
+    sigma_shapelets2 = Field[float](
         doc="Shapelet's Gaussian kernel size for the second measurement",
         optional=True,
         default=-1,
@@ -79,23 +79,23 @@ class FpfsMeasurementConfig(Config):
 
     def validate(self):
         super().validate()
-        if self.sigma_arcsec > 2.0 or self.sigma_arcsec < 0.0:
+        if self.sigma_shapelets > 2.0 or self.sigma_shapelets < 0.0:
             raise FieldValidationError(
-                self.__class__.sigma_arcsec,
+                self.__class__.sigma_shapelets,
                 self,
-                "sigma_arcsec in a wrong range",
+                "sigma_shapelets in a wrong range",
             )
-        if self.sigma_arcsec1 > 2.0:
+        if self.sigma_shapelets1 > 2.0:
             raise FieldValidationError(
-                self.__class__.sigma_arcsec1,
+                self.__class__.sigma_shapelets1,
                 self,
-                "sigma_arcsec1 in a wrong range",
+                "sigma_shapelets1 in a wrong range",
             )
-        if self.sigma_arcsec2 > 2.0:
+        if self.sigma_shapelets2 > 2.0:
             raise FieldValidationError(
-                self.__class__.sigma_arcsec2,
+                self.__class__.sigma_shapelets2,
                 self,
-                "sigma_arcsec2 in a wrong range",
+                "sigma_shapelets2 in a wrong range",
             )
         if self.noiseId < 0:
             raise FieldValidationError(
@@ -126,9 +126,9 @@ class FpfsMeasurementTask(Task):
         self.fpfs_config = anacal.fpfs.FpfsConfig(
             npix=self.config.npix,
             kmax_thres=self.config.kmax_thres,
-            sigma_arcsec=self.config.sigma_arcsec,
-            sigma_arcsec1=self.config.sigma_arcsec1,
-            sigma_arcsec2=self.config.sigma_arcsec2,
+            sigma_arcsec=self.config.sigma_shapelets,
+            sigma_arcsec1=self.config.sigma_shapelets1,
+            sigma_arcsec2=self.config.sigma_shapelets2,
             pthres=self.config.pthres,
             bound=self.config.bound,
             snr_min=self.config.snr_min,

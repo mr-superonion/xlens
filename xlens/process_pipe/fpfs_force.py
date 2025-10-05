@@ -101,11 +101,11 @@ class FpfsForcePipeConfig(
 
     def validate(self):
         super().validate()
-        if self.fpfs.sigma_arcsec1 < 0.0:
+        if self.fpfs.sigma_shapelets1 < 0.0:
             raise FieldValidationError(
-                self.fpfs.__class__.sigma_arcsec1,
+                self.fpfs.__class__.sigma_shapelets1,
                 self,
-                "sigma_arcsec1 in a wrong range",
+                "sigma_shapelets1 in a wrong range",
             )
 
     def setDefaults(self):

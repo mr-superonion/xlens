@@ -91,31 +91,31 @@ tasks:
   AnacalForceTask1:
     class: xlens.process_pipe.anacal_force.AnacalForcePipe
     config:
-      fpfs.sigma_arcsec1: 0.52
+      fpfs.sigma_shapelets1: 0.52
       anacal.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
   FpfsForceTask1:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
-      fpfs.sigma_arcsec1: 0.52
+      fpfs.sigma_shapelets1: 0.52
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot0_
   FpfsForceTask2:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
-      fpfs.sigma_arcsec1: 0.52
+      fpfs.sigma_shapelets1: 0.52
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_0_rot1_
   FpfsForceTask3:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
-      fpfs.sigma_arcsec1: 0.52
+      fpfs.sigma_shapelets1: 0.52
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot0_
   FpfsForceTask4:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
-      fpfs.sigma_arcsec1: 0.52
+      fpfs.sigma_shapelets1: 0.52
       fpfs.do_noise_bias_correction: False
       connections.coaddName: sim_1_rot1_
 

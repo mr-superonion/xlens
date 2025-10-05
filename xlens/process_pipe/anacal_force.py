@@ -153,11 +153,11 @@ class AnacalForcePipeConfig(
     def validate(self):
         super().validate()
         if self.do_fpfs:
-            if self.fpfs.sigma_arcsec1 < 0.0:
+            if self.fpfs.sigma_shapelets1 < 0.0:
                 raise FieldValidationError(
-                    self.fpfs.fields["sigma_arcsec1"],
+                    self.fpfs.fields["sigma_shapelets1"],
                     self,
-                    "sigma_arcsec1 in a wrong range",
+                    "sigma_shapelets1 in a wrong range",
                 )
 
     def setDefaults(self):
