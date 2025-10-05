@@ -340,6 +340,7 @@ def get_blocks(
             bb.psf_array = psf_array
     return blocks
 
+
 def prepare_data(
     *,
     band: str,

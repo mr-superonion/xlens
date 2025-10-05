@@ -27,11 +27,15 @@ __all__ = [
 
 import logging
 from typing import Any
+from numpy.lib import recfunctions as rfn
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import ConfigurableField, Field
+from lsst.pex.config import (
+    ConfigurableField, Field,
+    FieldValidationError,
+)
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -43,6 +47,7 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask
+from ..processor.fpfs import FpfsMeasurementTask
 
 
 class AnacalDetectPipeConnections(
@@ -94,6 +99,14 @@ class AnacalDetectPipeConfig(
         target=AnacalTask,
         doc="AnaCal Task Detect",
     )
+    fpfs = ConfigurableField(
+        target=FpfsMeasurementTask,
+        doc="Fpfs Source Measurement Task",
+    )
+    do_fpfs = Field[bool](
+        doc="Whether to drun fpfs task",
+        default=False,
+    )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
@@ -102,9 +115,17 @@ class AnacalDetectPipeConfig(
 
     def validate(self):
         super().validate()
+        if self.do_fpfs:
+            if self.fpfs.sigma_arcsec1 < 0.0:
+                raise FieldValidationError(
+                    self.fpfs.fields["sigma_arcsec1"],
+                    self,
+                    "sigma_arcsec1 in a wrong range",
+                )
 
     def setDefaults(self):
         super().setDefaults()
+        self.fpfs.do_compute_detect_weight = False
 
 
 class AnacalDetectPipe(PipelineTask):
@@ -124,6 +145,8 @@ class AnacalDetectPipe(PipelineTask):
         )
         assert isinstance(self.config, AnacalDetectPipeConfig)
         self.makeSubtask("anacal")
+        if self.config.do_fpfs:
+            self.makeSubtask("fpfs")
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -153,6 +176,18 @@ class AnacalDetectPipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
         return
 
+    def run_measure(self, data):
+        assert isinstance(self.config, AnacalDetectPipeConfig)
+        out = []
+        catalog = self.anacal.run(**data)
+        out.append(catalog)
+        if self.config.do_fpfs:
+            data["detection"] = catalog
+            out.append(
+                self.fpfs.run(**data)
+            )
+        return rfn.merge_arrays(out, flatten=True)
+
     def run(
         self,
         *,
@@ -163,6 +198,7 @@ class AnacalDetectPipe(PipelineTask):
         patch: int,
         seed_offset: int = 0,
         mask_array: NDArray | None = None,
+        **kwargs,
     ):
         assert isinstance(self.config, AnacalDetectPipeConfig)
         band = "i"
@@ -192,5 +228,5 @@ class AnacalDetectPipe(PipelineTask):
             patch=patch,
             mask_array=mask_array,
         )
-        catalog = self.anacal.run(**data)
+        catalog = self.run_measure(data)
         return Struct(output_catalog=catalog)

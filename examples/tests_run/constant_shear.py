@@ -103,9 +103,12 @@ sim_task = MultibandSimTask(config=cfg_sim)
 # Detection Task
 # ------------------------------
 detect_config = AnacalDetectPipeConfig()
+detect_config.anacal.sigma_arcsec = 0.40
 detect_config.anacal.force_size = False
 detect_config.anacal.num_epochs = 6
 detect_config.anacal.do_noise_bias_correction = True
+detect_config.do_fpfs = True
+detect_config.fpfs.sigma_arcsec = 0.40 * np.sqrt(2.0)
 detect_config.anacal.validate_psf = False
 det_task = AnacalDetectPipe(config=detect_config)
 if rank == 0:
@@ -154,7 +157,7 @@ for i in range(istart, iend):
         tract=tract_id,
         patch=patch_id,
     )
-    catalog = det_task.anacal.run(**prep)
+    catalog = det_task.run_measure(prep)
     fitsio.write(
         os.path.join(outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)),
         catalog,
