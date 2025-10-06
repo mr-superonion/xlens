@@ -1,0 +1,15 @@
+version: 2
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "3.11"
+  jobs:
+    pre_build:
+      - pip install --upgrade pip
+sphinx:
+  configuration: docs/conf.py
+python:
+  install:
+    - requirements: docs/requirements.txt
+    - method: pip
+      path: .
