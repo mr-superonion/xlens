@@ -182,11 +182,25 @@ class LsstPsf(anacal.psf.BasePsf):
 
 
 def truncate_square(arr: NDArray, rcut: int) -> None:
-    """Truncate the input array with square
+    """Zero out pixels outside a centred square support region.
 
-    Args:
-    arr (ndarray): image array
-    rcut (int): radius of the square (width / 2)
+    The function is primarily used when constructing PSF postage stamps.  It
+    enforces a compact support by setting all pixels farther than ``rcut``
+    from the stamp centre to zero while leaving the inner region untouched.
+
+    Parameters
+    ----------
+    arr : numpy.ndarray
+        Square, two-dimensional array to modify in place.
+    rcut : int
+        Half-width of the square region that should be kept.  The resulting
+        mask spans ``2 * rcut + 1`` pixels in both directions.
+
+    Raises
+    ------
+    ValueError
+        If ``arr`` is not a square 2-D array or if ``rcut`` is too large for
+        the provided array size.
     """
     if len(arr.shape) != 2 or arr.shape[0] != arr.shape[1]:
         raise ValueError("Input array must be a 2D square array")
@@ -360,17 +374,56 @@ def prepare_data(
     detection: astropy.table.Table | None = None,
     **kwargs,
 ):
-    """Prepares the data from LSST exposure
-    Args:
-    exposure (ExposureF): LSST exposure
-    seed (int):  random seed
-    noiseId (int): noise id
-    rotId (int): rotation id
-    npix (int): stamp size for PSF
-    noise_corr (NDArray): image noise correlation function (None)
+    """Collect metadata and auxiliary arrays for shear measurement tasks.
 
-    Returns:
-        (dict)
+    The routine orchestrates several helper utilities in this module to build
+    a dictionary consumed by the analysis pipeline.  It extracts PSF postage
+    stamps, prepares the galaxy image data, and computes deterministic random
+    seeds used when adding synthetic noise.
+
+    Parameters
+    ----------
+    band : str
+        Photometric band label used to tag the output dictionary.
+    exposure : lsst.afw.image.ExposureF
+        LSST exposure containing the science image and its associated PSF and
+        mask information.
+    seed : int
+        Base seed that, together with ``noiseId`` and ``rotId``, controls the
+        stochastic components of the processing.
+    noiseId : int, optional
+        Identifier for the noise realisation.  Defaults to ``0``.
+    rotId : int, optional
+        Identifier for the rotation realisation.  Defaults to ``0``.
+    npix : int, optional
+        Target size of the PSF postage stamp in pixels.  Defaults to ``32``.
+    noise_corr : numpy.ndarray, optional
+        Noise correlation function sampled on the same grid as the PSF stamp.
+    do_noise_bias_correction : bool, optional
+        If ``True`` (default) include the per-block noise-bias correction
+        arrays in the output payload.
+    badMaskPlanes : list of str, optional
+        Collection of mask plane names that should be treated as invalid.
+    skyMap : optional
+        Sky-map descriptor propagated to the output dictionary unchanged.
+    tract, patch : int, optional
+        Identifiers for the tract and patch associated with ``exposure``.
+    star_cat : numpy.ndarray, optional
+        Catalogue of reference stars used for PSF modelling.
+    mask_array : numpy.ndarray, optional
+        Pre-computed boolean mask array.  If ``None`` the mask is built from
+        ``exposure`` directly.
+    detection : astropy.table.Table, optional
+        Detection catalogue that provides initial estimates for source
+        properties.
+    **kwargs
+        Additional keyword arguments propagated to downstream consumers.
+
+    Returns
+    -------
+    dict
+        A dictionary containing harmonised image data, PSF information, and
+        metadata ready for the ``anacal`` measurement pipeline.
     """
     from .random import get_noise_seed
 

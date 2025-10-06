@@ -14,37 +14,34 @@ def get_noise_seed(
     band="i",
     is_sim=False
 ):
-    """
-    Generate a unique, reproducible 32-bit integer seed based on galaxy
-    parameters.
+    """Generate a stable pseudo-random seed for noise realisations.
 
-    Args:
-        galaxy_seed (int):
-            Base seed or unique identifier for the galaxy.
-        noiseId (int, optional):
-            Noise realization ID. Defaults to 0.
-        rotId (int, optional):
-            Rotation ID for galaxy orientation. Defaults to 0.
-        band (str, optional):
-            Photometric band identifier (e.g., "g", "r", "i", "z", "y").
-            Defaults to "i".
-        is_sim (bool or numpy.bool_, optional):
-            Flag indicating whether the galaxy is from a simulation (`True`) or
-            real data (`False`). Internally converted to an integer (1 for
-            True, 0 for False). Defaults to False.
+    The function mixes deterministic galaxy identifiers with optional
+    meta-data, hashes the values into a uniform byte representation, and
+    derives a 32-bit integer seed.  The resulting seed is reproducible for a
+    given combination of inputs and has a vanishingly small collision
+    probability within typical survey data sets.
 
-    Returns:
-        int:
-            A reproducible 32-bit unsigned integer seed derived from the
-            provided parameters. Changing any parameter will produce a
-            different seed.
+    Parameters
+    ----------
+    galaxy_seed : int
+        Base integer identifier that uniquely labels the galaxy.
+    noiseId : int, optional
+        Identifier describing the desired noise realisation.  Defaults to ``0``.
+    rotId : int, optional
+        Identifier describing the rotation realisation.  Defaults to ``0``.
+    band : str, optional
+        Photometric band label (``"g"``, ``"r"``, ``"i"``, ``"z"``, ``"y"``).
+        Defaults to ``"i"``.
+    is_sim : bool, optional
+        Flag that indicates whether the galaxy originates from a simulation
+        (``True``) or observations (``False``).  Defaults to ``False``.
 
-    Notes:
-        - This method ensures low collision probability by hashing non-integer
-          values and combining them with integer inputs before creating the
-          seed.
-        - For extremely large-scale uniqueness requirements (billions of
-          seeds), consider using 64-bit output for extra safety.
+    Returns
+    -------
+    int
+        Unsigned 32-bit integer seed suitable for initialising NumPy random
+        generators.
     """
     mixed_list = [
         galaxy_seed, noiseId, rotId, band, int(is_sim)
