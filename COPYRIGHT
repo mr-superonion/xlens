@@ -1,0 +1,18 @@
+XLENS Copyright Notice
+=======================
+
+This repository includes components derived from the Rubin Observatory
+Legacy Survey of Space and Time (LSST) Science Pipelines. The original LSST
+software is distributed by the LSST Project
+(https://www.lsst.org/) and is licensed under the GNU General Public License
+Version 3.
+
+Portions of this work are:
+  Copyright (c) 2008-2024
+  Association of Universities for Research in Astronomy, Inc. (AURA).
+  All rights reserved.
+
+In accordance with the LSST license requirements, we acknowledge that this
+product includes software developed by the LSST Project. Modifications and
+extensions made within the ``xlens`` project are licensed under the GNU
+General Public License, version 3 or any later version.

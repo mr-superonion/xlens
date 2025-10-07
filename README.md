@@ -48,3 +48,13 @@ pytest -vv
 ```
 ----
 
+## License and Acknowledgements
+
+This project is distributed under the terms of the GNU General Public License
+version 3. Portions of the codebase originate from the Rubin Observatory Legacy
+Survey of Space and Time (LSST) Science Pipelines. In accordance with the LSST
+license requirements, we acknowledge that this product includes software
+developed by the LSST Project (https://www.lsst.org/). Additional copyright
+details for bundled LSST-derived software can be found in the accompanying
+``COPYRIGHT`` file.
+
