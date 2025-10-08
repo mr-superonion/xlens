@@ -10,16 +10,16 @@
 source /global/u2/x/xiangchl/ana/setup_descwl_shear_sim.sh
 
 # change the script path
-script=/pscratch/sd/x/xiangchl/code/image/xlens/examples/tests_run/constant_shear.py
+script=/pscratch/sd/x/xiangchl/code/image/xlens/examples/tests_run/sim.py
 
-for mode in 1 0; do
+for mode in 40 0; do
     srun --mpi=pmix -n 1024 python "$script" \
       --mode "$mode" \
       --rot 0 \
       --shear 0.02 \
       --kappa 0.0 \
-      --target g2 \
+      --target g1 \
       --start 0 \
       --end 50 \
-      --layout grid
+      --layout random
 done

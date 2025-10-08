@@ -326,10 +326,10 @@ def main():
     outdir = outdir_path(
         args.pscratch, args.layout, args.target, args.shear
     )
-    # Build full ID list [min_id, max_id], split across ranks
+    # Build full ID list [min_id, max_id) split across ranks
     if args.max_id < args.min_id:
         raise SystemExit("--max-id must be >= --min-id")
-    all_ids = np.arange(args.min_id, args.max_id + 1, dtype=int)
+    all_ids = np.arange(args.min_id, args.max_id, dtype=int)
 
     # Even split
     n = len(all_ids)

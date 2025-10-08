@@ -9,7 +9,7 @@
 #SBATCH --ntasks=600
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=2G
-#SBATCH --time=0-08:00:00
+#SBATCH --time=0-10:00:00
 
 # Optional: remove if not using GPUs
 #SBATCH --gpus=0
@@ -17,9 +17,9 @@
 source /sdf/home/x/xiangchl/setupIm.sh
 export PSCRATCH="$SCRATCH"
 # change the script path
-script=/sdf/home/x/xiangchl/code/xlens/examples/tests_run/constant_shear.py
+script=/sdf/home/x/xiangchl/code/xlens/examples/tests_run/sim.py
 
-for mode in 1 0; do
+for mode in 40 0; do
     mpirun -n 600 python "$script" \
       --mode "$mode" \
       --rot 0 \

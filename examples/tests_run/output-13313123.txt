@@ -1,0 +1,3 @@
+DM stack could not be deactivated!
+SkyMap created.
+Detection task setup complete.

@@ -25,15 +25,16 @@ parser = argparse.ArgumentParser(
     description="Run constant shear simulation with MPI"
 )
 parser.add_argument("--target", type=str, default="g1", help="test target")
-parser.add_argument("--mode", type=int, default=0, choices=[0, 1, 2],
-                    help="Shear mode: 0: g=-shear, 1: g=shear, 2: g=0.00")
+parser.add_argument(
+    "--mode", type=int, default=0, choices=[40, 0, 27, 9, 3, 1, 36, 4, 80],
+    help="40:++++;0:----;27:+---;9:-+--;3:--+-;1:---+;36:++--;4:--++;80:0000")
 parser.add_argument(
     "--rot", type=int, default=0, choices=[0, 1], help="rotation id"
 )
 parser.add_argument("--start", type=int, default=0, help="start id")
 parser.add_argument("--end", type=int, default=2, help="end id")
 parser.add_argument("--shear", type=float, default=0.02, help="Shear value")
-parser.add_argument("--kappa", type=float, default=0.02, help="Kappa value")
+parser.add_argument("--kappa", type=float, default=0.00, help="Kappa value")
 parser.add_argument("--layout", type=str, default="grid", help="layout")
 args = parser.parse_args()
 
@@ -82,7 +83,7 @@ if rank == 0:
 # Image Simulation Task
 # ------------------------------
 cfg_cat = CatalogShearTaskConfig()
-cfg_cat.z_bounds = [-0.01, 20.0]
+cfg_cat.z_bounds = [0.0, 0.63, 0.98, 1.48, 10.0]
 cfg_cat.mode = shear_mode
 cfg_cat.rotId = rot_id
 cfg_cat.kappa_value = kappa_value
@@ -103,13 +104,12 @@ sim_task = MultibandSimTask(config=cfg_sim)
 # Detection Task
 # ------------------------------
 detect_config = AnacalDetectPipeConfig()
-detect_config.anacal.sigma_arcsec = 0.40
+detect_config.anacal.sigma_arcsec = 0.38
 detect_config.anacal.force_size = False
-detect_config.anacal.num_epochs = 6
+detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
 detect_config.do_fpfs = True
-detect_config.fpfs.sigma_shapelets = 0.40 * np.sqrt(2.0)
-detect_config.anacal.validate_psf = False
+detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
 det_task = AnacalDetectPipe(config=detect_config)
 if rank == 0:
     print("Detection task setup complete.")
@@ -146,7 +146,6 @@ for i in range(istart, iend):
         seed=sim_seed,
         truthCatalog=truth_catalog,
     )
-
     prep = det_task.anacal.prepare_data(
         exposure=sim_result.simExposure,
         seed=100000 + sim_seed,
