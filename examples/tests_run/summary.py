@@ -176,21 +176,18 @@ def measure_shear_flux_cut(src, flux_min, emax=0.3, dg=0.02):
         return 0.0, 0.0, 0.0, 0.0, 0
 
     w0 = src["wsel"][m0]
-    e1 = float(np.sum(w0 * src["fpfs_e1"][m0]))
-    e2 = float(np.sum(w0 * src["fpfs_e2"][m0]))
+    e1 = np.sum(w0 * src["fpfs_e1"][m0])
+    e2 = np.sum(w0 * src["fpfs_e2"][m0])
 
-    r1 = float(
-        np.sum(
-            src["dwsel_dg1"][m0] * src["fpfs_e1"][m0]
-            + w0 * src["fpfs_de1_dg1"][m0]
-        )
+    r1 = np.sum(
+        src["dwsel_dg1"][m0] * src["fpfs_e1"][m0]
+        + w0 * src["fpfs_de1_dg1"][m0]
     )
-    r2 = float(
-        np.sum(
-            src["dwsel_dg2"][m0] * src["fpfs_e2"][m0]
-            + w0 * src["fpfs_de2_dg2"][m0]
-        )
+    r2 = np.sum(
+        src["dwsel_dg2"][m0] * src["fpfs_e2"][m0]
+        + w0 * src["fpfs_de2_dg2"][m0]
     )
+
     def sel_term(comp: int):
         e = src[f"fpfs_e{comp}"]
         de = src[f"fpfs_de{comp}_dg{comp}"]
@@ -226,14 +223,19 @@ def per_rank_work(ids_chunk, outdir, flux_list, emax, dg, target):
     R_neg = []
 
     for i, sid in enumerate(ids_chunk):
-        ppos = cat_path(outdir, sid, mode=1)  # +g
+        ppos = cat_path(outdir, sid, mode=40)  # +g
         pneg = cat_path(outdir, sid, mode=0)  # -g
         if not (os.path.exists(ppos) and os.path.exists(pneg)):
             # Skip if pair not complete
             continue
 
-        src_pos = fitsio.read(ppos)
-        src_neg = fitsio.read(pneg)
+        try:
+            src_pos = fitsio.read(ppos)
+            src_neg = fitsio.read(pneg)
+        except OSError:
+            print(ppos)
+            print(pneg)
+            continue
 
         e_pos_row = np.zeros(ncut)
         e_neg_row = np.zeros(ncut)

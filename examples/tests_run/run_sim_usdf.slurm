@@ -15,7 +15,7 @@
 #SBATCH --gpus=0
 
 source /sdf/home/x/xiangchl/setupIm.sh
-export PSCRATCH="$SCRATCH"
+
 # change the script path
 script=/sdf/home/x/xiangchl/code/xlens/examples/tests_run/sim.py
 
@@ -28,5 +28,5 @@ for mode in 40 0; do
       --target g1 \
       --start 0 \
       --end 50 \
-      --layout grid
+      --layout random
 done

@@ -105,7 +105,7 @@ sim_task = MultibandSimTask(config=cfg_sim)
 # ------------------------------
 detect_config = AnacalDetectPipeConfig()
 detect_config.anacal.sigma_arcsec = 0.38
-detect_config.anacal.force_size = False
+detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
 detect_config.do_fpfs = True
@@ -128,39 +128,57 @@ outdir = os.path.join(
     f"shear{int(shear_value * 100):02d}",
 )
 os.makedirs(outdir, exist_ok=True)
+band = None
 
 # ------------------------------
 # Run Simulation & Measurement
 # ------------------------------
 for i in range(istart, iend):
     sim_seed = i * size + rank
+    if band is not None:
+        outfname = os.path.join(
+            outdir, "cat-%05d-%d-mode%d.fits" % (sim_seed, band, shear_mode)
+        )
+    else:
+        outfname = os.path.join(
+            outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)
+        )
+    if os.path.isfile(outfname) or (sim_seed>=30000):
+        continue
     truth_catalog = cat_task.run(
         tract_info=skymap[tract_id],
         seed=sim_seed,
     ).truthCatalog
 
-    sim_result = sim_task.run(
+    exposure = sim_task.run(
         tract_info=skymap[tract_id],
         patch_id=patch_id,
-        band="i",
+        band="i" if band is None else band,
         seed=sim_seed,
         truthCatalog=truth_catalog,
+    ).simExposure
+    detfname = os.path.join(
+        outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)
     )
+    if os.path.isfile(detfname):
+        detection = fitsio.read(detfname)
+    else:
+        detection = None
     prep = det_task.anacal.prepare_data(
-        exposure=sim_result.simExposure,
+        exposure=exposure,
         seed=100000 + sim_seed,
         noise_corr=None,
-        detection=None,
-        band=None,
+        detection=detection,
+        band=band,
         skyMap=skymap,
         tract=tract_id,
         patch=patch_id,
     )
     catalog = det_task.run_measure(prep)
     fitsio.write(
-        os.path.join(outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)),
+        outfname,
         catalog,
     )
     # clean up
-    del prep, sim_result, truth_catalog, catalog
+    del prep, exposure, truth_catalog, catalog
     gc.collect()
