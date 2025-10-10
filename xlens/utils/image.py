@@ -423,16 +423,9 @@ def combine_sim_exposures(exposures: Sequence[ExposureF]) -> ExposureF:
             raise ValueError(
                 "Variance plane must contain at least one finite value"
             )
-
         variance_value = float(np.nanmean(variance))
         if not np.isfinite(variance_value):
             raise ValueError("Variance mean must be finite")
-
-        if not np.allclose(
-            finite_variance, variance_value, rtol=0.0, atol=1e-6
-        ):
-            raise ValueError("Variance plane must be constant across the image")
-
         if variance_value <= 0:
             raise ValueError("Variance values must be positive")
 

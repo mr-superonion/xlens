@@ -17,6 +17,7 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+from xlens.utils.image import combine_sim_exposures
 from numpy.lib import recfunctions as rfn
 
 # ------------------------------
@@ -147,6 +148,33 @@ colnames = [
     "dflux_gauss4_dg1",
     "dflux_gauss4_dg2",
 ]
+
+
+def get_exposure(truth_catalog, sim_seed, band=None):
+    if band is None:
+        explist = []
+        for bb in ["g", "r", "i", "z"]:
+            explist.append(
+                sim_task.run(
+                    tract_info=skymap[tract_id],
+                    patch_id=patch_id,
+                    band=bb,
+                    seed=sim_seed,
+                    truthCatalog=truth_catalog,
+                ).simExposure
+            )
+        exposure = combine_sim_exposures(explist)
+    else:
+        exposure = sim_task.run(
+            tract_info=skymap[tract_id],
+            patch_id=patch_id,
+            band=band,
+            seed=sim_seed,
+            truthCatalog=truth_catalog,
+        ).simExposure
+    return exposure
+
+
 for i in range(istart, iend):
     sim_seed = i * size + rank
     if band is not None:
@@ -172,13 +200,9 @@ for i in range(istart, iend):
         seed=sim_seed,
     ).truthCatalog
 
-    exposure = sim_task.run(
-        tract_info=skymap[tract_id],
-        patch_id=patch_id,
-        band=("i" if band is None else band),
-        seed=sim_seed,
-        truthCatalog=truth_catalog,
-    ).simExposure
+    exposure = get_exposure(
+        truth_catalog=truth_catalog, sim_seed=sim_seed, band=band,
+    )
     prep = det_task.anacal.prepare_data(
         exposure=exposure,
         seed=100000 + sim_seed,
