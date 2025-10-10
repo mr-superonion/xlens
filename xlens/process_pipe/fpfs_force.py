@@ -161,6 +161,7 @@ class FpfsForcePipe(PipelineTask):
         detection,
         exposure_handles_dict: dict,
         correlation_handles_dict: dict | None,
+        **kwargs,
     ):
         assert isinstance(self.config, FpfsForcePipeConfig)
 
@@ -199,8 +200,11 @@ class FpfsForcePipe(PipelineTask):
                 noise_corr=noise_corr,
                 detection=detection,
             )
-            cat = self.fpfs.run(**data)
-            catalog.append(cat)
+            res = self.fpfs.run(**data)
+            colnames = res.dtype.names
+            map_dict = {name: f"{band}_" + name for name in colnames}
+            res = rfn.rename_fields(res, map_dict)
+            catalog.append(res)
             del exposure, data
         catalog = rfn.merge_arrays(catalog, flatten=True)
         return Struct(catalog=catalog)

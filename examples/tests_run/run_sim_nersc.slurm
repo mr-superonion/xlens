@@ -20,6 +20,6 @@ for mode in 40 0; do
       --kappa 0.0 \
       --target g1 \
       --start 0 \
-      --end 50 \
+      --end 30 \
       --layout random
 done

@@ -214,11 +214,8 @@ class AnacalForcePipe(PipelineTask):
         patch: int = 0,
         mask_array: NDArray | None = None,
         **kwargs,
-    ):
+    ) -> np.ndarray:
         assert isinstance(self.config, AnacalForcePipeConfig)
-        detection = rfn.repack_fields(
-            detection[list(anacal.table.column_names())]
-        )
         data = self.anacal.prepare_data(
             exposure=exposure,
             seed=seed,
@@ -230,13 +227,21 @@ class AnacalForcePipe(PipelineTask):
             patch=patch,
             mask_array=mask_array,
         )
-        out = []
-        colnames = ["flux", "dflux_dg1", "dflux_dg2"]
+        colnames = [
+            "flux_gauss0",
+            "dflux_gauss0_dg1",
+            "dflux_gauss0_dg2",
+            "flux_gauss2",
+            "dflux_gauss2_dg1",
+            "dflux_gauss2_dg2",
+            "flux_gauss4",
+            "dflux_gauss4_dg1",
+            "dflux_gauss4_dg2",
+        ]
         cat = rfn.repack_fields(
             self.anacal.run(**data)[colnames]
         )
-        map_dict = {name: f"{band}_" + name for name in colnames}
-        out.append(rfn.rename_fields(cat, map_dict))
+        out = [cat]
         if self.config.do_fpfs:
             out.append(
                 self.fpfs.run(**data)
@@ -273,18 +278,20 @@ class AnacalForcePipe(PipelineTask):
                 noise_corr = None
             idGenerator = self.config.idGenerator.apply(handle.dataId)
             seed = idGenerator.catalog_id + seed_offset
-            catalog.append(
-                self.run_one_band(
-                    exposure=exposure,
-                    detection=detection,
-                    band=band,
-                    seed=seed,
-                    noise_corr=noise_corr,
-                    skyMap=skyMap,
-                    tract=tract,
-                    patch=patch,
-                    mask_array=mask_array,
-                )
+            res = self.run_one_band(
+                exposure=exposure,
+                detection=detection,
+                band=band,
+                seed=seed,
+                noise_corr=noise_corr,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                mask_array=mask_array,
             )
+            colnames = res.dtype.names
+            map_dict = {name: f"{band}_" + name for name in colnames}
+            res = rfn.rename_fields(res, map_dict)
+            catalog.append(res)
         catalog = rfn.merge_arrays(catalog, flatten=True)
         return Struct(catalog=catalog)

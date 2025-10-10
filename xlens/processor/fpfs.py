@@ -205,7 +205,6 @@ class FpfsMeasurementTask(Task):
         assert isinstance(self.config, FpfsMeasurementConfig)
         lsst_bbox = exposure.getBBox()
 
-        base_column_name = band + "_"
         data = utils.image.prepare_data(
             band=band,
             exposure=exposure,
@@ -220,8 +219,6 @@ class FpfsMeasurementTask(Task):
             mask_array=mask_array,
             detection=detection,
         )
-
-        data["base_column_name"] = base_column_name
         if not self.config.use_average_psf:
             data["psf_object"] = utils.image.LsstPsf(
                 psf=exposure.getPsf(), npix=self.config.npix,

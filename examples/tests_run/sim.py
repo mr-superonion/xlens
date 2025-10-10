@@ -17,6 +17,7 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+from numpy.lib import recfunctions as rfn
 
 # ------------------------------
 # Argument Parsing
@@ -36,6 +37,7 @@ parser.add_argument("--end", type=int, default=2, help="end id")
 parser.add_argument("--shear", type=float, default=0.02, help="Shear value")
 parser.add_argument("--kappa", type=float, default=0.00, help="Kappa value")
 parser.add_argument("--layout", type=str, default="grid", help="layout")
+parser.add_argument("--band", type=str, default=None, help="band")
 args = parser.parse_args()
 
 shear_mode = int(args.mode)
@@ -45,6 +47,8 @@ rot_id = args.rot
 test_target = args.target
 istart = args.start
 iend = args.end
+band = args.band
+
 if args.layout == "random":
     extend_ratio = 1.08
 elif args.layout == "grid":
@@ -108,7 +112,7 @@ detect_config.anacal.sigma_arcsec = 0.38
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
-detect_config.do_fpfs = True
+detect_config.do_fpfs = (band is None)
 detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
 det_task = AnacalDetectPipe(config=detect_config)
 if rank == 0:
@@ -128,21 +132,39 @@ outdir = os.path.join(
     f"shear{int(shear_value * 100):02d}",
 )
 os.makedirs(outdir, exist_ok=True)
-band = None
 
 # ------------------------------
 # Run Simulation & Measurement
 # ------------------------------
+colnames = [
+    "flux_gauss0",
+    "dflux_gauss0_dg1",
+    "dflux_gauss0_dg2",
+    "flux_gauss2",
+    "dflux_gauss2_dg1",
+    "dflux_gauss2_dg2",
+    "flux_gauss4",
+    "dflux_gauss4_dg1",
+    "dflux_gauss4_dg2",
+]
 for i in range(istart, iend):
     sim_seed = i * size + rank
     if band is not None:
         outfname = os.path.join(
-            outdir, "cat-%05d-%d-mode%d.fits" % (sim_seed, band, shear_mode)
+            outdir, "cat-%05d-%s-mode%d.fits" % (sim_seed, band, shear_mode)
         )
+        detfname = os.path.join(
+            outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)
+        )
+        if os.path.isfile(detfname):
+            detection = fitsio.read(detfname)
+        else:
+            raise ValueError("Run detection with band=None first")
     else:
         outfname = os.path.join(
             outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)
         )
+        detection = None
     if os.path.isfile(outfname) or (sim_seed>=30000):
         continue
     truth_catalog = cat_task.run(
@@ -153,17 +175,10 @@ for i in range(istart, iend):
     exposure = sim_task.run(
         tract_info=skymap[tract_id],
         patch_id=patch_id,
-        band="i" if band is None else band,
+        band=("i" if band is None else band),
         seed=sim_seed,
         truthCatalog=truth_catalog,
     ).simExposure
-    detfname = os.path.join(
-        outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)
-    )
-    if os.path.isfile(detfname):
-        detection = fitsio.read(detfname)
-    else:
-        detection = None
     prep = det_task.anacal.prepare_data(
         exposure=exposure,
         seed=100000 + sim_seed,
@@ -174,11 +189,15 @@ for i in range(istart, iend):
         tract=tract_id,
         patch=patch_id,
     )
-    catalog = det_task.run_measure(prep)
+    res = det_task.run_measure(prep)
+    if band is not None:
+        map_dict = {name: f"{band}_" + name for name in colnames}
+        res = rfn.repack_fields(res[colnames])
+        res = rfn.rename_fields(res, map_dict)
     fitsio.write(
         outfname,
-        catalog,
+        res,
     )
     # clean up
-    del prep, exposure, truth_catalog, catalog
+    del prep, exposure, truth_catalog, res
     gc.collect()

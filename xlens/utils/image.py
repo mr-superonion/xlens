@@ -37,6 +37,7 @@ import lsst.geom as lsst_geom
 import numpy as np
 from lsst.afw.image import ExposureF, MaskX
 from numpy.typing import NDArray
+from numpy.lib import recfunctions as rfn
 
 badMaskDefault = [
     "BAD",
@@ -566,6 +567,9 @@ def prepare_data(
             detection = detection.copy().as_array()
         elif isinstance(detection, np.ndarray):
             detection = detection.copy()
+        detection = rfn.repack_fields(
+            detection[list(anacal.table.column_names())]
+        )
 
     return {
         "pixel_scale": pixel_scale,
