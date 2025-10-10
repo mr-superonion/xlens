@@ -6,7 +6,25 @@ import os
 import fitsio
 import numpy as np
 from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
-from mpi4py import MPI
+
+# --- Optional MPI: works without mpirun/srun or even mpi4py installed ---
+try:
+    from mpi4py import MPI  # type: ignore
+    _COMM = MPI.COMM_WORLD
+    _RANK = _COMM.Get_rank()
+    _SIZE = _COMM.Get_size()
+    def _barrier():
+        _COMM.Barrier()
+except Exception:
+    # Fallback to a tiny shim so the script runs single-process
+    class _FakeComm:
+        def Get_rank(self): return 0
+        def Get_size(self): return 1
+    _COMM = _FakeComm()
+    _RANK = 0
+    _SIZE = 1
+    def _barrier():  # no-op
+        return
 
 from xlens.process_pipe.anacal_detect import (
     AnacalDetectPipe,
@@ -24,21 +42,36 @@ from numpy.lib import recfunctions as rfn
 # Argument Parsing
 # ------------------------------
 parser = argparse.ArgumentParser(
-    description="Run constant shear simulation with MPI"
+    description="Run constant shear simulation (MPI optional)"
 )
 parser.add_argument("--target", type=str, default="g1", help="test target")
 parser.add_argument(
     "--mode", type=int, default=0, choices=[40, 0, 27, 9, 3, 1, 36, 4, 80],
-    help="40:++++;0:----;27:+---;9:-+--;3:--+-;1:---+;36:++--;4:--++;80:0000")
-parser.add_argument(
-    "--rot", type=int, default=0, choices=[0, 1], help="rotation id"
+    help="40:++++;0:----;27:+---;9:-+--;3:--+-;1:---+;36:++--;4:--++;80:0000"
 )
-parser.add_argument("--start", type=int, default=0, help="start id")
-parser.add_argument("--end", type=int, default=2, help="end id")
-parser.add_argument("--shear", type=float, default=0.02, help="Shear value")
-parser.add_argument("--kappa", type=float, default=0.00, help="Kappa value")
-parser.add_argument("--layout", type=str, default="grid", help="layout")
-parser.add_argument("--band", type=str, default=None, help="band")
+parser.add_argument(
+    "--rot", type=int, default=0, choices=[0, 1], help="rotation id",
+)
+parser.add_argument(
+    "--start", type=int, default=0, help="start id (inclusive)",
+)
+parser.add_argument(
+    "--end", type=int, default=2, help="end id (exclusive)",
+)
+parser.add_argument(
+    "--shear", type=float, default=0.02, help="Shear value",
+)
+parser.add_argument(
+    "--kappa", type=float, default=0.00, help="Kappa value",
+)
+parser.add_argument(
+    "--layout", type=str, default="grid",
+    choices=["grid","random"], help="layout",
+)
+parser.add_argument(
+    "--band", type=str, default=None,
+    help="single band (g,r,i,z) or None for multiband",
+)
 args = parser.parse_args()
 
 shear_mode = int(args.mode)
@@ -58,11 +91,16 @@ else:
     raise ValueError("Cannot support layout")
 
 # ------------------------------
-# MPI Setup
+# MPI (or single-process) info
 # ------------------------------
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
+comm = _COMM
+rank = _RANK
+size = _SIZE
+if rank == 0:
+    if size == 1:
+        print("[Info] Running single-process (no mpirun/srun needed).")
+    else:
+        print(f"[Info] Running with MPI across {size} ranks.")
 
 # ------------------------------
 # SkyMap Setup
@@ -119,12 +157,11 @@ det_task = AnacalDetectPipe(config=detect_config)
 if rank == 0:
     print("Detection task setup complete.")
 
-samples_per_rank = iend - istart
-if samples_per_rank <= 0:
+if iend - istart <= 0:
     raise ValueError(f"Invalid range: start={istart}, end={iend}")
 
 # Outdir layout:
-#   $PSCRATCH/constant_shear_isolated/<target>/anacal_blends_shearXX/
+#   $PSCRATCH/constant_shear_<layout>/<target>/shearXX/
 pscratch = os.environ.get("PSCRATCH", ".")
 outdir = os.path.join(
     pscratch,
@@ -134,9 +171,6 @@ outdir = os.path.join(
 )
 os.makedirs(outdir, exist_ok=True)
 
-# ------------------------------
-# Run Simulation & Measurement
-# ------------------------------
 colnames = [
     "flux_gauss0",
     "dflux_gauss0_dg1",
@@ -148,7 +182,6 @@ colnames = [
     "dflux_gauss4_dg1",
     "dflux_gauss4_dg2",
 ]
-
 
 def get_exposure(truth_catalog, sim_seed, band=None):
     if band is None:
@@ -174,9 +207,11 @@ def get_exposure(truth_catalog, sim_seed, band=None):
         ).simExposure
     return exposure
 
-
+# ------------------------------
+# Work loop (unique seeds per rank if MPI)
+# ------------------------------
 for i in range(istart, iend):
-    sim_seed = i * size + rank
+    sim_seed = i * size + rank  # with size==1 this is just i
     if band is not None:
         outfname = os.path.join(
             outdir, "cat-%05d-%s-mode%d.fits" % (sim_seed, band, shear_mode)
@@ -193,8 +228,11 @@ for i in range(istart, iend):
             outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)
         )
         detection = None
-    if os.path.isfile(outfname) or (sim_seed>=30000):
+
+    # Optional cap: skip large sim_seed (kept as-is)
+    if os.path.isfile(outfname) or (sim_seed >= 30000):
         continue
+
     truth_catalog = cat_task.run(
         tract_info=skymap[tract_id],
         seed=sim_seed,
@@ -214,14 +252,19 @@ for i in range(istart, iend):
         patch=patch_id,
     )
     res = det_task.run_measure(prep)
+
     if band is not None:
         map_dict = {name: f"{band}_" + name for name in colnames}
         res = rfn.repack_fields(res[colnames])
         res = rfn.rename_fields(res, map_dict)
-    fitsio.write(
-        outfname,
-        res,
-    )
+
+    fitsio.write(outfname, res)
+
     # clean up
     del prep, exposure, truth_catalog, res
     gc.collect()
+
+# Ensure all ranks finish (no-op in single process)
+_barrier()
+if rank == 0:
+    print("Done.")
