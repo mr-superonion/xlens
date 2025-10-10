@@ -13,16 +13,22 @@ try:
     _COMM = MPI.COMM_WORLD
     _RANK = _COMM.Get_rank()
     _SIZE = _COMM.Get_size()
+
     def _barrier():
         _COMM.Barrier()
 except Exception:
     # Fallback to a tiny shim so the script runs single-process
     class _FakeComm:
-        def Get_rank(self): return 0
-        def Get_size(self): return 1
+
+        def Get_rank(self):
+            return 0
+
+        def Get_size(self):
+            return 1
     _COMM = _FakeComm()
     _RANK = 0
     _SIZE = 1
+
     def _barrier():  # no-op
         return
 
@@ -66,7 +72,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--layout", type=str, default="grid",
-    choices=["grid","random"], help="layout",
+    choices=["grid", "random"], help="layout",
 )
 parser.add_argument(
     "--band", type=str, default=None,
@@ -183,6 +189,7 @@ colnames = [
     "dflux_gauss4_dg2",
 ]
 
+
 def get_exposure(truth_catalog, sim_seed, band=None):
     if band is None:
         explist = []
@@ -207,11 +214,12 @@ def get_exposure(truth_catalog, sim_seed, band=None):
         ).simExposure
     return exposure
 
+
 # ------------------------------
 # Work loop (unique seeds per rank if MPI)
 # ------------------------------
 for i in range(istart, iend):
-    sim_seed = i * size + rank  # with size==1 this is just i
+    sim_seed = i * size + rank
     if band is not None:
         outfname = os.path.join(
             outdir, "cat-%05d-%s-mode%d.fits" % (sim_seed, band, shear_mode)

@@ -2,8 +2,8 @@
 
 #SBATCH --partition=roma
 #SBATCH --job-name=test
-#SBATCH --output=output-%j.txt
-#SBATCH --error=output-%j.txt
+#SBATCH -o %u/log/shear_%x_%j.out
+#SBATCH -e %u/log/shear_%x_%j.err
 
 #SBATCH --nodes=5
 #SBATCH --ntasks=600
@@ -13,6 +13,9 @@
 
 # Optional: remove if not using GPUs
 #SBATCH --gpus=0
+
+
+mkdir -p "$HOME/log"
 
 source /sdf/home/x/xiangchl/setupIm.sh
 

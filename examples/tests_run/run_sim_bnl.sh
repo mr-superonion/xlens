@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Submit sim.py jobs to HTCondor.
 # - Sources setup on the worker node
 # - Sweeps mode in {0,40} and index in [0,5]
@@ -26,6 +26,12 @@ if [[ -z "${PSCRATCH:-}" ]]; then
   exit 1
 fi
 
+PYTHON_EXE_PATH="$(command -v python3 || true)"
+if [[ -z "$PYTHON_EXE_PATH" ]]; then
+  echo "Error: python3 not found in PATH after sourcing '$SETUP_SH'." >&2
+  exit 1
+fi
+
 SCRIPT_PATH="sim.py"
 if [[ ! -f "$SCRIPT_PATH" ]]; then
   echo "Error: sim script '$SCRIPT_PATH' not found." >&2
@@ -35,7 +41,7 @@ fi
 # -------------------------------
 # Logs
 # -------------------------------
-LOG_DIR="log"
+LOG_DIR="${HOME}/log"
 mkdir -p "$LOG_DIR"
 
 # -------------------------------
@@ -49,20 +55,19 @@ getenv          = true
 request_memory  = 4096
 
 # Run a login shell
-executable      = /bin/bash
+executable      = ${PYTHON_EXE_PATH}
 
 # Single line arguments. Condor will expand \$(mode) etc on the worker.
-arguments       = python3 ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$(index) --end \$(index_end) --layout ${LAYOUT}
+arguments       = ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$(start) --end \$(end) --layout ${LAYOUT}
 
-output          = ${LOG_DIR}/\$(mode)_idx\$(index)_\$(ClusterId)_\$(ProcId).out
-error           = ${LOG_DIR}/\$(mode)_idx\$(index)_\$(ClusterId)_\$(ProcId).err
+output          = ${LOG_DIR}/\$(mode)_idx\$(start)_\$(ClusterId)_\$(ProcId).out
+error           = ${LOG_DIR}/\$(mode)_idx\$(start)_\$(ClusterId)_\$(ProcId).err
 log             = ${LOG_DIR}/\$(ClusterId).log
 
-# Cartesian product of (mode, index) with index_end = index+1
-queue mode, index, index_end from (
+queue mode, start, end from (
 $(for m in "${MODES[@]}"; do
     for i in $(seq "${INDEX_START}" "${INDEX_END}"); do
-      echo "  ${m} ${i} $((i+1))"
+      echo "  ${m} $((i*10)) $(((i*10)+10))"
     done
   done)
 )

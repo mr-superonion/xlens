@@ -6,7 +6,10 @@
 #SBATCH --time=05:00:00
 #SBATCH --constraint=cpu
 #SBATCH --qos=regular
+#SBATCH -o %u/log/shear_%x_%j.out
+#SBATCH -e %u/log/shear_%x_%j.err
 
+mkdir -p "$HOME/log"
 source /global/u2/x/xiangchl/ana/setup_descwl_shear_sim.sh
 
 # change the script path
