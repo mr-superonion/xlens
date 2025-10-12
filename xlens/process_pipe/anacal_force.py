@@ -28,6 +28,7 @@ __all__ = [
 import logging
 from typing import Any
 
+import anacal
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.afw.image import ExposureF
@@ -50,7 +51,6 @@ from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
-import anacal
 
 
 class AnacalForcePipeConnections(

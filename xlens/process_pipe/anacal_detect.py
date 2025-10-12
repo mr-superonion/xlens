@@ -27,13 +27,13 @@ __all__ = [
 
 import logging
 from typing import Any
-from numpy.lib import recfunctions as rfn
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import (
-    ConfigurableField, Field,
+    ConfigurableField,
+    Field,
     FieldValidationError,
 )
 from lsst.pipe.base import (
@@ -44,6 +44,7 @@ from lsst.pipe.base import (
 )
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
+from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask

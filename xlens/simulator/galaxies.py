@@ -1,21 +1,24 @@
-import functools
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Iterable
 
+import fitsio
 import galsim
 import lsst
 import numpy as np
-from astropy.table import Table
+from numpy.lib import recfunctions as rfn
 
 from . import mog
 from .layout import Layout
-from .wcs import make_galsim_tanwcs
 
 
-@functools.lru_cache(maxsize=8)
-def cached_catalog_read(fname):
-    return Table.read(fname).as_array()
+def get_catalog(fname):
+    cat = fitsio.read(fname)
+    idx = np.arange(len(cat), dtype=np.int32)
+    cat = rfn.append_fields(
+        cat, "indices", idx, dtypes=[np.int32], usemask=False,
+    )
+    return cat
 
 
 class BaseGalaxyCatalog(ABC):
@@ -74,13 +77,13 @@ class BaseGalaxyCatalog(ABC):
         catalog_size = len(self.input_catalog)
         if indice_id is None:
             integers = np.arange(0, catalog_size, dtype=int)
-            indices = rng.choice(integers, size=num, p=probs)
+            idx = rng.choice(integers, size=num, p=probs)
         else:
             indice_min = indice_id * num
             indice_max = indice_min + num
             if indice_min >= catalog_size:
                 raise ValueError("indice_min too large")
-            indices = (
+            idx = (
                 np.arange(indice_min, indice_max, dtype=int) % catalog_size
             )
         # random orientation for each placed galaxy
@@ -100,7 +103,6 @@ class BaseGalaxyCatalog(ABC):
         self.data = np.zeros(num, dtype=self.dtype)
         self.data["dx"] = shifts_array["dx"]
         self.data["dy"] = shifts_array["dy"]
-        self.data["indices"] = indices
         self.data["angles"] = angles
         self.lensed = False
         self.data["prelensed_image_x"] = self.x_center + self.data["dx"] / ps
@@ -108,8 +110,9 @@ class BaseGalaxyCatalog(ABC):
         self.data["image_x"] = self.x_center + self.data["dx"] / ps
         self.data["image_y"] = self.y_center + self.data["dy"] / ps
         self.data["has_finite_shear"] = np.ones(num, dtype=bool)
-        self.data["redshift"] = self.input_catalog["redshift"][indices]
-        self.data["hlr"] = self._build_hlr_array(indices)
+        self.data["indices"] = self.input_catalog["indices"][idx]
+        self.data["redshift"] = self.input_catalog["redshift"][idx]
+        self.data["hlr"] = self._build_hlr_array(idx)
         return
 
     def set_z_source(self, redshift):
@@ -289,9 +292,9 @@ class BaseGalaxyCatalog(ABC):
         return
 
     def get_obj(
-            self, *, ind, mag_zero: float, band: str, use_mog=False,
-            include_point_source=True,
-        ) -> dict[str, list]:
+        self, *, ind, mag_zero: float, band: str, use_mog=False,
+        include_point_source=True,
+    ) -> dict[str, list]:
         """
         Returns
         -------
@@ -351,7 +354,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         )
 
         # not thread safe
-        cat = cached_catalog_read(fname)
+        cat = get_catalog(fname)
         if select_observable is not None:
             select_observable = np.atleast_1d(select_observable)
             if not set(select_observable) < set(cat.dtype.names):
@@ -496,10 +499,10 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
                 "Please donwload it from and place it under $CATSIM_DIR",
             )
 
-        cat = cached_catalog_read(fname)
+        cat = get_catalog(fname)
         if select_observable is not None:
             select_observable = np.atleast_1d(select_observable)
-            if not set(select_observable) < set(cat.column_names):
+            if not set(select_observable) < set(cat.dtype.names):
                 raise ValueError(
                     "Selection observables not in the catalog columns"
                 )

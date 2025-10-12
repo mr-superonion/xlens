@@ -9,15 +9,8 @@ ranks into a single summary output.
 Usage
 -----
 Run with mpirun/mpiexec (recommended):
-
-    mpirun -n <N> python summary.py \
-        --emax 0.3 \
-        --layout grid \
-        --target g1 \
-        --shear 0.02 \
-        --min-id 0 \
-        --max-id 30000
-
+    mpirun -n 10 python ./summary.py --emax 0.3 --layout random --target g1 \
+        --shear 0.02 --min-id 0 --max-id 30000
 Arguments
 ---------
 --emax <float>          Maximum ellipticity cut (e.g., 0.3).

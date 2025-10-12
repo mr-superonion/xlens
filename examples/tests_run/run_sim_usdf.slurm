@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 #SBATCH --partition=roma
 #SBATCH --job-name=test
@@ -31,5 +31,6 @@ for mode in 40 0; do
       --target g1 \
       --start 0 \
       --end 50 \
-      --layout random
+      --layout random \
+      --band a
 done

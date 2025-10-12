@@ -32,6 +32,8 @@ except Exception:
     def _barrier():  # no-op
         return
 
+from numpy.lib import recfunctions as rfn
+
 from xlens.process_pipe.anacal_detect import (
     AnacalDetectPipe,
     AnacalDetectPipeConfig,
@@ -42,7 +44,6 @@ from xlens.simulator.catalog import (
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
 from xlens.utils.image import combine_sim_exposures
-from numpy.lib import recfunctions as rfn
 
 # ------------------------------
 # Argument Parsing
@@ -76,7 +77,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--band", type=str, default=None,
-    help="single band (g,r,i,z) or None for multiband",
+    help="single band (g,r,i,z,y) or None for multiband",
 )
 args = parser.parse_args()
 
@@ -88,6 +89,8 @@ test_target = args.target
 istart = args.start
 iend = args.end
 band = args.band
+if band not in "grizy":
+    band = None
 
 if args.layout == "random":
     extend_ratio = 1.08
@@ -265,7 +268,8 @@ for i in range(istart, iend):
         map_dict = {name: f"{band}_" + name for name in colnames}
         res = rfn.repack_fields(res[colnames])
         res = rfn.rename_fields(res, map_dict)
-
+    else:
+        res = res[res["wsel"] > 1e-7]
     fitsio.write(outfname, res)
 
     # clean up

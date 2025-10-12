@@ -1,3 +1,6 @@
+import os
+
+import fitsio
 import galsim
 import lsst.geom as geom
 import numpy as np
@@ -104,9 +107,6 @@ def test_layout():
         boundary_box=bbox,
     )
 
-    width = float(bbox.getWidth())
-    height = float(bbox.getHeight())
-
     np.testing.assert_almost_equal(
         layout._pixscale_arcsec, 0.168
     )
@@ -119,10 +119,6 @@ def test_layout():
         wcs=wcs,
         boundary_box=bbox,
     )
-
-    width = float(bbox.getWidth())
-    height = float(bbox.getHeight())
-    # Square dimension with 20″ padding on each side
 
     np.testing.assert_almost_equal(
         layout._pixscale_arcsec, 0.168
@@ -160,6 +156,39 @@ def test_galaxies_init():
     np.testing.assert_almost_equal(
         catalog.data["dy"],
         catalog2.data["dy"],
+    )
+    return
+
+
+def test_galaxies_selection():
+    # Set up the configuration
+    tract_info = skymap[16012]
+    rng = np.random.RandomState(0)
+    mag_min = 20
+    mag_max = 25
+    catalog = xlens.simulator.galaxies.CatSim2017Catalog(
+        rng=rng,
+        tract_info=tract_info,
+        layout_name="random",
+        select_observable=["i_ab"],
+        select_lower_limit=[mag_min],
+        select_upper_limit=[mag_max],
+    )
+    arr = catalog.data
+    truth_catalog = fitsio.read(
+        os.path.join(os.environ["CATSIM_DIR"], "OneDegSq.fits"),
+    )
+    np.testing.assert_allclose(
+        np.max(truth_catalog[arr["indices"]]["i_ab"]),
+        mag_max,
+        rtol=1e-4,
+        atol=1e-3,
+    )
+    np.testing.assert_allclose(
+        np.min(truth_catalog[arr["indices"]]["i_ab"]),
+        mag_min,
+        rtol=1e-4,
+        atol=1e-3,
     )
     return
 
@@ -210,9 +239,6 @@ def test_galaxies_draw():
             psf_obj=psf_galsim,
             mag_zero=30,
             band="i"
-        )
-        print(
-
         )
         re = np.max(np.abs(gal_data1 - np.rot90(gal_data2))) / np.max(gal_data1)
         assert re < 1e-4

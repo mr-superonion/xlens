@@ -36,8 +36,8 @@ import astropy
 import lsst.geom as lsst_geom
 import numpy as np
 from lsst.afw.image import ExposureF, MaskX
-from numpy.typing import NDArray
 from numpy.lib import recfunctions as rfn
+from numpy.typing import NDArray
 
 badMaskDefault = [
     "BAD",

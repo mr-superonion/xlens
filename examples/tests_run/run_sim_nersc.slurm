@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
 #SBATCH --job-name=shear
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=256
@@ -24,5 +25,6 @@ for mode in 40 0; do
       --target g1 \
       --start 0 \
       --end 30 \
-      --layout random
+      --layout random \
+      --band a
 done
