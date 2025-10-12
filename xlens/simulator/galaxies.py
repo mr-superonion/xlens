@@ -45,6 +45,7 @@ class BaseGalaxyCatalog(ABC):
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
         extend_ratio: float = 1.08,
+        force_pixel_center: bool = False,
     ):
         self.prepare_tract_info(tract_info)
         wcs = tract_info.getWcs()
@@ -70,6 +71,15 @@ class BaseGalaxyCatalog(ABC):
         shifts_array = layout.get_shifts(
             rng=rng, density=density
         )
+
+        if force_pixel_center:
+            inv_pixel_scale = 1.0 / ps
+            shifts_array["dx"] = (
+                np.round(shifts_array["dx"] * inv_pixel_scale) * ps
+            )
+            shifts_array["dy"] = (
+                np.round(shifts_array["dy"] * inv_pixel_scale) * ps
+            )
 
         # choose which catalog rows populate those positions
         num = len(shifts_array)

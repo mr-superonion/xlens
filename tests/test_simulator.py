@@ -160,6 +160,23 @@ def test_galaxies_init():
     return
 
 
+def test_galaxies_force_pixel_center():
+    tract_info = skymap[16012]
+    rng = np.random.RandomState(1)
+    catalog = xlens.simulator.galaxies.CatSim2017Catalog(
+        rng=rng,
+        tract_info=tract_info,
+        layout_name="random",
+        force_pixel_center=True,
+    )
+    ps = catalog.pixel_scale
+    dx = catalog.data["dx"]
+    dy = catalog.data["dy"]
+    assert len(dx) > 0
+    np.testing.assert_allclose(dx / ps, np.round(dx / ps))
+    np.testing.assert_allclose(dy / ps, np.round(dy / ps))
+
+
 def test_galaxies_selection():
     # Set up the configuration
     tract_info = skymap[16012]

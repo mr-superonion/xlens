@@ -96,6 +96,10 @@ class CatalogConfig(
         doc="ratio of padded coverage length of galaxy catalog",
         default=1.08,
     )
+    force_pixel_center = Field[bool](
+        doc="Force catalog shifts to align with pixel centers.",
+        default=False,
+    )
     select_observable = ListField[str](
         doc=(
             "Optional catalog observable names used to filter galaxies. "
@@ -230,6 +234,7 @@ class CatalogTask(PipelineTask):
             layout_name=self.config.layout,
             sep_arcsec=self.config.sep_arcsec,
             extend_ratio=self.config.extend_ratio,
+            force_pixel_center=self.config.force_pixel_center,
             select_observable=(
                 select_observable
                 if select_observable
