@@ -260,7 +260,7 @@ def test_galaxies_draw():
         re = np.max(np.abs(gal_data1 - np.rot90(gal_data2))) / np.max(gal_data1)
         assert re < 1e-4
         shear_obj = slist[ii]
-        catalog.lens(shear_obj)
+        catalog.lens(shear_obj=shear_obj)
         simtask.draw_catalog(
             galaxy_catalog=catalog,
             patch_id=0,
@@ -297,13 +297,36 @@ def test_sim_task():
     return
 
 
-def test_galaxies_draw_mog_consistency():
-    from types import MethodType
+def test_catalog_disable_lensing_position_shifts():
+    from xlens.simulator.catalog import (
+        CatalogShearTask,
+        CatalogShearTaskConfig,
+    )
 
+    config = CatalogShearTaskConfig()
+    config.apply_lensing_position_shifts = False
+    cattask = CatalogShearTask(config=config)
+    catalog = cattask.run(
+        tract_info=skymap0[0],
+        seed=0,
+    ).truthCatalog
+
+    np.testing.assert_allclose(
+        catalog["image_x"],
+        catalog["prelensed_image_x"],
+    )
+    np.testing.assert_allclose(
+        catalog["image_y"],
+        catalog["prelensed_image_y"],
+    )
+    return
+
+
+def test_galaxies_draw_mog_consistency():
     from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
 
     config = MultibandSimConfig()
-    config.use_mog=False
+    config.use_mog = False
     simtask = MultibandSimTask(config=config)
 
     tract_info = skymap0[0]
@@ -324,7 +347,7 @@ def test_galaxies_draw_mog_consistency():
     )
 
     config = MultibandSimConfig()
-    config.use_mog=True
+    config.use_mog = True
     simtask = MultibandSimTask(config=config)
     image_mog = simtask.draw_catalog(
         galaxy_catalog=catalog,

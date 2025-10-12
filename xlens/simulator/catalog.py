@@ -100,6 +100,13 @@ class CatalogConfig(
         doc="Force catalog shifts to align with pixel centers.",
         default=False,
     )
+    apply_lensing_position_shifts = Field[bool](
+        doc=(
+            "If False, retain original galaxy positions after lensing so that "
+            "image coordinates remain equal to the pre-lensing values."
+        ),
+        default=True,
+    )
     select_observable = ListField[str](
         doc=(
             "Optional catalog observable names used to filter galaxies. "
@@ -261,7 +268,8 @@ class CatalogTask(PipelineTask):
         seed: int,
         **kwargs,
     ):
-        """Generate a truth catalog with the configured lensing perturbations."""
+        """Generate a truth catalog with the configured lensing
+        perturbations."""
         assert isinstance(self.config, CatalogConfig)
         galaxy_seed = seed * gal_seed_base + self.config.galId
         galaxy_catalog = self.prepare_galaxy_catalog(
@@ -271,7 +279,10 @@ class CatalogTask(PipelineTask):
         theta0 = self.rotate_list[self.config.rotId]
         galaxy_catalog.rotate(theta0)
         shear_obj = self.get_perturbation_object(tract_info, seed)
-        galaxy_catalog.lens(shear_obj)
+        galaxy_catalog.lens(
+            shear_obj=shear_obj,
+            apply_position_shifts=self.config.apply_lensing_position_shifts,
+        )
         return Struct(truthCatalog=galaxy_catalog.data)
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs) -> None:

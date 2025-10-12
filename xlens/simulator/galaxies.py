@@ -272,7 +272,7 @@ class BaseGalaxyCatalog(ABC):
         self.data["dec"] = dec
         return
 
-    def lens(self, shear_obj):
+    def lens(self, *, shear_obj, apply_position_shifts: bool = True):
         if self.lensed:
             raise ValueError("Cannot lens a lensed catalog")
         ps = self.pixel_scale
@@ -288,8 +288,13 @@ class BaseGalaxyCatalog(ABC):
             self.data[_]["gamma2"] = distort_res["gamma2"]
             self.data[_]["kappa"] = distort_res["kappa"]
             self.data[_]["has_finite_shear"] = distort_res["has_finite_shear"]
-        self.data["image_x"] = self.x_center + self.data["dx"] / ps
-        self.data["image_y"] = self.y_center + self.data["dy"] / ps
+        if apply_position_shifts:
+            self.data["image_x"] = self.x_center + self.data["dx"] / ps
+            self.data["image_y"] = self.y_center + self.data["dy"] / ps
+        else:
+            self.data["image_x"] = self.data["prelensed_image_x"]
+            self.data["image_y"] = self.data["prelensed_image_y"]
+
         wcs = self.tract_info.getWcs()
         ra, dec = wcs.pixelToSkyArray(
             x=self.data["image_x"],
