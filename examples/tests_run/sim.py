@@ -43,7 +43,15 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
-from xlens.utils.image import combine_sim_exposures
+from xlens.process_pipe.match import (
+    matchPipe,
+    matchPipeConfig,
+)
+from xlens.utils.image import (
+    combine_sim_exposures,
+    estimate_noise_variance,
+    generate_pure_noise,
+)
 
 # ------------------------------
 # Argument Parsing
@@ -76,7 +84,7 @@ parser.add_argument(
     choices=["grid", "random"], help="layout",
 )
 parser.add_argument(
-    "--band", type=str, default=None,
+    "--band", type=str, default="a",
     help="single band (g,r,i,z,y) or None for multiband",
 )
 args = parser.parse_args()
@@ -88,10 +96,13 @@ rot_id = args.rot
 test_target = args.target
 istart = args.start
 iend = args.end
+if iend - istart <= 0:
+    raise ValueError(f"Invalid range: start={istart}, end={iend}")
+
+
 band = args.band
 if band not in "grizy":
     band = None
-
 if args.layout == "random":
     extend_ratio = 1.08
 elif args.layout == "grid":
@@ -163,11 +174,13 @@ detect_config.anacal.do_noise_bias_correction = True
 detect_config.do_fpfs = (band is None)
 detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
 det_task = AnacalDetectPipe(config=detect_config)
-if rank == 0:
-    print("Detection task setup complete.")
 
-if iend - istart <= 0:
-    raise ValueError(f"Invalid range: start={istart}, end={iend}")
+
+config = matchPipeConfig()
+config.mag_zero = 30.0
+config.mag_max_truth = 28.0
+match_task = matchPipe(config=config)
+
 
 # Outdir layout:
 #   $PSCRATCH/constant_shear_<layout>/<target>/shearXX/
@@ -177,6 +190,7 @@ outdir = os.path.join(
     f"constant_shear_{args.layout}",
     test_target,
     f"shear{int(shear_value * 100):02d}",
+    f"mode{shear_mode}",
 )
 os.makedirs(outdir, exist_ok=True)
 
@@ -196,17 +210,36 @@ colnames = [
 def get_exposure(truth_catalog, sim_seed, band=None):
     if band is None:
         explist = []
+        noiselist = []
         for bb in ["g", "r", "i", "z"]:
-            explist.append(
-                sim_task.run(
-                    tract_info=skymap[tract_id],
-                    patch_id=patch_id,
-                    band=bb,
-                    seed=sim_seed,
-                    truthCatalog=truth_catalog,
-                ).simExposure
+            exp = sim_task.run(
+                tract_info=skymap[tract_id],
+                patch_id=patch_id,
+                band=bb,
+                seed=sim_seed,
+                truthCatalog=truth_catalog,
+            ).simExposure
+            nx = exp.getWidth()
+            ny = exp.getHeight()
+            noise_variance = estimate_noise_variance(
+                exposure=exp, mask_array=None,
             )
-        exposure = combine_sim_exposures(explist)
+            explist.append(
+                exp
+            )
+            noise_array = generate_pure_noise(
+                ny=ny,
+                nx=nx,
+                pixel_scale=pixel_scale,
+                seed=100000 + sim_seed,
+                band=bb,
+                noise_variance=noise_variance,
+                noise_corr=None,
+                noiseId=0,
+                rotId=args.rot,
+            )
+            noiselist.append(noise_array)
+        exposure, noise_array = combine_sim_exposures(explist, noiselist)
     else:
         exposure = sim_task.run(
             tract_info=skymap[tract_id],
@@ -215,7 +248,8 @@ def get_exposure(truth_catalog, sim_seed, band=None):
             seed=sim_seed,
             truthCatalog=truth_catalog,
         ).simExposure
-    return exposure
+        noise_array = None
+    return exposure, noise_array
 
 
 # ------------------------------
@@ -225,10 +259,10 @@ for i in range(istart, iend):
     sim_seed = i * size + rank
     if band is not None:
         outfname = os.path.join(
-            outdir, "cat-%05d-%s-mode%d.fits" % (sim_seed, band, shear_mode)
+            outdir, "cat-%05d-%s.fits" % (sim_seed, band)
         )
         detfname = os.path.join(
-            outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)
+            outdir, "cat-%05d.fits" % (sim_seed)
         )
         if os.path.isfile(detfname):
             detection = fitsio.read(detfname)
@@ -236,7 +270,7 @@ for i in range(istart, iend):
             raise ValueError("Run detection with band=None first")
     else:
         outfname = os.path.join(
-            outdir, "cat-%05d-mode%d.fits" % (sim_seed, shear_mode)
+            outdir, "cat-%05d.fits" % (sim_seed)
         )
         detection = None
 
@@ -249,7 +283,7 @@ for i in range(istart, iend):
         seed=sim_seed,
     ).truthCatalog
 
-    exposure = get_exposure(
+    exposure, noise_array = get_exposure(
         truth_catalog=truth_catalog, sim_seed=sim_seed, band=band,
     )
     prep = det_task.anacal.prepare_data(
@@ -261,6 +295,7 @@ for i in range(istart, iend):
         skyMap=skymap,
         tract=tract_id,
         patch=patch_id,
+        noise_array=noise_array,
     )
     res = det_task.run_measure(prep)
 
@@ -269,6 +304,14 @@ for i in range(istart, iend):
         res = rfn.repack_fields(res[colnames])
         res = rfn.rename_fields(res, map_dict)
     else:
+        res = match_task.run(
+            skyMap=skymap,
+            tract=tract_id,
+            patch=patch_id,
+            catalog=res,
+            dm_catalog=None,
+            truth_catalog=truth_catalog,
+        ).catalog
         res = res[res["wsel"] > 1e-7]
     fitsio.write(outfname, res)
 

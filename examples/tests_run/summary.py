@@ -1,43 +1,5 @@
 #!/usr/bin/env python3
 """
-summary.py -- Aggregate shear measurements over many catalogs with MPI.
-
-This script reads per-simulation catalogs (for both shear_mode=0 and 1),
-computes shear statistics across flux cuts, and reduces the results across MPI
-ranks into a single summary output.
-
-Usage
------
-Run with mpirun/mpiexec (recommended):
-    mpirun -n 10 python ./summary.py --emax 0.3 --layout random --target g1 \
-        --shear 0.02 --min-id 0 --max-id 30000
-Arguments
----------
---emax <float>          Maximum ellipticity cut (e.g., 0.3).
---layout <str>          Scene/layout name (e.g., "grid").
---target <str>          Target shear component to summarize (e.g., "g1" or "g2").
---shear <float>         Applied shear magnitude (e.g., 0.02).
---min-id <int>          Inclusive lower bound of simulation IDs to process.
---max-id <int>          Exclusive upper bound of simulation IDs to process.
-
-Input/Output
-------------
-- Expects per-ID FITS catalogs at:
-    {outdir}/cat-<ID:05d>-mode<MODE>.fits
-  where MODE in {0, 1}.
-
-- Produces rank-wise partial results that are reduced to final summary arrays.
-
-MPI Notes
----------
-- Each rank iterates over a disjoint subset of IDs in [min-id, max-id).
-- Rank 0 gathers and writes the final combined results.
-
-Requirements
-------------
-- Python 3.9+
-- mpi4py, numpy, fitsio (and any project-specific deps)
-
 Example
 -------
 # 128 ranks spanning IDs 0..29999:
@@ -50,10 +12,12 @@ mpirun -n 128 python summary.py \
 import argparse
 import os
 
-import fitsio
 import numpy as np
 from astropy.stats import sigma_clipped_stats
 from mpi4py import MPI
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 
 def parse_args():
@@ -146,24 +110,42 @@ def parse_flux_list(s: str):
     return [float(x) for x in s.split(",")] if s else [20.0, 40.0, 60.0]
 
 
-def outdir_path(pscratch, layout, target, shear):
+def base_path(pscratch, layout, target, shear):
     sd = f"shear{int(shear*100):02d}"
-    return os.path.join(pscratch, f"constant_shear_{layout}", target, sd)
+    return os.path.join(
+        pscratch,
+        "parquet",
+        f"constant_shear_{layout}",
+        target,
+        sd,
+    )
 
 
-def cat_path(outdir, sim_id, mode):
-    # cat-%05d-mode%d.fits
-    return os.path.join(outdir, f"cat-{sim_id:05d}-mode{mode}.fits")
+def parquet_seed_path(base_dir, seed, mode) -> str:
+    bucket = seed // 100
+    return os.path.join(
+        base_dir,
+        f"mode{mode}",
+        f"sim_seed_bucket={bucket}",
+        f"sim_seed={seed}",
+        "data.parquet",
+    )
 
 
-def measure_shear_flux_cut(src, flux_min, emax=0.3, dg=0.02):
+def arrow_to_numpy_struct(table: pa.Table) -> np.ndarray:
+    table = table.combine_chunks()
+    cols = [table[c].to_numpy(zero_copy_only=False) for c in table.column_names]
+    return np.rec.fromarrays(cols, names=table.column_names)
+
+
+def measure_shear_with_cut(src, flux_min, emax=0.3, dg=0.02):
     """
     Selection + response including selection response via finite differencing.
 
     Returns: e1, R11, e2, R22, N  (scalars for this flux_min)
     """
     esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
-    m0 = (src["flux"] > flux_min) & (esq0 < emax * emax)
+    m0 = (src["g_flux_gauss2"] > flux_min) & (esq0 < emax * emax)
     nn = int(np.sum(m0))
     if nn == 0:
         return 0.0, 0.0, 0.0, 0.0, 0
@@ -184,17 +166,17 @@ def measure_shear_flux_cut(src, flux_min, emax=0.3, dg=0.02):
     def sel_term(comp: int):
         e = src[f"fpfs_e{comp}"]
         de = src[f"fpfs_de{comp}_dg{comp}"]
-        df = src[f"dflux_dg{comp}"]
+        df = src[f"g_dflux_gauss2_dg{comp}"]
         comp2 = int(3 - comp)
         e2 = src[f"fpfs_e{comp2}"]
         de2 = src[f"fpfs_de{comp2}_dg{comp}"]
 
         esq_p = esq0 + 2.0 * dg * (e * de + e2 * de2)
-        m_p = ((src["flux"] + dg * df) > flux_min) & (esq_p < emax * emax)
+        m_p = ((src["g_flux_gauss2"] + dg * df) > flux_min) & (esq_p < emax * emax)
         ellp = np.sum(src["wsel"][m_p] * e[m_p])
 
         esq_m = esq0 - 2.0 * dg * (e * de + e2 * de2)
-        m_m = ((src["flux"] - dg * df) > flux_min) & (esq_m < emax * emax)
+        m_m = ((src["g_flux_gauss2"] - dg * df) > flux_min) & (esq_m < emax * emax)
         ellm = np.sum(src["wsel"][m_m] * e[m_m])
         return (ellp - ellm) / (2.0 * dg)
 
@@ -203,7 +185,7 @@ def measure_shear_flux_cut(src, flux_min, emax=0.3, dg=0.02):
     return e1, (r1 + r1_sel), e2, (r2 + r2_sel), nn
 
 
-def per_rank_work(ids_chunk, outdir, flux_list, emax, dg, target):
+def per_rank_work(ids_chunk, input_dir, flux_list, emax, dg, target):
     """
     For each ID in ids_chunk, read +g (mode1) and -g (mode0) catalogs,
     compute per-flux-cut e_pos/e_neg, R_pos/R_neg, N_pos/N_neg.
@@ -216,15 +198,17 @@ def per_rank_work(ids_chunk, outdir, flux_list, emax, dg, target):
     R_neg = []
 
     for i, sid in enumerate(ids_chunk):
-        ppos = cat_path(outdir, sid, mode=40)  # +g
-        pneg = cat_path(outdir, sid, mode=0)  # -g
-        if not (os.path.exists(ppos) and os.path.exists(pneg)):
+        ppos = parquet_seed_path(input_dir, sid, mode=40)  # +g
+        pneg = parquet_seed_path(input_dir, sid, mode=0)  # -g
+
+        if not (os.path.isfile(ppos) and os.path.isfile(pneg)):
             # Skip if pair not complete
             continue
-
         try:
-            src_pos = fitsio.read(ppos)
-            src_neg = fitsio.read(pneg)
+            tbl_pos = pq.read_table(ppos)
+            tbl_neg = pq.read_table(pneg)
+            src_pos = arrow_to_numpy_struct(tbl_pos)
+            src_neg = arrow_to_numpy_struct(tbl_neg)
         except OSError:
             print(ppos)
             print(pneg)
@@ -236,10 +220,10 @@ def per_rank_work(ids_chunk, outdir, flux_list, emax, dg, target):
         R_neg_row = np.zeros(ncut)
 
         for j, fmin in enumerate(flux_list):
-            e1p, R1p, e2p, R2p, Np = measure_shear_flux_cut(
+            e1p, R1p, e2p, R2p, Np = measure_shear_with_cut(
                 src_pos, fmin, emax=emax, dg=dg
             )
-            e1m, R1m, e2m, R2m, Nm = measure_shear_flux_cut(
+            e1m, R1m, e2m, R2m, Nm = measure_shear_with_cut(
                 src_neg, fmin, emax=emax, dg=dg
             )
 
@@ -318,7 +302,7 @@ def main():
     size = comm.Get_size()
 
     flux_list = parse_flux_list(args.flux_mins)
-    outdir = outdir_path(
+    input_dir = base_path(
         args.pscratch, args.layout, args.target, args.shear
     )
     # Build full ID list [min_id, max_id) split across ranks
@@ -337,7 +321,7 @@ def main():
     # Per-rank measurement
     E_pos, E_neg, R_pos, R_neg = per_rank_work(
         my_ids,
-        outdir,
+        input_dir,
         flux_list,
         args.emax,
         args.dg,
@@ -375,6 +359,7 @@ def main():
         clipped_mean, clipped_median, clipped_std = sigma_clipped_stats(
             all_E_pos / np.average(all_R_pos, axis=0),
             sigma=5.0,
+            axis=0,
         )
         neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
 
@@ -392,15 +377,13 @@ def main():
         lo_idx = int(0.1587 * args.bootstrap)
         hi_idx = int(0.8413 * args.bootstrap)
         sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
-        mean_m = np.mean(ms, axis=0)
 
         ord_cs = np.sort(cs, axis=0)
         sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
-        mean_c = np.mean(cs, axis=0)
 
         # Summary
         print("==============================================")
-        print(f"Outdir: {outdir}")
+        print(f"Input Directory: {input_dir}")
         print(f"Paired IDs (found): {all_E_pos.shape[0]}")
         print(f"ID range requested: [{args.min_id}, {args.max_id}]")
         print(f"Flux cuts: {flux_list}")

@@ -188,6 +188,7 @@ class FpfsMeasurementTask(Task):
         band: str,
         noise_corr: NDArray | None = None,
         mask_array: NDArray | None = None,
+        noise_array: NDArray | None = None,
         star_cat: NDArray | None = None,
         detection: NDArray | None = None,
         **kwargs,
@@ -217,6 +218,7 @@ class FpfsMeasurementTask(Task):
             badMaskPlanes=self.config.badMaskPlanes,
             star_cat=star_cat,
             mask_array=mask_array,
+            noise_array=noise_array,
             detection=detection,
         )
         if not self.config.use_average_psf:

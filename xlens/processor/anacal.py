@@ -228,6 +228,7 @@ class AnacalTask(Task):
         tract: int = 0,
         patch: int = 0,
         mask_array: NDArray | None = None,
+        noise_array: NDArray | None = None,
         star_cat: NDArray | None = None,
         detection: astropy.table.Table | None = None,
         **kwargs,
@@ -258,6 +259,7 @@ class AnacalTask(Task):
             patch=patch,
             star_cat=star_cat,
             mask_array=mask_array,
+            noise_array=noise_array,
             detection=detection,
             band=band,
         )
