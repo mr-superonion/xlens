@@ -10,14 +10,42 @@ mpirun -n 128 python summary.py \
 """
 
 import argparse
+import glob
 import os
 
 import numpy as np
 from astropy.stats import sigma_clipped_stats
-from mpi4py import MPI
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+
+# --- Optional MPI: works without mpirun/srun or even mpi4py installed ---
+try:
+    from mpi4py import MPI  # type: ignore
+
+    _COMM = MPI.COMM_WORLD
+    _RANK = _COMM.Get_rank()
+    _SIZE = _COMM.Get_size()
+
+    def _barrier():
+        _COMM.Barrier()
+
+except Exception:
+
+    class _FakeComm:
+        def Get_rank(self):
+            return 0
+
+        def Get_size(self):
+            return 1
+
+    _COMM = _FakeComm()
+    _RANK = 0
+    _SIZE = 1
+
+    def _barrier():
+        return
 
 
 def parse_args():
@@ -25,6 +53,9 @@ def parse_args():
         description="measure + aggregate from catalogs over a given ID range."
     )
     # Directory layout and naming
+    p.add_argument(
+        "--summary", action=argparse.BooleanOptionalAction, default=False
+    )
     p.add_argument(
         "--pscratch",
         type=str,
@@ -256,6 +287,54 @@ def per_rank_work(ids_chunk, input_dir, flux_list, emax, dg, target):
     )
 
 
+def save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut):
+    partdir = os.path.join(outdir, "summary-40-00")
+    os.makedirs(partdir, exist_ok=True)
+    path = os.path.join(partdir, f"seed_{index:05d}.npz")
+    np.savez_compressed(
+        path,
+        E_pos=E_pos,
+        E_neg=E_neg,
+        R_pos=R_pos,
+        R_neg=R_neg,
+        ncut=np.int64(ncut),
+    )
+    return path
+
+
+def load_and_stack_all(outdir, ncut_expected=None):
+    partdir = os.path.join(outdir, "summary-40-00")
+    arrays_E_pos, arrays_E_neg, arrays_R_pos, arrays_R_neg = [], [], [], []
+    ncut_from_file = None
+
+    paths = glob.glob(os.path.join(partdir, "seed_*.npz"))
+    for path in paths:
+        with np.load(path) as data:
+            E_pos = data["E_pos"]
+            E_neg = data["E_neg"]
+            R_pos = data["R_pos"]
+            R_neg = data["R_neg"]
+            if ncut_from_file is None:
+                ncut_from_file = int(data["ncut"])
+            arrays_E_pos.append(E_pos)
+            arrays_E_neg.append(E_neg)
+            arrays_R_pos.append(R_pos)
+            arrays_R_neg.append(R_neg)
+
+    def _stack(blocks, ncut):
+        blocks = [b for b in blocks if b.size > 0]
+        if len(blocks) == 0:
+            return np.zeros((0, ncut), dtype=np.float64)
+        return np.vstack(blocks)
+
+    ncut = ncut_expected if ncut_expected is not None else (ncut_from_file or 0)
+    E_pos_all = _stack(arrays_E_pos, ncut)
+    E_neg_all = _stack(arrays_E_neg, ncut)
+    R_pos_all = _stack(arrays_R_pos, ncut)
+    R_neg_all = _stack(arrays_R_neg, ncut)
+    return E_pos_all, E_neg_all, R_pos_all, R_neg_all
+
+
 def bootstrap_m(
     rng, e_pos, e_neg, R_pos, R_neg, shear_value, nsamp=10000
 ):  # noqa: N802 - keep historical name
@@ -297,103 +376,97 @@ def bootstrap_m(
 
 def main():
     args = parse_args()
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
+    rank = _RANK
+    size = _SIZE
 
     flux_list = parse_flux_list(args.flux_mins)
-    input_dir = base_path(
-        args.pscratch, args.layout, args.target, args.shear
-    )
-    # Build full ID list [min_id, max_id) split across ranks
-    if args.max_id < args.min_id:
-        raise SystemExit("--max-id must be >= --min-id")
-    all_ids = np.arange(args.min_id, args.max_id, dtype=int)
+    ncut = len(flux_list)
+    outdir = base_path(args.pscratch, args.layout, args.target, args.shear)
+    input_dir = outdir
 
-    # Even split
-    n = len(all_ids)
-    base = n // size
-    rem = n % size
-    start = rank * base + min(rank, rem)
-    stop = start + base + (1 if rank < rem else 0)
-    my_ids = all_ids[start:stop]
+    if not args.summary:
+        if args.max_id < args.min_id:
+            raise SystemExit("--max-id must be >= --min-id")
+        all_ids = np.arange(args.min_id, args.max_id, dtype=int)
 
-    # Per-rank measurement
-    E_pos, E_neg, R_pos, R_neg = per_rank_work(
-        my_ids,
-        input_dir,
-        flux_list,
-        args.emax,
-        args.dg,
-        args.target,
-    )
+        n = len(all_ids)
+        base = n // size
+        rem = n % size
+        start = rank * base + min(rank, rem)
+        stop = start + base + (1 if rank < rem else 0)
+        my_ids = all_ids[start:stop]
 
-    # Gather to rank 0
-    gathered = comm.gather((E_pos, E_neg, R_pos, R_neg), root=0)
-    if rank == 0:
-        # Concatenate along sample axis (skip empties)
-        all_E_pos = np.vstack([g[0] for g in gathered if g[0].size])
-        all_E_neg = np.vstack([g[1] for g in gathered if g[1].size])
-        all_R_pos = np.vstack([g[2] for g in gathered if g[2].size])
-        all_R_neg = np.vstack([g[3] for g in gathered if g[3].size])
+        E_pos, E_neg, R_pos, R_neg = per_rank_work(
+            my_ids,
+            input_dir,
+            flux_list,
+            args.emax,
+            args.dg,
+            args.target,
+        )
 
-        if all_E_pos.size == 0 or all_E_neg.size == 0:
-            raise SystemExit(
-                "No valid (+g/-g) pairs found in the given ID range."
+        index = int(my_ids[0]) if len(my_ids) > 0 else (args.min_id + rank)
+        save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut)
+        _barrier()
+    else:
+        if rank == 0:
+            all_E_pos, all_E_neg, all_R_pos, all_R_neg = load_and_stack_all(
+                outdir, ncut_expected=ncut
+            )
+            if all_E_pos.size == 0 or all_E_neg.size == 0:
+                raise SystemExit(
+                    "No valid (+g/-g) pairs found in the given ID range."
+                )
+
+            num = np.sum(all_E_pos - all_E_neg, axis=0)  # (ncut,)
+            den = np.sum(all_R_pos + all_R_neg, axis=0)
+            m = (num / den) / args.shear - 1.0
+
+            c = np.sum(all_E_pos + all_E_neg, axis=0) / np.sum(
+                all_R_pos + all_R_neg, axis=0
             )
 
-        # m and c per flux cut
-        num = np.sum(all_E_pos - all_E_neg, axis=0)  # (ncut,)
-        den = np.sum(all_R_pos + all_R_neg, axis=0)
-        m = (num / den) / args.shear - 1.0
+            area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
+                args.pixel_scale / 60.0
+            ) ** 2.0
 
-        c = np.sum(all_E_pos + all_E_neg, axis=0) / np.sum(
-            all_R_pos + all_R_neg, axis=0
-        )
+            clipped_mean, clipped_median, clipped_std = sigma_clipped_stats(
+                all_E_pos / np.average(all_R_pos, axis=0),
+                sigma=5.0,
+                axis=0,
+            )
+            neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
 
-        # area & densities
-        area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
-            args.pixel_scale / 60.0
-        ) ** 2.0
+            rng = np.random.default_rng(0)
+            ms, cs = bootstrap_m(
+                rng,
+                all_E_pos,
+                all_E_neg,
+                all_R_pos,
+                all_R_neg,
+                args.shear,
+                nsamp=args.bootstrap,
+            )
+            ord_ms = np.sort(ms, axis=0)
+            lo_idx = int(0.1587 * args.bootstrap)
+            hi_idx = int(0.8413 * args.bootstrap)
+            sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
 
-        clipped_mean, clipped_median, clipped_std = sigma_clipped_stats(
-            all_E_pos / np.average(all_R_pos, axis=0),
-            sigma=5.0,
-            axis=0,
-        )
-        neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
+            ord_cs = np.sort(cs, axis=0)
+            sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
 
-        rng = np.random.default_rng(0)
-        ms, cs = bootstrap_m(
-            rng,
-            all_E_pos,
-            all_E_neg,
-            all_R_pos,
-            all_R_neg,
-            args.shear,
-            nsamp=args.bootstrap,
-        )
-        ord_ms = np.sort(ms, axis=0)
-        lo_idx = int(0.1587 * args.bootstrap)
-        hi_idx = int(0.8413 * args.bootstrap)
-        sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
-
-        ord_cs = np.sort(cs, axis=0)
-        sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
-
-        # Summary
-        print("==============================================")
-        print(f"Input Directory: {input_dir}")
-        print(f"Paired IDs (found): {all_E_pos.shape[0]}")
-        print(f"ID range requested: [{args.min_id}, {args.max_id}]")
-        print(f"Flux cuts: {flux_list}")
-        print(f"Area (arcmin^2): {area_arcmin2:.3f}")
-        print("m (per flux cut):", m)
-        print("c (per flux cut):", c)
-        print("n_eff (per flux cut):", neff)
-        print("m 1-sigma (bootstrap):", sigma_m)
-        print("c 1-sigma (bootstrap):", sigma_c)
-        print("==============================================")
+            print("==============================================")
+            print(f"Input Directory: {input_dir}")
+            print(f"Paired IDs (found): {all_E_pos.shape[0]}")
+            print(f"ID range requested: [{args.min_id}, {args.max_id}]")
+            print(f"Flux cuts: {flux_list}")
+            print(f"Area (arcmin^2): {area_arcmin2:.3f}")
+            print("m (per flux cut):", m)
+            print("c (per flux cut):", c)
+            print("n_eff (per flux cut):", neff)
+            print("m 1-sigma (bootstrap):", sigma_m)
+            print("c 1-sigma (bootstrap):", sigma_c)
+            print("==============================================")
 
 
 if __name__ == "__main__":
