@@ -160,7 +160,7 @@ cat_task = CatalogShearTask(config=cfg_cat)
 cfg_sim = MultibandSimConfig()
 cfg_sim.survey_name = "lsst"
 cfg_sim.draw_image_noise = True
-cfg_sim.truncate_stamp_size = 65
+# cfg_sim.truncate_stamp_size = 65
 sim_task = MultibandSimTask(config=cfg_sim)
 
 # ------------------------------

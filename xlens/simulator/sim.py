@@ -292,8 +292,8 @@ class MultibandSimTask(PipelineTask):
         psf_obj,
         mag_zero: float,
         band: str,
-        draw_method: str="auto",
-        nn_trunc: None | int=None,
+        draw_method: str = "auto",
+        nn_trunc: None | int = None,
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimConfig)

@@ -418,3 +418,75 @@ def test_iasim():
     assert np.mean(diff) / baseline < 5e-4
     assert np.max(diff) / baseline < 5e-1
     return
+
+
+
+def test_reproducible():
+    from pathlib import Path
+    from xlens.simulator.catalog import CatalogShearTask, CatalogShearTaskConfig
+    from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+    DATA_DIR = Path(__file__).parent / "data"
+
+    catfname = os.path.join(DATA_DIR, "cat_seed_test.fits")
+    imgfname = os.path.join(DATA_DIR, "img_seed_test.fits")
+
+
+    def _make_discrete_skymap():
+        from lsst.skymap.discreteSkyMap import (
+            DiscreteSkyMap, DiscreteSkyMapConfig
+        )
+        config = DiscreteSkyMapConfig()
+        config.raList = [0.0]
+        config.decList = [0.0]
+        config.radiusList = [0.1]
+        config.rotation = 0.0
+        config.projection = "TAN"
+        config.patchInnerDimensions = [400, 400]
+        config.patchBorder = 0
+        config.pixelScale = 0.2
+        config.tractOverlap = 0.0
+        return DiscreteSkyMap(config)
+
+    skymap = _make_discrete_skymap()
+    tract_info = skymap[0]
+    patch_id = 0
+    base_seed = 7
+
+    catalog_config = CatalogShearTaskConfig()
+    catalog_config.z_bounds = [0.0, 0.63, 0.98, 1.48, 10.0]
+    catalog_config.mode = 0
+    catalog_config.rotId = 0
+    catalog_config.kappa_value = 0.0
+    catalog_config.test_value = 0.05
+    catalog_config.test_target = "g1"
+    catalog_config.layout = "random"
+    catalog_config.extend_ratio = 1.0
+    catalog_config.sep_arcsec = 14
+    catalog_task = CatalogShearTask(config=catalog_config)
+
+    truth_catalog = catalog_task.run(
+        tract_info=tract_info,
+        seed=base_seed,
+    ).truthCatalog.copy()
+
+    np.testing.assert_array_equal(truth_catalog, fitsio.read(catfname))
+
+    sim_config = MultibandSimConfig()
+    sim_config.survey_name = "lsst"
+    sim_config.draw_image_noise = True
+    sim_config.truncate_stamp_size = 65
+    sim_config.include_point_source = False
+    sim_task = MultibandSimTask(config=sim_config)
+
+    sim_output = sim_task.run(
+        tract_info=tract_info,
+        patch_id=patch_id,
+        band="i",
+        seed=base_seed,
+        truthCatalog=truth_catalog,
+    )
+    np.testing.assert_allclose(
+        sim_output.simExposure.image.array,
+        fitsio.read(imgfname),
+    )
+    return
