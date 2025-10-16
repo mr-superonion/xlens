@@ -425,6 +425,7 @@ def test_reproducible():
     from pathlib import Path
     from xlens.simulator.catalog import CatalogShearTask, CatalogShearTaskConfig
     from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+    from numpy.lib import recfunctions as rfn
     DATA_DIR = Path(__file__).parent / "data"
 
     catfname = os.path.join(DATA_DIR, "cat_seed_test.fits")
@@ -470,7 +471,8 @@ def test_reproducible():
     ).truthCatalog.copy()
 
     np.testing.assert_array_almost_equal(
-        truth_catalog, fitsio.read(catfname),
+        rfn.structured_to_unstructured(truth_catalog),
+        rfn.structured_to_unstructured(fitsio.read(catfname)),
         decimal=3,
     )
 
