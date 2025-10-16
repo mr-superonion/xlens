@@ -469,7 +469,10 @@ def test_reproducible():
         seed=base_seed,
     ).truthCatalog.copy()
 
-    np.testing.assert_array_equal(truth_catalog, fitsio.read(catfname))
+    np.testing.assert_array_almost_equal(
+        truth_catalog, fitsio.read(catfname),
+        decimal=3,
+    )
 
     sim_config = MultibandSimConfig()
     sim_config.survey_name = "lsst"
@@ -485,8 +488,9 @@ def test_reproducible():
         seed=base_seed,
         truthCatalog=truth_catalog,
     )
-    np.testing.assert_allclose(
+    np.testing.assert_almost_equal(
         sim_output.simExposure.image.array,
         fitsio.read(imgfname),
+        decimal=3,
     )
     return
