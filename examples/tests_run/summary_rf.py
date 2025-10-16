@@ -384,7 +384,7 @@ def per_rank_work(ids_chunk, input_dir, score_list, emax, dg, target):
 
 
 def save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut):
-    partdir = os.path.join(outdir, "summary")
+    partdir = os.path.join(outdir, "summary-rf-40-00")
     os.makedirs(partdir, exist_ok=True)
     path = os.path.join(partdir, f"seed_{index:05d}.npz")
     np.savez_compressed(
@@ -395,7 +395,7 @@ def save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut):
 
 
 def load_and_stack_all(outdir, size, ncut_expected=None):
-    partdir = os.path.join(outdir, "summary")
+    partdir = os.path.join(outdir, "summary-rf-40-00")
     arrays_E_pos, arrays_E_neg, arrays_R_pos, arrays_R_neg = [], [], [], []
     ncut_from_file = None
 
@@ -532,7 +532,6 @@ def main():
             print("m 1-sigma (bootstrap):", sigma_m)
             print("c 1-sigma (bootstrap):", sigma_c)
             print("==============================================")
-
 
 if __name__ == "__main__":
     main()
