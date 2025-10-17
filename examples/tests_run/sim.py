@@ -198,12 +198,15 @@ colnames = [
     "flux_gauss0",
     "dflux_gauss0_dg1",
     "dflux_gauss0_dg2",
+    "flux_gauss0_err",
     "flux_gauss2",
     "dflux_gauss2_dg1",
     "dflux_gauss2_dg2",
+    "flux_gauss2_err",
     "flux_gauss4",
     "dflux_gauss4_dg1",
     "dflux_gauss4_dg2",
+    "flux_gauss4_err",
 ]
 
 
