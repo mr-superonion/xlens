@@ -57,7 +57,8 @@ from xlens.utils.image import (
 # Argument Parsing
 # ------------------------------
 parser = argparse.ArgumentParser(
-    description="Run constant shear simulation (MPI optional)"
+    description="Run constant shear simulation (MPI optional)",
+    allow_abbrev=False,
 )
 parser.add_argument("--target", type=str, default="g1", help="test target")
 parser.add_argument(
@@ -87,7 +88,9 @@ parser.add_argument(
     "--band", type=str, default="a",
     help="single band (g,r,i,z,y) or None for multiband",
 )
-args = parser.parse_args()
+args, unknown_args = parser.parse_known_args()
+if unknown_args:
+    print("[warn] Ignoring unknown args:", unknown_args)
 
 shear_mode = int(args.mode)
 shear_value = args.shear
