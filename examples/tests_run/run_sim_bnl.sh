@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Submit sim.py jobs to HTCondor.
 # - Sweeps modes (default: 0,40) and indices [INDEX_START, INDEX_END]
+#   with chunk size --per-task (default: 10)
 # - Logs to ${HOME}/log
-# - CLI: --modes "0,40"  --index-start N  --index-end N  --target STR
+# - CLI: --modes "0,40"  --index-start N  --index-end N  --per-task N  --target STR
 #        --shear F  --kappa F  --rot N  --layout STR  --band STR  --dry-run
 
 set -euo pipefail
@@ -10,6 +11,7 @@ set -euo pipefail
 declare -a MODES=(0 40)     # override with: --modes "0,40"
 INDEX_START=0               # override with: --index-start N
 INDEX_END=2999              # inclusive; override with: --index-end N
+PER_TASK=10                 # number of IDs per job; override with: --per-task N
 TARGET="g1"                 # --target STR
 SHEAR="0.02"                # --shear F
 KAPPA="0.0"                 # --kappa F
@@ -30,6 +32,7 @@ Options (CLI-only; env vars are ignored):
   --modes "M1,M2,..."   replace default modes (e.g. "0,40")
   --index-start N       start index (default: ${INDEX_START})
   --index-end N         end index inclusive (default: ${INDEX_END})
+  --per-task N          number of IDs processed per job (default: ${PER_TASK})
   --script STD          python script to run (default: ${SCRIPT_PATH})
   --target STR          target (default: ${TARGET})
   --shear F             shear (default: ${SHEAR})
@@ -58,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --modes)        IFS=',' read -r -a MODES <<< "$2"; shift 2 ;;
     --index-start)  INDEX_START="$2"; shift 2 ;;
     --index-end)    INDEX_END="$2"; shift 2 ;;
+    --per-task)     PER_TASK="$2"; shift 2 ;;
     --script)       SCRIPT_PATH="$2"; shift 2 ;;
     --target)       TARGET="$2"; shift 2 ;;
     --shear)        SHEAR="$2"; shift 2 ;;
@@ -90,6 +94,10 @@ if (( INDEX_END < INDEX_START )); then
   echo "Error: --index-end (${INDEX_END}) < --index-start (${INDEX_START})." >&2
   exit 1
 fi
+if (( PER_TASK <= 0 )); then
+  echo "Error: --per-task must be a positive integer (got ${PER_TASK})." >&2
+  exit 1
+fi
 mkdir -p "$LOG_DIR"
 
 # -------------------------------
@@ -113,7 +121,7 @@ log             = ${LOG_DIR}/\$(ClusterId).log
 queue mode, start, end from (
 $(for m in "${MODES[@]}"; do
     for i in $(seq "${INDEX_START}" "${INDEX_END}"); do
-      s=$((i*10)); e=$((s+10))
+      s=$((i*PER_TASK)); e=$((s+PER_TASK))
       printf "  %s %d %d\n" "$m" "$s" "$e"
     done
   done)

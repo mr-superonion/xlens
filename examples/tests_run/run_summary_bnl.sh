@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Submit sim.py jobs to HTCondor.
 # - Sweeps indices [INDEX_START, INDEX_END] (each job gets --min-id/--max-id)
+#   with chunk size --per-task (default: 10)
 # - Logs to ${HOME}/log
 # - Only passes: --emax --layout --target --shear --start --end
 
@@ -8,6 +9,7 @@ set -euo pipefail
 
 INDEX_START=0               # override with: --index-start N
 INDEX_END=2999              # inclusive; override with: --index-end N
+PER_TASK=10                 # number of IDs per job; override with: --per-task N
 EMAX="0.30"                 # --emax F
 LAYOUT="random"             # --layout STR
 TARGET="g1"                 # --target STR
@@ -26,6 +28,7 @@ Options:
   --index-start N     start index (default: ${INDEX_START})
   --index-end N       end index inclusive (default: ${INDEX_END})
   --script PATH       python script to run (default: ${SCRIPT_PATH})
+  --per-task N        number of IDs processed per job (default: ${PER_TASK})
   --emax F            emax (default: ${EMAX})
   --layout STR        layout (default: ${LAYOUT})
   --target STR        target (default: ${TARGET})
@@ -51,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --index-start)  INDEX_START="$2"; shift 2 ;;
     --index-end)    INDEX_END="$2"; shift 2 ;;
     --script)       SCRIPT_PATH="$2"; shift 2 ;;
+    --per-task)     PER_TASK="$2"; shift 2 ;;
     --emax)         EMAX="$2"; shift 2 ;;
     --layout)       LAYOUT="$2"; shift 2 ;;
     --target)       TARGET="$2"; shift 2 ;;
@@ -80,6 +84,10 @@ if (( INDEX_END < INDEX_START )); then
   echo "Error: --index-end (${INDEX_END}) < --index-start (${INDEX_START})." >&2
   exit 1
 fi
+if (( PER_TASK <= 0 )); then
+  echo "Error: --per-task must be a positive integer (got ${PER_TASK})." >&2
+  exit 1
+fi
 mkdir -p "$LOG_DIR"
 
 # -------------------------------
@@ -102,7 +110,7 @@ log             = ${LOG_DIR}/\$(ClusterId).log
 
 queue start, end from (
 $(for i in $(seq "${INDEX_START}" "${INDEX_END}"); do
-    s=$((i*10)); e=$((s+10))
+    s=$((i*PER_TASK)); e=$((s+PER_TASK))
     printf "  %d %d\n" "$s" "$e"
   done)
 )
