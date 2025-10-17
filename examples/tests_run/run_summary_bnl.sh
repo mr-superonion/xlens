@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Submit sim.py jobs to HTCondor.
-# - Sweeps indices [INDEX_START, INDEX_END] (each job gets --min-id/--max-id)
-#   with chunk size --per-task (default: 10)
+# Submit summary.py jobs to HTCondor.
+# - Sweeps group indices [INDEX_START, INDEX_END] (each job gets
+#   --group-start/--group-end) with chunk size --per-task (default: 10)
 # - Logs to ${HOME}/log
 # - Only passes: --emax --layout --target --shear --start --end
 
@@ -9,14 +9,14 @@ set -euo pipefail
 
 INDEX_START=0               # override with: --index-start N
 INDEX_END=2999              # inclusive; override with: --index-end N
-PER_TASK=10                 # number of IDs per job; override with: --per-task N
+PER_TASK=10                 # number of group_ids per job; override with: --per-task N
 EMAX="0.30"                 # --emax F
 LAYOUT="random"             # --layout STR
 TARGET="g1"                 # --target STR
 SHEAR="0.02"                # --shear F
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
-SCRIPT_PATH="sim.py"        # if you need to change it: --script path/to/sim.py
+SCRIPT_PATH="summary.py"    # if you need to change it: --script path/to/summary.py
 LOG_DIR="${HOME}/log"
 DRY_RUN=false
 
@@ -28,7 +28,7 @@ Options:
   --index-start N     start index (default: ${INDEX_START})
   --index-end N       end index inclusive (default: ${INDEX_END})
   --script PATH       python script to run (default: ${SCRIPT_PATH})
-  --per-task N        number of IDs processed per job (default: ${PER_TASK})
+  --per-task N        number of group_ids processed per job (default: ${PER_TASK})
   --emax F            emax (default: ${EMAX})
   --layout STR        layout (default: ${LAYOUT})
   --target STR        target (default: ${TARGET})
@@ -103,16 +103,23 @@ request_memory  = 1800
 request_cpus    = 1
 
 executable      = ${PYTHON_EXE_PATH}
-arguments       = ${SCRIPT_PATH} --emax ${EMAX} --layout ${LAYOUT} --target ${TARGET} --shear ${SHEAR} --min-id \$(start) --max-id \$(end)
-output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_idx\$(start).out
-error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_idx\$(start).err
+arguments       = ${SCRIPT_PATH} --emax ${EMAX} --layout ${LAYOUT} --target ${TARGET} --shear ${SHEAR} --group-start \$(start) --group-end \$(end)
+output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_grp\$(start).out
+error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_grp\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log
 
 queue start, end from (
-$(for i in $(seq "${INDEX_START}" "${INDEX_END}"); do
-    s=$((i*PER_TASK)); e=$((s+PER_TASK))
+$(
+  s=${INDEX_START}
+  while (( s <= INDEX_END )); do
+    e=$((s + PER_TASK))
+    if (( e > INDEX_END + 1 )); then
+      e=$((INDEX_END + 1))
+    fi
     printf "  %d %d\n" "$s" "$e"
-  done)
+    s=$((s + PER_TASK))
+  done
+)
 )
 EOF
 }

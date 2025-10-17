@@ -2,11 +2,11 @@
 """
 Example
 -------
-# 128 ranks spanning IDs 0..29999:
+# 128 ranks spanning group IDs 0..299:
 mpirun -n 128 python summary.py \
     --emax 0.3 --layout grid \
     --target g1 --shear 0.02 \
-    --min-id 0 --max-id 30000
+    --group-start 0 --group-end 300
 """
 
 import argparse
@@ -57,7 +57,7 @@ with open(model_fname, "rb") as f:
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="measure + aggregate from catalogs over a given ID range.",
+        description="measure + aggregate from catalogs over a given group range.",
         allow_abbrev=False,
     )
     p.add_argument(
@@ -90,18 +90,18 @@ def parse_args():
         default=0.02,
         help="True shear amplitude |g| used in sims.",
     )
-    # ID range
+    # group range (each group contains 100 sim_seeds)
     p.add_argument(
-        "--min-id",
+        "--group-start",
         type=int,
         required=True,
-        help="Minimum sim_seed (inclusive), e.g. 0",
+        help="Minimum group_id (inclusive), maps to sim_seed >= 100*group_id",
     )
     p.add_argument(
-        "--max-id",
+        "--group-end",
         type=int,
         required=True,
-        help="Maximum sim_seed (inclusive), e.g. 2047",
+        help="Maximum group_id (exclusive), maps to sim_seed < 100*group_id",
     )
     # Measurement config
     p.add_argument(
@@ -163,13 +163,11 @@ def base_path(pscratch, layout, target, shear):
     )
 
 
-def parquet_seed_path(base_dir, seed, mode) -> str:
-    bucket = seed // 100
+def parquet_group_path(base_dir, group_id, mode) -> str:
     return os.path.join(
         base_dir,
         f"mode{mode}",
-        f"sim_seed_bucket={bucket}",
-        f"sim_seed={seed}",
+        f"group_id={group_id}",
         "data.parquet",
     )
 
@@ -315,11 +313,12 @@ def bootstrap_m(
     return ms, cs
 
 
-def per_rank_work(ids_chunk, input_dir, score_list, emax, dg, target):
+def per_rank_work(group_chunk, input_dir, score_list, emax, dg, target):
     """
-    For each ID in ids_chunk, read +g (mode1) and -g (mode0) catalogs,
-    compute per-flux-cut e_pos/e_neg, R_pos/R_neg, N_pos/N_neg.
-    Returns 6 arrays of shape (Nsamples_local, ncut).
+    For each group_id in ``group_chunk``, read the +g (mode40) and -g (mode0)
+    catalogs aggregated over that group's 100 sim_seeds and compute the
+    per-score-cut e_pos/e_neg, R_pos/R_neg. Returns 4 arrays of shape
+    (Nsamples_local, ncut).
     """
     ncut = len(score_list)
     E_pos = []
@@ -327,9 +326,9 @@ def per_rank_work(ids_chunk, input_dir, score_list, emax, dg, target):
     R_pos = []
     R_neg = []
 
-    for i, sid in enumerate(ids_chunk):
-        ppos = parquet_seed_path(input_dir, sid, mode=40)  # +g
-        pneg = parquet_seed_path(input_dir, sid, mode=0)  # -g
+    for group_id in group_chunk:
+        ppos = parquet_group_path(input_dir, group_id, mode=40)  # +g
+        pneg = parquet_group_path(input_dir, group_id, mode=0)  # -g
 
         if not (os.path.isfile(ppos) and os.path.isfile(pneg)):
             # Skip if pair not complete
@@ -351,10 +350,10 @@ def per_rank_work(ids_chunk, input_dir, score_list, emax, dg, target):
 
         fmin = 40
         for j, smax in enumerate(score_list):
-            e1p, R1p, e2p, R2p, Np = measure_shear_with_cut(
+            e1p, R1p, e2p, R2p, _ = measure_shear_with_cut(
                 src_pos, fmin, emax=emax, smax=smax, dg=dg
             )
-            e1m, R1m, e2m, R2m, Nm = measure_shear_with_cut(
+            e1m, R1m, e2m, R2m, _ = measure_shear_with_cut(
                 src_neg, fmin, emax=emax, smax=smax, dg=dg
             )
 
@@ -368,7 +367,6 @@ def per_rank_work(ids_chunk, input_dir, score_list, emax, dg, target):
                 e_neg_row[j] = e2m
                 R_pos_row[j] = R2p
                 R_neg_row[j] = R2m
-
 
         E_pos.append(e_pos_row)
         E_neg.append(e_neg_row)
@@ -387,10 +385,10 @@ def per_rank_work(ids_chunk, input_dir, score_list, emax, dg, target):
     )
 
 
-def save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut):
+def save_rank_partial(outdir, group_index, E_pos, E_neg, R_pos, R_neg, ncut):
     partdir = os.path.join(outdir, "summary-rf-40-00")
     os.makedirs(partdir, exist_ok=True)
-    path = os.path.join(partdir, f"seed_{index:05d}.npz")
+    path = os.path.join(partdir, f"group_{group_index:05d}.npz")
     np.savez_compressed(
         path,
         E_pos=E_pos, E_neg=E_neg, R_pos=R_pos, R_neg=R_neg, ncut=np.int64(ncut)
@@ -403,7 +401,7 @@ def load_and_stack_all(outdir, size, ncut_expected=None):
     arrays_E_pos, arrays_E_neg, arrays_R_pos, arrays_R_neg = [], [], [], []
     ncut_from_file = None
 
-    pathes = glob.glob(os.path.join(partdir, "seed_*.npz"))
+    pathes = glob.glob(os.path.join(partdir, "group_*.npz"))
     for path in pathes:
         with np.load(path) as data:
             E_pos = data["E_pos"]
@@ -447,22 +445,22 @@ def main():
     )
 
     if not args.summary:
-        # Build full ID list [min_id, max_id) split across ranks
-        if args.max_id < args.min_id:
-            raise SystemExit("--max-id must be >= --min-id")
-        all_ids = np.arange(args.min_id, args.max_id, dtype=int)
+        # Build full group list [group_start, group_end) split across ranks
+        if args.group_end <= args.group_start:
+            raise SystemExit("--group-end must be > --group-start")
+        all_groups = np.arange(args.group_start, args.group_end, dtype=int)
 
         # Even split
-        n = len(all_ids)
+        n = len(all_groups)
         base = n // size
         rem = n % size
         start = rank * base + min(rank, rem)
         stop = start + base + (1 if rank < rem else 0)
-        my_ids = all_ids[start:stop]
+        my_groups = all_groups[start:stop]
 
         # Per-rank measurement
         E_pos, E_neg, R_pos, R_neg = per_rank_work(
-            my_ids,
+            my_groups,
             input_dir,
             score_list,
             args.emax,
@@ -470,7 +468,12 @@ def main():
             args.target,
         )
 
-        save_rank_partial(outdir, args.min_id, E_pos, E_neg, R_pos, R_neg, ncut)
+        index = (
+            int(my_groups[0])
+            if len(my_groups) > 0
+            else (args.group_start + rank)
+        )
+        save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut)
         # Ensure all ranks have written their files
         _barrier()
     else:
@@ -481,7 +484,7 @@ def main():
             )
             if all_E_pos.size == 0 or all_E_neg.size == 0:
                 raise SystemExit(
-                    "No valid (+g/-g) pairs found in the given ID range."
+                    "No valid (+g/-g) pairs found in the given group range."
                 )
 
             # m and c per flux cut
@@ -527,7 +530,14 @@ def main():
             print("==============================================")
             print(f"Input Directory: {input_dir}")
             print(f"Paired IDs (found): {all_E_pos.shape[0]}")
-            print(f"ID range requested: [{args.min_id}, {args.max_id}]")
+            print(
+                "Group range requested: "
+                f"[{args.group_start}, {args.group_end})"
+            )
+            print(
+                "Seed range requested: "
+                f"[{args.group_start * 100}, {args.group_end * 100})"
+            )
             print(f"Score cuts: {score_list}")
             print(f"Area (arcmin^2): {area_arcmin2:.3f}")
             print("m (per flux cut):", m)

@@ -37,7 +37,7 @@ except Exception:
 # Argument Parsing
 # ------------------------------
 parser = argparse.ArgumentParser(
-    description="Convert FITS catalogs to a Parquet partitioned by sim_seed.",
+    description="Convert FITS catalogs to Parquet files partitioned by group_id (100 seeds).",
     allow_abbrev=False,
 )
 parser.add_argument("--target", type=str, default="g1", help="test target")
@@ -48,8 +48,12 @@ parser.add_argument(
 parser.add_argument(
     "--rot", type=int, default=0, choices=[0, 1], help="rotation id",
 )
-parser.add_argument("--start", type=int, default=0, help="start id (inclusive)")
-parser.add_argument("--end", type=int, default=2, help="end id (exclusive)")
+parser.add_argument(
+    "--start", type=int, default=0, help="start group_id (inclusive)",
+)
+parser.add_argument(
+    "--end", type=int, default=2, help="end group_id (exclusive)",
+)
 parser.add_argument("--shear", type=float, default=0.02, help="Shear value")
 parser.add_argument("--kappa", type=float, default=0.00, help="Kappa value")
 parser.add_argument(
@@ -71,8 +75,8 @@ shear_value = args.shear
 kappa_value = args.kappa
 rot_id = args.rot
 test_target = args.target
-istart = args.start
-iend = args.end
+group_start = args.start
+group_end = args.end
 
 # ------------------------------
 # MPI (or single-process) info
@@ -85,8 +89,8 @@ if rank == 0:
         print("[Info] Running single-process (no mpirun/srun needed).")
     else:
         print(f"[Info] Running with MPI across {size} ranks.")
-if iend - istart <= 0:
-    raise ValueError(f"Invalid range: start={istart}, end={iend}")
+if group_end - group_start <= 0:
+    raise ValueError(f"Invalid group range: start={group_start}, end={group_end}")
 
 # ------------------------------
 # Paths
@@ -146,21 +150,16 @@ def _astropy_to_arrow(tab: astTable.Table) -> pa.Table:
     return pa.Table.from_pandas(df, preserve_index=False)
 
 
-def _seed_partition_dir(base_dir: str, sim_seed: int) -> str:
-    """Return the hive-style partition directory for a sim_seed."""
-    bucket = int(sim_seed // 100)
-    return os.path.join(
-        base_dir,
-        f"sim_seed_bucket={bucket}", f"sim_seed={sim_seed}",
-    )
+def _group_partition_dir(base_dir: str, group_id: int) -> str:
+    """Return the hive-style partition directory for a group_id."""
+    return os.path.join(base_dir, f"group_id={group_id}")
 
 
-def _write_one_seed_parquet(
-    base_dir: str, t: pa.Table, sim_seed: int, overwrite: bool
+def _write_one_group_parquet(
+    base_dir: str, t: pa.Table, group_id: int, overwrite: bool
 ):
-    """Write a single seed to .../sim_seed_bucket=.../sim_seed=.../data.parquet
-    atomically."""
-    dir_path = _seed_partition_dir(base_dir, sim_seed)
+    """Write one Parquet file per group_id to .../group_id=.../data.parquet atomically."""
+    dir_path = _group_partition_dir(base_dir, group_id)
     os.makedirs(dir_path, exist_ok=True)
 
     out_path = os.path.join(dir_path, "data.parquet")
@@ -182,21 +181,41 @@ def _write_one_seed_parquet(
 # ------------------------------
 # Work loop (unique seeds per rank if MPI)
 # ------------------------------
-for i in range(istart, iend):
-    sim_seed = i * size + rank  # same distribution you used before
-    try:
-        tab = _read_and_stack(sim_seed)
-    except FileNotFoundError:
+for group_id in range(group_start + rank, group_end, size):
+    group_dir = _group_partition_dir(pq_root, group_id)
+    group_path = os.path.join(group_dir, "data.parquet")
+
+    if args.skip_existing and os.path.exists(group_path):
         continue
 
-    t = _astropy_to_arrow(tab)
+    tables: List[pa.Table] = []
 
-    _write_one_seed_parquet(
-        pq_root, t, sim_seed, overwrite=not args.skip_existing
+    seed_start = group_id * 100
+    seed_end = (group_id + 1) * 100
+
+    for sim_seed in range(seed_start, seed_end):
+        try:
+            tab = _read_and_stack(sim_seed)
+        except FileNotFoundError:
+            continue
+
+        t = _astropy_to_arrow(tab)
+        tables.append(t)
+
+        # free memory early for astropy table
+        del tab
+        gc.collect()
+
+    if not tables:
+        continue
+
+    combined = pa.concat_tables(tables, promote=True).combine_chunks()
+
+    _write_one_group_parquet(
+        pq_root, combined, group_id, overwrite=not args.skip_existing
     )
 
-    # free memory early
-    del tab, t
+    del tables, combined
     gc.collect()
 
 # Ensure all ranks finish (no-op in single process)
