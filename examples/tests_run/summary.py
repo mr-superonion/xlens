@@ -50,7 +50,8 @@ except Exception:
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="measure + aggregate from catalogs over a given ID range."
+        description="measure + aggregate from catalogs over a given ID range.",
+        allow_abbrev=False,
     )
     # Directory layout and naming
     p.add_argument(
@@ -134,7 +135,10 @@ def parse_args():
         default=10000,
         help="# bootstrap resamples for m uncertainty (done on rank 0).",
     )
-    return p.parse_args()
+    args, unknown_args = p.parse_known_args()
+    if unknown_args:
+        print("[warn] Ignoring unknown args:", unknown_args)
+    return args
 
 
 def parse_flux_list(s: str):

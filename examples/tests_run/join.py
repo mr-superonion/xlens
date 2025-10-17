@@ -37,7 +37,8 @@ except Exception:
 # Argument Parsing
 # ------------------------------
 parser = argparse.ArgumentParser(
-    description="Convert FITS catalogs to a Parquet partitioned by sim_seed."
+    description="Convert FITS catalogs to a Parquet partitioned by sim_seed.",
+    allow_abbrev=False,
 )
 parser.add_argument("--target", type=str, default="g1", help="test target")
 parser.add_argument(
