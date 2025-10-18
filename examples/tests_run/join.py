@@ -2,7 +2,7 @@
 import argparse
 import gc
 import os
-from typing import List
+from typing import List, Optional
 
 import astropy.table as astTable
 import pyarrow as pa
@@ -177,6 +177,16 @@ pq_root = os.path.join(
 )
 os.makedirs(pq_root, exist_ok=True)
 
+truth_root = os.path.join(
+    pscratch,
+    "parquet",
+    f"constant_shear_{args.layout}",
+    test_target,
+    f"shear{int(shear_value * 100):02d}",
+    f"truth-mode{shear_mode}",
+)
+os.makedirs(truth_root, exist_ok=True)
+
 
 # ------------------------------
 # Helpers
@@ -200,6 +210,22 @@ def _read_and_stack(sim_seed: int) -> astTable.Table:
     data_all = astTable.hstack(data_all, join_type="exact")
     data_all["sim_seed"] = sim_seed
     return data_all
+
+
+def _read_truth(sim_seed: int) -> Optional[astTable.Table]:
+    """Read the truth FITS for a sim_seed (if present)."""
+    truthfname = os.path.join(fits_root, f"truth-{sim_seed:05d}.fits")
+    if not os.path.exists(truthfname):
+        return None
+
+    truth = astTable.Table.read(truthfname)
+    truth = truth.copy()
+
+    if "truth_index" not in truth.colnames and "indices" in truth.colnames:
+        truth.rename_column("indices", "truth_index")
+
+    truth["sim_seed"] = sim_seed
+    return truth
 
 
 def _astropy_to_arrow(tab: astTable.Table) -> pa.Table:
@@ -247,11 +273,18 @@ def _write_one_group_parquet(
 for group_id in range(group_start + rank, group_end, size):
     group_dir = _group_partition_dir(pq_root, group_id)
     group_path = os.path.join(group_dir, "data.parquet")
+    truth_group_dir = _group_partition_dir(truth_root, group_id)
+    truth_group_path = os.path.join(truth_group_dir, "data.parquet")
 
-    if args.skip_existing and os.path.exists(group_path):
+    if (
+        args.skip_existing
+        and os.path.exists(group_path)
+        and os.path.exists(truth_group_path)
+    ):
         continue
 
     tables: List[pa.Table] = []
+    truth_tables: List[pa.Table] = []
 
     seed_start = group_id * 100
     seed_end = (group_id + 1) * 100
@@ -269,16 +302,31 @@ for group_id in range(group_start + rank, group_end, size):
         del tab
         gc.collect()
 
-    if not tables:
+        truth_tab = _read_truth(sim_seed)
+        if truth_tab is not None:
+            truth_tables.append(_astropy_to_arrow(truth_tab))
+            del truth_tab
+            gc.collect()
+
+    if not tables and not truth_tables:
         continue
 
-    combined = pa.concat_tables(tables, promote=True).combine_chunks()
+    if tables:
+        combined = pa.concat_tables(tables, promote=True).combine_chunks()
+        _write_one_group_parquet(
+            pq_root, combined, group_id, overwrite=not args.skip_existing
+        )
+        del combined
 
-    _write_one_group_parquet(
-        pq_root, combined, group_id, overwrite=not args.skip_existing
-    )
+    if truth_tables:
+        truth_combined = pa.concat_tables(truth_tables, promote=True).combine_chunks()
+        _write_one_group_parquet(
+            truth_root, truth_combined, group_id, overwrite=not args.skip_existing
+        )
+        del truth_combined
 
-    del tables, combined
+    del tables
+    del truth_tables
     gc.collect()
 
 # Ensure all ranks finish (no-op in single process)
