@@ -407,11 +407,7 @@ def main():
             args.target,
         )
 
-        index = (
-            int(my_groups[0])
-            if len(my_groups) > 0
-            else (args.group_start + rank)
-        )
+        index = int(my_groups[0])
         save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut)
         _barrier()
     else:
@@ -434,7 +430,7 @@ def main():
 
             area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
                 args.pixel_scale / 60.0
-            ) ** 2.0
+            ) ** 2.0 * 100
 
             clipped_mean, clipped_median, clipped_std = sigma_clipped_stats(
                 all_E_pos / np.average(all_R_pos, axis=0),

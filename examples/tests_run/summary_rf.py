@@ -487,7 +487,7 @@ def main():
                     "No valid (+g/-g) pairs found in the given group range."
                 )
 
-            # m and c per flux cut
+            # m and c per score cut
             num = np.sum(all_E_pos - all_E_neg, axis=0)  # (ncut,)
             den = np.sum(all_R_pos + all_R_neg, axis=0)
             m = (num / den) / args.shear - 1.0
@@ -499,7 +499,7 @@ def main():
             # area & densities
             area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
                 args.pixel_scale / 60.0
-            ) ** 2.0
+            ) ** 2.0 * 100
 
             clipped_mean, clipped_median, clipped_std = sigma_clipped_stats(
                 all_E_pos / np.average(all_R_pos, axis=0),
@@ -540,9 +540,9 @@ def main():
             )
             print(f"Score cuts: {score_list}")
             print(f"Area (arcmin^2): {area_arcmin2:.3f}")
-            print("m (per flux cut):", m)
-            print("c (per flux cut):", c)
-            print("n_eff (per flux cut):", neff)
+            print("m (per score cut):", m)
+            print("c (per score cut):", c)
+            print("n_eff (per score cut):", neff)
             print("m 1-sigma (bootstrap):", sigma_m)
             print("c 1-sigma (bootstrap):", sigma_c)
             print("==============================================")
