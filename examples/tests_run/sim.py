@@ -178,7 +178,6 @@ detect_config.do_fpfs = (band is None)
 detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
 det_task = AnacalDetectPipe(config=detect_config)
 
-
 config = matchPipeConfig()
 config.mag_zero = 30.0
 config.mag_max_truth = 28.0
@@ -280,7 +279,6 @@ for i in range(istart, iend):
         )
         detection = None
 
-    # Optional cap: skip large sim_seed (kept as-is)
     if os.path.isfile(outfname) or (sim_seed >= 30000):
         continue
 
@@ -288,6 +286,11 @@ for i in range(istart, iend):
         tract_info=skymap[tract_id],
         seed=sim_seed,
     ).truthCatalog
+    truthfname = os.path.join(
+        outdir, "truth-%05d.fits" % (sim_seed)
+    )
+    if (band is None) and (not os.path.isfile(truthfname)):
+        fitsio.write(truthfname, truth_catalog)
 
     exposure, noise_array = get_exposure(
         truth_catalog=truth_catalog, sim_seed=sim_seed, band=band,

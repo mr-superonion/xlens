@@ -197,7 +197,9 @@ def _read_and_stack(sim_seed: int) -> astTable.Table:
         data_all.append(astTable.Table.read(fname))
 
     # If you need strict presence of all bands, replace with join_type="exact"
-    return astTable.hstack(data_all, join_type="exact")
+    data_all = astTable.hstack(data_all, join_type="exact")
+    data_all["sim_seed"] = sim_seed
+    return data_all
 
 
 def _astropy_to_arrow(tab: astTable.Table) -> pa.Table:
