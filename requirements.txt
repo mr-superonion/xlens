@@ -8,3 +8,4 @@ lenstronomy
 matplotlib
 anacal==0.7.1
 pyccl
+namaster
