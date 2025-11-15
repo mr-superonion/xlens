@@ -12,7 +12,8 @@ import numpy as np
 from astropy.stats import sigma_clipped_stats
 from numpy.lib import recfunctions as rfn
 
-from xlens.catalog import measure_shear_with_cut
+from xlens.catalog import measure_shear
+from xlens.catalog.redshift import flexzboostEstimator
 
 
 colnames = [
@@ -92,8 +93,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--z-bounds",
         type=str,
-        default="0.3,0.6,0.9,1.2,1.5",
-        help="Comma-separated redshift boundarys, e.g. '0.3,0.6,0.9,1.2'.",
+        default="0.3,0.6,0.9,1.2,1.5,1.8",
+        help="Comma-separated redshift boundarys, e.g. '0.3,0.6,0.9,1.2,1.8'.",
     )
     parser.add_argument(
         "--emax",
@@ -187,7 +188,7 @@ def per_rank_work(
     emax: float,
     dg: float,
     target: str,
-    pz_obj,
+    zobj,
     do_correction: bool = True,
 ):
     e_pos_rows = []
@@ -196,37 +197,37 @@ def per_rank_work(
     r_neg_rows = []
     for sim_id in ids_chunk:
         src_pos = cat_read(base_dir, sim_id, mode=40)
-        e_pos, r_pos, rsel_pos = measure_shear_with_cut(
+        out_pos = measure_shear(
             src=src_pos,
             flux_min=flux_min,
-            pz_obj=pz_obj,
+            z_estimator=zobj,
             emax=emax,
             zbounds=zbounds,
             dg=dg,
             target=target,
             do_correction=do_correction,
-            z_width95_max=4.0,
+            z_width95_max=2.75,
         )
         del src_pos
         gc.collect()
         src_neg = cat_read(base_dir, sim_id, mode=0)
-        e_neg, r_neg, rsel_neg = measure_shear_with_cut(
+        out_neg = measure_shear(
             src=src_neg,
             flux_min=flux_min,
-            pz_obj=pz_obj,
+            z_estimator=zobj,
             emax=emax,
             zbounds=zbounds,
             dg=dg,
             target=target,
             do_correction=do_correction,
-            z_width95_max=4.0,
+            z_width95_max=2.75,
         )
         del src_neg
         gc.collect()
-        e_pos_rows.append(e_pos)
-        e_neg_rows.append(e_neg)
-        r_pos_rows.append(r_pos + rsel_pos)
-        r_neg_rows.append(r_neg + rsel_neg)
+        e_pos_rows.append(out_pos["e"])
+        e_neg_rows.append(out_neg["e"])
+        r_pos_rows.append(out_pos["r"] + out_pos["r_sel"])
+        r_neg_rows.append(out_neg["r"] + out_neg["r_sel"])
 
     return (
         np.vstack(e_pos_rows),
@@ -246,7 +247,7 @@ def save_rank_partial(
     ncut: int,
     do_correction: bool = True,
 ) -> str:
-    partdir = os.path.join(outdir, "summary-flexz3-40-00")
+    partdir = os.path.join(outdir, "summary-flexz-40-00")
     if not do_correction:
         partdir = partdir + "-nc"
     os.makedirs(partdir, exist_ok=True)
@@ -266,7 +267,7 @@ def load_and_stack_all(
     outdir: str, ncut_expected: Optional[int] = None,
     do_correction: bool = True,
 ):
-    partdir = os.path.join(outdir, "summary-flexz3-40-00")
+    partdir = os.path.join(outdir, "summary-flexz-40-00")
     if not do_correction:
         partdir = partdir + "-nc"
     arrays_E_pos: List[np.ndarray] = []
@@ -334,8 +335,8 @@ def main() -> None:
     if not args.summary:
         model_path = args.model_path
         with open(model_path, "rb") as f:
-            pz_obj = pickle.load(f)
-            pz_obj.model.models.n_jobs = 1
+            mm = pickle.load(f)
+        zobj = flexzboostEstimator(pz_obj=mm)
         my_ids = np.arange(args.min_id, args.max_id, dtype=int)
         if len(my_ids) > 0:
             e_pos, e_neg, r_pos, r_neg = per_rank_work(
@@ -346,7 +347,7 @@ def main() -> None:
                 args.emax,
                 args.dg,
                 args.target,
-                pz_obj,
+                zobj,
                 do_correction=do_correction,
             )
             save_rank_partial(
