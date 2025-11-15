@@ -130,11 +130,11 @@ class matchPipeConfig(
     )
     mag_max_truth = Field[float](
         doc="maximum magnitude limit of truth catalog",
-        default=27.0,
+        default=28.0,
     )
     do_select_primary = Field[bool](
         doc="whether select primary detection",
-        default=True,
+        default=False,
     )
     band_column_names = DictField(
         keytype=str,
@@ -367,6 +367,7 @@ class matchPipe(PipelineTask):
         catalog: NDArray,
         dm_catalog: NDArray | None = None,
         truth_catalog: NDArray | None = None,
+        **kwargs,
     ):
         assert isinstance(self.config, matchPipeConfig)
         pixel_scale = (
