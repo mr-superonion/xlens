@@ -2,7 +2,7 @@ import os
 import glob
 import numpy as np
 from abc import ABC, abstractmethod
-from .utils import _resolve_flux_min, _resolve_flux_name
+from .utils import _resolve_flux_name
 
 
 NUM_Z_GRIDS = 401
@@ -60,12 +60,12 @@ def get_color(
 
         flux = flux_base + dg * dflux
 
-        mag     = np.full(n, 30.0, dtype=np.float64)
-        mag_err = np.full(n,  1.0, dtype=np.float64)
+        mag = np.full(n, 30.0, dtype=np.float64)
+        mag_err = np.full(n, 1.0, dtype=np.float64)
 
         pos = flux > 0
         with np.errstate(divide="ignore", invalid="ignore"):
-            mag[pos]     = mag_zero - 2.5 * np.log10(flux[pos])
+            mag[pos] = mag_zero - 2.5 * np.log10(flux[pos])
             mag_err[pos] = A * (ferr[pos] / flux[pos])
 
         mags.append(mag)
@@ -209,8 +209,8 @@ class flexzboostEstimator(zEstimator):
 
 def load_bpz_templates(
     data_path,
-    filters = None,
-    spectra_name = "cosmossedswdust136.list",
+    filters=None,
+    spectra_name="cosmossedswdust136.list",
 ):
     """Load BPZ template fluxes on Z_GRIDS for provided filter set."""
     if filters is None:
@@ -226,10 +226,9 @@ def load_bpz_templates(
     nf = len(filters)
     nz = len(z)
     flux_templates = np.zeros((nz, nt, nf))
-    ab_dir = os.path.join(data_path, "AB")
-    # Pre-scan AB dir (kept in case you want to validate presence)
-    _ab_file_list = glob.glob(ab_dir + "/*.AB")
-    _ab_file_db = [os.path.split(x)[-1] for x in _ab_file_list]
+    # # Pre-scan AB dir (kept in case you want to validate presence)
+    # _ab_file_list = glob.glob(ab_dir + "/*.AB")
+    # _ab_file_db = [os.path.split(x)[-1] for x in _ab_file_list]
 
     for i, s in enumerate(spectra):
         for j, f in enumerate(filters):
@@ -323,7 +322,7 @@ class bpzEstimator(zEstimator):
             flux = flux_base + dg * dflux
 
             mag = np.full(n, 30.0, dtype=np.float64)
-            mag_err = np.full(n,  1.0, dtype=np.float64)
+            mag_err = np.full(n, 1.0, dtype=np.float64)
 
             pos = flux > 0
             with np.errstate(divide="ignore", invalid="ignore"):

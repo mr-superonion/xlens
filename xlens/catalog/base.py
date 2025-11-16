@@ -1,7 +1,4 @@
-import os
-import glob
 import numpy as np
-from abc import ABC, abstractmethod
 from .utils import _resolve_flux_min, _resolve_flux_name
 from .model import w_model, w_model_derivs
 
@@ -13,11 +10,11 @@ def get_esq(src: np.ndarray, comp: int = 1, dg: float = 0.0) -> np.ndarray:
     if comp not in (1, 2):
         raise ValueError(f"comp must be 1 or 2, got {comp!r}")
 
-    e  = src[f"fpfs_e{comp}"]
+    e = src[f"fpfs_e{comp}"]
     de = src[f"fpfs_de{comp}_dg{comp}"]
 
     comp2 = 3 - comp        # 1 to 2; 2 to 1
-    e2  = src[f"fpfs_e{comp2}"]
+    e2 = src[f"fpfs_e{comp2}"]
     de2 = src[f"fpfs_de{comp2}_dg{comp}"]
 
     esq0 = e * e + e2 * e2
