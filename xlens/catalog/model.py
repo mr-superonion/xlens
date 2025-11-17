@@ -83,7 +83,7 @@ def estimate_mean_in_bins(
     obs,
     mag_edges,
     radius_edges,
-    min_count: int = 1,
+    min_count: int = 100,
 ):
     """
     Estimate mean(obs) in 2D bins of (mag, radius).
@@ -107,14 +107,8 @@ def estimate_mean_in_bins(
     n_array : ndarray, shape (Nbins_kept,)
         Number of objects in each kept bin.
     """
-    mag = np.asarray(mag)
-    radius = np.asarray(radius)
-    obs = np.asarray(obs)
-
-    # --- define numbers of bins ---
     n_mag_bins = len(mag_edges) - 1
     n_radius_bins = len(radius_edges) - 1
-    n_bins_total = n_mag_bins * n_radius_bins
 
     # --- bin centers for plotting ---
     mag_centers = 0.5 * (mag_edges[:-1] + mag_edges[1:])
@@ -125,39 +119,38 @@ def estimate_mean_in_bins(
     mag_idx = np.digitize(mag, mag_edges) - 1
     radius_idx = np.digitize(radius, radius_edges) - 1
 
-    # --- mask out anything that fell outside the range ---
+    # mask out anything that fell outside the range
     valid = (
         (mag_idx >= 0) & (mag_idx < n_mag_bins) &
         (radius_idx >= 0) & (radius_idx < n_radius_bins)
     )
     mag_idx = mag_idx[valid]
     radius_idx = radius_idx[valid]
-    obs_valid = obs[valid]
+    obs = obs[valid]
 
-    # --- map 2D (i, j) -> 1D bin index k = i * n_radius_bins + j ---
-    k = mag_idx * n_radius_bins + radius_idx
+    obs_mean = np.full((n_mag_bins, n_radius_bins), np.nan, dtype=float)
+    ngals = np.full((n_mag_bins, n_radius_bins), np.nan, dtype=int)
 
-    # --- use bincount to accumulate counts and sums in each 2D bin ---
-    counts = np.bincount(k, minlength=n_bins_total).astype(int)
-    sums = np.bincount(k, weights=obs_valid, minlength=n_bins_total)
+    # loop over bins and compute std
+    # (fine for modest numbers of bins; easy to read)
+    for i in range(n_mag_bins):
+        for j in range(n_radius_bins):
+            mask = (mag_idx == i) & (radius_idx == j)
+            ngals[i, j] = np.sum(mask)
+            if ngals[i, j] > min_count:
+                obs_mean[i, j] = np.mean(obs[mask])
 
-    # --- compute means where we have enough objects ---
-    mean_flat = np.full(n_bins_total, np.nan, dtype=float)
-    good_bins = counts >= min_count
-    mean_flat[good_bins] = sums[good_bins] / counts[good_bins]
-
-    # --- flatten bin centers ---
+    # flatten and drop empty bins
     x_array = X.ravel()
     y_array = Y.ravel()
-    n_array = counts
+    mean_array = obs_mean.ravel()
+    n_array = ngals.ravel()
 
-    # --- keep only bins with mean defined (>= min_count) ---
-    keep = good_bins
-    x_array = x_array[keep]
-    y_array = y_array[keep]
-    mean_array = mean_flat[keep]
-    n_array = n_array[keep]
-
+    good = ~np.isnan(mean_array)
+    x_array = x_array[good]
+    y_array = y_array[good]
+    mean_array = mean_array[good]
+    n_array = n_array[good]
     return x_array, y_array, mean_array, n_array
 
 
