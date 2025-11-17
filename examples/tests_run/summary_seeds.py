@@ -368,7 +368,9 @@ def bootstrap_m(
     return ms, cs
 
 
-def build_redshift_estimator(redshift: str, model_path: str, bpz_data_path: str):
+def build_redshift_estimator(
+    redshift: str, model_path: str, bpz_data_path: str
+):
     if redshift == "flexzboost":
         with open(model_path, "rb") as f:
             mm = pickle.load(f)
@@ -384,7 +386,7 @@ def build_redshift_estimator(redshift: str, model_path: str, bpz_data_path: str)
     raise ValueError(f"Unsupported redshift estimator '{redshift}'")
 
 
-def resolve_model_path(redshift: str, cli_value: Optional[str]) -> Optional[str]:
+def resolve_model_path(redshift: str, cli_value: Optional[str]):
     if cli_value:
         return cli_value
     env_var = "FLEXZ_MODEL" if redshift == "flexzboost" else "BPZ_MODEL"
