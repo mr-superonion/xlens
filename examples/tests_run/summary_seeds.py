@@ -33,11 +33,17 @@ colnames = [
     "fpfs_e2",
     "fpfs_de2_dg1",
     "fpfs_de2_dg2",
+    "fpfs_m0",
+    "fpfs_dm0_dg1",
+    "fpfs_dm0_dg2",
+    "fpfs_m2",
+    "fpfs_dm2_dg1",
+    "fpfs_dm2_dg2",
 ]
 
 SUMMARY_DIR_NAMES = {
-    "flexzboost": "summary-flexz-40-00",
-    "bpz": "summary-bpz-40-00",
+    "flexzboost": "summary3-flexz-40-00",
+    "bpz": "summary3-bpz-40-00",
 }
 
 DEFAULT_BPZ_DATA_PATH = \

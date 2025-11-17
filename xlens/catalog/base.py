@@ -3,6 +3,9 @@ import glob
 import numpy as np
 from abc import ABC, abstractmethod
 from .utils import _resolve_flux_min, _resolve_flux_name
+from .model import w_model, w_model_derivs
+
+MAG_MIN = 18.0
 
 
 def get_esq(src: np.ndarray, comp: int = 1, dg: float = 0.0) -> np.ndarray:
@@ -55,14 +58,41 @@ def measure_shear(
     fn = _resolve_flux_name(flux_name)
     esq0 = get_esq(src)
 
+    fmax = 10.0 ** ((mag_zero - MAG_MIN) / 2.5)
     # band-independent fields
-    wsel = src["wsel"]
     e1_all = src["fpfs_e1"]
     e2_all = src["fpfs_e2"]
-    dwsel_dg1 = src["dwsel_dg1"]
-    dwsel_dg2 = src["dwsel_dg2"]
     de1_dg1 = src["fpfs_de1_dg1"]
     de2_dg2 = src["fpfs_de2_dg2"]
+    pars = np.array([5.1161, -0.8258, 14.7111,  0.0242, -2.0378, -0.5194])
+    wmod = w_model(
+        src["i_flux_gauss2"],
+        src["fpfs_m0"],
+        src["fpfs_m2"],
+        mag_zero,
+        *pars,
+    )
+    wopt = src["wsel"] * wmod
+    dwmod = w_model_derivs(
+        src["i_flux_gauss2"],
+        src["fpfs_m0"],
+        src["fpfs_m2"],
+        mag_zero,
+        *pars,
+    )
+    dwmod_dg1 = (
+        dwmod["dw_dflux"] * src["i_dflux_gauss2_dg1"] +
+        dwmod["dw_dm0"] * src["fpfs_dm0_dg1"] +
+        dwmod["dw_dm2"] * src["fpfs_dm2_dg1"]
+    )
+    dwmod_dg2 = (
+        dwmod["dw_dflux"] * src["i_dflux_gauss2_dg2"] +
+        dwmod["dw_dm0"] * src["fpfs_dm0_dg2"] +
+        dwmod["dw_dm2"] * src["fpfs_dm2_dg2"]
+    )
+
+    dw_dg1 = src["dwsel_dg1"] * wmod + dwmod_dg1 * src["wsel"]
+    dw_dg2 = src["dwsel_dg2"] * wmod + dwmod_dg2 * src["wsel"]
 
     # per-band flux minima and base fluxes
     fm = _resolve_flux_min(flux_min, bands=bands)
@@ -72,6 +102,8 @@ def measure_shear(
     mask = np.ones(src.shape[0], dtype=bool)
     for b in bands:
         mask &= flux[b] > fm[b]
+        if b == ref_band:
+            mask &= (flux[b] < fmax)
     mask &= esq0 < emax * emax
 
     # photo-z + width cut at base shear
@@ -103,6 +135,8 @@ def measure_shear(
             for b in bands:
                 df = src[f"{b}_dflux{fn}_dg{comp}"]
                 mask_side &= (flux[b] + dg_eff * df > fm[b])
+                if b == ref_band:
+                    mask_side &= (flux[b] + dg_eff * df < fmax)
 
             if do_correction:
                 z_side, w_side = z_estimator.get_zsel(
@@ -133,7 +167,7 @@ def measure_shear(
             idx_side = np.digitize(z_side, zbounds, right=False)
             ell_side = _bin_count(
                 idx_side,
-                wsel[mask_side] * e_comp[mask_side],
+                wopt[mask_side] * e_comp[mask_side],
                 minlength=minlen,
             )
             del esq_side, mask_side, idx_side
@@ -145,35 +179,35 @@ def measure_shear(
 
     idx0 = np.digitize(zmode, zbounds, right=False)
     if target == "g1":
-        e1 = _bin_count(idx0, wsel[mask] * e1_all[mask], minlength=minlen)
+        e1 = _bin_count(idx0, wopt[mask] * e1_all[mask], minlength=minlen)
         r1 = _bin_count(
             idx0,
-            dwsel_dg1[mask] * e1_all[mask] + wsel[mask] * de1_dg1[mask],
+            dw_dg1[mask] * e1_all[mask] + wopt[mask] * de1_dg1[mask],
             minlength=minlen,
         )
         r1_sel = sel_term(1)
         return {"e": e1, "r": r1, "r_sel": r1_sel}
     elif target == "g2":
-        e2 = _bin_count(idx0, wsel[mask] * e2_all[mask], minlength=minlen)
+        e2 = _bin_count(idx0, wopt[mask] * e2_all[mask], minlength=minlen)
         r2 = _bin_count(
             idx0,
-            dwsel_dg2[mask] * e2_all[mask] + wsel[mask] * de2_dg2[mask],
+            dw_dg2[mask] * e2_all[mask] + wopt[mask] * de2_dg2[mask],
             minlength=minlen,
         )
         r2_sel = sel_term(2)
         return {"e": e2, "r": r2, "r_sel": r2_sel}
     elif target == "g1g2":
-        e1 = _bin_count(idx0, wsel[mask] * e1_all[mask], minlength=minlen)
+        e1 = _bin_count(idx0, wopt[mask] * e1_all[mask], minlength=minlen)
         r1 = _bin_count(
             idx0,
-            dwsel_dg1[mask] * e1_all[mask] + wsel[mask] * de1_dg1[mask],
+            dw_dg1[mask] * e1_all[mask] + wopt[mask] * de1_dg1[mask],
             minlength=minlen,
         )
         r1_sel = sel_term(1)
-        e2 = _bin_count(idx0, wsel[mask] * e2_all[mask], minlength=minlen)
+        e2 = _bin_count(idx0, wopt[mask] * e2_all[mask], minlength=minlen)
         r2 = _bin_count(
             idx0,
-            dwsel_dg2[mask] * e2_all[mask] + wsel[mask] * de2_dg2[mask],
+            dw_dg2[mask] * e2_all[mask] + wopt[mask] * de2_dg2[mask],
             minlength=minlen,
         )
         r2_sel = sel_term(2)

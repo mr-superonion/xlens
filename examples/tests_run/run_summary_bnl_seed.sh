@@ -27,7 +27,6 @@ Usage: $(basename "$0") [options]
 Options:
   --index-start N       start index (default: ${INDEX_START})
   --index-end N         end index inclusive (default: ${INDEX_END})
-  --script PATH         python script to run (default: ${SCRIPT_PATH})
   --per-task N          number of IDs processed per job (default: ${PER_TASK})
   --layout STR          layout (default: ${LAYOUT})
   --target STR          target (default: ${TARGET})
@@ -53,7 +52,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --index-start)  INDEX_START="$2"; shift 2 ;;
     --index-end)    INDEX_END="$2"; shift 2 ;;
-    --script)       SCRIPT_PATH="$2"; shift 2 ;;
     --per-task)     PER_TASK="$2"; shift 2 ;;
     --emax)         EMAX="$2"; shift 2 ;;
     --layout)       LAYOUT="$2"; shift 2 ;;
@@ -75,10 +73,6 @@ if [[ -z "${PSCRATCH:-}" ]]; then
 fi
 if [[ -z "$PYTHON_EXE_PATH" ]]; then
   echo "Error: python3 not found in PATH." >&2
-  exit 1
-fi
-if [[ ! -f "$SCRIPT_PATH" ]]; then
-  echo "Error: script '$SCRIPT_PATH' not found." >&2
   exit 1
 fi
 if (( INDEX_END < INDEX_START )); then
