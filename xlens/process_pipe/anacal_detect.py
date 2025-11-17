@@ -76,7 +76,7 @@ class AnacalDetectPipeConnections(
         doc="noise correlation function",
         name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
-        dimensions=("skymap", "tract"),
+        dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
         multiple=True,
         deferLoad=True,

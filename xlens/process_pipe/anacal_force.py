@@ -85,13 +85,13 @@ class AnacalForcePipeConnections(
         doc="noise correlation function",
         name="deepCoadd_systematics_noisecorr",
         storageClass="ImageF",
-        dimensions=("skymap", "tract"),
+        dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
         multiple=True,
         deferLoad=True,
     )
     catalog = cT.Output(
-        doc="Source catalog with joint detection and measurement",
+        doc="Source catalog with force detection and measurement",
         name="{coaddName}Coadd_anacal_force",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",

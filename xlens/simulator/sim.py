@@ -97,7 +97,7 @@ class MultibandSimConnections(
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
         name="{coaddName}Coadd_systematics_noisecorr",
-        dimensions=("skymap", "tract"),
+        dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
         minimum=0,
