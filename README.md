@@ -21,6 +21,8 @@ pip install . --user
 ### Conda-forge
 stable verion can be installed from conda-forge
 ```
+conda create -c conda-forge --name my_env1
+conda install -c conda-forge --file requirements.txt
 conda install -c conda-forge xlens
 ```
 
