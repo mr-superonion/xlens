@@ -13,24 +13,24 @@ from ..utils.random import num_rot
 
 class FpfsMeasurementConfig(Config):
     npix = Field[int](
-        doc="number of pixels in stamp",
+        doc="number of pixels in stamp [pixel]",
         default=64,
     )
     bound = Field[int](
-        doc="Sources to be removed if too close to boundary",
+        doc="Sources to be removed if too close to boundary [pixel]",
         default=32,
     )
     sigma_shapelets = Field[float](
-        doc="Shapelet's Gaussian kernel size for detection",
+        doc="Shapelet's Gaussian kernel size for detection [arcsec]",
         default=0.52,
     )
     sigma_shapelets1 = Field[float](
-        doc="Shapelet's Gaussian kernel size for measurement",
+        doc="Shapelet's Gaussian kernel size for measurement [arcsec]",
         optional=True,
         default=-1,
     )
     sigma_shapelets2 = Field[float](
-        doc="Shapelet's Gaussian kernel size for the second measurement",
+        doc="Shapelet's Gaussian kernel size for the second measurement [arcsec]",
         optional=True,
         default=-1,
     )
