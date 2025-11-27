@@ -7,20 +7,10 @@ import argparse
 import gc
 import glob
 import os
-import pickle
 from typing import Iterable, List, Optional, Tuple
 
 import fitsio
 import numpy as np
-from astropy.stats import sigma_clipped_stats
-from numpy.lib import recfunctions as rfn
-
-from xlens.catalog import measure_shear
-from xlens.catalog.redshift import (
-    bpzEstimator,
-    flexzboostEstimator,
-    load_bpz_templates,
-)
 
 
 colnames = [
@@ -39,14 +29,14 @@ colnames = [
     "fpfs_m2",
     "fpfs_dm2_dg1",
     "fpfs_dm2_dg2",
+    "flux_gauss2",
+    "dflux_gauss2_dg1",
+    "dflux_gauss2_dg2",
+    "i_fpfs1_e1",
+    "i_fpfs1_de1_dg1",
+    "i_fpfs1_e2",
+    "i_fpfs1_de2_dg2",
 ]
-
-SUMMARY_DIR_NAMES = {
-    "flexzboost": "summary-flexz-40-00",
-    "bpz": "summary-bpz-40-00",
-}
-
-DEFAULT_BPZ_DATA_PATH = "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/bpz/"
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,13 +46,6 @@ def parse_args() -> argparse.Namespace:
             "using either FlexZBoost or BPZ redshift slices."
         ),
         allow_abbrev=False,
-    )
-    parser.add_argument(
-        "--redshift",
-        type=str,
-        default="flexzboost",
-        choices=list(SUMMARY_DIR_NAMES),
-        help="Photometric redshift estimator to use.",
     )
     parser.add_argument(
         "--summary", action=argparse.BooleanOptionalAction, default=False
@@ -110,13 +93,6 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Maximum sim_seed (exclusive).",
     )
-    # Measurement config
-    parser.add_argument(
-        "--mag-max",
-        type=float,
-        default=26.2,
-        help="Flux cut applied to each band before selection.",
-    )
     parser.add_argument(
         "--z-bounds",
         type=str,
@@ -139,7 +115,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stamp-dim",
         type=int,
-        default=3900,
+        default=3850,
         help="Usable image dimension (pixels) for density/area calc.",
     )
     parser.add_argument(
@@ -147,12 +123,6 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.2,
         help="Pixel scale (arcsec/pixel).",
-    )
-    parser.add_argument(
-        "--width-max",
-        type=float,
-        default=2.75,
-        help="maximum of percentile 95% width",
     )
     parser.add_argument(
         "--mag-zero",
@@ -166,25 +136,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=10000,
         help="# bootstrap resamples for m uncertainty",
-    )
-    parser.add_argument(
-        "--model-path",
-        type=str,
-        default=None,
-        help=(
-            "Path to the trained redshift estimator model. Defaults to the "
-            "FLEXZ_MODEL (for FlexZBoost) or BPZ_MODEL (for BPZ) environment "
-            "variable if set."
-        ),
-    )
-    parser.add_argument(
-        "--bpz-data-path",
-        type=str,
-        default=os.environ.get("BPZ_DATA_PATH", DEFAULT_BPZ_DATA_PATH),
-        help=(
-            "Directory that stores the BPZ templates. Only used when redshift "
-            "is 'bpz'."
-        ),
     )
     args, unknown_args = parser.parse_known_args()
     if unknown_args:
@@ -200,33 +151,79 @@ def base_path(pscratch, layout, target, shear):
     sd = f"shear{int(shear*100):02d}"
     return os.path.join(
         pscratch,
-        f"constant_shear_{layout}",
+        f"constant_shear_{layout}-2",
         target,
         sd,
     )
 
 
-def _to_native(a: np.ndarray) -> np.ndarray:
-    if a.dtype.byteorder in ("=", "|"):
-        return a
-    return a.byteswap().newbyteorder("=")
-
-
 def cat_read(base_dir: str, sim_id: int, mode: int) -> np.ndarray:
-    arrs = []
     main_path = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}.fits")
     main = fitsio.read(main_path, columns=colnames)
-    arrs.append(_to_native(main))
+    return main
 
-    for b in "grizy":
-        fn = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}-{b}.fits")
-        barr = fitsio.read(fn)
-        arrs.append(_to_native(barr))
 
-    merged = rfn.merge_arrays(
-        arrs, flatten=True, asrecarray=False, usemask=False,
+def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
+    """
+    Selection + response including selection response via finite differencing.
+
+    Returns: e1, R11, e2, R22, N  (scalars for this flux_min)
+    """
+    emax = 0.5
+    esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
+    m0 = (src["flux_gauss2"] > flux_min) & (esq0 < emax * emax)
+    # nn = int(np.sum(m0))
+    w0 = src["wsel"][m0]
+    ename = "i_fpfs1"
+    e1 = np.sum(w0 * src[f"{ename}_e1"][m0])
+    e2 = np.sum(w0 * src[f"{ename}_e2"][m0])
+
+    r1 = np.sum(
+        src["dwsel_dg1"][m0] * src[f"{ename}_e1"][m0]
+        + w0 * src[f"{ename}_de1_dg1"][m0]
     )
-    return rfn.repack_fields(merged)
+    r2 = np.sum(
+        src["dwsel_dg2"][m0] * src[f"{ename}_e2"][m0]
+        + w0 * src[f"{ename}_de2_dg2"][m0]
+    )
+
+    def sel_term(comp: int):
+        comp2 = int(3 - comp)
+        e = src[f"fpfs_e{comp}"]
+        de = src[f"fpfs_de{comp}_dg{comp}"]
+        en = src[f"fpfs_e{comp2}"]
+        den = src[f"fpfs_de{comp2}_dg{comp}"]
+        df = src[f"dflux_gauss2_dg{comp}"]
+
+        esq_p = esq0 + 2.0 * dg * (e * de + en * den)
+        m_p = (
+            ((src["flux_gauss2"] + dg * df) > flux_min)
+            & (esq_p < emax * emax)
+        )
+        ellp = np.sum(src["wsel"][m_p] * src[f"{ename}_e{comp}"][m_p])
+
+        esq_m = esq0 - 2.0 * dg * (e * de + en * den)
+        m_m = (
+            ((src["flux_gauss2"] - dg * df) > flux_min)
+            & (esq_m < emax * emax)
+        )
+        ellm = np.sum(src["wsel"][m_m] * src[f"{ename}_e{comp}"][m_m])
+        return (ellp - ellm) / (2.0 * dg)
+
+    r1_sel = sel_term(1)
+    r2_sel = sel_term(2)
+    if target == "g1":
+        return {
+            "e": np.array([e1]),
+            "r": np.array([r1]),
+            "r_sel": np.array([r1_sel]),
+        }
+    else:
+        return {
+            "e": np.array([e2]),
+            "r": np.array([r2]),
+            "r_sel": np.array([r2_sel]),
+        }
 
 
 def per_rank_work(
@@ -237,9 +234,7 @@ def per_rank_work(
     emax: float,
     dg: float,
     target: str,
-    zobj,
     do_correction: bool = True,
-    z_width95_max: float = 2.75,
     mag_zero: float = 30.0,
 ):
     e_pos_rows = []
@@ -251,14 +246,9 @@ def per_rank_work(
         out_pos = measure_shear(
             src=src_pos,
             flux_min=flux_min,
-            z_estimator=zobj,
             emax=emax,
-            zbounds=zbounds,
             dg=dg,
             target=target,
-            do_correction=do_correction,
-            z_width95_max=z_width95_max,
-            mag_zero=mag_zero,
         )
         del src_pos
         gc.collect()
@@ -266,14 +256,9 @@ def per_rank_work(
         out_neg = measure_shear(
             src=src_neg,
             flux_min=flux_min,
-            z_estimator=zobj,
             emax=emax,
-            zbounds=zbounds,
             dg=dg,
             target=target,
-            do_correction=do_correction,
-            z_width95_max=z_width95_max,
-            mag_zero=mag_zero,
         )
         del src_neg
         gc.collect()
@@ -290,8 +275,8 @@ def per_rank_work(
     )
 
 
-def summary_directory(outdir: str, redshift: str, do_correction: bool) -> str:
-    partdir = os.path.join(outdir, SUMMARY_DIR_NAMES[redshift])
+def summary_directory(outdir: str, do_correction: bool) -> str:
+    partdir = os.path.join(outdir, "summary-flux-40-00")
     if not do_correction:
         partdir = partdir + "-nc"
     return partdir
@@ -305,10 +290,9 @@ def save_rank_partial(
     r_pos: np.ndarray,
     r_neg: np.ndarray,
     ncut: int,
-    redshift: str,
     do_correction: bool = True,
 ) -> str:
-    partdir = summary_directory(outdir, redshift, do_correction)
+    partdir = summary_directory(outdir, do_correction)
     os.makedirs(partdir, exist_ok=True)
     path = os.path.join(partdir, f"seed_{seed_index:05d}.npz")
     np.savez_compressed(
@@ -325,10 +309,9 @@ def save_rank_partial(
 def load_and_stack_all(
     outdir: str,
     ncut_expected: Optional[int] = None,
-    redshift: str = "flexzboost",
     do_correction: bool = True,
 ):
-    partdir = summary_directory(outdir, redshift, do_correction)
+    partdir = summary_directory(outdir, do_correction)
     arrays_E_pos: List[np.ndarray] = []
     arrays_E_neg: List[np.ndarray] = []
     arrays_R_pos: List[np.ndarray] = []
@@ -358,7 +341,7 @@ def load_and_stack_all(
     return E_pos_all, E_neg_all, R_pos_all, R_neg_all
 
 
-def bootstrap_m(
+def bootstrap_mc(
     rng: np.random.Generator,
     e_pos: np.ndarray,
     e_neg: np.ndarray,
@@ -383,29 +366,20 @@ def bootstrap_m(
     return ms, cs
 
 
-def build_redshift_estimator(
-    redshift: str, model_path: str, bpz_data_path: str
-):
-    if redshift == "flexzboost":
-        with open(model_path, "rb") as f:
-            mm = pickle.load(f)
-        return flexzboostEstimator(pz_obj=mm)
-
-    if redshift == "bpz":
-        with open(model_path, "rb") as f:
-            mm = pickle.load(f)
-        flux_templates = load_bpz_templates(data_path=bpz_data_path)
-        zp_errors = [0.02, 0.02, 0.02, 0.02, 0.02]
-        return bpzEstimator(flux_templates, mm, zp_errors)
-
-    raise ValueError(f"Unsupported redshift estimator '{redshift}'")
-
-
-def resolve_model_path(redshift: str, cli_value: Optional[str]):
-    if cli_value:
-        return cli_value
-    env_var = "FLEXZ_MODEL" if redshift == "flexzboost" else "BPZ_MODEL"
-    return os.environ.get(env_var)
+def bootstrap_one(
+    rng: np.random.Generator,
+    e_pos: np.ndarray,
+    r_pos: np.ndarray,
+    nsamp: int = 10000,
+) -> np.ndarray:
+    n_obj, ncut = e_pos.shape
+    gout = np.zeros((nsamp, ncut))
+    denom = np.sum(r_pos, axis=0)
+    for idx in range(nsamp):
+        choices = rng.integers(0, n_obj, size=n_obj, endpoint=False)
+        num_m = np.sum(e_pos[choices], axis=0)
+        gout[idx] = num_m / denom
+    return gout
 
 
 def main() -> None:
@@ -417,17 +391,8 @@ def main() -> None:
     zbounds = parse_zbounds(args.z_bounds)
     ncut = len(zbounds) + 1
 
-    model_path = resolve_model_path(args.redshift, args.model_path)
-    if model_path is None:
-        env = "FLEXZ_MODEL" if args.redshift == "flexzboost" else "BPZ_MODEL"
-        raise SystemExit(
-            f"--model-path not provided and {env} is not set in the environment"
-        )
-    flux_min = 10.0 ** ((args.mag_zero - args.mag_max) / 2.5)
+    flux_min = -10.0
     if not args.summary:
-        zobj = build_redshift_estimator(
-            args.redshift, model_path, args.bpz_data_path
-        )
         my_ids = np.arange(args.min_id, args.max_id, dtype=int)
         if len(my_ids) > 0:
             e_pos, e_neg, r_pos, r_neg = per_rank_work(
@@ -438,9 +403,7 @@ def main() -> None:
                 args.emax,
                 args.dg,
                 args.target,
-                zobj,
                 do_correction=do_correction,
-                z_width95_max=args.width_max,
                 mag_zero=args.mag_zero,
             )
             save_rank_partial(
@@ -451,14 +414,12 @@ def main() -> None:
                 r_pos,
                 r_neg,
                 ncut,
-                redshift=args.redshift,
                 do_correction=do_correction,
             )
     else:
         all_e_pos, all_e_neg, all_r_pos, all_r_neg = load_and_stack_all(
             base_dir,
             ncut_expected=ncut,
-            redshift=args.redshift,
             do_correction=do_correction,
         )
 
@@ -479,15 +440,24 @@ def main() -> None:
             args.pixel_scale / 60.0
         ) ** 2.0
 
-        _, _, clipped_std = sigma_clipped_stats(
-            all_e_pos / np.average(all_r_pos, axis=0),
-            sigma=5.0,
-            axis=0,
-        )
-        neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
+        nsample = all_e_pos.shape[0]
+        area_all_arcmin2 = area_arcmin2 * nsample
 
         rng = np.random.default_rng(0)
-        ms, cs = bootstrap_m(
+        gs = bootstrap_one(
+            rng,
+            all_e_pos,
+            all_r_pos,
+            nsamp=args.bootstrap,
+        )
+
+        ord_gs = np.sort(gs, axis=0)
+        lo_idx = int(0.1587 * args.bootstrap)
+        hi_idx = int(0.8413 * args.bootstrap)
+        sigma_g = (ord_gs[hi_idx] - ord_gs[lo_idx]) / 2.0
+        neff = (0.26 / sigma_g) ** 2.0 / area_all_arcmin2
+
+        ms, cs = bootstrap_mc(
             rng,
             all_e_pos,
             all_e_neg,
@@ -497,8 +467,6 @@ def main() -> None:
             nsamp=args.bootstrap,
         )
         ord_ms = np.sort(ms, axis=0)
-        lo_idx = int(0.1587 * args.bootstrap)
-        hi_idx = int(0.8413 * args.bootstrap)
         sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
 
         ord_cs = np.sort(cs, axis=0)
@@ -506,7 +474,7 @@ def main() -> None:
 
         print("==============================================")
         print(f"Catalog directory: {base_dir}")
-        print(f"Photometric redshift estimator: {args.redshift}")
+        print("flux cut")
         print(f"Paired IDs (found): {all_e_pos.shape[0]}")
         print(f"Redshift boundarys: {list(zbounds)}")
         print(f"Area (arcmin^2): {area_arcmin2:.3f}")

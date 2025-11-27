@@ -61,7 +61,7 @@ def measure_shear(
     e2_all = src["fpfs_e2"]
     de1_dg1 = src["fpfs_de1_dg1"]
     de2_dg2 = src["fpfs_de2_dg2"]
-    pars = np.array([5.1161, -0.8258, 14.7111,  0.0242, -2.0378, -0.5194])
+    pars = np.array([5.1161, -0.8258, 14.7111, 0.0242, -2.0378, -0.5194])
     wmod = w_model(
         src["i_flux_gauss2"],
         src["fpfs_m0"],

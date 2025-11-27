@@ -109,7 +109,7 @@ universe        = vanilla
 initialdir      = ${PWD}
 notification    = never
 getenv          = true
-request_memory  = 10240
+request_memory  = 2048
 request_cpus    = 1
 
 executable      = ${PYTHON_EXE_PATH}

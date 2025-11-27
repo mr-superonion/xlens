@@ -434,6 +434,16 @@ def combine_sim_exposures(
     return combined_exposure, combined_noise
 
 
+def rotate_noise_corr(noise_corr):
+    noise_max = np.amax(noise_corr)
+    noise_corr = noise_corr / noise_max
+    ny2, nx2 = noise_corr.shape
+    assert ny2 % 2 == 1
+    assert nx2 % 2 == 1
+    assert noise_corr[ny2 // 2, nx2 // 2] == 1
+    return np.rot90(m=noise_corr, k=-1)
+
+
 def generate_pure_noise(
     *,
     ny: int,
@@ -465,7 +475,7 @@ def generate_pure_noise(
             .astype(np.float64)
         )
     else:
-        noise_corr = np.rot90(m=noise_corr, k=-1)
+        noise_corr = rotate_noise_corr(noise_corr)
         noise_array = (
             anacal.noise.simulate_noise(
                 seed=noise_seed,
