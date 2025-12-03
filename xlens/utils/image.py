@@ -33,9 +33,7 @@ from typing import Any, List, Sequence, Tuple
 
 import anacal
 import astropy
-import lsst.geom as lsst_geom
 import numpy as np
-from lsst.afw.image import ExposureF, MaskX
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
@@ -195,6 +193,7 @@ class LsstPsf(anacal.psf.BasePsf):
             self.y_min = min_corner.getY()
 
     def draw(self, x, y):
+        import lsst.geom as lsst_geom
         """Evaluate the PSF image centered on the requested pixel position."""
         this_psf = self.psf.computeImage(
             lsst_geom.Point2D(x + self.x_min, y + self.y_min)
@@ -243,7 +242,7 @@ def get_psf_array(
     lsst_bbox,
     npix: int,
     dg: int = 250,
-    lsst_mask: None | MaskX = None,
+    lsst_mask = None,
 ):
     """Compute an average PSF image over a regular grid.
 
@@ -270,6 +269,7 @@ def get_psf_array(
     out : numpy.ndarray
         Averaged PSF as a 2D array of shape ``(npix, npix)``.
     """
+    from lsst.geom import Point2D
     x_min, y_min = lsst_bbox.getMin().getX(), lsst_bbox.getMin().getY()
     x_max, y_max = lsst_bbox.getMax().getX(), lsst_bbox.getMax().getY()
 
@@ -280,12 +280,13 @@ def get_psf_array(
     x_array = np.arange(x_min + 20, x_min + width - 20, dg, dtype=int)
     y_array = np.arange(y_min + 20, y_min + height - 20, dg, dtype=int)
 
-    # Build INEXACT_PSF mask if needed
-    if lsst_mask is not None and "INEXACT_PSF" in lsst_mask.getMaskPlaneDict():
-        bitmask = lsst_mask.getPlaneBitMask("INEXACT_PSF")
-        mask_array = (bitmask & lsst_mask.array) > 0
-    else:
-        mask_array = None
+    # # Build INEXACT_PSF mask if needed
+    # if lsst_mask is not None and "INEXACT_PSF" in lsst_mask.getMaskPlaneDict():
+    #     bitmask = lsst_mask.getPlaneBitMask("INEXACT_PSF")
+    #     mask_array = (bitmask & lsst_mask.array) > 0
+    # else:
+    #     mask_array = None
+    mask_array = None
 
     out = np.zeros(shape=(npix, npix), dtype=np.float32)
     ncount = 0
@@ -297,7 +298,7 @@ def get_psf_array(
                 continue
             try:
                 psf_img = lsst_psf.computeImage(
-                    lsst_geom.Point2D(xc, yc)
+                    Point2D(xc, yc)
                 ).getArray()
                 out += resize_array(psf_img, (npix, npix))
                 ncount += 1
@@ -316,6 +317,8 @@ def get_psf_array(
 def get_blocks(
     *, lsst_psf, lsst_bbox, lsst_mask, pixel_scale, npix, psf_array
 ):
+
+    from lsst.geom import Point2D
     min_corner = lsst_bbox.getMin()
     x_min, y_min = min_corner.getX(), min_corner.getY()
     width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
@@ -365,7 +368,7 @@ def get_blocks(
             yy, xx = local_coords[idx]
             try:
                 this_psf = lsst_psf.computeImage(
-                    lsst_geom.Point2D(x_min + xx, y_min + yy)
+                    Point2D(x_min + xx, y_min + yy)
                 ).getArray()
                 bb.psf_array = resize_array(this_psf, (npix, npix))
                 found = True
@@ -377,10 +380,53 @@ def get_blocks(
     return blocks
 
 
+def get_blocks_cells(
+    *, cell_coadd, pixel_scale, npix
+):
+    x_start_coadd = cell_coadd.outer_bbox.beginX
+    y_start_coadd = cell_coadd.outer_bbox.beginY
+    blocks = []
+    for index, cell in enumerate(cell_coadd.cells.values()):
+        xmin = cell.outer.bbox.beginX - x_start_coadd
+        ymin = cell.outer.bbox.beginY - y_start_coadd
+        xmax = cell.outer.bbox.endX - x_start_coadd
+        ymax = cell.outer.bbox.endY - y_start_coadd
+        xmin_in = max(
+            cell.inner.bbox.beginX - x_start_coadd,
+            xmin + 10,
+        )
+        ymin_in = max(
+            cell.inner.bbox.beginY - y_start_coadd,
+            ymin + 10,
+        )
+        xmax_in = min(
+            cell.inner.bbox.endX - x_start_coadd,
+            xmax - 10,
+        )
+        ymax_in = min(
+            cell.inner.bbox.endY - y_start_coadd,
+            ymax - 10,
+        )
+        xcen = int((xmin + xmax) // 2)
+        ycen = int((ymin + ymax) // 2)
+        bb = anacal.geometry.block(
+            xcen, ycen, xmin, ymin, xmax, ymax, xmin_in, ymin_in, xmax_in,
+            ymax_in, pixel_scale, index,
+        )
+        bb.psf_array = resize_array(
+            cell.psf_image.array,
+            (npix, npix),
+        )
+        norm = np.sum(bb.psf_array)
+        bb.psf_array = bb.psf_array / norm
+        blocks.append(bb)
+    return blocks
+
+
 def combine_sim_exposures(
-    exposures: Sequence[ExposureF],
+    exposures: Sequence,
     noises: Sequence[NDArray],
-) -> Tuple[ExposureF, NDArray]:
+):
     """Combine simulated exposures using inverse-variance weights.
     """
 
@@ -519,7 +565,7 @@ def estimate_noise_variance(exposure, mask_array=None):
 def prepare_data(
     *,
     band: str,
-    exposure: ExposureF,
+    exposure,
     seed: int,
     noiseId: int = 0,
     rotId: int = 0,
@@ -531,6 +577,7 @@ def prepare_data(
     tract: int = 0,
     patch: int = 0,
     star_cat: NDArray | None = None,
+    psf_array: NDArray | None = None,
     mask_array: NDArray | None = None,
     noise_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
@@ -598,17 +645,17 @@ def prepare_data(
     wcs = exposure.getWcs()
 
     lsst_bbox = exposure.getBBox()
-    lsst_psf = exposure.getPsf()
-    psf_array = np.asarray(
-        get_psf_array(
-            lsst_psf=lsst_psf,
-            lsst_bbox=lsst_bbox,
-            npix=npix,
-            dg=250,
-            lsst_mask=exposure.mask,
-        ),
-        dtype=np.float64,
-    )
+    if psf_array is None:
+        psf_array = np.asarray(
+            get_psf_array(
+                lsst_psf=exposure.getPsf(),
+                lsst_bbox=lsst_bbox,
+                npix=npix,
+                dg=250,
+                lsst_mask=exposure.mask,
+            ),
+            dtype=np.float64,
+        )
     gal_array = np.asarray(
         exposure.image.array,
         dtype=np.float64,

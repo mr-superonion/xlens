@@ -1,7 +1,5 @@
-from lsst.geom import Box2D
-
-
 def getPatchInner(sources, patchInfo, pixel_scale):
+    from lsst.geom import Box2D
     """Set a flag for each source if it is in the innerBBox of a patch.
 
     Parameters

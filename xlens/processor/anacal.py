@@ -217,6 +217,33 @@ class AnacalTask(Task):
             )
         return catalog
 
+    def prepare_cell_data(self, cell_coadd):
+        npix = self.config.npix
+        pixel_scale = float(cell_coadd.wcs.getPixelScale().asArcseconds())
+        blocks = utils.image.get_blocks_cells(
+            cell_coadd=cell_coadd,
+            pixel_scale=pixel_scale,
+            npix=npix,
+        )
+
+        psf_array = np.zeros(
+            shape=(npix, npix),
+            dtype=np.float64,
+        )
+        ncount = 0
+        for bb in blocks:
+            psf_array += bb.psf_array
+            ncount += 1
+
+        if ncount < 2:
+            raise ValueError(
+                "Could not find enough valid PSF samples to average."
+            )
+        psf_array /= ncount
+        psf_rcut = npix // 2 - 2
+        utils.image.truncate_square(psf_array, psf_rcut)
+        return psf_array, blocks
+
     def prepare_data(
         self,
         *,
@@ -227,10 +254,12 @@ class AnacalTask(Task):
         skyMap=None,
         tract: int = 0,
         patch: int = 0,
+        star_cat: NDArray | None = None,
+        psf_array: NDArray | None = None,
         mask_array: NDArray | None = None,
         noise_array: NDArray | None = None,
-        star_cat: NDArray | None = None,
         detection: astropy.table.Table | None = None,
+        blocks: list | None = None,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -258,19 +287,23 @@ class AnacalTask(Task):
             tract=tract,
             patch=patch,
             star_cat=star_cat,
+            psf_array=psf_array,
             mask_array=mask_array,
             noise_array=noise_array,
             detection=detection,
             band=band,
         )
-        data["blocks"] = utils.image.get_blocks(
-            lsst_psf=exposure.getPsf(),
-            lsst_bbox=exposure.getBBox(),
-            lsst_mask=exposure.mask,
-            pixel_scale=data["pixel_scale"],
-            npix=self.config.npix,
-            psf_array=data["psf_array"],
-        )
+        if blocks is None:
+            data["blocks"] = utils.image.get_blocks(
+                lsst_psf=exposure.getPsf(),
+                lsst_bbox=exposure.getBBox(),
+                lsst_mask=exposure.mask,
+                pixel_scale=data["pixel_scale"],
+                npix=self.config.npix,
+                psf_array=data["psf_array"],
+            )
+        else:
+            data["blocks"] = blocks
         if self.config.validate_psf:
             data["lsst_psf"] = exposure.getPsf()
         else:
