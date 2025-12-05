@@ -496,7 +496,7 @@ def generate_pure_noise(
     nx: int,
     pixel_scale: float,
     seed: int,
-    band: str,
+    band: str | None,
     noise_variance: float,
     noise_corr=None,
     noiseId: int = 0,
@@ -538,12 +538,12 @@ def generate_pure_noise(
 def estimate_noise_variance(exposure, mask_array=None):
     if mask_array is None:
         mm = (
-            (exposure.variance.array < 1e9) &
+            (exposure.variance.array < 1e5) &
             (exposure.mask.array == 0)
         )
     else:
         mm = (
-            (exposure.variance.array < 1e9) &
+            (exposure.variance.array < 1e5) &
             (exposure.mask.array == 0) &
             (mask_array == 0)
         )
@@ -551,7 +551,7 @@ def estimate_noise_variance(exposure, mask_array=None):
         raise ValueError(
             "Do not have enough valid pixels"
         )
-    noise_variance = np.nanmean(
+    noise_variance = np.nanmedian(
         exposure.variance.array[mm],
     )
     del mm
@@ -564,7 +564,7 @@ def estimate_noise_variance(exposure, mask_array=None):
 
 def prepare_data(
     *,
-    band: str,
+    band: str | None,
     exposure,
     seed: int,
     noiseId: int = 0,

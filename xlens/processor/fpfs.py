@@ -185,7 +185,7 @@ class FpfsMeasurementTask(Task):
         *,
         exposure: ExposureF,
         seed: int,
-        band: str,
+        band: str | None,
         noise_corr: NDArray | None = None,
         mask_array: NDArray | None = None,
         noise_array: NDArray | None = None,

@@ -186,6 +186,7 @@ class AnacalTask(Task):
                                 cc["x1"] / pixel_scale,
                                 cc["x2"] / pixel_scale,
                             )
+
                         ).getArray())
                     )
                     if ep < 1e-2:
@@ -247,9 +248,9 @@ class AnacalTask(Task):
     def prepare_data(
         self,
         *,
-        band: str,
         exposure: ExposureF,
         seed: int,
+        band: str | None,
         noise_corr: NDArray | None = None,
         skyMap=None,
         tract: int = 0,
