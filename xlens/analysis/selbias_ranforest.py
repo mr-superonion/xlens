@@ -53,35 +53,35 @@ class SelBiasRfMultibandPipeConnections(
 ):
     src00 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot0_Coadd_{dataType}",
+        name="{coaddName}_0_rot0_coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src01 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_0_rot1_Coadd_{dataType}",
+        name="{coaddName}_0_rot1_coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src10 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_1_rot0_Coadd_{dataType}",
+        name="{coaddName}_1_rot0_coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src11 = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_1_rot1_Coadd_{dataType}",
+        name="{coaddName}_1_rot1_coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     summary = cT.Output(
         doc="Summary statistics",
-        name="{coaddName}Coadd_anacal_selbias_ranforest_{dataType}",
+        name="{coaddName}_coadd_anacal_selbias_ranforest_{dataType}",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
@@ -286,7 +286,7 @@ class SelBiasRfSummaryMultibandPipeConnections(
 ):
     summary_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}Coadd_anacal_selbias_ranforest_{dataType}",
+        name="{coaddName}_coadd_anacal_selbias_ranforest_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,

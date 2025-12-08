@@ -83,7 +83,7 @@ class AnacalDetectPipeConnections(
     )
     output_catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_detect",
+        name="{coaddName}_coadd_anacal_detect",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )

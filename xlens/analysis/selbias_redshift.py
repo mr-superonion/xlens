@@ -20,16 +20,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Selection-bias measurements aggregated in photometric-redshift bins."""
-
-__all__ = [
-    "SelBiasRedshiftPipeConnections",
-    "SelBiasRedshiftPipeConfig",
-    "SelBiasRedshiftPipe",
-    "SelBiasRedshiftSummaryPipeConnections",
-    "SelBiasRedshiftSummaryPipeConfig",
-    "SelBiasRedshiftSummaryPipe",
-]
-
 from __future__ import annotations
 
 import logging
@@ -57,6 +47,15 @@ from xlens.catalog.redshift import (
 )
 
 DEFAULT_BPZ_DATA_PATH = "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/2025-10-15/rail/bpz"
+
+__all__ = [
+    "SelBiasRedshiftPipeConnections",
+    "SelBiasRedshiftPipeConfig",
+    "SelBiasRedshiftPipe",
+    "SelBiasRedshiftSummaryPipeConnections",
+    "SelBiasRedshiftSummaryPipeConfig",
+    "SelBiasRedshiftSummaryPipe",
+]
 
 
 def _bootstrap_m(
@@ -127,7 +126,7 @@ class SelBiasRedshiftPipeConnections(
         name="{coaddName}_0_rot1_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
-        optional=True,
+        minimum=0,
     )
 
     src10 = cT.Input(
@@ -142,12 +141,12 @@ class SelBiasRedshiftPipeConnections(
         name="{coaddName}_1_rot1_Coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
-        optional=True,
+        minimum=0,
     )
 
     summary = cT.Output(
         doc="Summary statistics per redshift bin.",
-        name="{coaddName}Coadd_anacal_selbias_redshift_{dataType}{version}",
+        name="{coaddName}_coadd_anacal_selbias_redshift_{dataType}{version}",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
@@ -456,7 +455,9 @@ class SelBiasRedshiftSummaryPipe(PipelineTask):
         all_r_neg = self._stack(arrays_r_neg, ncut)
 
         if all_e_pos.size == 0 or all_e_neg.size == 0:
-            raise RuntimeError("No valid (+g/-g) pairs found in the summary inputs.")
+            raise RuntimeError(
+                "No valid (+g/-g) pairs found in the summary inputs."
+            )
 
         num = np.sum(all_e_pos - all_e_neg, axis=0)
         denom = np.sum(all_r_pos + all_r_neg, axis=0)
@@ -465,7 +466,8 @@ class SelBiasRedshiftSummaryPipe(PipelineTask):
         c = np.sum(all_e_pos + all_e_neg, axis=0) / denom
 
         area_arcmin2 = (
-            self.config.stamp_dim * self.config.stamp_dim * (self.config.pixel_scale / 60.0) ** 2
+            self.config.stamp_dim * self.config.stamp_dim
+            * (self.config.pixel_scale / 60.0) ** 2
         )
 
         _, _, clipped_std = sigma_clipped_stats(

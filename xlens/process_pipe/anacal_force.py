@@ -68,7 +68,7 @@ class AnacalForcePipeConnections(
     )
     input_catalog = cT.Input(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_joint",
+        name="{coaddName}_coadd_anacal_detect",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,
@@ -92,7 +92,7 @@ class AnacalForcePipeConnections(
     )
     catalog = cT.Output(
         doc="Source catalog with force detection and measurement",
-        name="{coaddName}Coadd_anacal_force",
+        name="{coaddName}_coadd_anacal_force",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )

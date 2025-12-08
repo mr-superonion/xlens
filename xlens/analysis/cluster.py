@@ -63,7 +63,7 @@ class HaloMcBiasMultibandPipeConnections(
     )
     src00List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_rot0_{noiseString}Coadd_anacal_{dataType}",
+        name="{coaddName}_rot0_{noiseString}_coadd_anacal_{dataType}",
         dimensions=(
             "skymap",
             "tract",
@@ -75,7 +75,7 @@ class HaloMcBiasMultibandPipeConnections(
     )
     src01List = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}_rot1_{noiseString}Coadd_anacal_{dataType}",
+        name="{coaddName}_rot1_{noiseString}_coadd_anacal_{dataType}",
         dimensions=(
             "skymap",
             "tract",
@@ -87,7 +87,7 @@ class HaloMcBiasMultibandPipeConnections(
     )
     truth00List = cT.Input(
         doc="input truth catalog",
-        name="{coaddName}_rot0_Coadd_truthCatalog",
+        name="{coaddName}_rot0_coadd_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=(
             "skymap",
@@ -98,7 +98,7 @@ class HaloMcBiasMultibandPipeConnections(
     )
     truth01List = cT.Input(
         doc="input truth catalog",
-        name="{coaddName}_rot1_Coadd_truthCatalog",
+        name="{coaddName}_rot1_coadd_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=(
             "skymap",

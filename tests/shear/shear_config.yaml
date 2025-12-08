@@ -129,12 +129,12 @@ tasks:
       weight_name: "wsel"
       dweight_name: "dwsel"
       do_correct_selection_bias: True
-      connections.dataType: anacal_joint
+      connections.dataType: anacal_detect
       connections.coaddName: sim
   Summary:
     class: xlens.analysis.selbias.SelBiasSummaryMultibandPipe
     config:
-      connections.dataType: anacal_joint
+      connections.dataType: anacal_detect
       connections.coaddName: sim
   # SelectBiasTask2:
   #   class: xlens.analysis.selbias.SelBiasMultibandPipe
