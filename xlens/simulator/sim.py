@@ -586,7 +586,7 @@ class IASimTask(MultibandSimTask):
         psf_obj,
         mag_zero: float,
         band: str,
-        draw_method: str="auto",
+        draw_method: str = "auto",
         **kwargs,
     ):
         assert isinstance(self.config, IASimConfig)

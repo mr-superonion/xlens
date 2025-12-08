@@ -39,12 +39,12 @@ tasks:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
       anacal.do_noise_bias_correction: True
-      connections.coaddName: sim_0_rot0_
+      connections.coaddName: sim_0_rot0
   AnaCalTask2:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
       anacal.do_noise_bias_correction: True
-      connections.coaddName: sim_0_rot1_
+      connections.coaddName: sim_0_rot1
 
   SummaryTask:
     class: xlens.analysis.cluster.HaloMcBiasMultibandPipe

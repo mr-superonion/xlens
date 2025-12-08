@@ -51,7 +51,7 @@ class FpfsJointPipeConnections(
 ):
     exposure = cT.Input(
         doc="Input coadd image",
-        name="{coaddName}Coadd_calexp",
+        name="{coaddName}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
@@ -66,9 +66,9 @@ class FpfsJointPipeConnections(
         multiple=True,
         deferLoad=True,
     )
-    joint_catalog = cT.Output(
+    detect_catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_joint",
+        name="{coaddName}_coadd_anacal_detect",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -176,4 +176,4 @@ class FpfsJointPipe(PipelineTask):
             detection=None,
         )
         catalog = self.fpfs.run(**data)
-        return Struct(joint_catalog=catalog)
+        return Struct(detect_catalog=catalog)

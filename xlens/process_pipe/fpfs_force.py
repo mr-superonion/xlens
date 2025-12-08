@@ -52,14 +52,14 @@ class FpfsForcePipeConnections(
 ):
     input_catalog = cT.Input(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_joint",
+        name="{coaddName}_coadd_anacal_detect",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,
     )
     exposure = cT.Input(
         doc="Input coadd image",
-        name="{coaddName}Coadd_calexp",
+        name="{coaddName}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
@@ -76,7 +76,7 @@ class FpfsForcePipeConnections(
     )
     catalog = cT.Output(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}Coadd_fpfs_force",
+        name="{coaddName}_coadd_fpfs_force",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )

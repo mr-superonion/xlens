@@ -78,13 +78,13 @@ class AddNoisePipeConnections(
     )
     exposure = cT.Input(
         doc="Input simulated coadd exposure",
-        name="{coaddName}Coadd_calexp",
+        name="{coaddName}_coadd_calexp",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
     simExposure = cT.Output(
         doc="Output simulated coadd exposure",
-        name="{coaddName}noise{noiseId}_Coadd_calexp",
+        name="{coaddName}noise{noiseId}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )

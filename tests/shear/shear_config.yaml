@@ -65,59 +65,59 @@ tasks:
       anacal.num_epochs: 3
       anacal.do_noise_bias_correction: False
       anacal.validate_psf: True
-      connections.coaddName: sim_0_rot0_
+      connections.coaddName: sim_0_rot0
   AnacalDetectTask2:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
       anacal.num_epochs: 3
       anacal.do_noise_bias_correction: False
       anacal.validate_psf: True
-      connections.coaddName: sim_0_rot1_
+      connections.coaddName: sim_0_rot1
   AnacalDetectTask3:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
       anacal.num_epochs: 3
       anacal.do_noise_bias_correction: False
       anacal.validate_psf: True
-      connections.coaddName: sim_1_rot0_
+      connections.coaddName: sim_1_rot0
   AnacalDetectTask4:
     class: xlens.process_pipe.anacal_detect.AnacalDetectPipe
     config:
       anacal.num_epochs: 3
       anacal.do_noise_bias_correction: False
       anacal.validate_psf: True
-      connections.coaddName: sim_1_rot1_
+      connections.coaddName: sim_1_rot1
 
   AnacalForceTask1:
     class: xlens.process_pipe.anacal_force.AnacalForcePipe
     config:
       fpfs.sigma_shapelets1: 0.52
       anacal.do_noise_bias_correction: False
-      connections.coaddName: sim_0_rot0_
+      connections.coaddName: sim_0_rot0
   FpfsForceTask1:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
       fpfs.sigma_shapelets1: 0.52
       fpfs.do_noise_bias_correction: False
-      connections.coaddName: sim_0_rot0_
+      connections.coaddName: sim_0_rot0
   FpfsForceTask2:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
       fpfs.sigma_shapelets1: 0.52
       fpfs.do_noise_bias_correction: False
-      connections.coaddName: sim_0_rot1_
+      connections.coaddName: sim_0_rot1
   FpfsForceTask3:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
       fpfs.sigma_shapelets1: 0.52
       fpfs.do_noise_bias_correction: False
-      connections.coaddName: sim_1_rot0_
+      connections.coaddName: sim_1_rot0
   FpfsForceTask4:
     class: xlens.process_pipe.fpfs_force.FpfsForcePipe
     config:
       fpfs.sigma_shapelets1: 0.52
       fpfs.do_noise_bias_correction: False
-      connections.coaddName: sim_1_rot1_
+      connections.coaddName: sim_1_rot1
 
   SelectBiasTask:
     class: xlens.analysis.selbias.SelBiasMultibandPipe

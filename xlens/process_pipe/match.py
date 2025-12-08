@@ -86,14 +86,14 @@ class matchPipeConnections(
     )
     anacal_catalog = cT.Input(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_joint",
+        name="{coaddName}_coadd_anacal_joint",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,
     )
     dm_catalog = cT.Input(
         doc="Catalog containing all the single-band measurement information",
-        name="{coaddName}Coadd_meas",
+        name="{coaddName}_coadd_meas",
         dimensions=("tract", "patch", "band", "skymap"),
         storageClass="SourceCatalog",
         multiple=True,
@@ -102,8 +102,8 @@ class matchPipeConnections(
     )
     truth_catalog = cT.Input(
         doc="Output truth catalog",
-        name="{coaddName}Coadd_truthCatalog",
-        dimensions=("skymap", "tract", "patch", "band"),
+        name="{coaddName}_coadd_truthCatalog",
+        dimensions=("skymap", "tract"),
         storageClass="ArrowAstropy",
         multiple=True,
         deferLoad=True,
@@ -111,7 +111,7 @@ class matchPipeConnections(
     )
     catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_match",
+        name="{coaddName}_coadd_anacal_match",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )

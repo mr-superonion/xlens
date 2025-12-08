@@ -255,7 +255,7 @@ class NeffSummaryMultibandPipeConnections(
 ):
     summary_list = cT.Input(
         doc="Source catalog with all the measurement generated in this task",
-        name="{coaddName}Coadd_anacal_neff_flux_{dataType}{version}",
+        name="{coaddName}_coadd_anacal_neff_flux_{dataType}{version}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,

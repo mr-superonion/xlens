@@ -58,7 +58,7 @@ class CatalogConnections(
     )
     truthCatalog = cT.Output(
         doc="Output truth catalog",
-        name="{simCoaddName}_{mode}_rot{rotId}_Coadd_truthCatalog",
+        name="{simCoaddName}_{mode}_rot{rotId}_coadd_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),
     )

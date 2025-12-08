@@ -116,14 +116,14 @@ class SelBiasRedshiftPipeConnections(
 ):
     src00 = cT.Input(
         doc="Negative shear catalog (rotation 0).",
-        name="{coaddName}_0_rot0_Coadd_{dataType}",
+        name="{coaddName}_0_rot0_coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src01 = cT.Input(
         doc="Negative shear catalog (rotation 1).",
-        name="{coaddName}_0_rot1_Coadd_{dataType}",
+        name="{coaddName}_0_rot1_coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         minimum=0,
@@ -131,14 +131,14 @@ class SelBiasRedshiftPipeConnections(
 
     src10 = cT.Input(
         doc="Positive shear catalog (rotation 0).",
-        name="{coaddName}_1_rot0_Coadd_{dataType}",
+        name="{coaddName}_1_rot0_coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
 
     src11 = cT.Input(
         doc="Positive shear catalog (rotation 1).",
-        name="{coaddName}_1_rot1_Coadd_{dataType}",
+        name="{coaddName}_1_rot1_coadd_{dataType}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         minimum=0,
@@ -360,7 +360,7 @@ class SelBiasRedshiftSummaryPipeConnections(
 ):
     summary_list = cT.Input(
         doc="Summary catalogs per patch/tract.",
-        name="{coaddName}Coadd_anacal_selbias_redshift_{dataType}{version}",
+        name="{coaddName}_coadd_anacal_selbias_redshift_{dataType}{version}",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=True,
