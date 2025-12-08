@@ -32,7 +32,7 @@ class AnacalConfig(Config):
     )
     num_epochs = Field[int](
         doc="Number of iterations",
-        default=5,
+        default=0,
     )
     force_size = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
@@ -189,7 +189,7 @@ class AnacalTask(Task):
 
                         ).getArray())
                     )
-                    if ep < 1e-2:
+                    if ep < 1e-1:
                         indexes.append(ic)
                 except Exception:
                     pass

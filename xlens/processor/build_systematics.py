@@ -43,14 +43,12 @@ class BuildSystematicsConnections(
     )
     outputMask = cT.Output(
         doc="Combined mask from bad pixels and bright stars across all bands.",
-        name="{coaddName}_systematics_mask",
+        name="deep_coadd_systematics_mask",
         storageClass="Mask",
         dimensions=("skymap", "tract", "patch"),
     )
-
     def __init__(self, *, config=None):
         super().__init__(config=config)
-
 
 
 class BuildSystematicsConfig(
@@ -163,19 +161,7 @@ class BuildSystematicsTask(PipelineTask):
     def _build_mask_band(self, *, exposure: ExposureF) -> np.ndarray:
         assert isinstance(self.config, BuildSystematicsConfig)
         bitv = exposure.mask.getPlaneBitMask(self.config.badMaskPlanes)
-        mask_band = (
-            ((exposure.mask.array & bitv) != 0)
-            | (
-                np.abs(exposure.image.array) > (
-                    6.0 * np.sqrt(
-                        np.where(
-                            exposure.variance.array < 0,
-                            0, exposure.variance.array,
-                        )
-                    )
-                )
-            )
-        ).astype(np.int16)
+        mask_band = ((exposure.mask.array & bitv) != 0).astype(np.int16)
         return mask_band
 
     def _get_gaia_mask_sources(
@@ -195,11 +181,9 @@ class BuildSystematicsTask(PipelineTask):
             dec=gaia_astropy["coord_dec"] * 180 / np.pi,
             degrees=True,
         )
-        print(len(gaia_astropy))
         mask = (mag <= 17.0)
         if not np.any(mask):
             return None
-        print(np.sum(mask))
 
         x = x[mask] - bbox.getBeginX()
         y = y[mask] - bbox.getBeginY()
@@ -208,7 +192,7 @@ class BuildSystematicsTask(PipelineTask):
             mag <= 11.0, (mag > 11.0) & (mag <= 14.0),
             (mag > 14.0) & (mag <= 17.0)
         ]
-        choices = [266.0, 185.0, 100.0]
+        choices = [450.0, 200.0, 100.0]
         r = np.select(conds, choices, default=100.0)
         dtype = np.dtype([("x", float), ("y", float), ("r", float)])
         xy_r = np.zeros(len(x), dtype=dtype)

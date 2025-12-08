@@ -1,3 +1,3 @@
-from . import anacal, fpfs, build_systematics
+from . import anacal, fpfs, build_systematics, measure_coadds
 
-__all__ = ["fpfs", "anacal", "build_systematics"]
+__all__ = ["fpfs", "anacal", "build_systematics", "measure_coadds"]

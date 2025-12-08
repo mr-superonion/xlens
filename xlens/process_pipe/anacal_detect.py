@@ -66,7 +66,7 @@ class AnacalDetectPipeConnections(
     )
     exposure = cT.Input(
         doc="Input coadd image",
-        name="{coaddName}Coadd_calexp",
+        name="{coaddName}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
@@ -83,7 +83,7 @@ class AnacalDetectPipeConnections(
     )
     output_catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}Coadd_anacal_joint",
+        name="{coaddName}Coadd_anacal_detect",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )

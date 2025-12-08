@@ -280,14 +280,7 @@ def get_psf_array(
     x_array = np.arange(x_min + 20, x_min + width - 20, dg, dtype=int)
     y_array = np.arange(y_min + 20, y_min + height - 20, dg, dtype=int)
 
-    # # Build INEXACT_PSF mask if needed
-    # if lsst_mask is not None and "INEXACT_PSF" in lsst_mask.getMaskPlaneDict():
-    #     bitmask = lsst_mask.getPlaneBitMask("INEXACT_PSF")
-    #     mask_array = (bitmask & lsst_mask.array) > 0
-    # else:
-    #     mask_array = None
     mask_array = None
-
     out = np.zeros(shape=(npix, npix), dtype=np.float32)
     ncount = 0
 
@@ -325,7 +318,9 @@ def get_blocks(
 
     # Build mask array: True = masked
     if lsst_mask is not None and "INEXACT_PSF" in lsst_mask.getMaskPlaneDict():
-        bitv = lsst_mask.getPlaneBitMask("INEXACT_PSF")
+        bitv = lsst_mask.getPlaneBitMask(
+            ["INEXACT_PSF", "NO_DATA", "BAD", "UNMASKEDNAN" ]
+        )
         mask_array = (bitv & lsst_mask.array) > 0
     else:
         mask_array = np.zeros((height, width), dtype=bool)
@@ -340,44 +335,45 @@ def get_blocks(
         scale=pixel_scale,
     )
 
+    new_blocks = []
+
     for bb in blocks:
         # Center of the block
         x0 = int(np.clip(bb.xcen, 0, width - 1))
         y0 = int(np.clip(bb.ycen, 0, height - 1))
+
         # Define 21x21 local box
         x_start = max(x0 - 10, 0)
-        x_end = min(x0 + 11, width)
+        x_end   = min(x0 + 11, width)
         y_start = max(y0 - 10, 0)
-        y_end = min(y0 + 11, height)
+        y_end   = min(y0 + 11, height)
+
         # Get unmasked local pixels
         local_mask = mask_array[y_start:y_end, x_start:x_end]
-        local_yx = np.argwhere(~local_mask)  # shape (N, 2)
+        local_yx = np.argwhere(~local_mask)
+
+        # If no usable pixel: drop this bb
         if local_yx.shape[0] == 0:
-            bb.psf_array = psf_array
             continue
-        # Compute squared distances to block center
+
+        # Convert to global coords
         local_coords = local_yx + np.array([y_start, x_start])
+
+        # Pick the closest point to (y0, x0)
         dy = local_coords[:, 0] - y0
         dx = local_coords[:, 1] - x0
-        dist2 = dx**2 + dy**2
-        # Sort and try the 5 closest
-        sorted_idx = np.argsort(dist2)[:5]
-        found = False
+        idx_min = int(np.argmin(dx * dx + dy * dy))
+        yy, xx = local_coords[idx_min]
+        try:
+            this_psf = lsst_psf.computeImage(
+                Point2D(x_min + xx, y_min + yy)
+            ).getArray()
+            bb.psf_array = resize_array(this_psf, (npix, npix))
+        except Exception:
+            continue
+        new_blocks.append(bb)
 
-        for idx in sorted_idx:
-            yy, xx = local_coords[idx]
-            try:
-                this_psf = lsst_psf.computeImage(
-                    Point2D(x_min + xx, y_min + yy)
-                ).getArray()
-                bb.psf_array = resize_array(this_psf, (npix, npix))
-                found = True
-                break
-            except Exception:
-                continue
-        if not found:
-            bb.psf_array = psf_array
-    return blocks
+    return new_blocks
 
 
 def get_blocks_cells(

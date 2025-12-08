@@ -75,7 +75,7 @@ class AnacalForcePipeConnections(
     )
     exposure = cT.Input(
         doc="Input coadd image",
-        name="{coaddName}Coadd_calexp",
+        name="{coaddName}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
@@ -120,10 +120,6 @@ class AnacalForcePipeConfig(
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
-    )
-    size = Field[float](
-        doc="Size of Gaussian for measurement [arcsec]",
-        default=-1,
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
@@ -183,13 +179,6 @@ class AnacalForcePipe(PipelineTask):
             }
         skyMap = inputs["skyMap"]
         detection = inputs["input_catalog"].as_array()
-        if self.config.size > 0:
-            detection["a1"] = self.config.size
-            detection["da1_dg1"] = 0.0
-            detection["da1_dg2"] = 0.0
-            detection["a2"] = self.config.size
-            detection["da2_dg1"] = 0.0
-            detection["da2_dg2"] = 0.0
         outputs = self.run(
             detection=detection,
             exposure_handles_dict=exposure_handles_dict,

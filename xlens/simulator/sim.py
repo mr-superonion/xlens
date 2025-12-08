@@ -88,7 +88,7 @@ class MultibandSimConnections(
     )
     exposure = cT.Input(
         doc="Input coadd exposure",
-        name="{coaddName}Coadd_calexp",
+        name="{coaddName}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=False,
@@ -112,7 +112,7 @@ class MultibandSimConnections(
     )
     simExposure = cT.Output(
         doc="Output simulated coadd exposure",
-        name="{simCoaddName}_{mode}_rot{rotId}_Coadd_calexp",
+        name="{simCoaddName}_{mode}_rot{rotId}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
