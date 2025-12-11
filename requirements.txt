@@ -6,6 +6,6 @@ astropy
 fitsio
 lenstronomy
 matplotlib
-anacal==0.7.1
+anacal==0.7.2
 pyccl
 namaster
