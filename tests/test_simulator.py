@@ -173,8 +173,8 @@ def test_galaxies_force_pixel_center():
     dx = catalog.data["dx"]
     dy = catalog.data["dy"]
     assert len(dx) > 0
-    np.testing.assert_allclose(dx / ps, np.round(dx / ps))
-    np.testing.assert_allclose(dy / ps, np.round(dy / ps))
+    np.testing.assert_allclose(dx / ps, np.floor(dx / ps) + 0.5)
+    np.testing.assert_allclose(dy / ps, np.floor(dy / ps) + 0.5)
 
 
 def test_galaxies_selection():
