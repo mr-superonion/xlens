@@ -75,11 +75,11 @@ class BaseGalaxyCatalog(ABC):
         if force_pixel_center:
             inv_pixel_scale = 1.0 / ps
             shifts_array["dx"] = (
-                np.round(shifts_array["dx"] * inv_pixel_scale) * ps
-            ) + 0.5
+                (np.round(shifts_array["dx"] * inv_pixel_scale) + 0.5) * ps
+            )
             shifts_array["dy"] = (
-                np.round(shifts_array["dy"] * inv_pixel_scale) * ps
-            ) + 0.5
+                (np.round(shifts_array["dy"] * inv_pixel_scale) + 0.5) * ps
+            )
 
         # choose which catalog rows populate those positions
         num = len(shifts_array)

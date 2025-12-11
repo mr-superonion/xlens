@@ -58,6 +58,10 @@ class AnacalConfig(Config):
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
     )
+    do_fpfs = Field[bool](
+        doc="whether to do FPFS measurement",
+        default=True,
+    )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
         default=[],
@@ -118,6 +122,7 @@ class AnacalTask(Task):
             "num_epochs": self.config.num_epochs,
             "force_size": self.config.force_size,
             "force_center": self.config.force_center,
+            "do_fpfs": self.config.do_fpfs,
             "prior": prior,
         }
         return
