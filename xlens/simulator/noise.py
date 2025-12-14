@@ -70,7 +70,7 @@ class AddNoisePipeConnections(
 ):
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
-        name="deepCoadd_systematics_noisecorr",
+        name="deep_coadd_systematics_noisecorr",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,

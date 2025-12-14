@@ -59,7 +59,7 @@ class FpfsJointPipeConnections(
     )
     noise_corr = cT.Input(
         doc="noise correlation function",
-        name="{coaddName}Coadd_systematics_noisecorr",
+        name="{coaddName}_coadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,

@@ -67,7 +67,7 @@ class MeasureCoaddsPipeConnections(
     )
     noise_corr = cT.Input(
         doc="Noise correlation function",
-        name="deepCoadd_systematics_noisecorr",
+        name="deep_coadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
