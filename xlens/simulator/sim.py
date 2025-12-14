@@ -86,17 +86,17 @@ class MultibandSimConnections(
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),
     )
-    exposure = cT.Input(
-        doc="Input coadd exposure",
-        name="{coaddName}_coadd",
-        storageClass="ExposureF",
+    mask = cT.Input(
+        doc="Input coadd systematics mask",
+        name="{coaddName}_coadd_systematics_mask",
+        storageClass="Mask",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=False,
         minimum=0,
     )
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
-        name="{coaddName}Coadd_systematics_noisecorr",
+        name="{coaddName}_coadd_systematics_noisecorr",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
@@ -104,7 +104,7 @@ class MultibandSimConnections(
     )
     psfImage = cT.Input(
         doc="image for PSF model for simulation",
-        name="{coaddName}Coadd_systematics_psfcentered",
+        name="{coaddName}_coadd_systematics_psfcentered",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
@@ -389,7 +389,7 @@ class MultibandSimTask(PipelineTask):
         truthCatalog,
         psfImage: afwImage.ImageF | None = None,
         noiseCorrImage: afwImage.ImageF | None = None,
-        exposure: afwImage.ExposureF | None = None,
+        mask: afwImage.MaskX | None = None,
         **kwargs,
     ):
         """Simulate an LSST coadd exposure for a specific tract patch.
@@ -407,9 +407,9 @@ class MultibandSimTask(PipelineTask):
         truthCatalog
             Truth catalog produced by :class:`CatalogTask` containing the
             galaxies to render.
-        psfImage, noiseCorrImage, exposure
+        psfImage, noiseCorrImage, mask
             Optional inputs that provide measured PSFs, noise correlation
-            images, or masks from real observations.
+            images, or systematics masks from real observations.
 
         Returns
         -------
@@ -433,12 +433,9 @@ class MultibandSimTask(PipelineTask):
         zero_flux = 10.0 ** (0.4 * mag_zero)
         photo_calib = afwImage.makePhotoCalibFromCalibZeroPoint(zero_flux)
 
-        if exposure is not None:
+        if mask is not None:
             self.log.debug("Using the real pixel mask")
-            mask_array = exposure.getMaskedImage().mask.array
-            assert mag_zero == 2.5 * np.log10(
-                exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()
-            )
+            mask_array = mask.getArray()
         else:
             self.log.debug("Do not use the real pixel mask")
             mask_array = 0.0

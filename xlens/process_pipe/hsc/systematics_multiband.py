@@ -74,19 +74,19 @@ class SystematicsMultibandPipeConnections(
     )
     outputNoiseCorr = cT.Output(
         doc="noise correlation function",
-        name="{coaddName}Coadd_systematics_noisecorr",
+        name="{coaddName}_coadd_systematics_noisecorr",
         dimensions=("tract", "patch", "band", "skymap"),
         storageClass="ImageF",
     )
     outputPsfCentered = cT.Output(
         doc="noise correlation function",
-        name="{coaddName}Coadd_systematics_psfcentered",
+        name="{coaddName}_coadd_systematics_psfcentered",
         dimensions=("tract", "patch", "band", "skymap"),
         storageClass="ImageF",
     )
     outputStarCentered = cT.Output(
         doc="noise correlation function",
-        name="{coaddName}Coadd_systematics_starcentered",
+        name="{coaddName}_coadd_systematics_starcentered",
         dimensions=("tract", "patch", "band", "skymap"),
         storageClass="ImageF",
     )

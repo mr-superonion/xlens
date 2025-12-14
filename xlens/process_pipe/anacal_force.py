@@ -83,7 +83,7 @@ class AnacalForcePipeConnections(
     )
     noise_corr = cT.Input(
         doc="noise correlation function",
-        name="deepCoadd_systematics_noisecorr",
+        name="deep_coadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
         minimum=0,
