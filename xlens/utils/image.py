@@ -383,40 +383,65 @@ def get_blocks_cells(
     y_start_coadd = cell_coadd.outer_bbox.beginY
     blocks = []
     for index, cell in enumerate(cell_coadd.cells.values()):
-        xmin = cell.outer.bbox.beginX - x_start_coadd
-        ymin = cell.outer.bbox.beginY - y_start_coadd
-        xmax = cell.outer.bbox.endX - x_start_coadd
-        ymax = cell.outer.bbox.endY - y_start_coadd
-        xmin_in = max(
-            cell.inner.bbox.beginX - x_start_coadd,
-            xmin + 10,
-        )
-        ymin_in = max(
-            cell.inner.bbox.beginY - y_start_coadd,
-            ymin + 10,
-        )
-        xmax_in = min(
-            cell.inner.bbox.endX - x_start_coadd,
-            xmax - 10,
-        )
-        ymax_in = min(
-            cell.inner.bbox.endY - y_start_coadd,
-            ymax - 10,
-        )
-        xcen = int((xmin + xmax) // 2)
-        ycen = int((ymin + ymax) // 2)
-        bb = anacal.geometry.block(
-            xcen, ycen, xmin, ymin, xmax, ymax, xmin_in, ymin_in, xmax_in,
-            ymax_in, pixel_scale, index,
-        )
-        bb.psf_array = resize_array(
-            cell.psf_image.array,
-            (npix, npix),
-        )
-        norm = np.sum(bb.psf_array)
-        bb.psf_array = bb.psf_array / norm
-        blocks.append(bb)
+        p0 = None
+        psf_image = getattr(cell, "psf_image", None)
+        if psf_image is not None:
+            p0 = getattr(psf_image, "array", None)
+        if (p0 is not None) and np.isfinite(p0).all():
+            xmin = cell.outer.bbox.beginX - x_start_coadd
+            ymin = cell.outer.bbox.beginY - y_start_coadd
+            xmax = cell.outer.bbox.endX - x_start_coadd
+            ymax = cell.outer.bbox.endY - y_start_coadd
+            xmin_in = max(
+                cell.inner.bbox.beginX - x_start_coadd,
+                xmin + 10,
+            )
+            ymin_in = max(
+                cell.inner.bbox.beginY - y_start_coadd,
+                ymin + 10,
+            )
+            xmax_in = min(
+                cell.inner.bbox.endX - x_start_coadd,
+                xmax - 10,
+            )
+            ymax_in = min(
+                cell.inner.bbox.endY - y_start_coadd,
+                ymax - 10,
+            )
+            xcen = int((xmin + xmax) // 2)
+            ycen = int((ymin + ymax) // 2)
+            bb = anacal.geometry.block(
+                xcen, ycen, xmin, ymin, xmax, ymax, xmin_in, ymin_in, xmax_in,
+                ymax_in, pixel_scale, index,
+            )
+            bb.psf_array = resize_array(
+                p0,
+                (npix, npix),
+            )
+            norm = np.sum(bb.psf_array)
+            bb.psf_array = bb.psf_array / norm
+            blocks.append(bb)
     return blocks
+
+
+def stack_psfs_cells(
+    *, cell_coadd, npix
+):
+    psf_array = np.zeros((npix, npix))
+    npsf = 0.0
+    for cell in cell_coadd.cells.values():
+        p0 = None
+        psf_image = getattr(cell, "psf_image", None)
+        if psf_image is not None:
+            p0 = getattr(psf_image, "array", None)
+        if (p0 is not None) and np.isfinite(p0).all():
+            psf_array = psf_array + resize_array(
+                p0,
+                (npix, npix),
+            )
+            npsf += 1
+    psf_array = psf_array / npsf
+    return psf_array
 
 
 def combine_sim_exposures(

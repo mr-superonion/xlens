@@ -2,6 +2,7 @@ from typing import Any
 
 import astropy.units as u
 import anacal
+import xlens
 import numpy as np
 from lsst.afw.image import ExposureF, ImageI
 from lsst.pex.config import Field, ListField, ConfigField
@@ -33,6 +34,15 @@ class BuildSystematicsConnections(
         multiple=True,
         deferLoad=True,
     )
+    cellexposure = cT.Input(
+        doc="Input cell coadd exposure to build systematics mask from.",
+        name="{coaddName}_coadd_cell_predetection",
+        storageClass="MultipleCellCoadd",
+        dimensions=("skymap", "tract", "patch", "band"),
+        multiple=True,
+        deferLoad=True,
+        minimum=0,
+    )
     gaia = cT.PrerequisiteInput(
         doc="GAIA sources to load",
         name="gaia_dr3_20230707",
@@ -40,11 +50,18 @@ class BuildSystematicsConnections(
         dimensions=("skypix",),
         multiple=True,
         deferLoad=True,
+        minimum=0,
     )
     outputMask = cT.Output(
         doc="Combined mask from bad pixels and bright stars across all bands.",
         name="deep_coadd_systematics_mask",
         storageClass="Mask",
+        dimensions=("skymap", "tract", "patch"),
+    )
+    outputPsf = cT.Output(
+        doc="Stacked PSF array (6 x npix x npix).",
+        name="deep_coadd_systematics_psfcentered",
+        storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
     )
     def __init__(self, *, config=None):
@@ -56,6 +73,10 @@ class BuildSystematicsConfig(
 ):
     """Configuration for :class:`BuildSystematicsTask`."""
 
+    npix = Field[int](
+        doc="number of pixels in stamp",
+        default=64,
+    )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
         default=["BAD", "CR", "NO_DATA", "SAT", "UNMASKEDNAN",],
@@ -84,19 +105,29 @@ class BuildSystematicsTask(PipelineTask):
     def runQuantum(self, butlerQC, inputRefs, outputRefs, **kwargs):
         inputs = butlerQC.get(inputRefs)
         dataId = butlerQC.quantum.dataId
-        gaia_loader = ReferenceObjectLoader(
-            dataIds=[ref.datasetRef.dataId for ref in inputRefs.gaia],
-            refCats=inputs.pop("gaia"),
-            name="gaia_dr3_20230707",
-            config=self.config.gaiaLoader,
-        )
+        if len(inputs["gaia"]) > 0:
+            gaia_loader = ReferenceObjectLoader(
+                dataIds=[ref.datasetRef.dataId for ref in inputRefs.gaia],
+                refCats=inputs.pop("gaia"),
+                name="gaia_dr3_20230707",
+                config=self.config.gaiaLoader,
+            )
+        else:
+            gaia_loader = None
         exposure_handles = inputs["exposure"]
         exposure_handles_dict = {
             handle.dataId["band"]: handle for handle in exposure_handles
         }
+
+        cell_handles = inputs["cellexposure"]
+        if len(cell_handles) == 0:
+            cell_handles_dict = None
+        else:
+            cell_handles_dict = {h.dataId["band"]: h for h in cell_handles}
         outputs = self.run(
-            exposureHandles=exposure_handles_dict,
+            exposure_handles_dict=exposure_handles_dict,
             gaia_loader=gaia_loader,
+            cell_handles_dict=cell_handles_dict,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -104,8 +135,9 @@ class BuildSystematicsTask(PipelineTask):
     def run(
         self,
         *,
-        exposureHandles: dict[str, Any],
-        gaia_loader: ReferenceObjectLoader,
+        exposure_handles_dict: dict[str, Any],
+        gaia_loader: ReferenceObjectLoader | None = None,
+        cell_handles_dict: None | dict[str, Any] = None,
         **kwargs,
     ) -> Struct:
         assert isinstance(self.config, BuildSystematicsConfig)
@@ -114,7 +146,7 @@ class BuildSystematicsTask(PipelineTask):
         template_wcs = None
         template_bbox = None
 
-        for band, exp_handle in exposureHandles.items():
+        for band, exp_handle in exposure_handles_dict.items():
             exp = exp_handle.get()
 
             if (template_wcs is None) and (template_bbox is None):
@@ -127,7 +159,11 @@ class BuildSystematicsTask(PipelineTask):
             mask_array = self._merge_mask(mask_array, band_mask)
             del exp, band_mask
 
-        if template_wcs is not None and template_bbox is not None:
+        if (
+            template_wcs is not None
+            and template_bbox is not None
+            and gaia_loader is not None
+        ):
             gaia = gaia_loader.loadPixelBox(
                 bbox=template_bbox,
                 filterName="phot_g_mean",
@@ -151,7 +187,22 @@ class BuildSystematicsTask(PipelineTask):
             output_msk.getArray().dtype,
             copy=False
         )
-        return Struct(outputMask=output_msk)
+
+        if cell_handles_dict is not None:
+            npix = self.config.npix
+            psf_array = np.zeros((6, npix, npix))
+            for i, band in enumerate("ugrizy"):
+                if band in cell_handles_dict.keys():
+                    cell_coadd = cell_handles_dict[band].get()
+                    psf_array[i] = xlens.utils.image.stack_psfs_cells(
+                        cell_coadd=cell_coadd,
+                        npix=npix,
+
+                    )
+                    del cell_coadd
+        else:
+            psf_array = None
+        return Struct(outputMask=output_msk, outputPsf=psf_array)
 
     def _merge_mask(self, global_mask: np.ndarray | None, band_mask: np.ndarray):
         if global_mask is None:
