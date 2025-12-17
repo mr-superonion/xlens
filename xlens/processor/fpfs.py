@@ -60,6 +60,14 @@ class FpfsMeasurementConfig(Config):
         doc="whether to compute detection mode",
         default=True,
     )
+    do_compute_detect_weight = Field[bool](
+        doc="whether to compute detection mode",
+        default=True,
+    )
+    return_only_linear_modes = Field[bool](
+        doc="whether only return linear modes",
+        default=False,
+    )
     use_average_psf = Field[bool](
         doc="whether to compute detection mode",
         default=True,
@@ -177,6 +185,8 @@ class FpfsMeasurementTask(Task):
             psf_object=psf_object,
             do_compute_detect_weight=self.config.do_compute_detect_weight,
             base_column_name=base_column_name,
+            return_only_linear_modes=self.config.return_only_linear_modes,
+            pack_linear_modes=True,
         )
         return catalog
 
