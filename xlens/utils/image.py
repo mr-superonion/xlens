@@ -29,13 +29,15 @@ rest of ``xlens``.
 """
 
 
-from typing import Any, List, Sequence, Tuple
+from typing import Any, List, Sequence
 
 import anacal
 import astropy
 import numpy as np
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
+
+import lsst.geom as lsst_geom
 
 badMaskDefault = [
     "BAD",
@@ -193,7 +195,6 @@ class LsstPsf(anacal.psf.BasePsf):
             self.y_min = min_corner.getY()
 
     def draw(self, x, y):
-        import lsst.geom as lsst_geom
         """Evaluate the PSF image centered on the requested pixel position."""
         this_psf = self.psf.computeImage(
             lsst_geom.Point2D(x + self.x_min, y + self.y_min)
@@ -269,7 +270,6 @@ def get_psf_array(
     out : numpy.ndarray
         Averaged PSF as a 2D array of shape ``(npix, npix)``.
     """
-    from lsst.geom import Point2D
     x_min, y_min = lsst_bbox.getMin().getX(), lsst_bbox.getMin().getY()
     x_max, y_max = lsst_bbox.getMax().getX(), lsst_bbox.getMax().getY()
 
@@ -291,7 +291,7 @@ def get_psf_array(
                 continue
             try:
                 psf_img = lsst_psf.computeImage(
-                    Point2D(xc, yc)
+                    lsst_geom.Point2D(xc, yc)
                 ).getArray()
                 out += resize_array(psf_img, (npix, npix))
                 ncount += 1
@@ -310,8 +310,6 @@ def get_psf_array(
 def get_blocks(
     *, lsst_psf, lsst_bbox, lsst_mask, pixel_scale, npix, psf_array
 ):
-
-    from lsst.geom import Point2D
     min_corner = lsst_bbox.getMin()
     x_min, y_min = min_corner.getX(), min_corner.getY()
     width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
@@ -366,7 +364,7 @@ def get_blocks(
         yy, xx = local_coords[idx_min]
         try:
             this_psf = lsst_psf.computeImage(
-                Point2D(x_min + xx, y_min + yy)
+                lsst_geom.Point2D(x_min + xx, y_min + yy)
             ).getArray()
             bb.psf_array = resize_array(this_psf, (npix, npix))
         except Exception:
