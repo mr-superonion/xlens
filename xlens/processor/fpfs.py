@@ -60,10 +60,6 @@ class FpfsMeasurementConfig(Config):
         doc="whether to compute detection mode",
         default=True,
     )
-    do_compute_detect_weight = Field[bool](
-        doc="whether to compute detection mode",
-        default=True,
-    )
     return_only_linear_modes = Field[bool](
         doc="whether only return linear modes",
         default=False,
@@ -134,7 +130,7 @@ class FpfsMeasurementTask(Task):
         self.fpfs_config = anacal.fpfs.FpfsConfig(
             npix=self.config.npix,
             kmax_thres=self.config.kmax_thres,
-            sigma_arcsec=self.config.sigma_shapelets,
+            sigma_shapelets=self.config.sigma_shapelets,
             sigma_shapelets1=self.config.sigma_shapelets1,
             sigma_shapelets2=self.config.sigma_shapelets2,
             pthres=self.config.pthres,

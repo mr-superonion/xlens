@@ -122,7 +122,6 @@ class AnacalTask(Task):
             "num_epochs": self.config.num_epochs,
             "force_size": self.config.force_size,
             "force_center": self.config.force_center,
-            "do_fpfs": self.config.do_fpfs,
             "prior": prior,
         }
         return
@@ -176,6 +175,7 @@ class AnacalTask(Task):
             detection=det,
             noise_array=noise_array,
             mask_array=mask_array,
+            do_fpfs=self.config.do_fpfs,
         )
         catalog["x1"] = catalog["x1"] + begin_x * pixel_scale
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale

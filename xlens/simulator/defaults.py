@@ -9,6 +9,9 @@ pixel_scale_defaults = {
 }
 
 psf_fwhm_defaults = {
+    "u": {
+        "lsst": 0.8,
+    }
     "g": {
         "lsst": 0.8,
         "hsc": 0.798,
@@ -34,6 +37,9 @@ psf_fwhm_defaults = {
 sys_npix = 49
 
 noise_variance_defaults = {
+    "u": {
+        "lsst": 0.4517,
+    }
     "g": {
         "lsst": 0.099,
         "hsc": 1.4e-3,

@@ -3,6 +3,10 @@ from astropy.cosmology import Planck18
 
 from .utils import _get_shear_res_dict
 
+from lenstronomy.LensModel.lens_model import LensModel
+from lenstronomy.LensModel.Solver.lens_equation_solver import LensEquationSolver
+from lenstronomy.Cosmo.lens_cosmo import LensCosmo
+
 
 class ShearHalo(object):
     def __init__(
@@ -26,9 +30,6 @@ class ShearHalo(object):
         cosmo (astropy.cosmology):  cosmology object
         no_kappa (bool):            if True, turn off kappa field
         """
-        from lenstronomy.LensModel.lens_model import LensModel
-        from lenstronomy.LensModel.Solver.lens_equation_solver import LensEquationSolver
-        from lenstronomy.Cosmo.lens_cosmo import LensCosmo
         if cosmo is None:
             cosmo = Planck18
         self.cosmo = cosmo

@@ -22,4 +22,3 @@ except ModuleNotFoundError:
         catalog,
     )
     __all__ = ["catalog"]
-
