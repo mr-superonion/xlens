@@ -86,7 +86,7 @@ if iend - istart <= 0:
 
 
 band = args.band
-if band not in "grizy":
+if band not in "ugrizy":
     band = None
 if args.layout == "random":
     extend_ratio = 1.08

@@ -21,12 +21,15 @@ import numpy as np
 from lsst.afw.image import ExposureF
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field, FieldValidationError
-from lsst.pipe.base import PipelineTask, PipelineTaskConfig, PipelineTaskConnections, Struct
+from lsst.pipe.base import (
+    PipelineTask, PipelineTaskConfig, PipelineTaskConnections, Struct
+)
 from lsst.pipe.tasks.coaddBase import makeSkyInfo
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
+from lsst.afw.image import MaskX
 
 from ..simulator.sim import MultibandSimTask
 from .anacal import AnacalTask
@@ -44,7 +47,6 @@ class MeasureSimsConnections(
     },
 ):
     """Butler connections for :class:`MeasureSimsTask`."""
-
     skyMap = cT.Input(
         doc="SkyMap to use in processing",
         name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
@@ -58,7 +60,7 @@ class MeasureSimsConnections(
         dimensions=("skymap", "tract"),
     )
     psfImage = cT.Input(
-        doc="PSF image for simulation (optional)",
+        doc="PSF image for simulation",
         name="{coaddName}_coadd_systematics_psfcentered",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
@@ -67,7 +69,7 @@ class MeasureSimsConnections(
         deferLoad=True,
     )
     noiseCorrImage = cT.Input(
-        doc="Noise correlation image for simulation and measurement (optional)",
+        doc="Noise correlation image for simulation and measurement",
         name="{coaddName}_coadd_systematics_noisecorr",
         storageClass="ImageF",
         dimensions=("skymap", "tract", "patch", "band"),
@@ -76,11 +78,11 @@ class MeasureSimsConnections(
         deferLoad=True,
     )
     systematicsMask = cT.Input(
-        doc="Systematics mask for coadd exposures used during simulation (optional)",
+        doc="Systematics mask for coadd exposures used during simulation",
         name="{coaddName}_coadd_systematics_mask",
         storageClass="Mask",
-        dimensions=("skymap", "tract", "patch", "band"),
-        multiple=True,
+        dimensions=("skymap", "tract", "patch"),
+        multiple=False,
         minimum=0,
         deferLoad=True,
     )
@@ -147,12 +149,14 @@ class MeasureSimsTask(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
+        super().__init__(
+            config=config, log=log, initInputs=initInputs, **kwargs
+        )
         assert isinstance(self.config, MeasureSimsConfig)
 
+        self.makeSubtask("simulator")
         self.makeSubtask("anacal")
         self.makeSubtask("fpfs")
-        self.makeSubtask("simulator")
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, MeasureSimsConfig)
@@ -161,9 +165,7 @@ class MeasureSimsTask(PipelineTask):
         tract = int(butlerQC.quantum.dataId["tract"])
         patch = int(butlerQC.quantum.dataId["patch"])
 
-        mask_handles = inputs.get("systematicsMask", [])
-        mask_handles_dict = {h.dataId["band"]: h for h in mask_handles}
-
+        mask = inputs.get("systematicsMask", None)
         corr_handles = inputs.get("noiseCorrImage", [])
         if len(corr_handles) == 0:
             corr_handles_dict = None
@@ -178,7 +180,7 @@ class MeasureSimsTask(PipelineTask):
             skyMap=inputs["skyMap"],
             tract=tract,
             patch=patch,
-            mask_handles_dict=mask_handles_dict,
+            mask=mask,
             correlation_handles_dict=corr_handles_dict,
             psf_handles_dict=psf_handles_dict,
         )
@@ -202,8 +204,6 @@ class MeasureSimsTask(PipelineTask):
             raise RuntimeError(
                 "Noise correlation is not normalized to 1 at the center pixel."
             )
-
-        self.log.debug("With correlation (band=%s), variance=%s", band, variance)
         return noise_corr
 
     def _simulate_band(
@@ -214,9 +214,9 @@ class MeasureSimsTask(PipelineTask):
         patch: int,
         truthCatalog,
         seed: int,
-        psf_handles_dict: dict,
-        correlation_handles_dict: dict | None,
-        mask_handles_dict: dict,
+        psf_handles_dict: dict | None = None,
+        correlation_handles_dict: dict | None = None,
+        mask: MaskX | None = None,
     ) -> ExposureF:
         kwargs: dict[str, Any] = {
             "tract_info": tract_info,
@@ -226,13 +226,12 @@ class MeasureSimsTask(PipelineTask):
             "truthCatalog": truthCatalog,
         }
 
-        if band in psf_handles_dict:
+        if psf_handles_dict and band in psf_handles_dict:
             kwargs["psfImage"] = psf_handles_dict[band].get()
-        if correlation_handles_dict is not None and band in correlation_handles_dict:
+        if correlation_handles_dict and band in correlation_handles_dict:
             kwargs["noiseCorrImage"] = correlation_handles_dict[band].get()
-        if band in mask_handles_dict:
-            kwargs["mask"] = mask_handles_dict[band].get()
-
+        if mask:
+            kwargs["mask"] = mask
         sim_output = self.simulator.run(**kwargs)
         exposure = sim_output.simExposure
         exposure.getPsf().setCacheCapacity(self.config.psfCache)
@@ -276,18 +275,6 @@ class MeasureSimsTask(PipelineTask):
         seed: int,
         mask_array: NDArray | None,
     ) -> NDArray:
-        data = self.anacal.prepare_data(
-            exposure=exposure,
-            seed=seed,
-            noise_corr=noise_corr,
-            detection=detection,
-            band=band,
-            skyMap=skyMap,
-            tract=tract,
-            patch=patch,
-            mask_array=mask_array,
-        )
-
         colnames = [
             "flux_gauss0",
             "dflux_gauss0_dg1",
@@ -302,7 +289,22 @@ class MeasureSimsTask(PipelineTask):
             "flux_gauss2_err",
             "flux_gauss4_err",
         ]
-        out = [rfn.repack_fields(self.anacal.run(**data)[colnames])]
+        data = self.anacal.prepare_data(
+            exposure=exposure,
+            seed=seed,
+            noise_corr=noise_corr,
+            detection=detection,
+            band=band,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
+            mask_array=mask_array,
+        )
+        out = []
+        if band == "i":
+            out.append(rfn.repack_fields(detection[colnames]))
+        else:
+            out.append(rfn.repack_fields(self.anacal.run(**data)[colnames]))
         out.append(self.fpfs.run(**data))
         res = rfn.merge_arrays(out, flatten=True)
         map_dict = {name: f"{band}_{name}" for name in colnames}
@@ -315,11 +317,9 @@ class MeasureSimsTask(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
-        exposure_handles_dict: dict,
-        correlation_handles_dict: dict | None,
-        psf_handles_dict: dict,
-        seed_offset: int = 0,
-        mask_handles_dict: dict | None = None,
+        psf_handles_dict: dict | None = None,
+        correlation_handles_dict: dict | None = None,
+        mask: MaskX | None = None,
         **kwargs,
     ):
         sky_info = makeSkyInfo(
@@ -329,17 +329,20 @@ class MeasureSimsTask(PipelineTask):
         )
         tract_info = sky_info.tractInfo
 
-        mask_handles_dict = mask_handles_dict or {}
-
         bands = ["i", "u", "g", "r", "z", "y"]
         id_data_id = dict(tract=tract, patch=patch)
 
         # Detection on i-band
         detect_band = "i"
-        idGenerator = self.config.idGenerator.apply({**id_data_id, "band": detect_band})
-        seed = idGenerator.catalog_id + seed_offset
-        i_mask = mask_handles_dict.get(detect_band)
+        idGenerator = self.config.idGenerator.apply(
+            {**id_data_id, "band": detect_band}
+        )
+        seed = idGenerator.catalog_id
 
+        if mask:
+            mask_array = mask.getArray()
+        else:
+            mask_array = None
         i_exposure = self._simulate_band(
             band=detect_band,
             tract_info=tract_info,
@@ -348,9 +351,11 @@ class MeasureSimsTask(PipelineTask):
             seed=seed,
             psf_handles_dict=psf_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
-            mask_handles_dict=mask_handles_dict,
+            mask=mask,
         )
-        i_noise_corr = self._load_noise_corr(correlation_handles_dict, detect_band)
+        i_noise_corr = self._load_noise_corr(
+            correlation_handles_dict, detect_band,
+        )
         det_cat = self._detect(
             exposure=i_exposure,
             band=detect_band,
@@ -359,7 +364,7 @@ class MeasureSimsTask(PipelineTask):
             tract=tract,
             patch=patch,
             seed=seed,
-            mask_array=i_mask.get().getArray() if i_mask is not None else None,
+            mask_array=mask_array,
         )
         force_outputs = [
             self._measure_band(
@@ -371,17 +376,18 @@ class MeasureSimsTask(PipelineTask):
                 tract=tract,
                 patch=patch,
                 seed=seed,
-                mask_array=i_mask.get().getArray() if i_mask is not None else None,
+                mask_array=mask_array,
             )
         ]
         del i_exposure
-
         # Forced measurements for remaining bands
         for band in bands:
             if band == detect_band:
                 continue
-            idGenerator = self.config.idGenerator.apply({**id_data_id, "band": band})
-            seed = idGenerator.catalog_id + seed_offset
+            idGenerator = self.config.idGenerator.apply(
+                {**id_data_id, "band": band}
+            )
+            seed = idGenerator.catalog_id
             exposure = self._simulate_band(
                 band=band,
                 tract_info=tract_info,
@@ -390,10 +396,9 @@ class MeasureSimsTask(PipelineTask):
                 seed=seed,
                 psf_handles_dict=psf_handles_dict,
                 correlation_handles_dict=correlation_handles_dict,
-                mask_handles_dict=mask_handles_dict,
+                mask=mask,
             )
             noise_corr = self._load_noise_corr(correlation_handles_dict, band)
-            band_mask = mask_handles_dict.get(band)
             force_outputs.append(
                 self._measure_band(
                     exposure=exposure,
@@ -404,11 +409,9 @@ class MeasureSimsTask(PipelineTask):
                     tract=tract,
                     patch=patch,
                     seed=seed,
-                    mask_array=band_mask.get().getArray() if band_mask is not None else None,
+                    mask_array=mask_array,
                 )
             )
             del exposure
-
         force_cat = rfn.merge_arrays(force_outputs, flatten=True)
-        final = rfn.merge_arrays([det_cat, force_cat], flatten=True)
-        return Struct(output_catalog=final)
+        return Struct(output_catalog=force_cat)

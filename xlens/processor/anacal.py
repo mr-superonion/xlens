@@ -224,6 +224,7 @@ class AnacalTask(Task):
         return catalog
 
     def prepare_cell_data(self, cell_coadd):
+        assert isinstance(self.config, AnacalConfig)
         npix = self.config.npix
         pixel_scale = float(cell_coadd.wcs.getPixelScale().asArcseconds())
         blocks = utils.image.get_blocks_cells(
