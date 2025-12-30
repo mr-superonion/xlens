@@ -249,8 +249,6 @@ for i in range(istart, iend):
         truthCatalog=truth_catalog,
         psfImage=psfImage,
         noiseCorrImage=noiseCorrImage,
-        # psfImage=None,
-        # noiseCorrImage=None,
     ).simExposure
     prep = det_task.anacal.prepare_data(
         exposure=exposure,
@@ -261,7 +259,6 @@ for i in range(istart, iend):
         tract=tract_id,
         patch=patch_id,
         noise_corr=noiseCorrImage.getArray(),
-        # noise_corr=None,
     )
     res = det_task.run_measure(prep)
     if band != "a":
