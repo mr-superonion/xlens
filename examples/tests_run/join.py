@@ -178,7 +178,7 @@ def _read_and_stack(sim_seed: int) -> astTable.Table:
     detection = astTable.Table.read(detfname)[colnames]
 
     data_all: List[astTable.Table] = [detection]
-    for band in "grizy":
+    for band in "ugrizy":
         fname = os.path.join(fits_root, f"cat-{sim_seed:05d}-{band}.fits")
         if not os.path.exists(fname):
             return None

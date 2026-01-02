@@ -1,331 +1,355 @@
 #!/usr/bin/env python3
-"""
-Example
--------
-# 128 ranks spanning group IDs 0..299:
-mpirun -n 128 python summary.py \
-    --emax 0.3 --layout grid \
-    --target g1 --shear 0.02 \
-    --group-start 0 --group-end 300
-"""
-
+"""Aggregate shear measurements using either FlexZBoost or BPZ redshifts."""
 import argparse
+import gc
 import glob
 import os
+import pickle
+from typing import Iterable, List, Optional, Tuple
 
+import fitsio
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 from astropy.stats import sigma_clipped_stats
+from numpy.lib import recfunctions as rfn
 
-# --- Optional MPI: works without mpirun/srun or even mpi4py installed ---
-try:
-    from mpi4py import MPI  # type: ignore
-
-    _COMM = MPI.COMM_WORLD
-    _RANK = _COMM.Get_rank()
-    _SIZE = _COMM.Get_size()
-
-    def _barrier():
-        _COMM.Barrier()
-
-except Exception:
-
-    class _FakeComm:
-        def Get_rank(self):
-            return 0
-
-        def Get_size(self):
-            return 1
-
-    _COMM = _FakeComm()
-    _RANK = 0
-    _SIZE = 1
-
-    def _barrier():
-        return
+from xlens.catalog import measure_shear
+from xlens.catalog.redshift import (
+    bpzEstimator,
+    flexzboostEstimator,
+    load_bpz_templates,
+)
 
 
-def parse_args():
-    p = argparse.ArgumentParser(
-        description="measure + aggregate from catalogs over a given group range.",
+colnames = [
+    "wsel",
+    "dwsel_dg1",
+    "dwsel_dg2",
+    "fpfs_e1",
+    "fpfs_de1_dg1",
+    "fpfs_de1_dg2",
+    "fpfs_e2",
+    "fpfs_de2_dg1",
+    "fpfs_de2_dg2",
+    "fpfs_m0",
+    "fpfs_dm0_dg1",
+    "fpfs_dm0_dg2",
+    "fpfs_m2",
+    "fpfs_dm2_dg1",
+    "fpfs_dm2_dg2",
+]
+
+SUMMARY_DIR_NAMES = {
+    "flexzboost": "summary-flexz-6bands-40-00",
+    "bpz": "summary-bpz-6bands-40-00",
+}
+
+DEFAULT_BPZ_DATA_PATH = "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/bpz/"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Measure + aggregate from catalogs over a given seed ID range "
+            "using either FlexZBoost or BPZ redshift slices."
+        ),
         allow_abbrev=False,
     )
-    # Directory layout and naming
-    p.add_argument(
+    parser.add_argument(
+        "--bands",
+        type=str,
+        default="ugrizy",
+        help="bands that are used for photo-z estimation",
+    )
+    parser.add_argument(
+        "--redshift",
+        type=str,
+        default="flexzboost",
+        choices=list(SUMMARY_DIR_NAMES),
+        help="Photometric redshift estimator to use.",
+    )
+    parser.add_argument(
         "--summary", action=argparse.BooleanOptionalAction, default=False
     )
-    p.add_argument(
+    parser.add_argument(
+        "--correction", action=argparse.BooleanOptionalAction, default=True
+    )
+    # Directory layout and naming
+    parser.add_argument(
         "--pscratch",
         type=str,
         default=os.environ.get("PSCRATCH", "."),
         help="Root directory where results were written.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--layout",
         type=str,
         default="grid",
         choices=["grid", "random"],
         help="Layout used in path naming.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--target",
         type=str,
         default="g1",
         choices=["g1", "g2"],
         help="Which component to analyze (affects R and e used).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--shear",
         type=float,
         default=0.02,
         help="True shear amplitude |g| used in sims.",
     )
-    # group range (each group contains 100 sim_seeds)
-    p.add_argument(
-        "--group-start",
+    # ID range
+    parser.add_argument(
+        "--min-id",
         type=int,
         required=True,
-        help="Minimum group_id (inclusive), maps to sim_seed >= 100*group_id",
+        help="Minimum sim_seed (inclusive).",
     )
-    p.add_argument(
-        "--group-end",
+    parser.add_argument(
+        "--max-id",
         type=int,
         required=True,
-        help="Maximum group_id (exclusive), maps to sim_seed < 100*group_id",
+        help="Maximum sim_seed (exclusive).",
     )
     # Measurement config
-    p.add_argument(
-        "--flux-mins",
-        type=str,
-        default="20,40,60",
-        help="Comma-separated list of flux cuts, e.g. '20,40,60'.",
+    parser.add_argument(
+        "--mag-max",
+        type=float,
+        default=26.2,
+        help="Flux cut applied to each band before selection.",
     )
-    p.add_argument(
+    parser.add_argument(
+        "--z-bounds",
+        type=str,
+        default="0.3,0.6,0.9,1.2,1.5,1.8",
+        help="Comma-separated redshift boundarys, e.g. '0.3,0.6,0.9,1.2,1.8'.",
+    )
+    parser.add_argument(
         "--emax",
         type=float,
         default=0.3,
         help="Ellipticity magnitude cut upper bound.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--dg",
         type=float,
         default=0.02,
         help="Finite-difference step for selection response.",
     )
     # Geometry for density / area
-    p.add_argument(
+    parser.add_argument(
         "--stamp-dim",
         type=int,
         default=3900,
         help="Usable image dimension (pixels) for density/area calc.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--pixel-scale",
         type=float,
         default=0.2,
         help="Pixel scale (arcsec/pixel).",
     )
+    parser.add_argument(
+        "--width-max",
+        type=float,
+        default=2.75,
+        help="maximum of percentile 95% width",
+    )
+    parser.add_argument(
+        "--mag-zero",
+        type=float,
+        default=30.0,
+        help="magnitude zero point",
+    )
     # Bootstrap
-    p.add_argument(
+    parser.add_argument(
         "--bootstrap",
         type=int,
         default=10000,
-        help="# bootstrap resamples for m uncertainty (done on rank 0).",
+        help="# bootstrap resamples for m uncertainty",
     )
-    args, unknown_args = p.parse_known_args()
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        default=None,
+        help=(
+            "Path to the trained redshift estimator model. Defaults to the "
+            "FLEXZ_MODEL (for FlexZBoost) or BPZ_MODEL (for BPZ) environment "
+            "variable if set."
+        ),
+    )
+    parser.add_argument(
+        "--bpz-data-path",
+        type=str,
+        default=os.environ.get("BPZ_DATA_PATH", DEFAULT_BPZ_DATA_PATH),
+        help=(
+            "Directory that stores the BPZ templates. Only used when redshift "
+            "is 'bpz'."
+        ),
+    )
+    args, unknown_args = parser.parse_known_args()
     if unknown_args:
         print("[warn] Ignoring unknown args:", unknown_args)
     return args
 
 
-def parse_flux_list(s: str):
-    return [float(x) for x in s.split(",")] if s else [20.0, 40.0, 60.0]
+def parse_zbounds(values: str) -> list[float]:
+    return [float(x) for x in values.split(",")]
 
 
 def base_path(pscratch, layout, target, shear):
     sd = f"shear{int(shear*100):02d}"
     return os.path.join(
         pscratch,
-        "parquet",
         f"constant_shear_{layout}",
         target,
         sd,
     )
 
 
-def parquet_group_path(base_dir, group_id, mode) -> str:
-    return os.path.join(
-        base_dir,
-        f"mode{mode}",
-        f"group_id={group_id}",
-        "data.parquet",
+def _to_native(a: np.ndarray) -> np.ndarray:
+    if a.dtype.byteorder in ("=", "|"):
+        return a
+    return a.byteswap().newbyteorder("=")
+
+
+def cat_read(base_dir: str, sim_id: int, mode: int, bands: str) -> np.ndarray:
+    arrs = []
+    main_path = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}.fits")
+    main = fitsio.read(main_path, columns=colnames)
+    arrs.append(_to_native(main))
+
+    for b in bands:
+        fn = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}-{b}.fits")
+        barr = fitsio.read(fn)
+        arrs.append(_to_native(barr))
+
+    merged = rfn.merge_arrays(
+        arrs, flatten=True, asrecarray=False, usemask=False,
     )
+    return rfn.repack_fields(merged)
 
 
-def arrow_to_numpy_struct(table: pa.Table) -> np.ndarray:
-    table = table.combine_chunks()
-    cols = [table[c].to_numpy(zero_copy_only=False) for c in table.column_names]
-    return np.rec.fromarrays(cols, names=table.column_names)
-
-
-def measure_shear_with_cut(src, flux_min, emax=0.3, dg=0.02):
-    """
-    Selection + response including selection response via finite differencing.
-
-    Returns: e1, R11, e2, R22, N  (scalars for this flux_min)
-    """
-    esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
-    m0 = (src["g_flux_gauss2"] > flux_min) & (esq0 < emax * emax)
-    nn = int(np.sum(m0))
-    if nn == 0:
-        return 0.0, 0.0, 0.0, 0.0, 0
-
-    w0 = src["wsel"][m0]
-    e1 = np.sum(w0 * src["fpfs_e1"][m0])
-    e2 = np.sum(w0 * src["fpfs_e2"][m0])
-
-    r1 = np.sum(
-        src["dwsel_dg1"][m0] * src["fpfs_e1"][m0]
-        + w0 * src["fpfs_de1_dg1"][m0]
-    )
-    r2 = np.sum(
-        src["dwsel_dg2"][m0] * src["fpfs_e2"][m0]
-        + w0 * src["fpfs_de2_dg2"][m0]
-    )
-
-    def sel_term(comp: int):
-        e = src[f"fpfs_e{comp}"]
-        de = src[f"fpfs_de{comp}_dg{comp}"]
-        df = src[f"g_dflux_gauss2_dg{comp}"]
-        comp2 = int(3 - comp)
-        e2 = src[f"fpfs_e{comp2}"]
-        de2 = src[f"fpfs_de{comp2}_dg{comp}"]
-
-        esq_p = esq0 + 2.0 * dg * (e * de + e2 * de2)
-        m_p = ((src["g_flux_gauss2"] + dg * df) > flux_min) & (esq_p < emax * emax)
-        ellp = np.sum(src["wsel"][m_p] * e[m_p])
-
-        esq_m = esq0 - 2.0 * dg * (e * de + e2 * de2)
-        m_m = ((src["g_flux_gauss2"] - dg * df) > flux_min) & (esq_m < emax * emax)
-        ellm = np.sum(src["wsel"][m_m] * e[m_m])
-        return (ellp - ellm) / (2.0 * dg)
-
-    r1_sel = sel_term(1)
-    r2_sel = sel_term(2)
-    return e1, (r1 + r1_sel), e2, (r2 + r2_sel), nn
-
-
-def per_rank_work(group_chunk, input_dir, flux_list, emax, dg, target):
-    """
-    For each group_id in ``group_chunk``, read the +g (mode40) and -g (mode0)
-    catalogs aggregated over that group's 100 sim_seeds and compute the
-    per-flux-cut e_pos/e_neg, R_pos/R_neg. Returns 4 arrays of shape
-    (Nsamples_local, ncut).
-    """
-    ncut = len(flux_list)
-    E_pos = []
-    E_neg = []
-    R_pos = []
-    R_neg = []
-
-    for group_id in group_chunk:
-        ppos = parquet_group_path(input_dir, group_id, mode=40)  # +g
-        pneg = parquet_group_path(input_dir, group_id, mode=0)  # -g
-
-        if not (os.path.isfile(ppos) and os.path.isfile(pneg)):
-            # Skip if pair not complete
-            continue
-        try:
-            tbl_pos = pq.read_table(ppos)
-            tbl_neg = pq.read_table(pneg)
-            src_pos = arrow_to_numpy_struct(tbl_pos)
-            src_neg = arrow_to_numpy_struct(tbl_neg)
-        except OSError:
-            print(ppos)
-            print(pneg)
-            continue
-
-        e_pos_row = np.zeros(ncut)
-        e_neg_row = np.zeros(ncut)
-        R_pos_row = np.zeros(ncut)
-        R_neg_row = np.zeros(ncut)
-
-        for j, fmin in enumerate(flux_list):
-            e1p, R1p, e2p, R2p, _ = measure_shear_with_cut(
-                src_pos, fmin, emax=emax, dg=dg
-            )
-            e1m, R1m, e2m, R2m, _ = measure_shear_with_cut(
-                src_neg, fmin, emax=emax, dg=dg
-            )
-
-            if target == "g1":
-                e_pos_row[j] = e1p
-                e_neg_row[j] = e1m
-                R_pos_row[j] = R1p
-                R_neg_row[j] = R1m
-            else:
-                e_pos_row[j] = e2p
-                e_neg_row[j] = e2m
-                R_pos_row[j] = R2p
-                R_neg_row[j] = R2m
-
-        E_pos.append(e_pos_row)
-        E_neg.append(e_neg_row)
-        R_pos.append(R_pos_row)
-        R_neg.append(R_neg_row)
-
-    if len(E_pos) == 0:
-        z = (np.zeros((0, ncut)),) * 4
-        return z
+def per_rank_work(
+    ids_chunk: Iterable[int],
+    base_dir: str,
+    zbounds: list[float],
+    flux_min: float,
+    emax: float,
+    dg: float,
+    target: str,
+    zobj,
+    do_correction: bool = True,
+    z_width95_max: float = 2.75,
+    mag_zero: float = 30.0,
+    bands: str = "ugrizy",
+):
+    e_pos_rows = []
+    e_neg_rows = []
+    r_pos_rows = []
+    r_neg_rows = []
+    shear_kwargs = {
+        "flux_min": flux_min,
+        "z_estimator": zobj,
+        "emax": emax,
+        "zbounds": zbounds,
+        "dg": dg,
+        "target": target,
+        "do_correction": do_correction,
+        "z_width95_max": z_width95_max,
+        "mag_zero": mag_zero,
+        "flux_name": "gauss2",
+        "bands": bands,
+    }
+    for sim_id in ids_chunk:
+        src_pos = cat_read(base_dir, sim_id, mode=40, bands=bands)
+        out_pos = measure_shear(
+            src=src_pos,
+            **shear_kwargs,
+        )
+        del src_pos
+        gc.collect()
+        src_neg = cat_read(base_dir, sim_id, mode=0, bands=bands)
+        out_neg = measure_shear(
+            src=src_neg,
+            **shear_kwargs,
+        )
+        del src_neg
+        gc.collect()
+        e_pos_rows.append(out_pos["e"])
+        e_neg_rows.append(out_neg["e"])
+        r_pos_rows.append(out_pos["r"] + out_pos["r_sel"])
+        r_neg_rows.append(out_neg["r"] + out_neg["r_sel"])
 
     return (
-        np.vstack(E_pos),
-        np.vstack(E_neg),
-        np.vstack(R_pos),
-        np.vstack(R_neg),
+        np.vstack(e_pos_rows),
+        np.vstack(e_neg_rows),
+        np.vstack(r_pos_rows),
+        np.vstack(r_neg_rows),
     )
 
 
-def save_rank_partial(outdir, group_index, E_pos, E_neg, R_pos, R_neg, ncut):
-    partdir = os.path.join(outdir, "summary-40-00")
+def summary_directory(outdir: str, redshift: str, do_correction: bool) -> str:
+    partdir = os.path.join(outdir, SUMMARY_DIR_NAMES[redshift])
+    if not do_correction:
+        partdir = partdir + "-nc"
+    return partdir
+
+
+def save_rank_partial(
+    outdir: str,
+    seed_index: int,
+    e_pos: np.ndarray,
+    e_neg: np.ndarray,
+    r_pos: np.ndarray,
+    r_neg: np.ndarray,
+    ncut: int,
+    redshift: str,
+    do_correction: bool = True,
+) -> str:
+    partdir = summary_directory(outdir, redshift, do_correction)
     os.makedirs(partdir, exist_ok=True)
-    path = os.path.join(partdir, f"group_{group_index:05d}.npz")
+    path = os.path.join(partdir, f"seed_{seed_index:05d}.npz")
     np.savez_compressed(
         path,
-        E_pos=E_pos,
-        E_neg=E_neg,
-        R_pos=R_pos,
-        R_neg=R_neg,
-        ncut=np.int64(ncut),
+        E_pos=e_pos,
+        E_neg=e_neg,
+        R_pos=r_pos,
+        R_neg=r_neg,
+        ncut=int(ncut),
     )
     return path
 
 
-def load_and_stack_all(outdir, ncut_expected=None):
-    partdir = os.path.join(outdir, "summary-40-00")
-    arrays_E_pos, arrays_E_neg, arrays_R_pos, arrays_R_neg = [], [], [], []
-    ncut_from_file = None
+def load_and_stack_all(
+    outdir: str,
+    ncut_expected: Optional[int] = None,
+    redshift: str = "flexzboost",
+    do_correction: bool = True,
+):
+    partdir = summary_directory(outdir, redshift, do_correction)
+    arrays_E_pos: List[np.ndarray] = []
+    arrays_E_neg: List[np.ndarray] = []
+    arrays_R_pos: List[np.ndarray] = []
+    arrays_R_neg: List[np.ndarray] = []
+    ncut_from_file: Optional[int] = None
 
-    paths = glob.glob(os.path.join(partdir, "group_*.npz"))
-    for path in paths:
+    for path in sorted(glob.glob(os.path.join(partdir, "*.npz"))):
         with np.load(path) as data:
-            E_pos = data["E_pos"]
-            E_neg = data["E_neg"]
-            R_pos = data["R_pos"]
-            R_neg = data["R_neg"]
+            arrays_E_pos.append(data["E_pos"])
+            arrays_E_neg.append(data["E_neg"])
+            arrays_R_pos.append(data["R_pos"])
+            arrays_R_neg.append(data["R_neg"])
             if ncut_from_file is None:
                 ncut_from_file = int(data["ncut"])
-            arrays_E_pos.append(E_pos)
-            arrays_E_neg.append(E_neg)
-            arrays_R_pos.append(R_pos)
-            arrays_R_neg.append(R_neg)
 
-    def _stack(blocks, ncut):
-        blocks = [b for b in blocks if b.size > 0]
-        if len(blocks) == 0:
+    def _stack(blocks: List[np.ndarray], ncut: int) -> np.ndarray:
+        valid = [blk for blk in blocks if blk.size > 0]
+        if not valid:
             return np.zeros((0, ncut), dtype=np.float64)
-        return np.vstack(blocks)
+        return np.vstack(valid)
 
     ncut = ncut_expected if ncut_expected is not None else (ncut_from_file or 0)
     E_pos_all = _stack(arrays_E_pos, ncut)
@@ -336,144 +360,169 @@ def load_and_stack_all(outdir, ncut_expected=None):
 
 
 def bootstrap_m(
-    rng, e_pos, e_neg, R_pos, R_neg, shear_value, nsamp=10000
-):  # noqa: N802 - keep historical name
-    """Bootstrap estimates of the multiplicative and additive biases.
-
-    Parameters
-    ----------
-    rng : numpy.random.Generator
-        RNG used to draw bootstrap indices.
-    e_pos, e_neg, R_pos, R_neg : ndarray
-        Arrays with shape ``(Nsamples_total, ncut)`` containing the per-object
-        ellipticity and response measurements for positive/negative shear.
-    shear_value : float
-        True shear amplitude used in the simulations.
-    nsamp : int, optional
-        Number of bootstrap realizations to draw.
-
-    Returns
-    -------
-    tuple of ndarray
-        ``(ms, cs)`` each of shape ``(nsamp, ncut)`` containing the bootstrap
-        draws of the multiplicative and additive biases respectively.
-    """
-    N, ncut = e_pos.shape
+    rng: np.random.Generator,
+    e_pos: np.ndarray,
+    e_neg: np.ndarray,
+    r_pos: np.ndarray,
+    r_neg: np.ndarray,
+    shear_value: float,
+    nsamp: int = 10000,
+) -> Tuple[np.ndarray, np.ndarray]:
+    n_obj, ncut = e_pos.shape
     ms = np.zeros((nsamp, ncut))
     cs = np.zeros((nsamp, ncut))
-    for i in range(nsamp):
-        k = rng.integers(0, N, size=N, endpoint=False)
-        den = np.sum(R_pos[k] + R_neg[k], axis=0)
+    for idx in range(nsamp):
+        choices = rng.integers(0, n_obj, size=n_obj, endpoint=False)
+        denom = np.sum(r_pos[choices] + r_neg[choices], axis=0)
 
-        num_m = np.sum(e_pos[k] - e_neg[k], axis=0)
-        new_gamma = num_m / den
-        ms[i] = new_gamma / shear_value - 1.0
+        num_m = np.sum(e_pos[choices] - e_neg[choices], axis=0)
+        gamma = num_m / denom
+        ms[idx] = gamma / shear_value - 1.0
 
-        num_c = np.sum(e_pos[k] + e_neg[k], axis=0)
-        cs[i] = num_c / den
+        num_c = np.sum(e_pos[choices] + e_neg[choices], axis=0)
+        cs[idx] = num_c / denom
     return ms, cs
+
+
+def build_redshift_estimator(
+        redshift: str, model_path: str, bpz_data_path: str,
+        bands: str,
+):
+    if redshift == "flexzboost":
+        with open(model_path, "rb") as f:
+            mm = pickle.load(f)
+        return flexzboostEstimator(pz_obj=mm)
+
+    if redshift == "bpz":
+        with open(model_path, "rb") as f:
+            mm = pickle.load(f)
+        flux_templates = load_bpz_templates(
+            data_path=bpz_data_path,
+            bands=bands,
+            filter_name="DC2LSST",
+        )
+        zp_errors = [0.02] * len(bands)
+        return bpzEstimator(flux_templates, mm, zp_errors)
+
+    raise ValueError(f"Unsupported redshift estimator '{redshift}'")
+
+
+def resolve_model_path(redshift: str, cli_value: Optional[str]):
+    if cli_value:
+        return cli_value
+    env_var = "FLEXZ_MODEL" if redshift == "flexzboost" else "BPZ_MODEL"
+    return os.environ.get(env_var)
 
 
 def main():
     args = parse_args()
-    rank = _RANK
-    size = _SIZE
+    do_correction = args.correction
+    if args.max_id <= args.min_id:
+        raise SystemExit("--max-id must be > --min-id")
+    base_dir = base_path(args.pscratch, args.layout, args.target, args.shear)
+    zbounds = parse_zbounds(args.z_bounds)
+    ncut = len(zbounds) + 1
 
-    flux_list = parse_flux_list(args.flux_mins)
-    ncut = len(flux_list)
-    outdir = base_path(args.pscratch, args.layout, args.target, args.shear)
-    input_dir = outdir
-
+    model_path = resolve_model_path(args.redshift, args.model_path)
+    if model_path is None:
+        env = "FLEXZ_MODEL" if args.redshift == "flexzboost" else "BPZ_MODEL"
+        raise SystemExit(
+            f"--model-path not provided and {env} is not set in the environment"
+        )
+    flux_min = 10.0 ** ((args.mag_zero - args.mag_max) / 2.5)
     if not args.summary:
-        if args.group_end <= args.group_start:
-            raise SystemExit("--group-end must be > --group-start")
-        all_groups = np.arange(args.group_start, args.group_end, dtype=int)
-
-        n = len(all_groups)
-        base = n // size
-        rem = n % size
-        start = rank * base + min(rank, rem)
-        stop = start + base + (1 if rank < rem else 0)
-        my_groups = all_groups[start:stop]
-
-        E_pos, E_neg, R_pos, R_neg = per_rank_work(
-            my_groups,
-            input_dir,
-            flux_list,
-            args.emax,
-            args.dg,
-            args.target,
+        zobj = build_redshift_estimator(
+            args.redshift, model_path, args.bpz_data_path, args.bands,
+        )
+        my_ids = np.arange(args.min_id, args.max_id, dtype=int)
+        if len(my_ids) > 0:
+            e_pos, e_neg, r_pos, r_neg = per_rank_work(
+                my_ids,
+                base_dir,
+                zbounds,
+                flux_min,
+                args.emax,
+                args.dg,
+                args.target,
+                zobj,
+                do_correction=do_correction,
+                z_width95_max=args.width_max,
+                mag_zero=args.mag_zero,
+                bands=args.bands,
+            )
+            save_rank_partial(
+                base_dir,
+                int(my_ids[0]),
+                e_pos,
+                e_neg,
+                r_pos,
+                r_neg,
+                ncut,
+                redshift=args.redshift,
+                do_correction=do_correction,
+            )
+    else:
+        all_e_pos, all_e_neg, all_r_pos, all_r_neg = load_and_stack_all(
+            base_dir,
+            ncut_expected=ncut,
+            redshift=args.redshift,
+            do_correction=do_correction,
         )
 
-        index = int(my_groups[0])
-        save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut)
-        _barrier()
-    else:
-        if rank == 0:
-            all_E_pos, all_E_neg, all_R_pos, all_R_neg = load_and_stack_all(
-                outdir, ncut_expected=ncut
-            )
-            if all_E_pos.size == 0 or all_E_neg.size == 0:
-                raise SystemExit(
-                    "No valid (+g/-g) pairs found in the given group range."
-                )
-
-            num = np.sum(all_E_pos - all_E_neg, axis=0)  # (ncut,)
-            den = np.sum(all_R_pos + all_R_neg, axis=0)
-            m = (num / den) / args.shear - 1.0
-
-            c = np.sum(all_E_pos + all_E_neg, axis=0) / np.sum(
-                all_R_pos + all_R_neg, axis=0
+        if all_e_pos.size == 0 or all_e_neg.size == 0:
+            raise SystemExit(
+                "No valid (+g/-g) pairs found in the given seed ID range."
             )
 
-            area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
-                args.pixel_scale / 60.0
-            ) ** 2.0 * 100
+        num = np.sum(all_e_pos - all_e_neg, axis=0)
+        denom = np.sum(all_r_pos + all_r_neg, axis=0)
+        m = (num / denom) / args.shear - 1.0
 
-            clipped_mean, clipped_median, clipped_std = sigma_clipped_stats(
-                all_E_pos / np.average(all_R_pos, axis=0),
-                sigma=5.0,
-                axis=0,
-            )
-            neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
+        c = np.sum(all_e_pos + all_e_neg, axis=0) / np.sum(
+            all_r_pos + all_r_neg, axis=0
+        )
 
-            rng = np.random.default_rng(0)
-            ms, cs = bootstrap_m(
-                rng,
-                all_E_pos,
-                all_E_neg,
-                all_R_pos,
-                all_R_neg,
-                args.shear,
-                nsamp=args.bootstrap,
-            )
-            ord_ms = np.sort(ms, axis=0)
-            lo_idx = int(0.1587 * args.bootstrap)
-            hi_idx = int(0.8413 * args.bootstrap)
-            sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
+        area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
+            args.pixel_scale / 60.0
+        ) ** 2.0
 
-            ord_cs = np.sort(cs, axis=0)
-            sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
+        _, _, clipped_std = sigma_clipped_stats(
+            all_e_pos / np.average(all_r_pos, axis=0),
+            sigma=5.0,
+            axis=0,
+        )
+        neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
 
-            print("==============================================")
-            print(f"Input Directory: {input_dir}")
-            print(f"Paired IDs (found): {all_E_pos.shape[0]}")
-            print(
-                "Group range requested: "
-                f"[{args.group_start}, {args.group_end})"
-            )
-            print(
-                "Seed range requested: "
-                f"[{args.group_start * 100}, {args.group_end * 100})"
-            )
-            print(f"Flux cuts: {flux_list}")
-            print(f"Area (arcmin^2): {area_arcmin2:.3f}")
-            print("m (per flux cut):", m)
-            print("c (per flux cut):", c)
-            print("n_eff (per flux cut):", neff)
-            print("m 1-sigma (bootstrap):", sigma_m)
-            print("c 1-sigma (bootstrap):", sigma_c)
-            print("==============================================")
+        rng = np.random.default_rng(0)
+        ms, cs = bootstrap_m(
+            rng,
+            all_e_pos,
+            all_e_neg,
+            all_r_pos,
+            all_r_neg,
+            args.shear,
+            nsamp=args.bootstrap,
+        )
+        ord_ms = np.sort(ms, axis=0)
+        lo_idx = int(0.1587 * args.bootstrap)
+        hi_idx = int(0.8413 * args.bootstrap)
+        sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
+
+        ord_cs = np.sort(cs, axis=0)
+        sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
+
+        print("==============================================")
+        print(f"Catalog directory: {base_dir}")
+        print(f"Photometric redshift estimator: {args.redshift}")
+        print(f"Paired IDs (found): {all_e_pos.shape[0]}")
+        print(f"Redshift boundarys: {list(zbounds)}")
+        print(f"Area (arcmin^2): {area_arcmin2:.3f}")
+        print("m (per redshift cut):", m)
+        print("c (per redshift cut):", c)
+        print("n_eff (per redshift cut):", neff)
+        print("m 1-sigma (bootstrap):", sigma_m)
+        print("c 1-sigma (bootstrap):", sigma_c)
+        print("==============================================")
 
 
 if __name__ == "__main__":

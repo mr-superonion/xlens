@@ -1,12 +1,11 @@
 import os
-import glob
 import numpy as np
 from abc import ABC, abstractmethod
 from .utils import _resolve_flux_name
 
 
-NUM_Z_GRIDS = 401
-Z_MAX = 4.0
+NUM_Z_GRIDS = 501
+Z_MAX = 5.0
 Z_GRIDS = np.linspace(0.0, Z_MAX, NUM_Z_GRIDS)
 PROBS = np.array([0.025, 0.16, 0.5, 0.84, 0.975], dtype=float)
 
@@ -20,35 +19,25 @@ def get_color(
     comp: int = 1,
     dg: float = 0.0,
     flux_name: str = "gauss2",
+    include_mag_err: bool = False,
 ) -> np.ndarray:
     """
-    Parameters
-    ----------
-    src : np.ndarray (structured)
-        Must include fields per band (with optional flux_name suffix):
-          {b}_flux{fn}
-          {b}_dflux{fn}_dg{comp}
-          {b}_flux{fn}_err
-        for each b in `bands` (default "grizy").
-
     Returns
     -------
-    np.ndarray, shape (N, 1 + 2*(len(bands)-1))
-        Columns ordered as:
-          [ref_mag,
-           (band[0]-band[1]), err(...),
-           (band[1]-band[2]), err(...),
-           ...
-          ]
+    np.ndarray
+        If include_mag_err=False: shape (N, 1 + (len(bands)-1))
+          [ref_mag, (b0-b1), (b1-b2), ...]
+        If include_mag_err=True: shape (N, 1 + 2*(len(bands)-1))
+          [ref_mag, (b0-b1), err01, (b1-b2), err12, ...]
     """
     fn = _resolve_flux_name(flux_name)
     A = 2.5 / np.log(10.0)
     n = src.shape[0]
 
     mags: list[np.ndarray] = []
-    merrs: list[np.ndarray] = []
-
-    # Compute mag and mag_err per band, in the same order as `bands`
+    merrs: list[np.ndarray] | None = [] if include_mag_err else None
+    # Compute mag (and optionally mag_err) per band, in the same order as
+    # `bands`
     for b in bands:
         flux_col = f"{b}_flux{fn}"
         dflux_col = f"{b}_dflux{fn}_dg{comp}"
@@ -59,38 +48,38 @@ def get_color(
         ferr = src[err_col]
 
         flux = flux_base + dg * dflux
-
-        mag = np.full(n, 30.0, dtype=np.float64)
-        mag_err = np.full(n, 1.0, dtype=np.float64)
-
+        mag = np.full(n, mag_zero, dtype=np.float64)
         pos = flux > 0
         with np.errstate(divide="ignore", invalid="ignore"):
             mag[pos] = mag_zero - 2.5 * np.log10(flux[pos])
-            mag_err[pos] = A * (ferr[pos] / flux[pos])
-
         mags.append(mag)
-        merrs.append(mag_err)
+        if merrs is not None:
+            mag_err = np.full(n, 1.0, dtype=np.float64)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                mag_err[pos] = A * (ferr[pos] / flux[pos])
+            merrs.append(mag_err)
 
     nb = len(bands) - 1
-    feat = np.empty((n, 1 + 2 * nb), dtype=np.float64)
-
-    # reference magnitude
+    ncols = 1 + (2 * nb if include_mag_err else nb)
+    feat = np.empty((n, ncols), dtype=np.float64)
     try:
         ref_idx = bands.index(ref_band)
     except ValueError:
         raise ValueError(f"ref_band={ref_band!r} not found in bands={bands!r}")
     feat[:, 0] = mags[ref_idx]
 
-    # adjacent colors in band order
     j = 1
-    for i in range(nb):
-        # color = mag(b_i) - mag(b_{i+1})
-        np.subtract(mags[i], mags[i + 1], out=feat[:, j])
-        j += 1
-        # color error = sqrt(err_i^2 + err_{i+1}^2)
-        feat[:, j] = np.hypot(merrs[i], merrs[i + 1])
-        j += 1
-
+    if include_mag_err:
+        assert merrs is not None
+        for i in range(nb):
+            np.subtract(mags[i], mags[i + 1], out=feat[:, j])
+            j += 1
+            feat[:, j] = np.hypot(merrs[i], merrs[i + 1])
+            j += 1
+    else:
+        for i in range(nb):
+            np.subtract(mags[i], mags[i + 1], out=feat[:, j])
+            j += 1
     return feat
 
 
@@ -139,6 +128,7 @@ class zEstimator(ABC):
         dg: float = 0.0,
         flux_name2: str | None = None,
         flux_name3: str | None = None,
+        **kwargs,
     ) -> dict:
         """Method to get redshift point estimates
         """
@@ -155,11 +145,13 @@ class zEstimator(ABC):
         dg: float = 0.0,
         flux_name2: str | None = None,
         flux_name3: str | None = None,
+        **kwargs,
     ):
         zout = self.get_z(
             src=src, mag_zero=mag_zero, flux_name=flux_name,
             bands=bands, ref_band=ref_band, comp=comp, dg=dg,
             flux_name2=flux_name2, flux_name3=flux_name3,
+            **kwargs,
         )
         zmode = zout["zmode"]
         width95 = zout["z975"] - zout["z025"]
@@ -189,6 +181,8 @@ class flexzboostEstimator(zEstimator):
         dg: float = 0.0,
         flux_name2: str | None = None,
         flux_name3: str | None = None,
+        include_mag_err: bool = False,
+        **kwargs,
     ) -> dict:
         colors = get_color(
             src,
@@ -198,6 +192,7 @@ class flexzboostEstimator(zEstimator):
             flux_name=flux_name,
             bands=bands,
             ref_band=ref_band,
+            include_mag_err=include_mag_err,
         )
         pdfs, _ = self.pz_obj.predict(colors, n_grid=NUM_Z_GRIDS)
         # Argmax per row, then map to z_grid
@@ -208,16 +203,13 @@ class flexzboostEstimator(zEstimator):
 
 
 def load_bpz_templates(
-    data_path,
-    filters=None,
-    spectra_name="cosmossedswdust136.list",
+    data_path: str,
+    bands: str,
+    filter_name: str = "DC2LSST",
+    spectra_name: str = "cosmossedswdust136.list",
 ):
     """Load BPZ template fluxes on Z_GRIDS for provided filter set."""
-    if filters is None:
-        filters = [
-            "DC2LSST_g", "DC2LSST_r", "DC2LSST_i", "DC2LSST_z", "DC2LSST_y"
-        ]
-
+    filters = [f"{filter_name}_{b}" for b in bands]
     from desc_bpz.useful_py3 import get_str, get_data, match_resol
     z = Z_GRIDS
     spectra_file = os.path.join(data_path, "SED", spectra_name)
@@ -234,6 +226,7 @@ def load_bpz_templates(
         for j, f in enumerate(filters):
             model = f"{s}.{f}.AB"
             model_path = os.path.join(data_path, "AB", model)
+            assert os.path.isfile(model_path), "Cannot find model"
             zo, f_mod_0 = get_data(model_path, (0, 1))
             flux_templates[:, i, j] = match_resol(zo, f_mod_0, z)
     return flux_templates

@@ -2,8 +2,6 @@ import numpy as np
 from .utils import _resolve_flux_min, _resolve_flux_name
 from .model import w_model, w_model_derivs
 
-MAG_MIN = 18.0
-
 
 def get_esq(src: np.ndarray, comp: int = 1, dg: float = 0.0) -> np.ndarray:
     """Return |e|^2 evaluated at shear g_comp = dg to first order."""
@@ -55,7 +53,6 @@ def measure_shear(
     fn = _resolve_flux_name(flux_name)
     esq0 = get_esq(src)
 
-    fmax = 10.0 ** ((mag_zero - MAG_MIN) / 2.5)
     # band-independent fields
     e1_all = src["fpfs_e1"]
     e2_all = src["fpfs_e2"]
@@ -95,14 +92,11 @@ def measure_shear(
     fm = _resolve_flux_min(flux_min, bands=bands)
     flux = {b: src[f"{b}_flux{fn}"] for b in bands}
 
-    # base selection: all bands above flux_min and |e|^2 < emax^2
+    # No shear
     mask = np.ones(src.shape[0], dtype=bool)
     for b in bands:
         mask &= flux[b] > fm[b]
-        if b == ref_band:
-            mask &= (flux[b] < fmax)
     mask &= esq0 < emax * emax
-
     # photo-z + width cut at base shear
     zmode, width95 = z_estimator.get_zsel(
         src[mask],
@@ -110,8 +104,9 @@ def measure_shear(
         flux_name=flux_name,
         bands=bands,
         ref_band=ref_band,
-        comp=1,      # base comp for selection mask; not used in esq0
+        comp=1,
         dg=0.0,
+        include_mag_err=False,
     )
     mtmp = width95 < z_width95_max
     mask[mask] &= mtmp
@@ -132,8 +127,6 @@ def measure_shear(
             for b in bands:
                 df = src[f"{b}_dflux{fn}_dg{comp}"]
                 mask_side &= (flux[b] + dg_eff * df > fm[b])
-                if b == ref_band:
-                    mask_side &= (flux[b] + dg_eff * df < fmax)
 
             if do_correction:
                 z_side, w_side = z_estimator.get_zsel(
@@ -144,6 +137,7 @@ def measure_shear(
                     ref_band=ref_band,
                     comp=comp,
                     dg=dg_eff,
+                    include_mag_err=False,
                 )
             else:
                 z_side, w_side = z_estimator.get_zsel(
@@ -154,6 +148,7 @@ def measure_shear(
                     ref_band=ref_band,
                     comp=comp,
                     dg=0.0,
+                    include_mag_err=False,
                 )
 
             mtmp_local = w_side < z_width95_max

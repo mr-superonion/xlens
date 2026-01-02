@@ -6,4 +6,5 @@ from .base import (
 __all__ = [
     "twopt", "utils", "model",
     "get_esq", "measure_shear",
+    "redshift",
 ]

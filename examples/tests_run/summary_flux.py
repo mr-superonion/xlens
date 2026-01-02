@@ -172,7 +172,6 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
     emax = 0.5
     esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
     m0 = (src["flux_gauss2"] > flux_min) & (esq0 < emax * emax)
-    # nn = int(np.sum(m0))
     w0 = src["wsel"][m0]
     ename = "i_fpfs1"
     e1 = np.sum(w0 * src[f"{ename}_e1"][m0])
@@ -317,6 +316,7 @@ def load_and_stack_all(
     arrays_R_pos: List[np.ndarray] = []
     arrays_R_neg: List[np.ndarray] = []
     ncut_from_file: Optional[int] = None
+    print(partdir)
 
     for path in sorted(glob.glob(os.path.join(partdir, "*.npz"))):
         with np.load(path) as data:

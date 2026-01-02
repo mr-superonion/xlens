@@ -87,21 +87,25 @@ def _bootstrap_m(
 def _build_redshift_estimator(
     *,
     redshift: str,
+    bands: str,
     model_path: str,
+    filter_name: str,
     bpz_data_path: str,
 ):
     if redshift == "flexzboost":
         with open(model_path, "rb") as f:
             model = pickle.load(f)
         return flexzboostEstimator(pz_obj=model)
-
     if redshift == "bpz":
         with open(model_path, "rb") as f:
             model = pickle.load(f)
-        flux_templates = load_bpz_templates(data_path=bpz_data_path)
-        zp_errors = [0.02, 0.02, 0.02, 0.02, 0.02]
+        flux_templates = load_bpz_templates(
+            data_path=bpz_data_path,
+            bands=bands,
+            filter_name=filter_name,
+        )
+        zp_errors = [0.02] * len(bands)
         return bpzEstimator(flux_templates, model, zp_errors)
-
     raise ValueError(f"Unsupported redshift estimator '{redshift}'")
 
 
@@ -219,6 +223,10 @@ class SelBiasRedshiftPipeConfig(
         doc="Directory with BPZ flux templates.",
         default=DEFAULT_BPZ_DATA_PATH,
     )
+    filter_name = Field[str](
+        doc="Observation filter name",
+        default="DC2LSST",
+    )
 
     def validate(self):
         super().validate()
@@ -259,29 +267,35 @@ class SelBiasRedshiftPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
+        super().__init__(
+            config=config, log=log, initInputs=initInputs, **kwargs
+        )
         assert isinstance(self.config, SelBiasRedshiftPipeConfig)
         self._zbounds = list(self.config.zbounds)
         self._ncut = len(self._zbounds) + 1
         self._z_estimator = self._init_z_estimator()
 
     def _init_z_estimator(self):
+        assert isinstance(self.config, SelBiasRedshiftPipeConfig)
         config = self.config
         if config.model_path:
             model_path = config.model_path
         else:
-            env_name = (
-                "FLEXZ_MODEL" if config.redshift_estimator == "flexzboost" else "BPZ_MODEL"
-            )
+            if config.redshift_estimator == "flexzboost":
+                env_name = "FLEXZ_MODEL"
+            else:
+                env_name = "BPZ_MODEL"
             model_path = os.environ.get(env_name, "")
         if not model_path:
             raise RuntimeError(
-                "model_path is not configured and the corresponding environment variable "
-                "is not set"
+                "model_path is not configured and the corresponding environment"
+                "variable is not set"
             )
 
         if config.redshift_estimator == "bpz":
-            data_path = config.bpz_data_path or os.environ.get("BPZ_DATA_PATH", "")
+            data_path = config.bpz_data_path or os.environ.get(
+                "BPZ_DATA_PATH", ""
+            )
             if not data_path:
                 data_path = DEFAULT_BPZ_DATA_PATH
         else:
@@ -290,6 +304,8 @@ class SelBiasRedshiftPipe(PipelineTask):
         return _build_redshift_estimator(
             redshift=config.redshift_estimator,
             model_path=model_path,
+            bands=self.config.bands,
+            filter_name=self.config.filter_name,
             bpz_data_path=data_path,
         )
 
@@ -299,6 +315,7 @@ class SelBiasRedshiftPipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
 
     def _measure_catalog(self, src) -> tuple[np.ndarray, np.ndarray]:
+        assert isinstance(self.config, SelBiasRedshiftPipeConfig)
         config = self.config
         out = measure_shear(
             src=src,
@@ -320,7 +337,9 @@ class SelBiasRedshiftPipe(PipelineTask):
         resp_sel = np.asarray(out["r_sel"], dtype=np.float64)
         return ell, resp + resp_sel
 
-    def _accumulate_pair(self, catalogs: Iterable[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    def _accumulate_pair(
+        self, catalogs: Iterable[np.ndarray | None]
+    ) -> tuple[np.ndarray, np.ndarray]:
         e_total = np.zeros(self._ncut, dtype=np.float64)
         r_total = np.zeros(self._ncut, dtype=np.float64)
         for src in catalogs:
@@ -421,7 +440,9 @@ class SelBiasRedshiftSummaryPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
+        super().__init__(
+            config=config, log=log, initInputs=initInputs, **kwargs
+        )
         assert isinstance(self.config, SelBiasRedshiftSummaryPipeConfig)
         self._ncut = len(self.config.zbounds) + 1
 
@@ -437,6 +458,7 @@ class SelBiasRedshiftSummaryPipe(PipelineTask):
         return np.vstack(valid)
 
     def run(self, *, summary_list, **kwargs):
+        assert isinstance(self.config, SelBiasRedshiftSummaryPipeConfig)
         arrays_e_pos: List[np.ndarray] = []
         arrays_e_neg: List[np.ndarray] = []
         arrays_r_pos: List[np.ndarray] = []

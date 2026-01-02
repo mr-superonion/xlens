@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""
-Example
--------
-# 128 ranks spanning group IDs 0..299:
-mpirun -n 128 python summary.py \
-    --emax 0.3 --layout grid \
-    --target g1 --shear 0.02 \
-    --group-start 0 --group-end 300
-"""
+"""Aggregate shear measurements over individual simulation seeds using RF cuts."""
 
 import argparse
 import glob
@@ -15,55 +7,36 @@ import os
 import pickle
 import warnings
 
+import fitsio
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 from astropy.stats import sigma_clipped_stats
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from numpy.lib import recfunctions as rfn
+
+try:
+    from mpi4py import MPI  # type: ignore
+except Exception as exc:  # pragma: no cover - mpi4py optional
+    raise SystemExit("mpi4py is required to run this script") from exc
+
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.exceptions import InconsistentVersionWarning
 
 warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
 
-# --- Optional MPI: works without mpirun/srun or even mpi4py installed ---
-try:
-    from mpi4py import MPI  # type: ignore
-    _COMM = MPI.COMM_WORLD
-    _RANK = _COMM.Get_rank()
-    _SIZE = _COMM.Get_size()
 
-    def _barrier():
-        _COMM.Barrier()
-except Exception:
-    class _FakeComm:
-        def Get_rank(self):
-            return 0
-
-        def Get_size(self):
-            return 1
-    _COMM = _FakeComm()
-    _RANK = 0
-    _SIZE = 1
-
-    def _barrier():
-        return
-
-
-model_fname = os.path.join(
-    os.environ["HOME"], "unrecognized_blend_gri-only.pkl"
-)
-with open(model_fname, "rb") as f:
-    clf = pickle.load(f)
+_MODEL_PATH = os.path.join(os.environ["HOME"], "unrecognized_blend_gri-only.pkl")
+with open(_MODEL_PATH, "rb") as _fh:
+    _RF_MODEL: RandomForestClassifier = pickle.load(_fh)
 
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="measure + aggregate from catalogs over a given group range.",
+        description=(
+            "Measure + aggregate from catalogs over a given seed ID range "
+            "using random-forest based score cuts."
+        ),
         allow_abbrev=False,
     )
-    p.add_argument(
-        "--summary", action=argparse.BooleanOptionalAction, default=False
-    )
-    # Directory layout and naming
+    p.add_argument("--summary", action=argparse.BooleanOptionalAction, default=False)
     p.add_argument(
         "--pscratch",
         type=str,
@@ -90,25 +63,29 @@ def parse_args():
         default=0.02,
         help="True shear amplitude |g| used in sims.",
     )
-    # group range (each group contains 100 sim_seeds)
     p.add_argument(
-        "--group-start",
+        "--min-id",
         type=int,
         required=True,
-        help="Minimum group_id (inclusive), maps to sim_seed >= 100*group_id",
+        help="Minimum sim_seed (inclusive).",
     )
     p.add_argument(
-        "--group-end",
+        "--max-id",
         type=int,
         required=True,
-        help="Maximum group_id (exclusive), maps to sim_seed < 100*group_id",
+        help="Maximum sim_seed (exclusive).",
     )
-    # Measurement config
     p.add_argument(
         "--score-maxes",
         type=str,
-        default="0.1,0.3,0.5,0.7,0.9",
-        help="Comma-separated list of score cuts, e.g. '0.1, 0.2, 0.3'.",
+        default="0.1,0.2,0.3",
+        help="Comma-separated list of score cuts, e.g. '0.1,0.2,0.3'.",
+    )
+    p.add_argument(
+        "--flux-min",
+        type=float,
+        default=40.0,
+        help="Flux cut applied to each band before score selection.",
     )
     p.add_argument(
         "--emax",
@@ -122,7 +99,6 @@ def parse_args():
         default=0.02,
         help="Finite-difference step for selection response.",
     )
-    # Geometry for density / area
     p.add_argument(
         "--stamp-dim",
         type=int,
@@ -135,7 +111,6 @@ def parse_args():
         default=0.2,
         help="Pixel scale (arcsec/pixel).",
     )
-    # Bootstrap
     p.add_argument(
         "--bootstrap",
         type=int,
@@ -152,75 +127,81 @@ def parse_score_list(s: str):
     return [float(x) for x in s.split(",")] if s else [0.1, 0.2, 0.3]
 
 
+CORE_COLUMNS = [
+    "wsel",
+    "dwsel_dg1",
+    "dwsel_dg2",
+    "fpfs_e1",
+    "fpfs_de1_dg1",
+    "fpfs_de1_dg2",
+    "fpfs_e2",
+    "fpfs_de2_dg1",
+    "fpfs_de2_dg2",
+]
+
+
 def base_path(pscratch, layout, target, shear):
     sd = f"shear{int(shear*100):02d}"
-    return os.path.join(
-        pscratch,
-        "parquet",
-        f"constant_shear_{layout}",
-        target,
-        sd,
-    )
+    return os.path.join(pscratch, f"constant_shear_{layout}", target, sd)
 
 
-def parquet_group_path(base_dir, group_id, mode) -> str:
-    return os.path.join(
-        base_dir,
-        f"mode{mode}",
-        f"group_id={group_id}",
-        "data.parquet",
-    )
+def _to_native(arr: np.ndarray) -> np.ndarray:
+    if arr.dtype.byteorder in ("=", "|"):
+        return arr
+    return arr.byteswap().newbyteorder("=")
 
 
-def arrow_to_numpy_struct(table: pa.Table) -> np.ndarray:
-    table = table.combine_chunks()
-    cols = [table[c].to_numpy(zero_copy_only=False) for c in table.column_names]
-    return np.rec.fromarrays(cols, names=table.column_names)
+def cat_read(base_dir: str, sim_id: int, mode: int) -> np.ndarray:
+    mode_dir = os.path.join(base_dir, f"mode{mode}")
+    main_path = os.path.join(mode_dir, f"cat-{sim_id:05d}.fits")
+    arrays = [_to_native(fitsio.read(main_path, columns=CORE_COLUMNS))]
 
-
-def get_score(src, comp: int = 1, dg: float = 0.0):
-    mag_zero = 30.0
-    phot = []
-    rr = -2.5 / np.log(10)
     for band in "gri":
-        dm = (
-            rr * src[f"{band}_dflux_gauss2_dg{comp}"] /
-            src[f"{band}_flux_gauss2"]
-        ) * dg
-        ff = np.clip(src[f"{band}_flux_gauss2"], a_min=1e-30, a_max=None)
-        phot.append(
-            mag_zero - 2.5 * np.log10(ff) + dm
-        )
+        cols = [
+            f"{band}_flux_gauss2",
+            f"{band}_flux_gauss2_err",
+            f"{band}_dflux_gauss2_dg1",
+            f"{band}_dflux_gauss2_dg2",
+        ]
+        band_path = os.path.join(mode_dir, f"cat-{sim_id:05d}-{band}.fits")
+        arrays.append(_to_native(fitsio.read(band_path, columns=cols)))
+
+    merged = rfn.merge_arrays(arrays, flatten=True, asrecarray=False, usemask=False)
+    return rfn.repack_fields(merged)
+
+
+def _get_score(src, comp: int = 1, dg: float = 0.0):
+    mag_zero = 30.0
+    rr = -2.5 / np.log(10)
+    phot = []
+    for band in "gri":
+        flux = np.clip(src[f"{band}_flux_gauss2"], a_min=1e-30, a_max=None)
+        dflux = src[f"{band}_dflux_gauss2_dg{comp}"]
+        dm = (rr * dflux / flux) * dg
+        phot.append(mag_zero - 2.5 * np.log10(flux) + dm)
     phot = np.vstack(phot).T
-    return clf.predict_proba(phot)[:, 1]
+    return _RF_MODEL.predict_proba(phot)[:, 1]
 
 
-def get_esq(src, comp: int = 1, dg: float = 0.0):
+def _get_esq(src, comp: int = 1, dg: float = 0.0):
     e = src[f"fpfs_e{comp}"]
     de = src[f"fpfs_de{comp}_dg{comp}"]
     comp2 = int(3 - comp)
     e2 = src[f"fpfs_e{comp2}"]
     de2 = src[f"fpfs_de{comp2}_dg{comp}"]
     esq0 = e ** 2.0 + e2 ** 2.0
-    esq = esq0 + 2.0 * dg * (e * de + e2 * de2)
-    return esq
+    return esq0 + 2.0 * dg * (e * de + e2 * de2)
 
 
 def measure_shear_with_cut(src, flux_min, emax=0.3, smax=1.0, dg=0.02):
-    """
-    Selection + response including selection response via finite differencing.
-
-    Returns: e1, R11, e2, R22, N  (scalars for this flux_min)
-    """
-
-    score = get_score(src)
-    esq0 = get_esq(src)
+    score = _get_score(src)
+    esq0 = _get_esq(src)
     m_0 = (
-        (src["g_flux_gauss2"] > flux_min) &
-        (src["r_flux_gauss2"] > flux_min) &
-        (src["i_flux_gauss2"] > flux_min) &
-        (esq0 < emax * emax) &
-        (score < smax)
+        (src["g_flux_gauss2"] > flux_min)
+        & (src["r_flux_gauss2"] > flux_min)
+        & (src["i_flux_gauss2"] > flux_min)
+        & (esq0 < emax * emax)
+        & (score < smax)
     )
     nn = int(np.sum(m_0))
     if nn == 0:
@@ -240,31 +221,31 @@ def measure_shear_with_cut(src, flux_min, emax=0.3, smax=1.0, dg=0.02):
     )
 
     def sel_term(comp: int):
-        esq_p = get_esq(src, comp=comp, dg=dg)
-        score_p = get_score(src, comp=comp, dg=dg)
-        gflux_p = (src["g_flux_gauss2"] + dg * src[f"g_dflux_gauss2_dg{comp}"])
-        rflux_p = (src["r_flux_gauss2"] + dg * src[f"r_dflux_gauss2_dg{comp}"])
-        iflux_p = (src["i_flux_gauss2"] + dg * src[f"i_dflux_gauss2_dg{comp}"])
+        esq_p = _get_esq(src, comp=comp, dg=dg)
+        score_p = _get_score(src, comp=comp, dg=dg)
+        gflux_p = src["g_flux_gauss2"] + dg * src[f"g_dflux_gauss2_dg{comp}"]
+        rflux_p = src["r_flux_gauss2"] + dg * src[f"r_dflux_gauss2_dg{comp}"]
+        iflux_p = src["i_flux_gauss2"] + dg * src[f"i_dflux_gauss2_dg{comp}"]
         m_p = (
-            (gflux_p > flux_min) &
-            (rflux_p > flux_min) &
-            (iflux_p > flux_min) &
-            (esq_p < emax * emax) &
-            (score_p < smax)
+            (gflux_p > flux_min)
+            & (rflux_p > flux_min)
+            & (iflux_p > flux_min)
+            & (esq_p < emax * emax)
+            & (score_p < smax)
         )
         ellp = np.sum(src["wsel"][m_p] * src[f"fpfs_e{comp}"][m_p])
 
-        esq_m = get_esq(src, comp=comp, dg=-dg)
-        score_m = get_score(src, comp=comp, dg=-dg)
-        gflux_m = (src["g_flux_gauss2"] - dg * src[f"g_dflux_gauss2_dg{comp}"])
-        rflux_m = (src["r_flux_gauss2"] - dg * src[f"r_dflux_gauss2_dg{comp}"])
-        iflux_m = (src["i_flux_gauss2"] - dg * src[f"i_dflux_gauss2_dg{comp}"])
+        esq_m = _get_esq(src, comp=comp, dg=-dg)
+        score_m = _get_score(src, comp=comp, dg=-dg)
+        gflux_m = src["g_flux_gauss2"] - dg * src[f"g_dflux_gauss2_dg{comp}"]
+        rflux_m = src["r_flux_gauss2"] - dg * src[f"r_dflux_gauss2_dg{comp}"]
+        iflux_m = src["i_flux_gauss2"] - dg * src[f"i_dflux_gauss2_dg{comp}"]
         m_m = (
-            (gflux_m > flux_min) &
-            (rflux_m > flux_min) &
-            (iflux_m > flux_min) &
-            (esq_m < emax * emax) &
-            (score_m < smax)
+            (gflux_m > flux_min)
+            & (rflux_m > flux_min)
+            & (iflux_m > flux_min)
+            & (esq_m < emax * emax)
+            & (score_m < smax)
         )
         ellm = np.sum(src["wsel"][m_m] * src[f"fpfs_e{comp}"][m_m])
         return (ellp - ellm) / (2.0 * dg)
@@ -274,73 +255,24 @@ def measure_shear_with_cut(src, flux_min, emax=0.3, smax=1.0, dg=0.02):
     return e1, (r1 + r1_sel), e2, (r2 + r2_sel), nn
 
 
-def bootstrap_m(
-    rng, e_pos, e_neg, R_pos, R_neg, shear_value, nsamp=10000
-):  # noqa: N802 - keep historical name
-    """Bootstrap estimates of the multiplicative and additive biases.
-
-    Parameters
-    ----------
-    rng : numpy.random.Generator
-        RNG used to draw bootstrap indices.
-    e_pos, e_neg, R_pos, R_neg : ndarray
-        Arrays with shape ``(Nsamples_total, ncut)`` containing the per-object
-        ellipticity and response measurements for positive/negative shear.
-    shear_value : float
-        True shear amplitude used in the simulations.
-    nsamp : int, optional
-        Number of bootstrap realizations to draw.
-
-    Returns
-    -------
-    tuple of ndarray
-        ``(ms, cs)`` each of shape ``(nsamp, ncut)`` containing the bootstrap
-        draws of the multiplicative and additive biases respectively.
-    """
-    N, ncut = e_pos.shape
-    ms = np.zeros((nsamp, ncut))
-    cs = np.zeros((nsamp, ncut))
-    for i in range(nsamp):
-        k = rng.integers(0, N, size=N, endpoint=False)
-        den = np.sum(R_pos[k] + R_neg[k], axis=0)
-
-        num_m = np.sum(e_pos[k] - e_neg[k], axis=0)
-        new_gamma = num_m / den
-        ms[i] = new_gamma / shear_value - 1.0
-
-        num_c = np.sum(e_pos[k] + e_neg[k], axis=0)
-        cs[i] = num_c / den
-    return ms, cs
-
-
-def per_rank_work(group_chunk, base_dir, score_list, emax, dg, target):
-    """
-    For each group_id in ``group_chunk``, read the +g (mode40) and -g (mode0)
-    catalogs aggregated over that group's 100 sim_seeds and compute the
-    per-score-cut e_pos/e_neg, R_pos/R_neg. Returns 4 arrays of shape
-    (Nsamples_local, ncut).
-    """
+def per_rank_work(ids_chunk, base_dir, score_list, flux_min, emax, dg, target):
     ncut = len(score_list)
     E_pos = []
     E_neg = []
     R_pos = []
     R_neg = []
 
-    for group_id in group_chunk:
-        ppos = parquet_group_path(base_dir, group_id, mode=40)  # +g
-        pneg = parquet_group_path(base_dir, group_id, mode=0)  # -g
-
-        if not (os.path.isfile(ppos) and os.path.isfile(pneg)):
-            # Skip if pair not complete
+    for sid in ids_chunk:
+        pos_path = os.path.join(base_dir, "mode40", f"cat-{sid:05d}.fits")
+        neg_path = os.path.join(base_dir, "mode0", f"cat-{sid:05d}.fits")
+        if not (os.path.exists(pos_path) and os.path.exists(neg_path)):
             continue
         try:
-            tbl_pos = pq.read_table(ppos)
-            tbl_neg = pq.read_table(pneg)
-            src_pos = arrow_to_numpy_struct(tbl_pos)
-            src_neg = arrow_to_numpy_struct(tbl_neg)
-        except OSError:
-            print(ppos)
-            print(pneg)
+            src_pos = cat_read(base_dir, sid, mode=40)
+            src_neg = cat_read(base_dir, sid, mode=0)
+        except (OSError, FileNotFoundError):
+            print(pos_path)
+            print(neg_path)
             continue
 
         e_pos_row = np.zeros(ncut)
@@ -348,15 +280,13 @@ def per_rank_work(group_chunk, base_dir, score_list, emax, dg, target):
         R_pos_row = np.zeros(ncut)
         R_neg_row = np.zeros(ncut)
 
-        fmin = 40
         for j, smax in enumerate(score_list):
             e1p, R1p, e2p, R2p, _ = measure_shear_with_cut(
-                src_pos, fmin, emax=emax, smax=smax, dg=dg
+                src_pos, flux_min, emax=emax, smax=smax, dg=dg
             )
             e1m, R1m, e2m, R2m, _ = measure_shear_with_cut(
-                src_neg, fmin, emax=emax, smax=smax, dg=dg
+                src_neg, flux_min, emax=emax, smax=smax, dg=dg
             )
-
             if target == "g1":
                 e_pos_row[j] = e1p
                 e_neg_row[j] = e1m
@@ -374,8 +304,7 @@ def per_rank_work(group_chunk, base_dir, score_list, emax, dg, target):
         R_neg.append(R_neg_row)
 
     if len(E_pos) == 0:
-        z = (np.zeros((0, ncut)),) * 4
-        return z
+        return (np.zeros((0, ncut)),) * 4
 
     return (
         np.vstack(E_pos),
@@ -385,39 +314,38 @@ def per_rank_work(group_chunk, base_dir, score_list, emax, dg, target):
     )
 
 
-def save_rank_partial(outdir, group_index, E_pos, E_neg, R_pos, R_neg, ncut):
-    partdir = os.path.join(outdir, "summary-rf2-40-00")
+def save_rank_partial(outdir, seed_index, E_pos, E_neg, R_pos, R_neg, ncut):
+    partdir = os.path.join(outdir, "summary-rf-40-00")
     os.makedirs(partdir, exist_ok=True)
-    path = os.path.join(partdir, f"group_{group_index:05d}.npz")
+    path = os.path.join(partdir, f"seed_{seed_index:05d}.npz")
     np.savez_compressed(
         path,
-        E_pos=E_pos, E_neg=E_neg, R_pos=R_pos, R_neg=R_neg, ncut=np.int64(ncut)
+        E_pos=E_pos,
+        E_neg=E_neg,
+        R_pos=R_pos,
+        R_neg=R_neg,
+        ncut=np.int64(ncut),
     )
     return path
 
 
-def load_and_stack_all(outdir, size, ncut_expected=None):
-    partdir = os.path.join(outdir, "summary-rf2-40-00")
+def load_and_stack_all(outdir, ncut_expected=None):
+    partdir = os.path.join(outdir, "summary-rf-40-00")
     arrays_E_pos, arrays_E_neg, arrays_R_pos, arrays_R_neg = [], [], [], []
     ncut_from_file = None
 
-    pathes = glob.glob(os.path.join(partdir, "group_*.npz"))
-    for path in pathes:
+    for path in sorted(glob.glob(os.path.join(partdir, "*.npz"))):
         with np.load(path) as data:
-            E_pos = data["E_pos"]
-            E_neg = data["E_neg"]
-            R_pos = data["R_pos"]
-            R_neg = data["R_neg"]
+            arrays_E_pos.append(data["E_pos"])
+            arrays_E_neg.append(data["E_neg"])
+            arrays_R_pos.append(data["R_pos"])
+            arrays_R_neg.append(data["R_neg"])
             if ncut_from_file is None:
                 ncut_from_file = int(data["ncut"])
-            arrays_E_pos.append(E_pos)
-            arrays_E_neg.append(E_neg)
-            arrays_R_pos.append(R_pos)
-            arrays_R_neg.append(R_neg)
 
     def _stack(blocks, ncut):
-        blocks = [b for b in blocks if b.size > 0]
-        if len(blocks) == 0:
+        blocks = [blk for blk in blocks if blk.size > 0]
+        if not blocks:
             return np.zeros((0, ncut), dtype=np.float64)
         return np.vstack(blocks)
 
@@ -429,112 +357,122 @@ def load_and_stack_all(outdir, size, ncut_expected=None):
     return E_pos_all, E_neg_all, R_pos_all, R_neg_all
 
 
+def bootstrap_m(rng, e_pos, e_neg, R_pos, R_neg, shear_value, nsamp=10000):
+    N, ncut = e_pos.shape
+    ms = np.zeros((nsamp, ncut))
+    cs = np.zeros((nsamp, ncut))
+    for i in range(nsamp):
+        k = rng.integers(0, N, size=N, endpoint=False)
+        den = np.sum(R_pos[k] + R_neg[k], axis=0)
+
+        num_m = np.sum(e_pos[k] - e_neg[k], axis=0)
+        new_gamma = num_m / den
+        ms[i] = new_gamma / shear_value - 1.0
+
+        num_c = np.sum(e_pos[k] + e_neg[k], axis=0)
+        cs[i] = num_c / den
+    return ms, cs
+
+
 def main():
     args = parse_args()
-    comm = _COMM
-    rank = _RANK
-    size = _SIZE
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    if args.max_id <= args.min_id:
+        raise SystemExit("--max-id must be > --min-id")
 
     score_list = parse_score_list(args.score_maxes)
-
-    # Save per-rank partials
+    outdir = base_path(args.pscratch, args.layout, args.target, args.shear)
     ncut = len(score_list)
-    base_dir = base_path(args.pscratch, args.layout, args.target, args.shear)
 
     if not args.summary:
-        # Build full group list [group_start, group_end) split across ranks
-        if args.group_end <= args.group_start:
-            raise SystemExit("--group-end must be > --group-start")
-        all_groups = np.arange(args.group_start, args.group_end, dtype=int)
-
-        # Even split
-        n = len(all_groups)
+        all_ids = np.arange(args.min_id, args.max_id, dtype=int)
+        n = len(all_ids)
         base = n // size
         rem = n % size
         start = rank * base + min(rank, rem)
         stop = start + base + (1 if rank < rem else 0)
-        my_groups = all_groups[start:stop]
+        my_ids = all_ids[start:stop]
 
-        # Per-rank measurement
         E_pos, E_neg, R_pos, R_neg = per_rank_work(
-            my_groups,
-            base_dir,
+            my_ids,
+            outdir,
             score_list,
+            args.flux_min,
             args.emax,
             args.dg,
             args.target,
         )
 
         index = (
-            int(my_groups[0])
-            if len(my_groups) > 0
-            else (args.group_start + rank)
+            int(my_ids[0]) if len(my_ids) > 0 else (args.min_id + rank)
         )
-        save_rank_partial(base_dir, index, E_pos, E_neg, R_pos, R_neg, ncut)
-        # Ensure all ranks have written their files
-        _barrier()
-    else:
-        if rank == 0:
-            # Load, stack, and (optionally) save final combined
-            all_E_pos, all_E_neg, all_R_pos, all_R_neg = load_and_stack_all(
-                base_dir, size, ncut_expected=ncut
-            )
-            if all_E_pos.size == 0 or all_E_neg.size == 0:
-                raise SystemExit(
-                    "No valid (+g/-g) pairs found in the given group range."
-                )
+        save_rank_partial(outdir, index, E_pos, E_neg, R_pos, R_neg, ncut)
+        comm.Barrier()
+        return
 
-            # m and c per score cut
-            num = np.sum(all_E_pos - all_E_neg, axis=0)  # (ncut,)
-            den = np.sum(all_R_pos + all_R_neg, axis=0)
-            m = (num / den) / args.shear - 1.0
+    if rank == 0:
+        all_E_pos, all_E_neg, all_R_pos, all_R_neg = load_and_stack_all(
+            outdir, ncut_expected=ncut
+        )
 
-            c = np.sum(all_E_pos + all_E_neg, axis=0) / np.sum(
-                all_R_pos + all_R_neg, axis=0
+        if all_E_pos.size == 0 or all_E_neg.size == 0:
+            raise SystemExit(
+                "No valid (+g/-g) pairs found in the given seed ID range."
             )
 
-            # area & densities
-            area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
-                args.pixel_scale / 60.0
-            ) ** 2.0 * 100
+        num = np.sum(all_E_pos - all_E_neg, axis=0)
+        den = np.sum(all_R_pos + all_R_neg, axis=0)
+        m = (num / den) / args.shear - 1.0
 
-            clipped_mean, clipped_median, clipped_std = sigma_clipped_stats(
-                all_E_pos / np.average(all_R_pos, axis=0),
-                sigma=5.0,
-                axis=0,
-            )
-            neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
+        c = np.sum(all_E_pos + all_E_neg, axis=0) / np.sum(
+            all_R_pos + all_R_neg, axis=0
+        )
 
-            rng = np.random.default_rng(0)
-            ms, cs = bootstrap_m(
-                rng,
-                all_E_pos,
-                all_E_neg,
-                all_R_pos,
-                all_R_neg,
-                args.shear,
-                nsamp=args.bootstrap,
-            )
-            ord_ms = np.sort(ms, axis=0)
-            lo_idx = int(0.1587 * args.bootstrap)
-            hi_idx = int(0.8413 * args.bootstrap)
-            sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
+        area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
+            args.pixel_scale / 60.0
+        ) ** 2.0
 
-            ord_cs = np.sort(cs, axis=0)
-            sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
+        _, _, clipped_std = sigma_clipped_stats(
+            all_E_pos / np.average(all_R_pos, axis=0),
+            sigma=5.0,
+        )
+        neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
 
-            # Summary
-            print("==============================================")
-            print(f"Catalog Directory: {base_dir}")
-            print(f"Paired IDs (found): {all_E_pos.shape[0]}")
-            print(f"Score cuts: {score_list}")
-            print(f"Area (arcmin^2): {area_arcmin2:.3f}")
-            print("m (per score cut):", m)
-            print("c (per score cut):", c)
-            print("n_eff (per score cut):", neff)
-            print("m 1-sigma (bootstrap):", sigma_m)
-            print("c 1-sigma (bootstrap):", sigma_c)
-            print("==============================================")
+        rng = np.random.default_rng(0)
+        ms, cs = bootstrap_m(
+            rng,
+            all_E_pos,
+            all_E_neg,
+            all_R_pos,
+            all_R_neg,
+            args.shear,
+            nsamp=args.bootstrap,
+        )
+        ord_ms = np.sort(ms, axis=0)
+        lo_idx = int(0.1587 * args.bootstrap)
+        hi_idx = int(0.8413 * args.bootstrap)
+        sigma_m = (ord_ms[hi_idx] - ord_ms[lo_idx]) / 2.0
+
+        ord_cs = np.sort(cs, axis=0)
+        sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
+
+        print("==============================================")
+        print(f"Outdir: {outdir}")
+        print(f"Paired IDs (found): {all_E_pos.shape[0]}")
+        print(f"ID range requested: [{args.min_id}, {args.max_id})")
+        print(f"Score cuts: {score_list}")
+        print(f"Area (arcmin^2): {area_arcmin2:.3f}")
+        print("m (per score cut):", m)
+        print("c (per score cut):", c)
+        print("n_eff (per score cut):", neff)
+        print("m 1-sigma (bootstrap):", sigma_m)
+        print("c 1-sigma (bootstrap):", sigma_c)
+        print("==============================================")
+    comm.Barrier()
+
 
 if __name__ == "__main__":
     main()
