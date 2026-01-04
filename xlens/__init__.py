@@ -1,7 +1,7 @@
 from .__version__ import __version__  # noqa
 
 try:
-    from . import (
+    from . import (  # noqa
         analysis,
         catalog,
         process_pipe,

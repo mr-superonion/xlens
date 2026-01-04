@@ -124,10 +124,10 @@ class ShearLogNormalFlat:
         lensed_y = src["dx"] * mat[1, 0] + src["dy"] * mat[1, 1]
 
         return _get_shear_res_dict(
-                lensed_x=lensed_x,
-                lensed_y=lensed_y,
-                gamma1=gamma1,
-                gamma2=gamma2,
-                kappa=kappa,
-                has_finite_shear=True
+            lensed_x=lensed_x,
+            lensed_y=lensed_y,
+            gamma1=gamma1,
+            gamma2=gamma2,
+            kappa=kappa,
+            has_finite_shear=True
         )

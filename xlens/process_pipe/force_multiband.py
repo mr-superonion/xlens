@@ -295,7 +295,7 @@ class ForcedPhotCoaddTask(pipeBase.PipelineTask):
                 fpRecord = footprintCat.find(srcRecord.getId())
                 if fpRecord is None:
                     raise LookupError(
-                        "Cannot find Footprint for source {}; please check that {} "
+                        "Cannot find Footprint for source {}; check that {} "
                         "IDs are compatible with reference source IDs".format(
                             srcRecord.getId(), footprintCat
                         )

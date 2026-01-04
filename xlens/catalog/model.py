@@ -2,6 +2,7 @@ import numpy as np
 
 s0 = 0.01  # ground for std
 
+
 def evar_model(mag, radius, c0, c1, c2, c3, c4, c5):
     logAB = c0 + c1 * mag + c2 * radius + (
         c3 * mag ** 2.0 + c4 * radius ** 2.0
@@ -50,7 +51,7 @@ def w_model_derivs(flux, m0, m2, mag_zero, c0, c1, c2, c3, c4, c5):
 
     # derivatives of logAB
     dlogAB_dmag = c1 + 2*c3*mag + c5*radius
-    dlogAB_dr   = c2 + 2*c4*radius + c5*mag
+    dlogAB_dr = c2 + 2*c4*radius + c5*mag
 
     # --- dw/dflux ---
     # mag depends on flux; radius does not

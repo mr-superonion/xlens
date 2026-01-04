@@ -1,6 +1,4 @@
 """Utilities for applying BATSim transforms."""
-from typing import Any
-
 import galsim
 import numpy as np
 

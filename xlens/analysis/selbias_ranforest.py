@@ -245,7 +245,7 @@ class SelBiasRfMultibandPipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
         return
 
-    def run(self, src00, src01, src10, src11):
+    def run(self, *, src00, src01, src10, src11, **kwargs):
         assert isinstance(self.config, SelBiasRfMultibandPipeConfig)
         ncuts = len(self.config.thresholds)
         em = np.zeros(ncuts)
@@ -363,7 +363,7 @@ class SelBiasRfSummaryMultibandPipe(PipelineTask):
         self.run(**inputs)
         return
 
-    def run(self, summary_list):
+    def run(self, *, summary_list, **kwargs):
         assert isinstance(self.config, SelBiasRfSummaryMultibandPipeConfig)
         up1 = []
         up2 = []

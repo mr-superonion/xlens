@@ -6,12 +6,13 @@ import numpy as np
 num_rot = 2
 gal_seed_base = 10
 
+
 def get_noise_seed(
     *,
     galaxy_seed,
     noiseId=0,
     rotId=0,
-    band="i",
+    band: None | str = "i",
     is_sim=False
 ):
     """Generate a stable pseudo-random seed for noise realisations.

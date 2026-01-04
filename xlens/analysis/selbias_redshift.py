@@ -46,7 +46,8 @@ from xlens.catalog.redshift import (
     load_bpz_templates,
 )
 
-DEFAULT_BPZ_DATA_PATH = "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/2025-10-15/rail/bpz"
+DEFAULT_BPZ_DATA_PATH = \
+    "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/2025-10-15/rail/bpz"
 
 __all__ = [
     "SelBiasRedshiftPipeConnections",

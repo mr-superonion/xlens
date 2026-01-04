@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Aggregate shear measurements over individual simulation seeds using RF cuts."""
+"""
+Aggregate shear measurements over individual simulation seeds using RF
+cuts.
+"""
 
 import argparse
 import glob
@@ -23,7 +26,9 @@ from sklearn.exceptions import InconsistentVersionWarning
 warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
 
 
-_MODEL_PATH = os.path.join(os.environ["HOME"], "unrecognized_blend_gri-only.pkl")
+_MODEL_PATH = os.path.join(
+    os.environ["HOME"], "unrecognized_blend_gri-only.pkl"
+)
 with open(_MODEL_PATH, "rb") as _fh:
     _RF_MODEL: RandomForestClassifier = pickle.load(_fh)
 
@@ -36,7 +41,9 @@ def parse_args():
         ),
         allow_abbrev=False,
     )
-    p.add_argument("--summary", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument(
+        "--summary", action=argparse.BooleanOptionalAction, default=False,
+    )
     p.add_argument(
         "--pscratch",
         type=str,
@@ -166,7 +173,9 @@ def cat_read(base_dir: str, sim_id: int, mode: int) -> np.ndarray:
         band_path = os.path.join(mode_dir, f"cat-{sim_id:05d}-{band}.fits")
         arrays.append(_to_native(fitsio.read(band_path, columns=cols)))
 
-    merged = rfn.merge_arrays(arrays, flatten=True, asrecarray=False, usemask=False)
+    merged = rfn.merge_arrays(
+        arrays, flatten=True, asrecarray=False, usemask=False,
+    )
     return rfn.repack_fields(merged)
 
 

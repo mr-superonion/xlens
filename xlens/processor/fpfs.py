@@ -30,17 +30,17 @@ class FpfsMeasurementConfig(Config):
         default=-1,
     )
     sigma_shapelets2 = Field[float](
-        doc="Shapelet's Gaussian kernel size for the second measurement [arcsec]",
+        doc="Shapelet's Gaussian kernel for the second measurement [arcsec]",
         optional=True,
         default=-1,
     )
     snr_min = Field[float](
-        doc="Shapelet's Gaussian kernel size for the second measurement",
+        doc="Shapelet's Gaussian kernel for the second measurement",
         optional=True,
         default=12.0,
     )
     r2_min = Field[float](
-        doc="Shapelet's Gaussian kernel size for the second measurement",
+        doc="Shapelet's Gaussian kernel for the second measurement",
         optional=True,
         default=0.1,
     )
@@ -233,5 +233,5 @@ class FpfsMeasurementTask(Task):
                 lsst_bbox=lsst_bbox,
             )
         else:
-           data["psf_object"] = None
+            data["psf_object"] = None
         return data

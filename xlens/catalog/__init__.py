@@ -1,8 +1,8 @@
-from . import model, redshift, twopt, utils
+from . import model, redshift, utils
 from .base import get_esq, measure_shear
 
 __all__ = [
-    "twopt", "utils", "model",
+    "utils", "model",
     "get_esq", "measure_shear",
     "redshift",
 ]

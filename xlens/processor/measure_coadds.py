@@ -30,7 +30,7 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.afw.image import ExposureF, MaskX
+from lsst.afw.image import MaskX
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field, FieldValidationError
 from lsst.pipe.base import (
@@ -90,6 +90,7 @@ class MeasureCoaddsPipeConnections(
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
+
     def __init__(self, *, config=None):
         super().__init__(config=config)
 
@@ -140,7 +141,10 @@ class MeasureCoaddsPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
+        super().__init__(
+            config=config, log=log,
+            initInputs=initInputs, **kwargs,
+        )
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
 
         self.makeSubtask("anacal")
@@ -207,6 +211,7 @@ class MeasureCoaddsPipe(PipelineTask):
         seed_offset: int = 0,
         mask_array: NDArray | None = None,
     ) -> np.ndarray:
+        assert isinstance(self.config, MeasureCoaddsPipeConfig)
         band = "i"
         if band not in exposure_handles_dict:
             raise KeyError(
@@ -221,7 +226,6 @@ class MeasureCoaddsPipe(PipelineTask):
 
         idGenerator = self.config.idGenerator.apply(handle.dataId)
         seed = idGenerator.catalog_id + seed_offset
-
         data = self.anacal.prepare_data(
             exposure=exposure,
             band=band,
@@ -247,6 +251,7 @@ class MeasureCoaddsPipe(PipelineTask):
         seed_offset: int = 0,
         mask_array: NDArray | None = None,
     ) -> np.ndarray:
+        assert isinstance(self.config, MeasureCoaddsPipeConfig)
         """Loop over bands and run forced measurement. Returns band-prefixed
         merged structured array.
         """

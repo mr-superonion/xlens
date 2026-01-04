@@ -95,4 +95,5 @@ def DeVaucouleurs(
 ):
     return _mog_gal("dev", M, flux, half_light_radius)
 
+
 __all__ = ["Exponential", "DeVaucouleurs"]

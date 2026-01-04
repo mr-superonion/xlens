@@ -3,7 +3,7 @@ from typing import Any
 import anacal
 import astropy.units as u
 import numpy as np
-from lsst.afw.image import ExposureF, ImageI, MaskX
+from lsst.afw.image import ExposureF, MaskX
 from lsst.meas.algorithms import (
     LoadReferenceObjectsConfig,
     ReferenceObjectLoader,
@@ -16,7 +16,6 @@ from lsst.pipe.base import (
     Struct,
 )
 from lsst.pipe.base import connectionTypes as cT
-
 import xlens
 
 
@@ -65,6 +64,7 @@ class BuildSystematicsConnections(
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
     )
+
     def __init__(self, *, config=None):
         super().__init__(config=config)
 
@@ -98,14 +98,15 @@ class BuildSystematicsConfig(
 
 
 class BuildSystematicsTask(PipelineTask):
-    """Collect mask information from exposures, including bright star masking."""
+    """Collect mask information from exposures, including bright star
+    masking.
+    """
 
     _DefaultName = "BuildSystematicsTask"
     ConfigClass = BuildSystematicsConfig
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs, **kwargs):
         inputs = butlerQC.get(inputRefs)
-        dataId = butlerQC.quantum.dataId
         if len(inputs["gaia"]) > 0:
             gaia_loader = ReferenceObjectLoader(
                 dataIds=[ref.datasetRef.dataId for ref in inputRefs.gaia],
@@ -205,7 +206,9 @@ class BuildSystematicsTask(PipelineTask):
             psf_array = None
         return Struct(outputMask=output_msk, outputPsf=psf_array)
 
-    def _merge_mask(self, global_mask: np.ndarray | None, band_mask: np.ndarray):
+    def _merge_mask(
+        self, global_mask: np.ndarray | None, band_mask: np.ndarray,
+    ):
         if global_mask is None:
             return band_mask.astype(np.int16)
         return (global_mask | band_mask).astype(np.int16)

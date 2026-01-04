@@ -242,7 +242,7 @@ def get_psf_array(
     lsst_bbox,
     npix: int,
     dg: int = 250,
-    lsst_mask = None,
+    lsst_mask=None,
 ):
     """Compute an average PSF image over a regular grid.
 
@@ -316,7 +316,7 @@ def get_blocks(
     # Build mask array: True = masked
     if lsst_mask is not None and "INEXACT_PSF" in lsst_mask.getMaskPlaneDict():
         bitv = lsst_mask.getPlaneBitMask(
-            ["INEXACT_PSF", "NO_DATA", "BAD", "UNMASKEDNAN" ]
+            ["INEXACT_PSF", "NO_DATA", "BAD", "UNMASKEDNAN"]
         )
         mask_array = (bitv & lsst_mask.array) > 0
     else:
@@ -341,9 +341,9 @@ def get_blocks(
 
         # Define 21x21 local box
         x_start = max(x0 - 10, 0)
-        x_end   = min(x0 + 11, width)
+        x_end = min(x0 + 11, width)
         y_start = max(y0 - 10, 0)
-        y_end   = min(y0 + 11, height)
+        y_end = min(y0 + 11, height)
 
         # Get unmasked local pixels
         local_mask = mask_array[y_start:y_end, x_start:x_end]
@@ -740,6 +740,7 @@ def prepare_data(
             detection = detection.copy().as_array()
         elif isinstance(detection, np.ndarray):
             detection = detection.copy()
+        assert detection is not None
         detection = rfn.repack_fields(
             detection[list(anacal.table.column_names())]
         )

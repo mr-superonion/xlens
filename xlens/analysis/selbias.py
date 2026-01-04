@@ -198,7 +198,9 @@ class SelBiasMultibandPipe(PipelineTask):
         egn = self.egname
         comp = en[-1]
         if comp not in {"1", "2"}:
-            raise ValueError(f"Ellipticity column {en} must end with '1' or '2'")
+            raise ValueError(
+                f"Ellipticity column {en} must end with '1' or '2'"
+            )
         comp2 = "2" if comp == "1" else "1"
 
         en2 = en[:-1] + comp2
