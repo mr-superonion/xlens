@@ -4,10 +4,9 @@ import gc
 import os
 
 import fitsio
+import lsst.afw.image as afwImage
 import numpy as np
 from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
-import lsst.afw.image as afwImage
-
 from mpi4py import MPI
 from numpy.lib import recfunctions as rfn
 
@@ -24,7 +23,6 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
-
 
 COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()
@@ -141,12 +139,12 @@ sim_task = MultibandSimTask(config=cfg_sim)
 # Detection Task
 # ------------------------------
 detect_config = AnacalDetectPipeConfig()
-detect_config.anacal.sigma_arcsec = 0.37
+detect_config.anacal.sigma_arcsec = 0.40
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
 detect_config.do_fpfs = (args.band == "a")
-detect_config.fpfs.sigma_shapelets1 = 0.37 * np.sqrt(2.0)
+detect_config.fpfs.sigma_shapelets1 = 0.40 * np.sqrt(2.0)
 det_task = AnacalDetectPipe(config=detect_config)
 
 config = matchPipeConfig()
@@ -160,7 +158,7 @@ match_task = matchPipe(config=config)
 pscratch = os.environ.get("PSCRATCH", ".")
 outdir = os.path.join(
     pscratch,
-    f"constant_shear_{args.layout}-2",
+    f"constant_shear_{args.layout}",
     test_target,
     f"shear{int(shear_value * 100):02d}",
     f"mode{shear_mode}",

@@ -33,11 +33,10 @@ from typing import Any, List, Sequence
 
 import anacal
 import astropy
+import lsst.geom as lsst_geom
 import numpy as np
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
-
-import lsst.geom as lsst_geom
 
 badMaskDefault = [
     "BAD",

@@ -5,9 +5,8 @@ import os
 
 import fitsio
 import numpy as np
-from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 from lsst.afw.image import ExposureF
-
+from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 from mpi4py import MPI
 
 from xlens.process_pipe.anacal_detect import (
@@ -23,8 +22,6 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import IASimConfig, IASimTask
-
-
 
 COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()

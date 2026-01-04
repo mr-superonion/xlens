@@ -12,7 +12,6 @@ from typing import Iterable, List, Optional, Tuple
 import fitsio
 import numpy as np
 
-
 colnames = [
     "wsel",
     "dwsel_dg1",
@@ -49,9 +48,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--summary", action=argparse.BooleanOptionalAction, default=False
-    )
-    parser.add_argument(
-        "--correction", action=argparse.BooleanOptionalAction, default=True
     )
     # Directory layout and naming
     parser.add_argument(
@@ -92,6 +88,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         required=True,
         help="Maximum sim_seed (exclusive).",
+    )
+    parser.add_argument(
+        "--mag-max",
+        type=float,
+        default=24.5,
+        help="Flux cut applied to each band before selection.",
     )
     parser.add_argument(
         "--z-bounds",
@@ -143,15 +145,11 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def parse_zbounds(values: str) -> list[float]:
-    return [float(x) for x in values.split(",")]
-
-
 def base_path(pscratch, layout, target, shear):
     sd = f"shear{int(shear*100):02d}"
     return os.path.join(
         pscratch,
-        f"constant_shear_{layout}-2",
+        f"constant_shear_{layout}",
         target,
         sd,
     )
@@ -169,7 +167,6 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
 
     Returns: e1, R11, e2, R22, N  (scalars for this flux_min)
     """
-    emax = 0.5
     esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
     m0 = (src["flux_gauss2"] > flux_min) & (esq0 < emax * emax)
     w0 = src["wsel"][m0]
@@ -216,30 +213,31 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
             "e": np.array([e1]),
             "r": np.array([r1]),
             "r_sel": np.array([r1_sel]),
+            "n_gal": np.array([np.sum(m0)]),
         }
     else:
         return {
             "e": np.array([e2]),
             "r": np.array([r2]),
             "r_sel": np.array([r2_sel]),
+            "n_gal": np.array([np.sum(m0)]),
         }
 
 
 def per_rank_work(
     ids_chunk: Iterable[int],
     base_dir: str,
-    zbounds: list[float],
     flux_min: float,
     emax: float,
     dg: float,
     target: str,
-    do_correction: bool = True,
-    mag_zero: float = 30.0,
 ):
     e_pos_rows = []
     e_neg_rows = []
     r_pos_rows = []
     r_neg_rows = []
+    n_pos_rows = []
+    n_neg_rows = []
     for sim_id in ids_chunk:
         src_pos = cat_read(base_dir, sim_id, mode=40)
         out_pos = measure_shear(
@@ -265,19 +263,21 @@ def per_rank_work(
         e_neg_rows.append(out_neg["e"])
         r_pos_rows.append(out_pos["r"] + out_pos["r_sel"])
         r_neg_rows.append(out_neg["r"] + out_neg["r_sel"])
+        n_pos_rows.append(out_pos["n_gal"])
+        n_neg_rows.append(out_neg["n_gal"])
 
     return (
         np.vstack(e_pos_rows),
         np.vstack(e_neg_rows),
         np.vstack(r_pos_rows),
         np.vstack(r_neg_rows),
+        np.vstack(n_pos_rows),
+        np.vstack(n_neg_rows),
     )
 
 
-def summary_directory(outdir: str, do_correction: bool) -> str:
+def summary_directory(outdir: str) -> str:
     partdir = os.path.join(outdir, "summary-flux-40-00")
-    if not do_correction:
-        partdir = partdir + "-nc"
     return partdir
 
 
@@ -288,10 +288,10 @@ def save_rank_partial(
     e_neg: np.ndarray,
     r_pos: np.ndarray,
     r_neg: np.ndarray,
-    ncut: int,
-    do_correction: bool = True,
+    n_pos: np.ndarray,
+    n_neg: np.ndarray,
 ) -> str:
-    partdir = summary_directory(outdir, do_correction)
+    partdir = summary_directory(outdir)
     os.makedirs(partdir, exist_ok=True)
     path = os.path.join(partdir, f"seed_{seed_index:05d}.npz")
     np.savez_compressed(
@@ -300,7 +300,9 @@ def save_rank_partial(
         E_neg=e_neg,
         R_pos=r_pos,
         R_neg=r_neg,
-        ncut=int(ncut),
+        N_pos=n_pos,
+        N_neg=n_neg,
+        ncut=1,
     )
     return path
 
@@ -308,15 +310,15 @@ def save_rank_partial(
 def load_and_stack_all(
     outdir: str,
     ncut_expected: Optional[int] = None,
-    do_correction: bool = True,
 ):
-    partdir = summary_directory(outdir, do_correction)
+    partdir = summary_directory(outdir)
     arrays_E_pos: List[np.ndarray] = []
     arrays_E_neg: List[np.ndarray] = []
     arrays_R_pos: List[np.ndarray] = []
     arrays_R_neg: List[np.ndarray] = []
+    arrays_N_pos: List[np.ndarray] = []
+    arrays_N_neg: List[np.ndarray] = []
     ncut_from_file: Optional[int] = None
-    print(partdir)
 
     for path in sorted(glob.glob(os.path.join(partdir, "*.npz"))):
         with np.load(path) as data:
@@ -324,6 +326,8 @@ def load_and_stack_all(
             arrays_E_neg.append(data["E_neg"])
             arrays_R_pos.append(data["R_pos"])
             arrays_R_neg.append(data["R_neg"])
+            arrays_N_pos.append(data["N_pos"])
+            arrays_N_neg.append(data["N_neg"])
             if ncut_from_file is None:
                 ncut_from_file = int(data["ncut"])
 
@@ -338,7 +342,9 @@ def load_and_stack_all(
     E_neg_all = _stack(arrays_E_neg, ncut)
     R_pos_all = _stack(arrays_R_pos, ncut)
     R_neg_all = _stack(arrays_R_neg, ncut)
-    return E_pos_all, E_neg_all, R_pos_all, R_neg_all
+    N_pos_all = _stack(arrays_N_pos, ncut)
+    N_neg_all = _stack(arrays_N_neg, ncut)
+    return E_pos_all, E_neg_all, R_pos_all, R_neg_all, N_pos_all, N_neg_all
 
 
 def bootstrap_mc(
@@ -384,27 +390,21 @@ def bootstrap_one(
 
 def main() -> None:
     args = parse_args()
-    do_correction = args.correction
     if args.max_id <= args.min_id:
         raise SystemExit("--max-id must be > --min-id")
     base_dir = base_path(args.pscratch, args.layout, args.target, args.shear)
-    zbounds = parse_zbounds(args.z_bounds)
-    ncut = len(zbounds) + 1
 
-    flux_min = -10.0
+    flux_min = 10.0 ** ((args.mag_zero - args.mag_max) / 2.5)
     if not args.summary:
         my_ids = np.arange(args.min_id, args.max_id, dtype=int)
         if len(my_ids) > 0:
-            e_pos, e_neg, r_pos, r_neg = per_rank_work(
+            e_pos, e_neg, r_pos, r_neg, n_pos, n_neg = per_rank_work(
                 my_ids,
                 base_dir,
-                zbounds,
                 flux_min,
                 args.emax,
                 args.dg,
                 args.target,
-                do_correction=do_correction,
-                mag_zero=args.mag_zero,
             )
             save_rank_partial(
                 base_dir,
@@ -413,15 +413,12 @@ def main() -> None:
                 e_neg,
                 r_pos,
                 r_neg,
-                ncut,
-                do_correction=do_correction,
+                n_pos,
+                n_neg,
             )
     else:
-        all_e_pos, all_e_neg, all_r_pos, all_r_neg = load_and_stack_all(
-            base_dir,
-            ncut_expected=ncut,
-            do_correction=do_correction,
-        )
+        all_e_pos, all_e_neg, all_r_pos, all_r_neg, all_n_pos, all_n_neg = \
+            load_and_stack_all(base_dir, ncut_expected=1,)
 
         if all_e_pos.size == 0 or all_e_neg.size == 0:
             raise SystemExit(
@@ -439,9 +436,9 @@ def main() -> None:
         area_arcmin2 = (args.stamp_dim * args.stamp_dim) * (
             args.pixel_scale / 60.0
         ) ** 2.0
-
         nsample = all_e_pos.shape[0]
         area_all_arcmin2 = area_arcmin2 * nsample
+        nraw = np.sum(all_n_pos) / area_all_arcmin2
 
         rng = np.random.default_rng(0)
         gs = bootstrap_one(
@@ -476,11 +473,11 @@ def main() -> None:
         print(f"Catalog directory: {base_dir}")
         print("flux cut")
         print(f"Paired IDs (found): {all_e_pos.shape[0]}")
-        print(f"Redshift boundarys: {list(zbounds)}")
         print(f"Area (arcmin^2): {area_arcmin2:.3f}")
         print("m (per redshift cut):", m)
         print("c (per redshift cut):", c)
         print("n_eff (per redshift cut):", neff)
+        print("n_raw (per redshift cut):", nraw)
         print("m 1-sigma (bootstrap):", sigma_m)
         print("c 1-sigma (bootstrap):", sigma_c)
         print("==============================================")

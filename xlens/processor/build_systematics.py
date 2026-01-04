@@ -1,14 +1,14 @@
 from typing import Any
 
-import astropy.units as u
 import anacal
-import xlens
+import astropy.units as u
 import numpy as np
-from lsst.afw.image import ExposureF, ImageI
-from lsst.pex.config import Field, ListField, ConfigField
+from lsst.afw.image import ExposureF, ImageI, MaskX
 from lsst.meas.algorithms import (
-    ReferenceObjectLoader, LoadReferenceObjectsConfig,
+    LoadReferenceObjectsConfig,
+    ReferenceObjectLoader,
 )
+from lsst.pex.config import ConfigField, Field, ListField
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -16,7 +16,8 @@ from lsst.pipe.base import (
     Struct,
 )
 from lsst.pipe.base import connectionTypes as cT
-from lsst.afw.image import MaskX
+
+import xlens
 
 
 class BuildSystematicsConnections(

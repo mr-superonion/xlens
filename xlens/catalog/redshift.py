@@ -1,8 +1,9 @@
 import os
-import numpy as np
 from abc import ABC, abstractmethod
-from .utils import _resolve_flux_name
 
+import numpy as np
+
+from .utils import _resolve_flux_name
 
 NUM_Z_GRIDS = 501
 Z_MAX = 5.0
@@ -210,7 +211,7 @@ def load_bpz_templates(
 ):
     """Load BPZ template fluxes on Z_GRIDS for provided filter set."""
     filters = [f"{filter_name}_{b}" for b in bands]
-    from desc_bpz.useful_py3 import get_str, get_data, match_resol
+    from desc_bpz.useful_py3 import get_data, get_str, match_resol
     z = Z_GRIDS
     spectra_file = os.path.join(data_path, "SED", spectra_name)
     spectra = [s[:-4] for s in get_str(spectra_file)]

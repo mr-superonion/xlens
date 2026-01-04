@@ -36,7 +36,7 @@ from ..utils.random import (
     num_rot,
 )
 from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
-from .perturbation import ShearHalo, ShearRedshift, ShearLogNormalFlat
+from .perturbation import ShearHalo, ShearLogNormalFlat, ShearRedshift
 
 
 class CatalogConnections(

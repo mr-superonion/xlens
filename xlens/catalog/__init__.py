@@ -1,7 +1,5 @@
-from . import twopt, utils, redshift, model
-from .base import (
-    get_esq, measure_shear
-)
+from . import model, redshift, twopt, utils
+from .base import get_esq, measure_shear
 
 __all__ = [
     "twopt", "utils", "model",

@@ -1,6 +1,7 @@
 import numpy as np
-from .utils import _resolve_flux_min, _resolve_flux_name
+
 from .model import w_model, w_model_derivs
+from .utils import _resolve_flux_min, _resolve_flux_name
 
 
 def get_esq(src: np.ndarray, comp: int = 1, dg: float = 0.0) -> np.ndarray:

@@ -19,7 +19,6 @@ from xlens.catalog.redshift import (
     load_bpz_templates,
 )
 
-
 colnames = [
     "wsel",
     "dwsel_dg1",

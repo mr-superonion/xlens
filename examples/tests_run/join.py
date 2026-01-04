@@ -7,9 +7,7 @@ from typing import List, Optional
 import astropy.table as astTable
 import pyarrow as pa
 import pyarrow.parquet as pq
-
 from mpi4py import MPI  # type: ignore
-
 
 COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()

@@ -18,18 +18,20 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.afw.image import ExposureF
+from lsst.afw.image import ExposureF, MaskX
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field, FieldValidationError
 from lsst.pipe.base import (
-    PipelineTask, PipelineTaskConfig, PipelineTaskConnections, Struct
+    PipelineTask,
+    PipelineTaskConfig,
+    PipelineTaskConnections,
+    Struct,
 )
 from lsst.pipe.tasks.coaddBase import makeSkyInfo
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
-from lsst.afw.image import MaskX
 
 from ..simulator.sim import MultibandSimTask
 from .anacal import AnacalTask
