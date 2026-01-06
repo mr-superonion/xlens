@@ -1,14 +1,86 @@
 import os
 from abc import ABC, abstractmethod
+from scipy.integrate import simpson
+from scipy.optimize import minimize_scalar
 
 import numpy as np
 
 from .utils import _resolve_flux_name
 
 NUM_Z_GRIDS = 501
+Z_MIN = 0.0
 Z_MAX = 5.0
-Z_GRIDS = np.linspace(0.0, Z_MAX, NUM_Z_GRIDS)
+Z_GRIDS = np.linspace(Z_MIN, Z_MAX, NUM_Z_GRIDS)
 PROBS = np.array([0.025, 0.16, 0.5, 0.84, 0.975], dtype=float)
+INV1PZ = 1.0 / (1.0 + Z_GRIDS)  # precompute once
+GAMMA_RISK = 0.15
+
+
+def risk(zx: float, p_norm: np.ndarray) -> float:
+    # loss = 1 - 1/(1 + (( (zx-z)/(1+z) )/gamma)^2)
+    dz = (zx - Z_GRIDS) * INV1PZ
+    t = dz / GAMMA_RISK
+    t2 = t * t
+    loss_vec = t2 / (1.0 + t2)  # same as 1 - 1/(1+t2)
+    return float(simpson(p_norm * loss_vec, Z_GRIDS))
+
+
+def get_point_estimate(p):
+    total = float(np.sum(p))
+    if (not np.isfinite(total)) or total <= 0.0:
+        return (np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
+    # normalized pdf for risk
+    p_norm = p / total
+    # mode (peak on grid)
+    # percentiles (CDF from discrete sum)
+    cdf = np.cumsum(p, dtype=float) / total
+    zqs = np.interp(PROBS, cdf, Z_GRIDS)
+    # minimize risk
+    res = minimize_scalar(
+        lambda zx: risk(zx, p_norm), bounds=(Z_MIN, Z_MAX), method="bounded"
+    )
+    zmode = Z_GRIDS[int(np.argmax(p))]
+    z025, z160, z500, z840, z975 = zqs
+    zbest = res.x
+    return (zmode, z025, z160, z500, z840, z975, zbest)
+
+
+def get_point_estimates_from_pdfs(
+    pdfs: np.ndarray,
+):
+    """
+    Compute point estimates from PDF samples on a redshift grid.
+
+    Returns dict of arrays (shape (N,)):
+      - zmode : z_grid[argmax p(z)]
+      - z025, z160, z500, z840, z975 : CDF percentiles at [0.025, 0.16, 0.50,
+        0.84, 0.975]
+      - zbest : argmin_zx ∫ p_norm(z) * loss(zx,z) dz   (bounded to [z_grid[0],
+        z_grid[-1]])
+    """
+    if pdfs.ndim != 2:
+        raise ValueError(f"pdfs must be 2D (N, M); got {pdfs.shape}")
+
+    N = pdfs.shape[0]
+    zbest = np.full(N, np.nan, dtype=float)
+    zmode = np.full(N, np.nan, dtype=float)
+    z025 = np.full(N, np.nan, dtype=float)
+    z160 = np.full(N, np.nan, dtype=float)
+    z500 = np.full(N, np.nan, dtype=float)
+    z840 = np.full(N, np.nan, dtype=float)
+    z975 = np.full(N, np.nan, dtype=float)
+    for i, p in enumerate(pdfs):
+        zmode[i], z025[i], z160[i], z500[i], z840[i], z975[i], zbest[i] = \
+            get_point_estimate(p)
+    return {
+        "zmode": zmode,
+        "z025": z025,
+        "z160": z160,
+        "z500": z500,
+        "z840": z840,
+        "z975": z975,
+        "zbest": zbest,
+    }
 
 
 def get_color(
@@ -62,7 +134,7 @@ def get_color(
 
     nb = len(bands) - 1
     ncols = 1 + (2 * nb if include_mag_err else nb)
-    feat = np.empty((n, ncols), dtype=np.float64)
+    feat = np.empty((n, ncols), dtype=np.float32)
     try:
         ref_idx = bands.index(ref_band)
     except ValueError:
@@ -82,33 +154,6 @@ def get_color(
             np.subtract(mags[i], mags[i + 1], out=feat[:, j])
             j += 1
     return feat
-
-
-def get_percentiles_from_pdf(pdfs: np.ndarray):
-    n = pdfs.shape[0]
-    z025 = np.full(n, np.nan, dtype=float)
-    z160 = np.full(n, np.nan, dtype=float)
-    z500 = np.full(n, np.nan, dtype=float)
-    z840 = np.full(n, np.nan, dtype=float)
-    z975 = np.full(n, np.nan, dtype=float)
-    for i, p in enumerate(pdfs):
-        total = p.sum()
-        if not np.isfinite(total) or total <= 0.0:
-            continue
-        cdf = np.cumsum(p, dtype=float) / total
-        zqs = np.interp(PROBS, cdf, Z_GRIDS)
-        z025[i] = zqs[0]
-        z160[i] = zqs[1]
-        z500[i] = zqs[2]
-        z840[i] = zqs[3]
-        z975[i] = zqs[4]
-    return {
-        "z025": z025,
-        "z160": z160,
-        "z500": z500,
-        "z840": z840,
-        "z975": z975,
-    }
 
 
 # ------------------------
@@ -196,11 +241,7 @@ class flexzboostEstimator(zEstimator):
             include_mag_err=include_mag_err,
         )
         pdfs, _ = self.pz_obj.predict(colors, n_grid=NUM_Z_GRIDS)
-        # Argmax per row, then map to z_grid
-        idx = np.argmax(pdfs, axis=1)
-        zmode = np.take(Z_GRIDS, idx)
-        zps = get_percentiles_from_pdf(pdfs)
-        return {"zmode": zmode, **zps}
+        return get_point_estimates_from_pdfs(pdfs)
 
 
 def load_bpz_templates(
@@ -269,22 +310,8 @@ class bpzEstimator(zEstimator):
         L = pczt.likelihood
         P = prior_function(Z_GRIDS, mag_0, self.prior_dict, nt)
         post = L * P
-        post_z = post.sum(axis=1)
-
-        zmode = Z_GRIDS[np.argmax(post_z)]
-        total = post_z.sum()
-        if not np.isfinite(total) or total <= 0:
-            return (
-                float(zmode),
-                np.nan, np.nan, np.nan, np.nan, np.nan,
-            )
-        cdf = np.cumsum(post_z, dtype=float) / total
-        zqs = np.interp(PROBS, cdf, Z_GRIDS)
-        return (
-            float(zmode), float(zqs[0]),
-            float(zqs[1]), float(zqs[2]),
-            float(zqs[3]), float(zqs[4]),
-        )
+        pdf = post.sum(axis=1)
+        return get_point_estimate(pdf)
 
     def get_z(
         self,
@@ -349,7 +376,7 @@ class bpzEstimator(zEstimator):
             [self._meas_one(flux[i], flux_err[i], mag0[i]) for i in range(ng)],
             dtype=float,
         )
-        zmode, z025, z160, z500, z840, z975 = results.T
+        zmode, z025, z160, z500, z840, z975, zbest = results.T
         return {
             "zmode": zmode,
             "z025": z025,
@@ -357,4 +384,5 @@ class bpzEstimator(zEstimator):
             "z500": z500,
             "z840": z840,
             "z975": z975,
+            "zbest": zbest,
         }

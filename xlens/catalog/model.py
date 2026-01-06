@@ -230,3 +230,30 @@ def estimate_std_in_bins(
     std_array = std_array[good]
     n_array = n_array[good]
     return x_array, y_array, std_array, n_array
+
+
+# pars = np.array([5.1161, -0.8258, 14.7111, 0.0242, -2.0378, -0.5194])
+# wmod = w_model(
+#     src["i_flux_gauss2"],
+#     src["fpfs_m0"],
+#     src["fpfs_m2"],
+#     mag_zero,
+#     *pars,
+# )
+# dwmod = w_model_derivs(
+#     src["i_flux_gauss2"],
+#     src["fpfs_m0"],
+#     src["fpfs_m2"],
+#     mag_zero,
+#     *pars,
+# )
+# dwmod_dg1 = (
+#     dwmod["dw_dflux"] * src["i_dflux_gauss2_dg1"] +
+#     dwmod["dw_dm0"] * src["fpfs_dm0_dg1"] +
+#     dwmod["dw_dm2"] * src["fpfs_dm2_dg1"]
+# )
+# dwmod_dg2 = (
+#     dwmod["dw_dflux"] * src["i_dflux_gauss2_dg2"] +
+#     dwmod["dw_dm0"] * src["fpfs_dm0_dg2"] +
+#     dwmod["dw_dm2"] * src["fpfs_dm2_dg2"]
+# )
