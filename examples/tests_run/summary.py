@@ -208,22 +208,17 @@ def base_path(pscratch, layout, target, shear):
     )
 
 
-def _to_native(a: np.ndarray) -> np.ndarray:
-    if a.dtype.byteorder in ("=", "|"):
-        return a
-    return a.byteswap().newbyteorder("=")
-
 
 def cat_read(base_dir: str, sim_id: int, mode: int, bands: str) -> np.ndarray:
     arrs = []
     main_path = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}.fits")
     main = fitsio.read(main_path, columns=colnames)
-    arrs.append(_to_native(main))
+    arrs.append(main)
 
     for b in bands:
         fn = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}-{b}.fits")
         barr = fitsio.read(fn)
-        arrs.append(_to_native(barr))
+        arrs.append(barr)
 
     merged = rfn.merge_arrays(
         arrs, flatten=True, asrecarray=False, usemask=False,

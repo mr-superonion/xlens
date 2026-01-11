@@ -1,7 +1,7 @@
 
 def _resolve_flux_min(
     flux_min: float | dict,
-    bands: str = "grizy",
+    bands: str,
 ) -> dict[str, float]:
     """Return per-band flux_min as dict{band: value}."""
     if isinstance(flux_min, dict):
