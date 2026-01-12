@@ -74,6 +74,10 @@ class AnacalConfig(Config):
         doc="rotation id",
         default=0,
     )
+    psf_model_type = Field[str](
+        doc="type of psf model (choose from object, block, patch)",
+        default="patch",
+    )
 
     def validate(self):
         super().validate()
@@ -304,7 +308,6 @@ class AnacalTask(Task):
             data["blocks"] = utils.image.get_blocks(
                 lsst_psf=exposure.getPsf(),
                 lsst_bbox=exposure.getBBox(),
-                lsst_mask=exposure.mask,
                 pixel_scale=data["pixel_scale"],
                 npix=self.config.npix,
                 psf_array=data["psf_array"],
@@ -319,9 +322,11 @@ class AnacalTask(Task):
             data["base_column_name"] = None
         else:
             data["base_column_name"] = band + "_"
-        data["psf_object"] = utils.image.LsstPsf(
-            psf=exposure.getPsf(),
-            npix=self.config.npix,
-            lsst_bbox=exposure.getBBox(),
-        )
+        if self.config.psf_model_type == "object":
+            data["psf_object"] = utils.image.LsstPsf(
+                psf=exposure.getPsf(), npix=self.config.npix,
+                lsst_bbox=lsst_bbox,
+            )
+        else:
+           data["psf_object"] = None
         return data

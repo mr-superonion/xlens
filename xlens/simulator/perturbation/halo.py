@@ -6,6 +6,10 @@ from lenstronomy.LensModel.Solver.lens_equation_solver import LensEquationSolver
 
 from .utils import _get_shear_res_dict
 
+from lenstronomy.LensModel.lens_model import LensModel
+from lenstronomy.LensModel.Solver.lens_equation_solver import LensEquationSolver
+from lenstronomy.Cosmo.lens_cosmo import LensCosmo
+
 
 class ShearHalo(object):
     def __init__(

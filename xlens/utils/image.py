@@ -307,21 +307,11 @@ def get_psf_array(
 
 
 def get_blocks(
-    *, lsst_psf, lsst_bbox, lsst_mask, pixel_scale, npix, psf_array
+    *, lsst_psf, lsst_bbox, pixel_scale, npix, psf_array
 ):
     min_corner = lsst_bbox.getMin()
     x_min, y_min = min_corner.getX(), min_corner.getY()
     width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
-
-    # Build mask array: True = masked
-    if lsst_mask is not None and "INEXACT_PSF" in lsst_mask.getMaskPlaneDict():
-        bitv = lsst_mask.getPlaneBitMask(
-            ["INEXACT_PSF", "NO_DATA", "BAD", "UNMASKEDNAN"]
-        )
-        mask_array = (bitv & lsst_mask.array) > 0
-    else:
-        mask_array = np.zeros((height, width), dtype=bool)
-
     # Create blocks
     blocks = anacal.geometry.get_block_list(
         img_ny=height,
@@ -331,45 +321,19 @@ def get_blocks(
         block_overlap=80,
         scale=pixel_scale,
     )
-
     new_blocks = []
-
     for bb in blocks:
         # Center of the block
         x0 = int(np.clip(bb.xcen, 0, width - 1))
         y0 = int(np.clip(bb.ycen, 0, height - 1))
-
-        # Define 21x21 local box
-        x_start = max(x0 - 10, 0)
-        x_end = min(x0 + 11, width)
-        y_start = max(y0 - 10, 0)
-        y_end = min(y0 + 11, height)
-
-        # Get unmasked local pixels
-        local_mask = mask_array[y_start:y_end, x_start:x_end]
-        local_yx = np.argwhere(~local_mask)
-
-        # If no usable pixel: drop this bb
-        if local_yx.shape[0] == 0:
-            continue
-
-        # Convert to global coords
-        local_coords = local_yx + np.array([y_start, x_start])
-
-        # Pick the closest point to (y0, x0)
-        dy = local_coords[:, 0] - y0
-        dx = local_coords[:, 1] - x0
-        idx_min = int(np.argmin(dx * dx + dy * dy))
-        yy, xx = local_coords[idx_min]
         try:
             this_psf = lsst_psf.computeImage(
-                lsst_geom.Point2D(x_min + xx, y_min + yy)
+                lsst_geom.Point2D(x_min + x0, y_min + y0)
             ).getArray()
             bb.psf_array = resize_array(this_psf, (npix, npix))
         except Exception:
             continue
         new_blocks.append(bb)
-
     return new_blocks
 
 

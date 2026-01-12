@@ -64,9 +64,9 @@ class FpfsMeasurementConfig(Config):
         doc="whether only return linear modes",
         default=False,
     )
-    use_average_psf = Field[bool](
-        doc="whether to compute detection mode",
-        default=True,
+    psf_model_type = Field[str](
+        doc="type of psf model (choose from object, block, patch)",
+        default="patch",
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
@@ -227,7 +227,7 @@ class FpfsMeasurementTask(Task):
             noise_array=noise_array,
             detection=detection,
         )
-        if not self.config.use_average_psf:
+        if self.config.psf_model_type == "object":
             data["psf_object"] = utils.image.LsstPsf(
                 psf=exposure.getPsf(), npix=self.config.npix,
                 lsst_bbox=lsst_bbox,

@@ -208,7 +208,6 @@ class MeasureCoaddsPipe(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
-        seed_offset: int = 0,
         mask_array: NDArray | None = None,
     ) -> np.ndarray:
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
@@ -225,11 +224,10 @@ class MeasureCoaddsPipe(PipelineTask):
         noise_corr = self._load_noise_corr(correlation_handles_dict, band)
 
         idGenerator = self.config.idGenerator.apply(handle.dataId)
-        seed = idGenerator.catalog_id + seed_offset
         data = self.anacal.prepare_data(
             exposure=exposure,
             band=band,
-            seed=seed,
+            seed=idGenerator.catalog_id,
             noise_corr=noise_corr,
             detection=None,
             skyMap=skyMap,
@@ -248,7 +246,6 @@ class MeasureCoaddsPipe(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
-        seed_offset: int = 0,
         mask_array: NDArray | None = None,
     ) -> np.ndarray:
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
@@ -262,10 +259,9 @@ class MeasureCoaddsPipe(PipelineTask):
 
             noise_corr = self._load_noise_corr(correlation_handles_dict, band)
             idGenerator = self.config.idGenerator.apply(handle.dataId)
-            seed = idGenerator.catalog_id + seed_offset
             data = self.anacal.prepare_data(
                 exposure=exposure,
-                seed=seed,
+                seed=idGenerator.catalog_id,
                 noise_corr=noise_corr,
                 detection=detection,
                 band=band,
@@ -304,7 +300,6 @@ class MeasureCoaddsPipe(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
-        seed_offset: int = 0,
         mask: MaskX | None = None,
         **kwargs,
     ):
@@ -318,7 +313,6 @@ class MeasureCoaddsPipe(PipelineTask):
             skyMap=skyMap,
             tract=tract,
             patch=patch,
-            seed_offset=seed_offset,
             mask_array=mask_array,
         )
         force_cat = self._force(
@@ -328,7 +322,6 @@ class MeasureCoaddsPipe(PipelineTask):
             skyMap=skyMap,
             tract=tract,
             patch=patch,
-            seed_offset=seed_offset,
             mask_array=mask_array,
         )
         final = rfn.merge_arrays([det_cat, force_cat], flatten=True)
