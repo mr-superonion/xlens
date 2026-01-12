@@ -1,9 +1,10 @@
 import os
+from pathlib import Path
 
 import fitsio
 import numpy as np
+
 import xlens
-from pathlib import Path
 
 
 def test_pz_point_estimates():

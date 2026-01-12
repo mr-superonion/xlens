@@ -1,9 +1,9 @@
 import os
 from abc import ABC, abstractmethod
-from scipy.integrate import simpson
-from scipy.optimize import minimize_scalar
 
 import numpy as np
+from scipy.integrate import simpson
+from scipy.optimize import minimize_scalar
 
 from .utils import _resolve_flux_name
 

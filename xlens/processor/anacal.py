@@ -325,8 +325,8 @@ class AnacalTask(Task):
         if self.config.psf_model_type == "object":
             data["psf_object"] = utils.image.LsstPsf(
                 psf=exposure.getPsf(), npix=self.config.npix,
-                lsst_bbox=lsst_bbox,
+                lsst_bbox=exposure.getBBox(),
             )
         else:
-           data["psf_object"] = None
+            data["psf_object"] = None
         return data

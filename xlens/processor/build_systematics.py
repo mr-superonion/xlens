@@ -19,6 +19,7 @@ from lsst.pipe.base import (
     Struct,
 )
 from lsst.pipe.base import connectionTypes as cT
+
 import xlens
 from xlens.utils.image import resize_array, subpixel_shift
 
