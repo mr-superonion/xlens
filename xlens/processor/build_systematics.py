@@ -23,6 +23,8 @@ from lsst.pipe.base import connectionTypes as cT
 import xlens
 from xlens.utils.image import resize_array, subpixel_shift
 
+band_order = "ugrizy"
+
 
 class BuildSystematicsConnections(
     PipelineTaskConnections,
@@ -207,7 +209,6 @@ class BuildSystematicsTask(PipelineTask):
         psf_centered_array = np.zeros((6, npix, npix))
         star_centered_array = np.zeros((6, npix, npix))
 
-        band_order = "ugrizy"
         for band, exp_handle in exposure_handles_dict.items():
             exp = exp_handle.get()
 
@@ -273,7 +274,7 @@ class BuildSystematicsTask(PipelineTask):
 
         if cell_handles_dict is not None:
             psf_array = np.zeros((6, npix, npix))
-            for i, band in enumerate("ugrizy"):
+            for i, band in enumerate(band_order):
                 if band in cell_handles_dict.keys():
                     cell_coadd = cell_handles_dict[band].get()
                     psf_array[i] = xlens.utils.image.stack_psfs_cells(

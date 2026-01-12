@@ -41,6 +41,7 @@ from lsst.pipe.base import (
 )
 from lsst.pipe.tasks.coaddBase import makeSkyInfo
 from lsst.skymap import BaseSkyMap
+from numpy.typing import NDArray
 
 from ..utils.random import (
     gal_seed_base,
@@ -60,6 +61,7 @@ from .wcs import make_galsim_tanwcs
 
 SIM_INCLUSION_PADDING = 200  # pixels
 DEFAULT_BAT_STAMP_SIZE = 64
+band_order = "ugrizy"
 
 
 class MultibandSimConnections(
@@ -85,6 +87,7 @@ class MultibandSimConnections(
         name="{simCoaddName}_{mode}_rot{rotId}_coadd_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),
+        multiple=False,
     )
     mask = cT.Input(
         doc="Input coadd systematics mask",
@@ -94,19 +97,19 @@ class MultibandSimConnections(
         multiple=False,
         minimum=0,
     )
-    noiseCorrImage = cT.Input(
-        doc="image for noise correlation function",
-        name="{coaddName}_coadd_systematics_noisecorr",
-        dimensions=("skymap", "tract", "patch", "band"),
-        storageClass="ImageF",
+    noiseCorrArray = cT.Input(
+        doc="Stacked noise correlation array (6 x npix x npix).",
+        name="deep_coadd_systematics_noisecorr_stack",
+        storageClass="NumpyArray",
+        dimensions=("skymap", "tract", "patch"),
         multiple=False,
         minimum=0,
     )
-    psfImage = cT.Input(
-        doc="image for PSF model for simulation",
-        name="{coaddName}_coadd_systematics_psfcentered",
-        dimensions=("skymap", "tract", "patch", "band"),
-        storageClass="ImageF",
+    psfArray = cT.Input(
+        doc="Stacked PSF image array (6 x npix x npix).",
+        name="deep_coadd_systematics_psfcentered_stack",
+        storageClass="NumpyArray",
+        dimensions=("skymap", "tract", "patch"),
         multiple=False,
         minimum=0,
     )
@@ -134,6 +137,10 @@ class MultibandSimConfig(
     survey_name = Field[str](
         doc="Name of the survey",
         default="LSST",
+    )
+    mag_zero = Field[float](
+        doc="magnitude zero point",
+        default=30.0,
     )
     include_pixel_masks = Field[bool](
         doc="whether to include pixel masks in the simulation",
@@ -387,8 +394,8 @@ class MultibandSimTask(PipelineTask):
         band: str,
         seed: int,
         truthCatalog,
-        psfImage: afwImage.ImageF | None = None,
-        noiseCorrImage: afwImage.ImageF | None = None,
+        psfArray: NDArray | None = None,
+        noiseCorrArray: NDArray | None = None,
         mask: afwImage.MaskX | None = None,
         **kwargs,
     ):
@@ -407,7 +414,7 @@ class MultibandSimTask(PipelineTask):
         truthCatalog
             Truth catalog produced by :class:`CatalogTask` containing the
             galaxies to render.
-        psfImage, noiseCorrImage, mask
+        psfArray, noiseCorrArray, mask
             Optional inputs that provide measured PSFs, noise correlation
             images, or systematics masks from real observations.
 
@@ -419,7 +426,7 @@ class MultibandSimTask(PipelineTask):
         """
         assert isinstance(self.config, MultibandSimConfig)
         if self.config.use_real_psf:
-            if psfImage is None:
+            if psfArray is None:
                 raise IOError("Do not have PSF input model")
 
         # Prepare the random number generator and basic parameters
@@ -429,9 +436,11 @@ class MultibandSimTask(PipelineTask):
         wcs = tract_info.getWcs()
         pixel_scale = wcs.getPixelScale().asArcseconds()
 
-        mag_zero = mag_zero_defaults[self.config.survey_name]
+        mag_zero_survey_default = mag_zero_defaults[self.config.survey_name]
+        mag_zero = self.config.mag_zero
         zero_flux = 10.0 ** (0.4 * mag_zero)
         photo_calib = afwImage.makePhotoCalibFromCalibZeroPoint(zero_flux)
+        var_ratio = 10.0 ** ((mag_zero - mag_zero_survey_default) * 0.8)
 
         if mask is not None:
             self.log.debug("Using the real pixel mask")
@@ -440,15 +449,20 @@ class MultibandSimTask(PipelineTask):
             self.log.debug("Do not use the real pixel mask")
             mask_array = 0.0
 
+        isys = band_order.index(band)
         # Obtain PSF object for Galsim
-        if psfImage is not None and self.config.use_real_psf:
+        if psfArray is not None and self.config.use_real_psf:
+            draw_method = "no_pixel"
+            psf_array = psfArray[isys]
+            assert abs(np.sum(psf_array) - 1.0) < 1e-2
             psf_galsim = galsim.InterpolatedImage(
-                galsim.Image(psfImage.getArray()),
+                galsim.Image(psf_array),
                 scale=pixel_scale,
                 flux=1.0,
             )
-            draw_method = "no_pixel"
+            psfImage = afwImage.ImageF(psfArray.shape[0], psfArray.shape[1])
         else:
+            draw_method = "auto"
             psf_fwhm = psf_fwhm_defaults[band][survey_name]
             psf_galsim = galsim.Moffat(fwhm=psf_fwhm, beta=2.5).shear(
                 e1=self.config.psf_e1,
@@ -461,10 +475,9 @@ class MultibandSimTask(PipelineTask):
                 wcs=None,
             ).array
             psfImage = afwImage.ImageF(sys_npix, sys_npix)
-            assert psfImage is not None
-            psfImage.array[:, :] = psf_array
-            draw_method = "auto"
 
+        assert psfImage is not None
+        psfImage.array[:, :] = psf_array
         # and psf kernel for the LSST exposure
         kernel = afwMath.FixedKernel(psfImage.convertD())
         kernel_psf = meaAlg.KernelPsf(kernel)
@@ -480,12 +493,12 @@ class MultibandSimTask(PipelineTask):
         )
 
         # Obtain Noise correlation array
-        if noiseCorrImage is None:
+        if noiseCorrArray is None:
             noise_corr = None
-            variance = noise_variance_defaults[band][survey_name]
+            variance = noise_variance_defaults[band][survey_name] * var_ratio
             self.log.debug("No correlation, variance:", variance)
         else:
-            noise_corr = noiseCorrImage.getArray()
+            noise_corr = noiseCorrArray[isys]
             variance = np.amax(noise_corr)
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
