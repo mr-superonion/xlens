@@ -11,7 +11,9 @@ from lsst.meas.algorithms import (
     ReferenceObjectLoader,
 )
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import ConfigField, Field, ListField
+from lsst.pex.config import (
+    ConfigField, Field, ListField, FieldValidationError,
+)
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -52,11 +54,9 @@ class BuildSystematicsConnections(
     )
     catalog = cT.Input(
         doc="Catalog containing single-band measurement information.",
-        name="{coaddName}_coadd_meas",
-        storageClass="SourceCatalog",
-        dimensions=("skymap", "tract", "patch", "band"),
-        multiple=True,
-        deferLoad=True,
+        name="object",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap", "tract"),
         minimum=0,
     )
     gaia = cT.PrerequisiteInput(
@@ -74,27 +74,27 @@ class BuildSystematicsConnections(
         storageClass="Mask",
         dimensions=("skymap", "tract", "patch"),
     )
-    outputPsf = cT.Output(
-        doc="Stacked PSF array (6 x npix x npix).",
-        name="deep_coadd_systematics_psfcentered",
-        storageClass="NumpyArray",
-        dimensions=("skymap", "tract", "patch"),
-    )
     outputNoiseCorr = cT.Output(
         doc="Stacked noise correlation array (6 x npix x npix).",
-        name="deep_coadd_systematics_noisecorr_stack",
+        name="deep_coadd_systematics_noisecorr_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
     )
     outputPsfCentered = cT.Output(
         doc="Stacked PSF image array (6 x npix x npix).",
-        name="deep_coadd_systematics_psfcentered_stack",
+        name="deep_coadd_systematics_psfcentered_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
     )
     outputStarCentered = cT.Output(
         doc="Stacked star image array (6 x npix x npix).",
-        name="deep_coadd_systematics_starcentered_stack",
+        name="deep_coadd_systematics_starcentered_6bands",
+        storageClass="NumpyArray",
+        dimensions=("skymap", "tract", "patch"),
+    )
+    outputPsf = cT.Output(
+        doc="Stacked PSF array (6 x npix x npix).",
+        name="deep_coadd_systematics_psfcentered_6bands_cell",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
     )
@@ -110,7 +110,7 @@ class BuildSystematicsConfig(
 
     npix = Field[int](
         doc="number of pixels in stamp",
-        default=64,
+        default=49,
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
@@ -126,7 +126,7 @@ class BuildSystematicsConfig(
     )
     star_snr_min = Field[float](
         doc="minimum (aperture) snr threshold of stars",
-        default=100.0,
+        default=150.0,
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
     gaiaLoader = ConfigField(
@@ -139,6 +139,13 @@ class BuildSystematicsConfig(
         self.gaiaLoader.requireProperMotion = False
         self.gaiaLoader.anyFilterMapsToThis = "phot_g_mean"
 
+    def validate(self):
+        super().validate()
+        if self.npix % 2 == 0:
+            raise FieldValidationError(
+                self.__class__.npix, self, "npix should be odd number"
+            )
+
 
 class BuildSystematicsTask(PipelineTask):
     """Collect mask information from exposures, including bright star
@@ -149,6 +156,8 @@ class BuildSystematicsTask(PipelineTask):
     ConfigClass = BuildSystematicsConfig
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs, **kwargs):
+        tract = int(butlerQC.quantum.dataId["tract"])
+        patch = int(butlerQC.quantum.dataId["patch"])
         inputs = butlerQC.get(inputRefs)
         if len(inputs["gaia"]) > 0:
             gaia_loader = ReferenceObjectLoader(
@@ -171,18 +180,13 @@ class BuildSystematicsTask(PipelineTask):
             cell_handles_dict = None
         else:
             cell_handles_dict = {h.dataId["band"]: h for h in cell_handles}
-        catalog_handles = inputs["catalog"]
-        if len(catalog_handles) == 0:
-            catalog_handles_dict = None
-        else:
-            catalog_handles_dict = {
-                handle.dataId["band"]: handle for handle in catalog_handles
-            }
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
+            tract=tract,
+            patch=patch,
             gaia_loader=gaia_loader,
             cell_handles_dict=cell_handles_dict,
-            catalog_handles_dict=catalog_handles_dict,
+            catalog=inputs["catalog"],
             seed=seed,
         )
         butlerQC.put(outputs, outputRefs)
@@ -191,10 +195,12 @@ class BuildSystematicsTask(PipelineTask):
     def run(
         self,
         *,
+        tract: int,
+        patch: int,
         exposure_handles_dict: dict[str, Any],
         gaia_loader: ReferenceObjectLoader | None = None,
         cell_handles_dict: None | dict[str, Any] = None,
-        catalog_handles_dict: None | dict[str, Any] = None,
+        catalog = None,
         seed: int | None = None,
         **kwargs,
     ) -> Struct:
@@ -208,7 +214,21 @@ class BuildSystematicsTask(PipelineTask):
         noise_corr_array = np.zeros((6, npix, npix))
         psf_centered_array = np.zeros((6, npix, npix))
         star_centered_array = np.zeros((6, npix, npix))
+        if catalog is not None:
+            catalog = catalog[catalog["patch"] == patch]
+            ngood = np.zeros(len(catalog))
+            for b in band_order:
+                snr = catalog[f"{b}_psfFlux"] / catalog[f"{b}_psfFluxErr"]
+                test = (
+                    (catalog[f"{b}_calib_psf_candidate"])
+                    & (snr > self.config.star_snr_min)
+                    & (~catalog[f"{b}_psfFlux_flag"])
+                    & (~catalog[f"{b}_hsmShapeRegauss_flag"])
+                )
+                ngood += (test).astype(int)
+            catalog = catalog[ngood==ngood.max()]
 
+        # Mask, PSF and Stars
         for band, exp_handle in exposure_handles_dict.items():
             exp = exp_handle.get()
 
@@ -223,26 +243,18 @@ class BuildSystematicsTask(PipelineTask):
 
             if band in band_order:
                 i = band_order.index(band)
-                noise_image = self.get_noise_corr(exp)
-                noise_corr_array[i] = noise_image.array
-
-                if (
-                    catalog_handles_dict is not None
-                    and band in catalog_handles_dict
-                ):
-                    catalog = catalog_handles_dict[band].get()
-                    psf_image, star_image = self.get_psf_systematics(
+                if catalog is not None:
+                    psf_array, star_array = self.get_psf_systematics(
                         exp,
                         catalog,
                         seed,
+                        band=band,
                     )
-                    if psf_image is not None:
-                        psf_centered_array[i] = psf_image.array
-                    if star_image is not None:
-                        star_centered_array[i] = star_image.array
-                    del catalog
+                    if psf_array is not None:
+                        psf_centered_array[i] = psf_array
+                    if star_array is not None:
+                        star_centered_array[i] = star_array
             del exp, band_mask
-
         if (
             template_wcs is not None
             and template_bbox is not None
@@ -263,7 +275,6 @@ class BuildSystematicsTask(PipelineTask):
                 anacal.mask.add_bright_star_mask(
                     mask_array=mask_array, star_array=gaia_array
                 )
-
         assert mask_array is not None
         h, w = mask_array.shape
         output_msk = MaskX(width=w, height=h)
@@ -285,6 +296,15 @@ class BuildSystematicsTask(PipelineTask):
                     del cell_coadd
         else:
             psf_array = None
+
+        # noise correlation
+        for band, exp_handle in exposure_handles_dict.items():
+            exp = exp_handle.get()
+            if band in band_order:
+                i = band_order.index(band)
+                noise_corr_array[i] = self.get_noise_corr(exp, mask_array)
+            del exp
+
         return Struct(
             outputMask=output_msk,
             outputPsf=psf_array,
@@ -343,12 +363,14 @@ class BuildSystematicsTask(PipelineTask):
         xy_r["r"] = r
         return xy_r
 
-    def get_noise_corr(self, exposure):
+    def get_noise_corr(self, exposure, mask_array):
         assert isinstance(self.config, BuildSystematicsConfig)
         variance_array = exposure.getMaskedImage().variance.array[
             1000:3000, 1000:3000
         ]
-        window_array = (exposure.mask.array == 0).astype(np.float32)[
+        window_array = (
+            (exposure.mask.array == 0) & (mask_array ==0)
+        ).astype(np.float32)[
             1000:3000, 1000:3000
         ]
 
@@ -359,7 +381,6 @@ class BuildSystematicsTask(PipelineTask):
         window_array = (
             window_array
             * (noise_array**2.0 < variance_array * 9)
-            * (variance_array < 5.0)
             * (~np.isnan(variance_array))
         )
 
@@ -399,80 +420,65 @@ class BuildSystematicsTask(PipelineTask):
             ny // 2 - npixl : ny // 2 + npixr,
             nx // 2 - npixl : nx // 2 + npixr,
         ]
-        noise_corr = noise_corr / window_corr
+        good = window_corr > 0
+        noise_corr2 = np.zeros_like(window_corr, dtype=np.float32)
+        noise_corr2[good] = noise_corr[good] / window_corr[good]
         del window_array, noise_array, window_corr
+        return noise_corr2
 
-        noise_image = afwImage.ImageF(self.config.npix, self.config.npix)
-        noise_image.array[:, :] = noise_corr
-
-        return noise_image
-
-    def get_psf_systematics(self, exposure, catalog, seed):
+    def get_psf_systematics(self, exposure, catalog, seed, band):
         assert isinstance(self.config, BuildSystematicsConfig)
         if seed is None:
             raise ValueError("Seed is required to select a random star.")
         npixl = int(self.config.npix // 2)
         npixr = int(self.config.npix // 2 + 1)
-
-        catalog = catalog.asAstropy().as_array()
-        msk = catalog["calib_psf_reserved"] & catalog["detect_isPrimary"]
-        catalog = catalog[msk]
-        snr = (
-            catalog["base_CircularApertureFlux_3_0_instFlux"]
-            / catalog["base_CircularApertureFlux_3_0_instFluxErr"]
-        )
         bbox = exposure.getBBox()
         xmin_exp, ymin_exp = bbox.getMinX(), bbox.getMinY()
         xmax_exp, ymax_exp = bbox.getMaxX(), bbox.getMaxY()
-        msk2 = (
-            (catalog["base_SdssShape_x"] > xmin_exp + npixl)
-            & (catalog["base_SdssShape_y"] > ymin_exp + npixl)
-            & (catalog["base_SdssShape_x"] < xmax_exp - npixr)
-            & (catalog["base_SdssShape_y"] < ymax_exp - npixr)
-            & (snr > self.config.star_snr_min)
+        msk = (
+            (catalog[f"{band}_centroid_x"] > xmin_exp + npixl)
+            & (catalog[f"{band}_centroid_y"] > ymin_exp + npixl)
+            & (catalog[f"{band}_centroid_x"] < xmax_exp - npixr)
+            & (catalog[f"{band}_centroid_y"] < ymax_exp - npixr)
         )
-        catalog = catalog[msk2]
+        catalog = catalog[msk]
         nstars = len(catalog)
 
         if nstars >= 1:
             np.random.seed(seed)
             ind = np.random.randint(0, nstars)
             src = catalog[ind]
-
             # Collect the PSF image
-            exposure.getPsf().setCacheCapacity(self.config.psfCache)
             lsst_psf = exposure.getPsf()
             psf_array = lsst_psf.computeImage(
                 Point2D(
-                    int(src["base_SdssShape_x"]),
-                    int(src["base_SdssShape_y"]),
+                    int(src[f"{band}_centroid_x"]),
+                    int(src[f"{band}_centroid_y"]),
                 )
             ).getArray()
             psf_array = resize_array(
                 psf_array,
                 (self.config.npix, self.config.npix),
             )
-            psf_image = afwImage.ImageF(self.config.npix, self.config.npix)
-            psf_image.array[:, :] = psf_array
 
             bbox = Box2I(
                 Point2I(
-                    int(src["base_SdssShape_x"]) - npixl,
-                    int(src["base_SdssShape_y"]) - npixl,
+                    int(src[f"{band}_centroid_x"]) - npixl,
+                    int(src[f"{band}_centroid_y"]) - npixl,
                 ),
                 Extent2I(self.config.npix, self.config.npix),
             )
-
             # Collect the star image
             # Extract the sub-image using the BBox
             star_image = exposure.Factory(exposure, bbox).getImage()
             # Get the image component and convert to a NumPy array
             star_array = star_image.getArray()
-            offset_x = src["base_SdssShape_x"] - int(src["base_SdssShape_x"])
-            offset_y = src["base_SdssShape_y"] - int(src["base_SdssShape_y"])
+            xn = f"{band}_centroid_x"
+            yn = f"{band}_centroid_y"
+            offset_x = src[xn] - int(src[xn])
+            offset_y = src[yn] - int(src[yn])
             star_array = subpixel_shift(star_array, -offset_x, -offset_y)
-            star_image.array[:, :] = star_array
         else:
-            psf_image = None
-            star_image = None
-        return psf_image, star_image
+            psf_array = None
+            star_array = None
+        return psf_array, star_array
