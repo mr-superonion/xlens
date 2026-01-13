@@ -117,19 +117,18 @@ class CatalogConfig(
     )
     select_lower_limit = ListField[float](
         doc=(
-            "Lower limits for the observables listed in ``select_observable``. "
+            "Lower limits for the observables listed in ``select_observable``."
             "Leave empty to disable minimum filtering for a quantity."
         ),
         default=[],
     )
     select_upper_limit = ListField[float](
         doc=(
-            "Upper limits for the observables listed in ``select_observable``. "
+            "Upper limits for the observables listed in ``select_observable``."
             "Leave empty to disable maximum filtering for a quantity."
         ),
         default=[],
     )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
         super().validate()
@@ -290,12 +289,7 @@ class CatalogTask(PipelineTask):
         inputs = butlerQC.get(inputRefs)
 
         assert butlerQC.quantum.dataId is not None
-
-        # Get unique integer ID for IdFactory and RNG seeds; only the latter
-        # should really be used as the IDs all come from the input catalog.
-        idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
-        seed = idGenerator.catalog_id
-        inputs["seed"] = seed
+        inputs["seed"] = butlerQC.quantum.dataId["tract"]
         skymap = butlerQC.get(inputRefs.skymap)
         inputs["tract_info"] = skymap[butlerQC.quantum.dataId["tract"]]
         outputs = self.run(**inputs)
