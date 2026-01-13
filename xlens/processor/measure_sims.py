@@ -49,6 +49,8 @@ from ..simulator.sim import MultibandSimTask
 from .anacal import AnacalTask
 from .fpfs import FpfsMeasurementTask
 
+band_order = "ugrizy"
+
 
 class MeasureSimsConnections(
     PipelineTaskConnections,
@@ -73,27 +75,25 @@ class MeasureSimsConnections(
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),
     )
-    psfImage = cT.Input(
-        doc="PSF image for simulation",
-        name="{coaddName}_coadd_systematics_psfcentered",
-        storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
-        multiple=True,
+    psfArray = cT.Input(
+        doc="Stacked PSF image array (6 x npix x npix).",
+        name="deep_coadd_systematics_psfcentered_6bands",
+        storageClass="NumpyArray",
+        dimensions=("skymap", "tract", "patch"),
+        multiple=False,
         minimum=0,
-        deferLoad=True,
     )
-    noiseCorrImage = cT.Input(
-        doc="Noise correlation image for simulation and measurement",
-        name="{coaddName}_coadd_systematics_noisecorr",
-        storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
-        multiple=True,
+    noiseCorrArray = cT.Input(
+        doc="Stacked noise correlation array (6 x npix x npix).",
+        name="deep_coadd_systematics_noisecorr_6bands",
+        storageClass="NumpyArray",
+        dimensions=("skymap", "tract", "patch"),
+        multiple=False,
         minimum=0,
-        deferLoad=True,
     )
     systematicsMask = cT.Input(
         doc="Systematics mask for coadd exposures used during simulation",
-        name="{coaddName}_coadd_systematics_mask",
+        name="deep_coadd_systematics_mask",
         storageClass="Mask",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
@@ -180,14 +180,8 @@ class MeasureSimsTask(PipelineTask):
         patch = int(butlerQC.quantum.dataId["patch"])
 
         mask = inputs.get("systematicsMask", None)
-        corr_handles = inputs.get("noiseCorrImage", [])
-        if len(corr_handles) == 0:
-            corr_handles_dict = None
-        else:
-            corr_handles_dict = {h.dataId["band"]: h for h in corr_handles}
-
-        psf_handles = inputs.get("psfImage", [])
-        psf_handles_dict = {h.dataId["band"]: h for h in psf_handles}
+        corr_array = inputs.get("noiseCorrArray", None)
+        psf_array = inputs.get("psfArray", None)
 
         outputs = self.run(
             truthCatalog=inputs["truthCatalog"],
@@ -195,24 +189,25 @@ class MeasureSimsTask(PipelineTask):
             tract=tract,
             patch=patch,
             mask=mask,
-            correlation_handles_dict=corr_handles_dict,
-            psf_handles_dict=psf_handles_dict,
+            corr_array=corr_array,
+            psf_array=psf_array,
         )
         butlerQC.put(outputs, outputRefs)
 
     def _load_noise_corr(
-        self, correlation_handles_dict: dict | None, band: str
+        self, corr_array: np.ndarray | None, band: str
     ) -> NDArray | None:
-        if correlation_handles_dict is None:
+        if corr_array is None:
             return None
-        if band not in correlation_handles_dict:
+        if band not in band_order:
             return None
 
-        noise_corr = correlation_handles_dict[band].get().getArray()
+        iband = band_order.index(band)
+        noise_corr = corr_array[iband]
         variance = float(np.amax(noise_corr))
-        if variance > 0:
-            noise_corr = noise_corr / variance
-
+        if variance <= 0:
+            return None
+        noise_corr = noise_corr / variance
         ny, nx = noise_corr.shape
         if not np.isclose(noise_corr[ny // 2, nx // 2], 1.0):
             raise RuntimeError(
@@ -228,8 +223,8 @@ class MeasureSimsTask(PipelineTask):
         patch: int,
         truthCatalog,
         seed: int,
-        psf_handles_dict: dict | None = None,
-        correlation_handles_dict: dict | None = None,
+        psf_array: NDArray | None = None,
+        corr_array: NDArray | None = None,
         mask: MaskX | None = None,
     ) -> ExposureF:
         kwargs: dict[str, Any] = {
@@ -240,10 +235,10 @@ class MeasureSimsTask(PipelineTask):
             "truthCatalog": truthCatalog,
         }
 
-        if psf_handles_dict and band in psf_handles_dict:
-            kwargs["psfImage"] = psf_handles_dict[band].get()
-        if correlation_handles_dict and band in correlation_handles_dict:
-            kwargs["noiseCorrImage"] = correlation_handles_dict[band].get()
+        if psf_array is not None:
+            kwargs["psfArray"] = psf_array
+        if corr_array is not None:
+            kwargs["noiseCorrArray"] = corr_array
         if mask:
             kwargs["mask"] = mask
         sim_output = self.simulator.run(**kwargs)
@@ -331,8 +326,8 @@ class MeasureSimsTask(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
-        psf_handles_dict: dict | None = None,
-        correlation_handles_dict: dict | None = None,
+        psf_array: NDArray | None = None,
+        corr_array: NDArray | None = None,
         mask: MaskX | None = None,
         **kwargs,
     ):
@@ -363,12 +358,12 @@ class MeasureSimsTask(PipelineTask):
             patch=patch,
             truthCatalog=truthCatalog,
             seed=seed,
-            psf_handles_dict=psf_handles_dict,
-            correlation_handles_dict=correlation_handles_dict,
+            psf_array=psf_array,
+            corr_array=corr_array,
             mask=mask,
         )
         i_noise_corr = self._load_noise_corr(
-            correlation_handles_dict, detect_band,
+            corr_array, detect_band,
         )
         det_cat = self._detect(
             exposure=i_exposure,
@@ -408,11 +403,11 @@ class MeasureSimsTask(PipelineTask):
                 patch=patch,
                 truthCatalog=truthCatalog,
                 seed=seed,
-                psf_handles_dict=psf_handles_dict,
-                correlation_handles_dict=correlation_handles_dict,
+                psf_array=psf_array,
+                corr_array=corr_array,
                 mask=mask,
             )
-            noise_corr = self._load_noise_corr(correlation_handles_dict, band)
+            noise_corr = self._load_noise_corr(corr_array, band)
             force_outputs.append(
                 self._measure_band(
                     exposure=exposure,
