@@ -105,8 +105,8 @@ class matchPipeConnections(
         name="{coaddName}_coadd_truthCatalog",
         dimensions=("skymap", "tract"),
         storageClass="ArrowAstropy",
-        multiple=True,
-        deferLoad=True,
+        multiple=False,
+        deferLoad=False,
         minimum=0,
     )
     catalog = cT.Output(
@@ -213,16 +213,7 @@ class matchPipe(PipelineTask):
                 dm_catalog.append(rfn.rename_fields(cat, map_dict))
             dm_catalog = rfn.merge_arrays(dm_catalog, flatten=True)
 
-        truth_handles = inputs["truth_catalog"]
-        if len(truth_handles) == 0:
-            truth_handles_dict = None
-            truth_catalog = None
-        else:
-            truth_handles_dict = {
-                handle.dataId["band"]: handle for handle in truth_handles
-            }
-            truth_catalog = truth_handles_dict["i"].get().as_array()
-
+        truth_catalog = inputs["truth_catalog"].as_array()
         anacal_catalog = inputs["anacal_catalog"].as_array()
         index = np.arange(len(anacal_catalog))
         anacal_catalog = rfn.append_fields(
