@@ -86,7 +86,7 @@ class matchPipeConnections(
     )
     anacal_catalog = cT.Input(
         doc="Source catalog with joint detection and measurement",
-        name="{coaddName}_coadd_anacal_joint",
+        name="{coaddName}_coadd_anacal_catalog",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,

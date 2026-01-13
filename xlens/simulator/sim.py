@@ -93,13 +93,13 @@ class MultibandSimConnections(
         doc="Input coadd systematics mask",
         name="{coaddName}_coadd_systematics_mask",
         storageClass="Mask",
-        dimensions=("skymap", "tract", "patch", "band"),
+        dimensions=("skymap", "tract", "patch"),
         multiple=False,
         minimum=0,
     )
     noiseCorrArray = cT.Input(
         doc="Stacked noise correlation array (6 x npix x npix).",
-        name="deep_coadd_systematics_noisecorr_stack",
+        name="deep_coadd_systematics_noisecorr_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
@@ -107,7 +107,7 @@ class MultibandSimConnections(
     )
     psfArray = cT.Input(
         doc="Stacked PSF image array (6 x npix x npix).",
-        name="deep_coadd_systematics_psfcentered_stack",
+        name="deep_coadd_systematics_psfcentered_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,

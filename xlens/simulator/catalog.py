@@ -41,7 +41,7 @@ from .perturbation import ShearHalo, ShearLogNormalFlat, ShearRedshift
 
 class CatalogConnections(
     PipelineTaskConnections,
-    dimensions=("skymap", "tract", "patch", "band"),
+    dimensions=("skymap", "tract"),
     defaultTemplates={
         "coaddName": "deep",
         "simCoaddName": "sim",
@@ -289,25 +289,15 @@ class CatalogTask(PipelineTask):
         assert butlerQC.quantum.dataId is not None
         inputs = butlerQC.get(inputRefs)
 
-        # band name
         assert butlerQC.quantum.dataId is not None
-        patch_id = butlerQC.quantum.dataId["patch"]
-        inputs["patch_id"] = patch_id
 
         # Get unique integer ID for IdFactory and RNG seeds; only the latter
         # should really be used as the IDs all come from the input catalog.
         idGenerator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
         seed = idGenerator.catalog_id
         inputs["seed"] = seed
-
         skymap = butlerQC.get(inputRefs.skymap)
-        sky_info = makeSkyInfo(
-            skymap,
-            tractId=butlerQC.quantum.dataId["tract"],
-            patchId=butlerQC.quantum.dataId["patch"],
-        )
-        tract_info = sky_info.tractInfo
-        inputs["tract_info"] = tract_info
+        inputs["tract_info"] = skymap[butlerQC.quantum.dataId["tract"]]
         outputs = self.run(**inputs)
         butlerQC.put(outputs, outputRefs)
         return

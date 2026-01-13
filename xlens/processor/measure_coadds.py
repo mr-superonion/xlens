@@ -47,6 +47,8 @@ from numpy.typing import NDArray
 from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
 
+band_order = "ugrizy"
+
 
 class MeasureCoaddsPipeConnections(
     PipelineTaskConnections,
@@ -67,14 +69,13 @@ class MeasureCoaddsPipeConnections(
         multiple=True,
         deferLoad=True,
     )
-    noise_corr = cT.Input(
-        doc="Noise correlation function",
-        name="deep_coadd_systematics_noisecorr",
-        storageClass="ImageF",
-        dimensions=("skymap", "tract", "patch", "band"),
+    noiseCorrArray = cT.Input(
+        doc="Stacked noise correlation array (6 x npix x npix).",
+        name="deep_coadd_systematics_noisecorr_6bands",
+        storageClass="NumpyArray",
+        dimensions=("skymap", "tract", "patch"),
+        multiple=False,
         minimum=0,
-        multiple=True,
-        deferLoad=True,
     )
     mask = cT.Input(
         doc="Combined mask from bad pixels and bright stars across all bands.",
@@ -160,15 +161,9 @@ class MeasureCoaddsPipe(PipelineTask):
         exposure_handles = inputs["exposure"]
         exposure_handles_dict = {h.dataId["band"]: h for h in exposure_handles}
 
-        corr_handles = inputs["noise_corr"]
-        if len(corr_handles) == 0:
-            corr_handles_dict = None
-        else:
-            corr_handles_dict = {h.dataId["band"]: h for h in corr_handles}
-
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
-            correlation_handles_dict=corr_handles_dict,
+            corr_array=inputs.get("noiseCorrArray", None),
             skyMap=inputs["skyMap"],
             tract=tract,
             patch=patch,
@@ -177,18 +172,19 @@ class MeasureCoaddsPipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
 
     def _load_noise_corr(
-        self, correlation_handles_dict: dict | None, band: str
+        self, corr_array: np.ndarray | None, band: str
     ) -> NDArray | None:
-        if correlation_handles_dict is None:
+        if corr_array is None:
             return None
-        if band not in correlation_handles_dict:
+        if band not in band_order:
             return None
 
-        noise_corr = correlation_handles_dict[band].get().getArray()
+        iband = band_order.index(band)
+        noise_corr = corr_array[iband]
         variance = float(np.amax(noise_corr))
-        if variance > 0:
-            noise_corr = noise_corr / variance
-
+        if variance <= 0:
+            return None
+        noise_corr = noise_corr / variance
         ny, nx = noise_corr.shape
         if not np.isclose(noise_corr[ny // 2, nx // 2], 1.0):
             raise RuntimeError(
@@ -204,7 +200,7 @@ class MeasureCoaddsPipe(PipelineTask):
         self,
         *,
         exposure_handles_dict: dict,
-        correlation_handles_dict: dict | None,
+        corr_array: np.ndarray | None,
         skyMap,
         tract: int,
         patch: int,
@@ -221,8 +217,7 @@ class MeasureCoaddsPipe(PipelineTask):
         exposure = handle.get()
         exposure.getPsf().setCacheCapacity(self.config.psfCache)
 
-        noise_corr = self._load_noise_corr(correlation_handles_dict, band)
-
+        noise_corr = self._load_noise_corr(corr_array, band)
         idGenerator = self.config.idGenerator.apply(handle.dataId)
         data = self.anacal.prepare_data(
             exposure=exposure,
@@ -242,7 +237,7 @@ class MeasureCoaddsPipe(PipelineTask):
         *,
         detection: NDArray,
         exposure_handles_dict: dict,
-        correlation_handles_dict: dict | None,
+        corr_array: np.ndarray | None,
         skyMap,
         tract: int,
         patch: int,
@@ -257,7 +252,7 @@ class MeasureCoaddsPipe(PipelineTask):
             exposure = handle.get()
             exposure.getPsf().setCacheCapacity(self.config.psfCache)
 
-            noise_corr = self._load_noise_corr(correlation_handles_dict, band)
+            noise_corr = self._load_noise_corr(corr_array, band)
             idGenerator = self.config.idGenerator.apply(handle.dataId)
             data = self.anacal.prepare_data(
                 exposure=exposure,
@@ -296,7 +291,7 @@ class MeasureCoaddsPipe(PipelineTask):
         self,
         *,
         exposure_handles_dict: dict,
-        correlation_handles_dict: dict | None,
+        corr_array: np.ndarray | None,
         skyMap,
         tract: int,
         patch: int,
@@ -309,7 +304,7 @@ class MeasureCoaddsPipe(PipelineTask):
             mask_array = None
         det_cat = self._detect(
             exposure_handles_dict=exposure_handles_dict,
-            correlation_handles_dict=correlation_handles_dict,
+            corr_array=corr_array,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
@@ -318,7 +313,7 @@ class MeasureCoaddsPipe(PipelineTask):
         force_cat = self._force(
             detection=det_cat,
             exposure_handles_dict=exposure_handles_dict,
-            correlation_handles_dict=correlation_handles_dict,
+            corr_array=corr_array,
             skyMap=skyMap,
             tract=tract,
             patch=patch,

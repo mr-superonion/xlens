@@ -365,11 +365,24 @@ class BuildSystematicsTask(PipelineTask):
 
     def get_noise_corr(self, exposure, mask_array):
         assert isinstance(self.config, BuildSystematicsConfig)
+        mask = exposure.mask  # MaskX / afwImage.Mask
+
+        # Always check what planes exist in this exposure:
+        print(mask.getMaskPlaneDict().keys())
+
+        planes = [
+            "BAD", "CR", "NO_DATA", "SAT", "UNMASKEDNAN",
+            "DETECTED", "DETECTED_NEGATIVE"
+        ]
+        avail = set(mask.getMaskPlaneDict().keys())
+        planes = [p for p in planes if p in avail]
+
+        bits = mask.getPlaneBitMask(planes)
         variance_array = exposure.getMaskedImage().variance.array[
             1000:3000, 1000:3000
         ]
         window_array = (
-            (exposure.mask.array == 0) & (mask_array ==0)
+            ((mask.array & bits) == 0) & (mask_array == 0)
         ).astype(np.float32)[
             1000:3000, 1000:3000
         ]
