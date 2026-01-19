@@ -228,6 +228,7 @@ class flexzboostEstimator(zEstimator):
         flux_name2: str | None = None,
         flux_name3: str | None = None,
         include_mag_err: bool = False,
+        return_pdfs: bool = False,
         **kwargs,
     ) -> dict:
         colors = get_color(
@@ -241,7 +242,10 @@ class flexzboostEstimator(zEstimator):
             include_mag_err=include_mag_err,
         )
         pdfs, _ = self.pz_obj.predict(colors, n_grid=NUM_Z_GRIDS)
-        return get_point_estimates_from_pdfs(pdfs)
+        points = get_point_estimates_from_pdfs(pdfs)
+        if return_pdfs:
+            points["pdfs"] = pdfs
+        return points
 
 
 def load_bpz_templates(
@@ -296,7 +300,7 @@ class bpzEstimator(zEstimator):
         self.prior_dict = prior_dict
         self.zp_errors = np.array(zp_errors, dtype=float)
 
-    def _meas_one(
+    def _measure_one_source(
         self,
         flux: np.ndarray,
         flux_err: np.ndarray,
@@ -311,7 +315,7 @@ class bpzEstimator(zEstimator):
         P = prior_function(Z_GRIDS, mag_0, self.prior_dict, nt)
         post = L * P
         pdf = post.sum(axis=1)
-        return get_point_estimate(pdf)
+        return pdf
 
     def get_z(
         self,
@@ -323,6 +327,7 @@ class bpzEstimator(zEstimator):
         ref_band: str = "i",
         comp: int = 1,
         dg: float = 0.0,
+        return_pdfs: bool = False,
         **kwargs,
     ) -> dict:
         fn = _resolve_flux_name(flux_name)
@@ -372,17 +377,13 @@ class bpzEstimator(zEstimator):
 
         ng = len(src)
 
-        results = np.array(
-            [self._meas_one(flux[i], flux_err[i], mag0[i]) for i in range(ng)],
+        pdfs = np.stack(
+            [self._measure_one_source(
+                flux[i], flux_err[i], mag0[i]
+            ) for i in range(ng)],
             dtype=float,
         )
-        zmode, z025, z160, z500, z840, z975, zbest = results.T
-        return {
-            "zmode": zmode,
-            "z025": z025,
-            "z160": z160,
-            "z500": z500,
-            "z840": z840,
-            "z975": z975,
-            "zbest": zbest,
-        }
+        points = get_point_estimates_from_pdfs(pdfs)
+        if return_pdfs:
+            points["pdfs"] = pdfs
+        return points

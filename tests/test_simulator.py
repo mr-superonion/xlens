@@ -16,6 +16,7 @@ config.tractOverlap = 1.0 / 60  # degrees
 config.pixelScale = 0.168  # arcsec/pixel (HSC)
 skymap = RingsSkyMap(config)
 
+# small patch
 config = RingsSkyMapConfig()
 config.patchInnerDimensions = [501, 501]
 config.tractOverlap = 0.0
@@ -294,6 +295,35 @@ def test_sim_task():
         truthCatalog=catalog,
     )
     assert np.sum(out.simExposure.image.array) > 0.0
+
+    # with real PSF
+    psf = galsim.Moffat(beta=3.0, fwhm=1.0).withFlux(1.0)
+    psf_array = psf.drawImage(scale=0.2, method="auto", nx=49, ny=49).array
+    config = MultibandSimConfig()
+    config.use_real_psf = True
+    simtask = MultibandSimTask(config=config)
+    out = simtask.run(
+        tract_info=skymap[0],
+        patch_id=0,
+        band="i",
+        seed=0,
+        truthCatalog=catalog,
+        psfArray=psf_array,
+        noiseCorrArray=None,
+    )
+    psf_lsst = out.simExposure.getPsf()
+    psf_array2 = psf_lsst.computeKernelImage(geom.Point2D(200, 200)).array
+    psf_array3 = psf_lsst.computeImage(geom.Point2D(200, 200)).array
+    np.testing.assert_array_almost_equal(
+        psf_array2,
+        psf_array,
+        decimal=4,
+    )
+    np.testing.assert_array_almost_equal(
+        psf_array3,
+        psf_array,
+        decimal=4,
+    )
     return
 
 

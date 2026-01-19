@@ -13,65 +13,6 @@ COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()
 SIZE = COMM.Get_size()
 
-colnames = [
-    "ra",
-    "dec",
-    "wdet",
-    "dwdet_dg1",
-    "dwdet_dg2",
-    "wsel",
-    "dwsel_dg1",
-    "dwsel_dg2",
-    "mask_value",
-    "is_primary",
-    "flux_gauss0",
-    "dflux_gauss0_dg1",
-    "dflux_gauss0_dg2",
-    "flux_gauss2",
-    "dflux_gauss2_dg1",
-    "dflux_gauss2_dg2",
-    "flux_gauss4",
-    "dflux_gauss4_dg1",
-    "dflux_gauss4_dg2",
-    "flux_gauss0_err",
-    "flux_gauss2_err",
-    "flux_gauss4_err",
-    "fpfs_e1",
-    "fpfs_de1_dg1",
-    "fpfs_de1_dg2",
-    "fpfs_e2",
-    "fpfs_de2_dg1",
-    "fpfs_de2_dg2",
-    "fpfs_m0",
-    "fpfs_dm0_dg1",
-    "fpfs_dm0_dg2",
-    "fpfs_m2",
-    "fpfs_dm2_dg1",
-    "fpfs_dm2_dg2",
-    "x1_det",
-    "x2_det",
-    "fpfs1_e1",
-    "fpfs1_de1_dg1",
-    "fpfs1_e2",
-    "fpfs1_de2_dg2",
-    "fpfs1_q1",
-    "fpfs1_dq1_dg1",
-    "fpfs1_q2",
-    "fpfs1_dq2_dg2",
-    "fpfs1_m00",
-    "fpfs1_dm00_dg1",
-    "fpfs1_dm00_dg2",
-    "fpfs1_m20",
-    "fpfs1_dm20_dg1",
-    "fpfs1_dm20_dg2",
-    "fpfs1_m22c",
-    "fpfs1_dm22c_dg1",
-    "fpfs1_m22s",
-    "fpfs1_dm22s_dg2",
-    "truth_index",
-    "redshift",
-]
-
 # ------------------------------
 # Argument Parsing
 # ------------------------------
@@ -173,7 +114,7 @@ def _read_and_stack(sim_seed: int) -> astTable.Table:
     detfname = os.path.join(fits_root, f"cat-{sim_seed:05d}.fits")
     if not os.path.exists(detfname):
         return None
-    detection = astTable.Table.read(detfname)[colnames]
+    detection = astTable.Table.read(detfname)
 
     data_all: List[astTable.Table] = [detection]
     for band in "ugrizy":

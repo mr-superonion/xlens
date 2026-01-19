@@ -80,8 +80,8 @@ if iend - istart <= 0:
 
 
 band = args.band
-if band not in "grizya":
-    raise ValueError("Band not in [grizya]")
+if band not in "ugrizya":
+    raise ValueError("Band not in [ugrizya]")
 if args.layout == "random":
     extend_ratio = 1.08
 elif args.layout == "grid":
@@ -108,7 +108,7 @@ config.rotation = 0.0
 config.projection = "TAN"
 config.patchInnerDimensions = [4000, 4000]
 config.patchBorder = 0
-config.pixelScale = 0.168
+config.pixelScale = 0.20
 config.tractOverlap = 0.0
 skymap = DiscreteSkyMap(config)
 if RANK == 0:
@@ -130,7 +130,8 @@ cfg_cat.sep_arcsec = 14
 cat_task = CatalogShearTask(config=cfg_cat)
 
 cfg_sim = MultibandSimConfig()
-cfg_sim.survey_name = "hsc"
+cfg_sim.survey_name = "lsst"
+cfg_sim.mag_zero = 31.4
 cfg_sim.draw_image_noise = True
 cfg_sim.use_real_psf = True
 sim_task = MultibandSimTask(config=cfg_sim)
@@ -139,17 +140,17 @@ sim_task = MultibandSimTask(config=cfg_sim)
 # Detection Task
 # ------------------------------
 detect_config = AnacalDetectPipeConfig()
-detect_config.anacal.sigma_arcsec = 0.40
+detect_config.anacal.sigma_arcsec = 0.50
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
 detect_config.do_fpfs = (args.band == "a")
-detect_config.fpfs.sigma_shapelets1 = 0.40 * np.sqrt(2.0)
+detect_config.fpfs.sigma_shapelets1 = 0.50 * np.sqrt(2.0)
 det_task = AnacalDetectPipe(config=detect_config)
 
 config = matchPipeConfig()
-config.mag_zero = 27.0
-config.mag_max_truth = 28.0
+config.mag_zero = 31.4
+config.mag_max_truth = 28.5
 match_task = matchPipe(config=config)
 
 

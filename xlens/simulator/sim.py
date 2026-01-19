@@ -453,14 +453,17 @@ class MultibandSimTask(PipelineTask):
         # Obtain PSF object for Galsim
         if psfArray is not None and self.config.use_real_psf:
             draw_method = "no_pixel"
-            psf_array = psfArray[isys]
+            if len(psfArray.shape) == 3:
+                psf_array = psfArray[isys]
+            else:
+                psf_array = psfArray
             assert abs(np.sum(psf_array) - 1.0) < 1e-2
             psf_galsim = galsim.InterpolatedImage(
                 galsim.Image(psf_array),
                 scale=pixel_scale,
                 flux=1.0,
             )
-            psfImage = afwImage.ImageF(psfArray.shape[0], psfArray.shape[1])
+            psfImage = afwImage.ImageF(psf_array.shape[0], psf_array.shape[1])
         else:
             draw_method = "auto"
             psf_fwhm = psf_fwhm_defaults[band][survey_name]
@@ -498,7 +501,10 @@ class MultibandSimTask(PipelineTask):
             variance = noise_variance_defaults[band][survey_name] * var_ratio
             self.log.debug("No correlation, variance:", variance)
         else:
-            noise_corr = noiseCorrArray[isys]
+            if len(noiseCorrArray.shape) == 3:
+                noise_corr = noiseCorrArray[isys]
+            else:
+                noise_corr = noiseCorrArray
             variance = np.amax(noise_corr)
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
