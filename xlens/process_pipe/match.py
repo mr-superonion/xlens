@@ -136,6 +136,10 @@ class matchPipeConfig(
         doc="whether select primary detection",
         default=False,
     )
+    match_pix_distance = Field[int](
+        doc="matching distance in pixels",
+        default=6,
+    )
     band_column_names = DictField(
         keytype=str,
         itemtype=str,
@@ -217,7 +221,7 @@ class matchPipe(PipelineTask):
         anacal_catalog = inputs["anacal_catalog"].as_array()
         index = np.arange(len(anacal_catalog))
         anacal_catalog = rfn.append_fields(
-            anacal_catalog, names="index",
+            base=anacal_catalog, names="index",
             data=index, dtypes="i4", usemask=False,
         )
 
@@ -297,8 +301,8 @@ class matchPipe(PipelineTask):
         ana_coords = np.vstack(
             (src["x1_det"] / pixel_scale, src["x2_det"] / pixel_scale)
         ).T
-
-        src_idx, mrc_idx = self.match(ana_coords, mrc_coords)
+        thres = self.config.match_pix_distance
+        src_idx, mrc_idx = self.match(ana_coords, mrc_coords, thres=thres)
         final_src = src[src_idx]
         final_mrc = mrc[mrc_idx]
         # Combine fields
@@ -318,8 +322,8 @@ class matchPipe(PipelineTask):
                 path,
                 columns=["i_ab"],
             )
-        cat_ref = self._cat_ref
-        mag_mrc = cat_ref[mrc["indices"]]["i_ab"]
+        assert self._cat_ref is not None
+        mag_mrc = self._cat_ref[mrc["indices"]]["i_ab"]
         mrc = mrc[mag_mrc < self.config.mag_max_truth]
         x_mrc = np.array(mrc["image_x"])
         y_mrc = np.array(mrc["image_y"])
@@ -330,7 +334,8 @@ class matchPipe(PipelineTask):
         ).T
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
 
-        src_idx, mrc_idx = self.match(ana_coords, mrc_coords)
+        thres = self.config.match_pix_distance
+        src_idx, mrc_idx = self.match(ana_coords, mrc_coords, thres=thres)
         final_src = src[src_idx]
         final_mrc = mrc[mrc_idx]
         final_mrc = rfn.repack_fields(
