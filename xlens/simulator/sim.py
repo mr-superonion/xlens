@@ -174,6 +174,10 @@ class MultibandSimConfig(
         doc="whether to use use multi-Gaussian approximation",
         default=False,
     )
+    force_isotropic = Field[bool](
+        doc="force all input catalog to be isotropic",
+        default=False,
+    )
     psf_e1 = Field[float](
         doc="psf ellipticity, first component e1",
         default=0.0,
@@ -336,6 +340,7 @@ class MultibandSimTask(PipelineTask):
                 gal_obj = galaxy_catalog.get_obj(
                     ind=i, mag_zero=mag_zero, band=band,
                     use_mog=self.config.use_mog,
+                    force_isotropic=self.config.force_isotropic,
                     include_point_source=self.config.include_point_source,
                 )
                 convolved_object = galsim.Convolve([gal_obj, psf_obj])
@@ -639,6 +644,7 @@ class IASimTask(MultibandSimTask):
                 gal_obj = galaxy_catalog.get_obj(
                     ind=i, mag_zero=mag_zero, band=band,
                     use_mog=self.config.use_mog,
+                    force_isotropic=self.config.force_isotropic,
                     include_point_source=self.config.include_point_source,
                 )
                 stamp = draw_ia(

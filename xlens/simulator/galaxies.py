@@ -307,8 +307,11 @@ class BaseGalaxyCatalog(ABC):
         return
 
     def get_obj(
-        self, *, ind, mag_zero: float, band: str, use_mog=False,
-        include_point_source=True,
+        self, *,
+        ind, mag_zero: float, band: str,
+        use_mog: bool = False,
+        force_isotropic: bool = False,
+        include_point_source: bool = True,
     ) -> dict[str, list]:
         """
         Returns
@@ -319,6 +322,7 @@ class BaseGalaxyCatalog(ABC):
         gal = self._generate_galaxy(
             entry=entry, mag_zero=mag_zero, band=band, use_mog=use_mog,
             include_point_source=include_point_source,
+            force_isotropic=force_isotropic,
         )
         gal = gal.rotate(
             src["angles"] * galsim.radians
@@ -409,7 +413,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
 
     def _generate_galaxy(
         self, *, entry, mag_zero, band, use_mog=False,
-        include_point_source=True, **kwargs,
+        include_point_source=True,
+        force_isotropic=False,
+        **kwargs,
     ) -> galsim.GSObject:
         if use_mog:
             _simulator = mog
@@ -440,7 +446,10 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         if disk_flux > 0:
             a_d, b_d = dd["a_d"], dd["b_d"]
             hlr_d = np.sqrt(a_d * b_d)
-            q_d = (b_d / a_d) if a_d > 0 else 1.0
+            if force_isotropic:
+                q_d = 1.0
+            else:
+                q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(dd["pa_disk"])
             disk = _simulator.Exponential(
                 flux=disk_flux, half_light_radius=hlr_d
@@ -453,7 +462,10 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         if bulge_flux > 0:
             a_b, b_b = dd["a_b"], dd["b_b"]
             hlr_b = np.sqrt(a_b * b_b)
-            q_b = (b_b / a_b) if a_b > 0 else 1.0
+            if force_isotropic:
+                q_b = 1.0
+            else:
+                q_b = (b_b / a_b) if a_b > 0 else 1.0
             beta_b = np.radians(dd["pa_bulge"])
             bulge = _simulator.DeVaucouleurs(
                 flux=bulge_flux, half_light_radius=hlr_b
@@ -546,7 +558,10 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         return catalog["diskHalfLightRadiusArcsec"]
 
     def _generate_galaxy(
-        self, *, entry, mag_zero, band, survey_name, use_mog=False, **kwargs,
+        self, *, entry, mag_zero, band, survey_name,
+        use_mog=False,
+        force_isotropic=False,
+        **kwargs,
     ) -> galsim.GSObject:
         """
         entry is a row of the columnar table (supports dict-like access).
@@ -564,10 +579,16 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         disk_hlr = entry["diskHalfLightRadiusArcsec"]
 
         # shear-ellipticity components
-        disk_e1, disk_e2 = entry["diskEllipticity1"], entry["diskEllipticity2"]
-        bulge_e1, bulge_e2 = (
-            entry["spheroidEllipticity1"], entry["spheroidEllipticity2"]
-        )
+        if force_isotropic:
+            disk_e1, disk_e2 = 0.0, 0.0
+            bulge_e1, bulge_e2 = 0.0, 0.0
+        else:
+            disk_e1, disk_e2 = (
+                entry["diskEllipticity1"], entry["diskEllipticity2"]
+            )
+            bulge_e1, bulge_e2 = (
+                entry["spheroidEllipticity1"], entry["spheroidEllipticity2"]
+            )
 
         mag = entry[f"{sname}_mag_{band}"]
         flux = 10 ** ((mag_zero - mag) / 2.5)
