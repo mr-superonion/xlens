@@ -80,7 +80,7 @@ class ShearEstimator(object):
 
     def _measure(
         self, src, comp: int, sign: float,
-        extinction: np.ndarray | dict | None = None,
+        extinction: np.ndarray | None = None,
     ):
         """Compute binned <w_sel e> for shear +sign*dg."""
         fn = self.fn
@@ -103,6 +103,10 @@ class ShearEstimator(object):
             if extinction is not None:
                 _m = _m - extinction[f"a_{b}"]
             mask_s &= (_m < self.magx[b])
+        if extinction is None:
+            ext = None
+        else:
+            ext = extinction[mask_s]
 
         if self.z_estimator is not None:
             z_s, w_s = self.z_estimator.get_zsel(
@@ -115,7 +119,7 @@ class ShearEstimator(object):
                 dg=dg_eff,
                 include_mag_err=False,
                 z_point_name=self.z_point_name,
-                extinction=extinction,
+                extinction=ext,
             )
             mtmp_local = w_s < self.z_width95_max
             mask_s[mask_s] &= mtmp_local
@@ -154,7 +158,7 @@ class ShearEstimator(object):
 
     def get_sel_response(
         self, src, comp: int,
-        extinction: np.ndarray | dict | None = None,
+        extinction: np.ndarray | None = None,
     ) -> np.ndarray:
         """Selection response term for component comp (1 or 2)."""
         ellp, _, _, _ = self._measure(src, comp, +1.0, extinction=extinction)
@@ -165,7 +169,7 @@ class ShearEstimator(object):
         self,
         src: np.ndarray,
         target: str,
-        extinction: np.ndarray | dict | None = None,
+        extinction: np.ndarray | None = None,
     ):
         """
         Measure shear components in redshift bins, using a supplied z-estimator.

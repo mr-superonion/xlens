@@ -93,7 +93,7 @@ def get_color(
     dg: float = 0.0,
     flux_name: str = "gauss2",
     include_mag_err: bool = False,
-    extinction: np.ndarray | dict | None = None,
+    extinction: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Returns
@@ -180,7 +180,7 @@ class zEstimator(ABC):
         dg: float = 0.0,
         flux_name2: str | None = None,
         flux_name3: str | None = None,
-        extinction: np.ndarray | dict | None = None,
+        extinction: np.ndarray | None = None,
         **kwargs,
     ) -> dict:
         """Method to get redshift point estimates
@@ -199,14 +199,14 @@ class zEstimator(ABC):
         z_point_name: str = "zmode",
         flux_name2: str | None = None,
         flux_name3: str | None = None,
-        extinction: np.ndarray | dict | None = None,
+        extinction: np.ndarray | None = None,
         **kwargs,
     ):
         zout = self.get_z(
             src=src, mag_zero=mag_zero, flux_name=flux_name,
             bands=bands, ref_band=ref_band, comp=comp, dg=dg,
             flux_name2=flux_name2, flux_name3=flux_name3,
-            **kwargs,
+            extinction=extinction, **kwargs,
         )
         zpoint = zout[z_point_name]
         width95 = zout["z975"] - zout["z025"]
@@ -238,7 +238,7 @@ class flexzboostEstimator(zEstimator):
         flux_name3: str | None = None,
         include_mag_err: bool = False,
         return_pdfs: bool = False,
-        extinction: np.ndarray | dict | None = None,
+        extinction: np.ndarray | None = None,
         **kwargs,
     ) -> dict:
         colors = get_color(
@@ -339,7 +339,7 @@ class bpzEstimator(zEstimator):
         comp: int = 1,
         dg: float = 0.0,
         return_pdfs: bool = False,
-        extinction: np.ndarray | dict | None = None,
+        extinction: np.ndarray | None = None,
         **kwargs,
     ) -> dict:
 
