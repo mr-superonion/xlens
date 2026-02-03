@@ -140,7 +140,7 @@ class MultibandSimConfig(
     )
     mag_zero = Field[float](
         doc="magnitude zero point",
-        default=30.0,
+        default=-1,
     )
     include_pixel_masks = Field[bool](
         doc="whether to include pixel masks in the simulation",
@@ -443,9 +443,13 @@ class MultibandSimTask(PipelineTask):
 
         mag_zero_survey_default = mag_zero_defaults[self.config.survey_name]
         mag_zero = self.config.mag_zero
+        if mag_zero < 0:
+            mag_zero = mag_zero_survey_default
+            var_ratio = 1.0
+        else:
+            var_ratio = 10.0 ** ((mag_zero - mag_zero_survey_default) * 0.8)
         zero_flux = 10.0 ** (0.4 * mag_zero)
         photo_calib = afwImage.makePhotoCalibFromCalibZeroPoint(zero_flux)
-        var_ratio = 10.0 ** ((mag_zero - mag_zero_survey_default) * 0.8)
 
         if mask is not None:
             self.log.debug("Using the real pixel mask")
@@ -510,7 +514,9 @@ class MultibandSimTask(PipelineTask):
                 noise_corr = noiseCorrArray[isys]
             else:
                 noise_corr = noiseCorrArray
-            variance = np.amax(noise_corr)
+            # collect variance
+            variance = np.amax(noise_corr) * var_ratio
+            # normalized noise correlation function
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
             assert noise_corr[ny // 2, nx // 2] == 1

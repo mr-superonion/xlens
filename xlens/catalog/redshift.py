@@ -5,7 +5,7 @@ import numpy as np
 from scipy.integrate import simpson
 from scipy.optimize import minimize_scalar
 
-from .utils import _resolve_flux_name
+from .utils import _resolve_cut_name
 
 NUM_Z_GRIDS = 501
 Z_MIN = 0.0
@@ -93,6 +93,7 @@ def get_color(
     dg: float = 0.0,
     flux_name: str = "gauss2",
     include_mag_err: bool = False,
+    extinction: np.ndarray | dict | None = None,
 ) -> np.ndarray:
     """
     Returns
@@ -103,7 +104,7 @@ def get_color(
         If include_mag_err=True: shape (N, 1 + 2*(len(bands)-1))
           [ref_mag, (b0-b1), err01, (b1-b2), err12, ...]
     """
-    fn = _resolve_flux_name(flux_name)
+    fn = _resolve_cut_name(flux_name)
     A = 2.5 / np.log(10.0)
     n = src.shape[0]
 
@@ -121,10 +122,15 @@ def get_color(
         ferr = src[err_col]
 
         flux = flux_base + dg * dflux
-        mag = np.full(n, mag_zero, dtype=np.float64)
+        mag = np.full(n, 40.0, dtype=np.float64)  #  default to faint mag=40.0
         pos = flux > 0
-        with np.errstate(divide="ignore", invalid="ignore"):
-            mag[pos] = mag_zero - 2.5 * np.log10(flux[pos])
+        if extinction is None:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                mag[pos] = mag_zero - 2.5 * np.log10(flux[pos])
+        else:
+            a_ext = extinction[f"a_{b}"]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                mag[pos] = mag_zero - 2.5 * np.log10(flux[pos]) - a_ext[pos]
         mags.append(mag)
         if merrs is not None:
             mag_err = np.full(n, 1.0, dtype=np.float64)
@@ -174,6 +180,7 @@ class zEstimator(ABC):
         dg: float = 0.0,
         flux_name2: str | None = None,
         flux_name3: str | None = None,
+        extinction: np.ndarray | dict | None = None,
         **kwargs,
     ) -> dict:
         """Method to get redshift point estimates
@@ -189,8 +196,10 @@ class zEstimator(ABC):
         ref_band: str = "i",
         comp: int = 1,
         dg: float = 0.0,
+        z_point_name: str = "zmode",
         flux_name2: str | None = None,
         flux_name3: str | None = None,
+        extinction: np.ndarray | dict | None = None,
         **kwargs,
     ):
         zout = self.get_z(
@@ -199,9 +208,9 @@ class zEstimator(ABC):
             flux_name2=flux_name2, flux_name3=flux_name3,
             **kwargs,
         )
-        zmode = zout["zmode"]
+        zpoint = zout[z_point_name]
         width95 = zout["z975"] - zout["z025"]
-        return zmode, width95
+        return zpoint, width95
 
 
 class flexzboostEstimator(zEstimator):
@@ -229,6 +238,7 @@ class flexzboostEstimator(zEstimator):
         flux_name3: str | None = None,
         include_mag_err: bool = False,
         return_pdfs: bool = False,
+        extinction: np.ndarray | dict | None = None,
         **kwargs,
     ) -> dict:
         colors = get_color(
@@ -240,6 +250,7 @@ class flexzboostEstimator(zEstimator):
             bands=bands,
             ref_band=ref_band,
             include_mag_err=include_mag_err,
+            extinction=extinction,
         )
         pdfs, _ = self.pz_obj.predict(colors, n_grid=NUM_Z_GRIDS)
         points = get_point_estimates_from_pdfs(pdfs)
@@ -328,12 +339,13 @@ class bpzEstimator(zEstimator):
         comp: int = 1,
         dg: float = 0.0,
         return_pdfs: bool = False,
+        extinction: np.ndarray | dict | None = None,
         **kwargs,
     ) -> dict:
-        fn = _resolve_flux_name(flux_name)
+
+        fn = _resolve_cut_name(flux_name)
         A = 2.5 / np.log(10.0)
         n = src.shape[0]
-
         mags = []
         merrs = []
         for b in bands:
@@ -347,14 +359,19 @@ class bpzEstimator(zEstimator):
 
             flux = flux_base + dg * dflux
 
-            mag = np.full(n, 30.0, dtype=np.float64)
+            mag = np.full(n, 40.0, dtype=np.float64)  # default to faint gal
             mag_err = np.full(n, 1.0, dtype=np.float64)
 
             pos = flux > 0
             with np.errstate(divide="ignore", invalid="ignore"):
-                mag[pos] = mag_zero - 2.5 * np.log10(flux[pos])
                 mag_err[pos] = A * (ferr[pos] / flux[pos])
-
+            if extinction is None:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    mag[pos] = mag_zero - 2.5 * np.log10(flux[pos])
+            else:
+                a_ext = extinction[f"a_{b}"]
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    mag[pos] = mag_zero - 2.5 * np.log10(flux[pos]) - a_ext[pos]
             mags.append(mag)
             merrs.append(mag_err)
 

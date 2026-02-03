@@ -12,7 +12,7 @@ import numpy as np
 from astropy.stats import sigma_clipped_stats
 from numpy.lib import recfunctions as rfn
 
-from xlens.catalog import measure_shear
+from xlens.catalog import ShearEstimator
 from xlens.catalog.redshift import (
     bpzEstimator,
     flexzboostEstimator,
@@ -38,11 +38,18 @@ colnames = [
 ]
 
 SUMMARY_DIR_NAMES = {
-    "flexzboost": "summary-flexz-6bands-40-00",
-    "bpz": "summary-bpz-6bands-40-00",
+    "flexzboost": "summary-flexz-40-00-mag246-3",
+    "bpz": "summary-bpz-40-00-mag246-3",
 }
 
 DEFAULT_BPZ_DATA_PATH = "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/bpz/"
+
+
+def parse_float_list(s: str) -> list[float]:
+    s = s.strip()
+    # allow "24.6" or "24.6,24.0,23.7"
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    return [float(p) for p in parts]
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +65,16 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="ugrizy",
         help="bands that are used for photo-z estimation",
+    )
+    parser.add_argument(
+        "--mag-max",
+        type=str,
+        default="27.0,26.0,24.6,25.0,25.5",
+        help=(
+            "mag cut per band. Provide a single value (applies to all bands)"
+            "or a comma-separated list matching --bands order. "
+            "Example: --bands g,r,i --mag-max 24.6,24.3,24.0"
+        ),
     )
     parser.add_argument(
         "--redshift",
@@ -111,13 +128,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         required=True,
         help="Maximum sim_seed (exclusive).",
-    )
-    # Measurement config
-    parser.add_argument(
-        "--mag-max",
-        type=float,
-        default=26.2,
-        help="Flux cut applied to each band before selection.",
     )
     parser.add_argument(
         "--z-bounds",
@@ -230,7 +240,7 @@ def per_rank_work(
     ids_chunk: Iterable[int],
     base_dir: str,
     zbounds: list[float],
-    flux_min: float,
+    mag_max: float | dict,
     emax: float,
     dg: float,
     target: str,
@@ -245,37 +255,40 @@ def per_rank_work(
     r_pos_rows = []
     r_neg_rows = []
     shear_kwargs = {
-        "flux_min": flux_min,
+        "mag_max": mag_max,
         "z_estimator": zobj,
         "emax": emax,
         "zbounds": zbounds,
         "dg": dg,
-        "target": target,
-        "do_correction": do_correction,
         "z_width95_max": z_width95_max,
         "mag_zero": mag_zero,
         "flux_name": "gauss2",
         "bands": bands,
+        "ref_band": "i",
     }
+
+    shear_obj = ShearEstimator(
+        **shear_kwargs
+    )
     for sim_id in ids_chunk:
         src_pos = cat_read(base_dir, sim_id, mode=40, bands=bands)
-        out_pos = measure_shear(
+        out_pos = shear_obj.measure_shear(
             src=src_pos,
-            **shear_kwargs,
+            target=target,
         )
         del src_pos
         gc.collect()
         src_neg = cat_read(base_dir, sim_id, mode=0, bands=bands)
-        out_neg = measure_shear(
+        out_neg = shear_obj.measure_shear(
             src=src_neg,
-            **shear_kwargs,
+            target=target,
         )
         del src_neg
         gc.collect()
         e_pos_rows.append(out_pos["e"])
         e_neg_rows.append(out_neg["e"])
-        r_pos_rows.append(out_pos["r"] + out_pos["r_sel"])
-        r_neg_rows.append(out_neg["r"] + out_neg["r_sel"])
+        r_pos_rows.append(out_pos["r"] + out_pos["r_det"] + out_pos["r_sel"])
+        r_neg_rows.append(out_neg["r"] + out_neg["r_det"] + out_neg["r_sel"])
 
     return (
         np.vstack(e_pos_rows),
@@ -423,10 +436,22 @@ def main():
         raise SystemExit(
             f"--model-path not provided and {env} is not set in the environment"
         )
-    flux_min = 10.0 ** ((args.mag_zero - args.mag_max) / 2.5)
+
+    bands = args.bands
+    mag_max_list = parse_float_list(args.mag_max)
+    # Broadcast or validate length
+    if len(mag_max_list) == 1:
+        mag_max_list = mag_max_list * len(bands)
+    elif len(mag_max_list) != len(bands):
+        raise ValueError(
+            f"--mag-max has {len(mag_max_list)} value(s)"
+            "but --bands has {len(bands)} band(s). "
+        )
+    mag_max = {b: mmax for b, mmax in zip(bands, mag_max_list)}
+
     if not args.summary:
         zobj = build_redshift_estimator(
-            args.redshift, model_path, args.bpz_data_path, args.bands,
+            args.redshift, model_path, args.bpz_data_path, bands,
         )
         my_ids = np.arange(args.min_id, args.max_id, dtype=int)
         if len(my_ids) > 0:
@@ -434,7 +459,7 @@ def main():
                 my_ids,
                 base_dir,
                 zbounds,
-                flux_min,
+                mag_max,
                 args.emax,
                 args.dg,
                 args.target,
@@ -442,7 +467,7 @@ def main():
                 do_correction=do_correction,
                 z_width95_max=args.width_max,
                 mag_zero=args.mag_zero,
-                bands=args.bands,
+                bands=bands,
             )
             save_rank_partial(
                 base_dir,

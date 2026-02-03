@@ -1,5 +1,5 @@
 
-def _resolve_flux_min(
+def _resolve_cut(
     flux_min: float | dict,
     bands: str,
 ) -> dict[str, float]:
@@ -11,7 +11,7 @@ def _resolve_flux_min(
         return {b: f for b in bands}
 
 
-def _resolve_flux_name(flux_name: str) -> str:
+def _resolve_cut_name(flux_name: str) -> str:
     """Normalize flux_name to column suffix ('' or f'_{name}')."""
     if len(flux_name) > 0:
         if flux_name[0] != "_":

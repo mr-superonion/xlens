@@ -132,6 +132,7 @@ cat_task = CatalogShearTask(config=cfg_cat)
 cfg_sim = MultibandSimConfig()
 cfg_sim.survey_name = "hsc"
 cfg_sim.draw_image_noise = True
+cfg_sim.mag_zero = 27.0
 cfg_sim.use_real_psf = True
 sim_task = MultibandSimTask(config=cfg_sim)
 

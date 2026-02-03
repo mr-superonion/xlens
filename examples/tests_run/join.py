@@ -119,9 +119,8 @@ def _read_and_stack(sim_seed: int) -> astTable.Table:
     data_all: List[astTable.Table] = [detection]
     for band in "ugrizy":
         fname = os.path.join(fits_root, f"cat-{sim_seed:05d}-{band}.fits")
-        if not os.path.exists(fname):
-            return None
-        data_all.append(astTable.Table.read(fname))
+        if os.path.exists(fname):
+            data_all.append(astTable.Table.read(fname))
 
     # If you need strict presence of all bands, replace with join_type="exact"
     dd = astTable.hstack(data_all, join_type="exact")
