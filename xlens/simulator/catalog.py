@@ -20,7 +20,6 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import Field, FieldValidationError, ListField
 from lsst.pipe.base import (
     PipelineTask,
@@ -28,7 +27,6 @@ from lsst.pipe.base import (
     PipelineTaskConnections,
     Struct,
 )
-from lsst.pipe.tasks.coaddBase import makeSkyInfo
 from lsst.skymap import BaseSkyMap
 
 from ..utils.random import (
@@ -87,6 +85,10 @@ class CatalogConfig(
     rotId = Field[int](
         doc="number of rotations",
         default=0,
+    )
+    indice_group_id = Field[int](
+        doc="indice group index, if <0, ranomly select indices",
+        default=-1,
     )
     sep_arcsec = Field[float](
         doc="Spacing (arcsec) for 'grid'/'hex' layout",
@@ -239,6 +241,7 @@ class CatalogTask(PipelineTask):
             tract_info=tract_info,
             layout_name=self.config.layout,
             sep_arcsec=self.config.sep_arcsec,
+            indice_group_id=self.config.indice_group_id,
             extend_ratio=self.config.extend_ratio,
             force_pixel_center=self.config.force_pixel_center,
             select_observable=(

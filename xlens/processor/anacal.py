@@ -285,6 +285,15 @@ class AnacalTask(Task):
             (dict)
         """
         assert isinstance(self.config, AnacalConfig)
+        pixel_scale = float(exposure.wcs.getPixelScale().asArcseconds())
+        if blocks is None:
+            blocks = utils.image.get_blocks(
+                lsst_psf=exposure.getPsf(),
+                lsst_bbox=exposure.getBBox(),
+                pixel_scale=pixel_scale,
+                npix=self.config.npix,
+                psf_array=psf_array,
+            )
         data = utils.image.prepare_data(
             exposure=exposure,
             seed=seed,
@@ -303,17 +312,8 @@ class AnacalTask(Task):
             noise_array=noise_array,
             detection=detection,
             band=band,
+            blocks=blocks,
         )
-        if blocks is None:
-            data["blocks"] = utils.image.get_blocks(
-                lsst_psf=exposure.getPsf(),
-                lsst_bbox=exposure.getBBox(),
-                pixel_scale=data["pixel_scale"],
-                npix=self.config.npix,
-                psf_array=data["psf_array"],
-            )
-        else:
-            data["blocks"] = blocks
         if self.config.validate_psf:
             data["lsst_psf"] = exposure.getPsf()
         else:

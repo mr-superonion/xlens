@@ -40,7 +40,7 @@ class BaseGalaxyCatalog(ABC):
         tract_info: lsst.skymap.tractInfo.ExplicitTractInfo,
         layout_name: str,
         sep_arcsec: float | None = None,
-        indice_id: int | None = None,
+        indice_group_id: int | None = None,
         select_observable: list[str] | str | None = None,
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
@@ -85,12 +85,12 @@ class BaseGalaxyCatalog(ABC):
         num = len(shifts_array)
         probs = self._probabilities_for_sampling(self.input_catalog)
         catalog_size = len(self.input_catalog)
-        if indice_id is None:
+        if (indice_group_id is None) or (indice_group_id < 0):
             integers = np.arange(0, catalog_size, dtype=int)
             idx = rng.choice(integers, size=num, p=probs)
         else:
-            indice_min = indice_id * num
-            indice_max = indice_min + num
+            indice_min = indice_group_id * num
+            indice_max = min(indice_min + num, catalog_size)
             if indice_min >= catalog_size:
                 raise ValueError("indice_min too large")
             idx = (
@@ -198,6 +198,7 @@ class BaseGalaxyCatalog(ABC):
             Passed to _read_catalog(...) so subclasses can load/filter
             input_catalog.
         """
+        assert table.dtype.names is not None
         # Create instance without running __init__
         self = cls.__new__(cls)
         self.prepare_tract_info(tract_info)
@@ -212,8 +213,8 @@ class BaseGalaxyCatalog(ABC):
         )
 
         # Validate fields
-        for col in ("dx", "dy", "indices", "angles"):
-            if col not in table.dtype.names:
+        for col in ["dx", "dy", "indices", "angles"]:
+            if col not in list(table.dtype.names):
                 raise ValueError(
                     f"Missing required column '{col}' in table array"
                 )
@@ -238,8 +239,9 @@ class BaseGalaxyCatalog(ABC):
             ("hlr", "f8"),
         ]
         self.data = np.zeros(len(table), dtype=self.dtype)
+        assert self.data.dtype.names is not None
         for name in table.dtype.names:
-            if name in self.data.dtype.names:
+            if name in list(self.data.dtype.names):
                 self.data[name] = table[name]
         self.lensed = True
         return self

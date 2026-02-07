@@ -563,6 +563,7 @@ def prepare_data(
     mask_array: NDArray | None = None,
     noise_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
+    blocks: List | None = None,
     **kwargs,
 ):
     """Collect metadata and auxiliary arrays for shear measurement tasks.
@@ -699,6 +700,8 @@ def prepare_data(
     else:
         tractInfo = None
         patchInfo = None
+    beginx = lsst_bbox.beginX
+    beginy = lsst_bbox.beginY
     if detection is not None:
         if isinstance(detection, astropy.table.Table):
             detection = detection.copy().as_array()
@@ -708,6 +711,16 @@ def prepare_data(
         detection = rfn.repack_fields(
             detection[list(anacal.table.column_names())]
         )
+        if blocks is not None:
+            assert detection is not None
+            for bb in blocks:
+                mm = (
+                    (detection["x2_det"] / pixel_scale - beginy >= bb.ymin_in)
+                    & (detection["x2_det"] / pixel_scale - beginy < bb.ymax_in)
+                    & (detection["x1_det"] / pixel_scale - beginx >= bb.xmin_in)
+                    & (detection["x1_det"] / pixel_scale - beginx < bb.xmax_in)
+                )
+                detection["block_id"][mm] = bb.index
 
     return {
         "pixel_scale": pixel_scale,
@@ -717,11 +730,12 @@ def prepare_data(
         "psf_array": psf_array,
         "mask_array": mask_array,
         "noise_array": noise_array,
-        "begin_x": lsst_bbox.beginX,
-        "begin_y": lsst_bbox.beginY,
+        "begin_x": beginx,
+        "begin_y": beginy,
         "wcs": wcs,
         "skyMap": skyMap,
         "tractInfo": tractInfo,
         "patchInfo": patchInfo,
         "detection": detection,
+        "blocks": blocks,
     }
