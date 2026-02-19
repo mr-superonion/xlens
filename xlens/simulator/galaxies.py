@@ -83,9 +83,9 @@ class BaseGalaxyCatalog(ABC):
 
         # choose which catalog rows populate those positions
         num = len(shifts_array)
-        probs = self._probabilities_for_sampling(self.input_catalog)
         catalog_size = len(self.input_catalog)
         if (indice_group_id is None) or (indice_group_id < 0):
+            probs = self._probabilities_for_sampling(self.input_catalog)
             integers = np.arange(0, catalog_size, dtype=int)
             idx = rng.choice(integers, size=num, p=probs)
         else:
@@ -96,6 +96,8 @@ class BaseGalaxyCatalog(ABC):
             idx = (
                 np.arange(indice_min, indice_max, dtype=int) % catalog_size
             )
+            num = indice_max - indice_min
+            shifts_array = shifts_array[0:num]
         # random orientation for each placed galaxy
         angles = rng.uniform(low=0.0, high=2.0*np.pi, size=num)
         self.dtype = [
