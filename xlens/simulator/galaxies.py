@@ -316,6 +316,7 @@ class BaseGalaxyCatalog(ABC):
         use_mog: bool = False,
         force_isotropic: bool = False,
         include_point_source: bool = True,
+        survey_name: str = "",
     ) -> dict[str, list]:
         """
         Returns
@@ -327,6 +328,7 @@ class BaseGalaxyCatalog(ABC):
             entry=entry, mag_zero=mag_zero, band=band, use_mog=use_mog,
             include_point_source=include_point_source,
             force_isotropic=force_isotropic,
+            survey_name=survey_name,
         )
         gal = gal.rotate(
             src["angles"] * galsim.radians
@@ -607,3 +609,124 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
 
         gal = (bulge + disk).withFlux(flux)
         return gal
+
+
+# ---------------------------------------------------------
+# Concrete implementation: Euclid Flagship 2025 (COSMOS)
+# ---------------------------------------------------------
+class Flagship2025Catalog(BaseGalaxyCatalog):
+    """
+    Catalog of galaxies from the Euclid Flagship 2025 simulation
+    (COSMOS field extraction, flagship_cosmos.fits).
+
+    The axis ratios (disk_axis_ratio, bulge_axis_ratio) are stored as
+    minor/major ratio, which maps directly to GalSim's ``q`` parameter.
+    """
+
+    def _read_catalog(
+        self,
+        *,
+        select_observable=None,
+        select_lower_limit=None,
+        select_upper_limit=None,
+    ):
+        fname = os.path.join(
+            os.environ.get("CATSIM_DIR", "."),
+            "flagship_cosmos.fits",
+        )
+        if not os.path.isfile(fname):
+            raise FileNotFoundError(
+                "Cannot find 'flagship_cosmos.fits'",
+                "Please download it and place it under $CATSIM_DIR",
+            )
+        cat = get_catalog(fname)
+        if select_observable is not None:
+            select_observable = np.atleast_1d(select_observable)
+            if not set(select_observable) < set(cat.dtype.names):
+                raise ValueError(
+                    "Selection observables not in the catalog columns"
+                )
+            mask = np.ones(len(cat)).astype(bool)
+            if select_lower_limit is not None:
+                select_lower_limit = np.atleast_1d(select_lower_limit)
+                assert len(select_observable) == len(select_lower_limit)
+                for nn, ll in zip(select_observable, select_lower_limit):
+                    mask = mask & (cat[nn] > ll)
+            if select_upper_limit is not None:
+                select_upper_limit = np.atleast_1d(select_upper_limit)
+                assert len(select_observable) == len(select_upper_limit)
+                for nn, ul in zip(select_observable, select_upper_limit):
+                    mask = mask & (cat[nn] <= ul)
+            cat = cat[mask]
+        return cat
+
+    def _compute_density(self, cat) -> float:
+        """The catalog are a box on sky
+        """
+        ra = cat["ra_gal"]
+        dec = cat["dec_gal"]
+        ra_range = ra.max() - ra.min()
+        dec_range = dec.max() - dec.min()
+        cos_dec = np.cos(np.radians(np.mean(dec)))
+        area_deg2 = ra_range * cos_dec * dec_range
+        area_arcmin2 = area_deg2 * 3600.0
+        return len(cat) / area_arcmin2
+
+    def _half_light_radius(self, catalog) -> np.ndarray:
+        return catalog["disk_r50"]
+
+    def _generate_galaxy(
+        self, *, entry, mag_zero, band, survey_name,
+        use_mog=False,
+        force_isotropic=False,
+        **kwargs,
+    ) -> galsim.GSObject:
+        assert not use_mog
+        sname = survey_name
+        if sname == "hsc":
+            sname = "lsst"
+
+        mag = entry[f"{sname}_{band}"]
+        flux = 10 ** ((mag_zero - mag) / 2.5)
+
+        bulge_frac = entry["bulge_fraction"]
+        bulge_flux = flux * bulge_frac
+        disk_flux = flux * (1.0 - bulge_frac)
+
+        # Position angle (degrees) shared by disk and bulge
+        pa = float(entry["pa"]) * galsim.degrees
+
+        components = []
+
+        # Disk (nsersic is always 1.0 in this catalog)
+        if disk_flux > 0:
+            disk_hlr = max(float(entry["disk_r50"]), 1e-4)
+            if force_isotropic:
+                q_d = 1.0
+            else:
+                q_d = float(entry["disk_axis_ratio"])
+                # axis ratio is minor/major; clamp to valid range
+                q_d = min(max(q_d, 0.00), 1.0)
+            disk = galsim.Exponential(
+                flux=disk_flux, half_light_radius=disk_hlr,
+            ).shear(q=q_d, beta=pa)
+            components.append(disk)
+
+        # Bulge
+        if bulge_flux > 0:
+            bulge_hlr = max(float(entry["bulge_r50"]), 1e-4)
+            bulge_n = float(entry["bulge_nsersic"])
+            if force_isotropic:
+                q_b = 1.0
+            else:
+                q_b = float(entry["bulge_axis_ratio"])
+                q_b = min(max(q_b, 0.00), 1.0)
+            bulge = galsim.Sersic(
+                n=bulge_n, flux=bulge_flux, half_light_radius=bulge_hlr,
+            ).shear(q=q_b, beta=pa)
+            components.append(bulge)
+
+        if not components:
+            return galsim.Gaussian(flux=flux, sigma=1e-4)
+
+        return galsim.Add(components)

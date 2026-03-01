@@ -55,7 +55,11 @@ from .defaults import (
     psf_fwhm_defaults,
     sys_npix,
 )
-from .galaxies import CatSim2017Catalog, OpenUniverse2024RubinRomanCatalog
+from .galaxies import (
+    CatSim2017Catalog,
+    Flagship2025Catalog,
+    OpenUniverse2024RubinRomanCatalog,
+)
 from .noise import get_noise_array
 from .wcs import make_galsim_tanwcs
 
@@ -216,11 +220,14 @@ class MultibandSimConfig(
                 self,
                 "We require noiseId >=0 ",
             )
-        if self.galaxy_type not in ["catsim2017", "RomanRubin2024"]:
+        if self.galaxy_type not in [
+            "catsim2017", "RomanRubin2024", "flagship2025",
+        ]:
             raise FieldValidationError(
                 self.__class__.galaxy_type,
                 self,
-                "We require galaxy_type in ['catsim2017', 'RomanRubin2024']",
+                "We require galaxy_type in "
+                "['catsim2017', 'RomanRubin2024', 'flagship2025']",
             )
 
     def setDefaults(self):
@@ -282,6 +289,8 @@ class MultibandSimTask(PipelineTask):
             GalClass = CatSim2017Catalog
         elif self.config.galaxy_type == "RomanRubin2024":
             GalClass = OpenUniverse2024RubinRomanCatalog
+        elif self.config.galaxy_type == "flagship2025":
+            GalClass = Flagship2025Catalog
         else:
             raise ValueError("invalid galaxy_type")
         galaxy_catalog = GalClass.from_array(
@@ -326,6 +335,7 @@ class MultibandSimTask(PipelineTask):
         height = outer_bbox.getHeight()
         wcs_gs = make_galsim_tanwcs(galaxy_catalog.tract_info)
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
+        survey_name = self.config.survey_name
         for i, src in enumerate(galaxy_catalog.data):
             if (
                 (xmin - SIM_INCLUSION_PADDING) <
@@ -342,6 +352,7 @@ class MultibandSimTask(PipelineTask):
                     use_mog=self.config.use_mog,
                     force_isotropic=self.config.force_isotropic,
                     include_point_source=self.config.include_point_source,
+                    survey_name=survey_name,
                 )
                 convolved_object = galsim.Convolve([gal_obj, psf_obj])
                 if self.config.use_field_distortion:
@@ -633,6 +644,7 @@ class IASimTask(MultibandSimTask):
 
         wcs_gs = make_galsim_tanwcs(galaxy_catalog.tract_info)
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
+        survey_name = self.config.survey_name
 
         for i, src in enumerate(galaxy_catalog.data):
             if (
@@ -652,6 +664,7 @@ class IASimTask(MultibandSimTask):
                     use_mog=self.config.use_mog,
                     force_isotropic=self.config.force_isotropic,
                     include_point_source=self.config.include_point_source,
+                    survey_name=survey_name,
                 )
                 stamp = draw_ia(
                     amplitude=self.config.ia_amplitude,
