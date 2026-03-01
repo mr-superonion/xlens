@@ -9,3 +9,6 @@ matplotlib
 anacal==0.7.3
 pyccl
 namaster
+scikit-learn
+pywavelets
+xgboost

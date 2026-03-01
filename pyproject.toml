@@ -17,6 +17,9 @@ dependencies = [
     "ipykernel", # Support for Jupyter notebooks
 ]
 
+[project.optional-dependencies]
+flexcode = ["flexcode"]
+
 [project.urls]
 "Source Code" = "https://github.com/mr-superonion/xlens"
 

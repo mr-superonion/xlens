@@ -59,7 +59,8 @@ jobs:
           mamba install --file requirements_test.txt -c conda-forge
           conda clean -a -y
 
-          python -m pip install --upgrade pip setuptools FlexCode[all]
+          python -m pip install --upgrade pip setuptools
+          pip install --no-deps FlexCode
           pip install .
 
       - name: Test with pytest
