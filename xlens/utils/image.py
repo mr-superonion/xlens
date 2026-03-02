@@ -102,14 +102,12 @@ def subpixel_shift(image: NDArray, shift_x: float, shift_y: float) -> NDArray:
 def resize_array(
     array: NDArray[Any],
     target_shape: tuple[int, int] = (64, 64),
-    truth_catalog=None,
 ):
     """Resize an image-like array to a square target shape.
 
     The function first crops the array symmetrically if it is larger than the
     requested output size and then applies zero-padding when the array is too
-    small.  When a truth catalog is provided, its pixel coordinates are
-    updated so they remain consistent with the resized image.
+    small.
 
     Parameters
     ----------
@@ -117,16 +115,11 @@ def resize_array(
         Input array to resize.  The array is assumed to be two-dimensional.
     target_shape
         Tuple of ``(height, width)`` describing the requested output shape.
-    truth_catalog
-        Optional truth catalog whose ``image_*`` and ``prelensed_image_*``
-        columns are updated in place so that they refer to the resized image.
 
     Returns
     -------
-    numpy.ndarray or tuple
-        The resized array.  If ``truth_catalog`` was provided, the function
-        returns a tuple ``(array, truth_catalog)`` with the mutated catalog as
-        the second element.
+    numpy.ndarray
+        The resized array.
     """
     target_height, target_width = target_shape
     input_height, input_width = array.shape
@@ -135,19 +128,9 @@ def resize_array(
     if input_height > target_height:
         start_h = (input_height - target_height) // 2
         array = array[start_h : start_h + target_height, :]
-        if truth_catalog is not None:
-            truth_catalog["image_y"] = truth_catalog["image_y"] - start_h
-            truth_catalog["prelensed_image_y"] = (
-                truth_catalog["prelensed_image_y"] - start_h
-            )
     if input_width > target_width:
         start_w = (input_width - target_width) // 2
         array = array[:, start_w : start_w + target_width]
-        if truth_catalog is not None:
-            truth_catalog["image_x"] = truth_catalog["image_x"] - start_w
-            truth_catalog["prelensed_image_x"] = (
-                truth_catalog["prelensed_image_x"] - start_w
-            )
 
     # Pad with zeros if smaller
     if input_height < target_height:
@@ -170,10 +153,7 @@ def resize_array(
             ((0, 0), (pad_left, pad_right)),
             mode="constant",
         )
-    if truth_catalog is not None:
-        return array, truth_catalog
-    else:
-        return array
+    return array
 
 
 class LsstPsf(anacal.psf.BasePsf):
