@@ -250,10 +250,10 @@ class MultibandSimTask(PipelineTask):
     def simulate_images(
         self,
         *,
-        catalog,
+        galaxy_catalog,
         psf_obj,
-        tract_info,
-        patch_id: int,
+        wcs,
+        bbox_outer,
         band: str,
         mag_zero: float,
         draw_method: str = "auto",
@@ -263,14 +263,14 @@ class MultibandSimTask(PipelineTask):
 
         Parameters
         ----------
-        catalog
-            ``astropy.table.Table`` representing the truth catalog to draw.
+        galaxy_catalog
+            Galaxy catalog object (e.g. from ``from_array``) to draw.
         psf_obj
             ``galsim.GSObject`` describing the PSF to use when rendering.
-        tract_info
-            Rubin ``TractInfo`` instance that provides WCS and patch geometry.
-        patch_id
-            Integer index of the patch to render.
+        wcs
+            LSST ``SkyWcs`` object that provides the sky-to-pixel mapping.
+        bbox_outer
+            ``lsst.geom.Box2I`` giving the outer bounding box of the patch.
         band
             Name of the photometric band (``"r"``, ``"i"``, ...).
         mag_zero
@@ -285,18 +285,6 @@ class MultibandSimTask(PipelineTask):
             patch.
         """
         assert isinstance(self.config, MultibandSimConfig)
-        if self.config.galaxy_type == "catsim2017":
-            GalClass = CatSim2017Catalog
-        elif self.config.galaxy_type == "RomanRubin2024":
-            GalClass = OpenUniverse2024RubinRomanCatalog
-        elif self.config.galaxy_type == "flagship2025":
-            GalClass = Flagship2025Catalog
-        else:
-            raise ValueError("invalid galaxy_type")
-        galaxy_catalog = GalClass.from_array(
-            tract_info=tract_info,
-            table=catalog,
-        )
         if self.config.truncate_stamp_size <= 0:
             nn_trunc = None
         else:
@@ -304,7 +292,8 @@ class MultibandSimTask(PipelineTask):
 
         return self.draw_catalog(
             galaxy_catalog=galaxy_catalog,
-            patch_id=patch_id,
+            wcs=wcs,
+            bbox_outer=bbox_outer,
             psf_obj=psf_obj,
             mag_zero=mag_zero,
             band=band,
@@ -316,7 +305,8 @@ class MultibandSimTask(PipelineTask):
         self,
         *,
         galaxy_catalog,
-        patch_id: int,
+        wcs,
+        bbox_outer,
         psf_obj,
         mag_zero: float,
         band: str,
@@ -325,15 +315,13 @@ class MultibandSimTask(PipelineTask):
         **kwargs,
     ):
         assert isinstance(self.config, MultibandSimConfig)
-        patch_info = galaxy_catalog.tract_info[patch_id]
-        outer_bbox = patch_info.getOuterBBox()
-        xmin = outer_bbox.getMinX()
-        ymin = outer_bbox.getMinY()
-        xmax = outer_bbox.getMaxX()
-        ymax = outer_bbox.getMaxY()
-        width = outer_bbox.getWidth()
-        height = outer_bbox.getHeight()
-        wcs_gs = make_galsim_tanwcs(galaxy_catalog.tract_info)
+        xmin = bbox_outer.getMinX()
+        ymin = bbox_outer.getMinY()
+        xmax = bbox_outer.getMaxX()
+        ymax = bbox_outer.getMaxY()
+        width = bbox_outer.getWidth()
+        height = bbox_outer.getHeight()
+        wcs_gs = make_galsim_tanwcs(wcs)
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
         survey_name = self.config.survey_name
         for i, src in enumerate(galaxy_catalog.data):
@@ -505,11 +493,24 @@ class MultibandSimTask(PipelineTask):
         kernel = afwMath.FixedKernel(psfImage.convertD())
         kernel_psf = meaAlg.KernelPsf(kernel)
 
-        galaxy_array = self.simulate_images(
-            catalog=truthCatalog,
-            psf_obj=psf_galsim,
+        if self.config.galaxy_type == "catsim2017":
+            GalClass = CatSim2017Catalog
+        elif self.config.galaxy_type == "RomanRubin2024":
+            GalClass = OpenUniverse2024RubinRomanCatalog
+        elif self.config.galaxy_type == "flagship2025":
+            GalClass = Flagship2025Catalog
+        else:
+            raise ValueError("invalid galaxy_type")
+        galaxy_catalog = GalClass.from_array(
             tract_info=tract_info,
-            patch_id=patch_id,
+            table=truthCatalog,
+        )
+
+        galaxy_array = self.simulate_images(
+            galaxy_catalog=galaxy_catalog,
+            psf_obj=psf_galsim,
+            wcs=wcs,
+            bbox_outer=boundary_box,
             band=band,
             mag_zero=mag_zero,
             draw_method=draw_method,
@@ -620,7 +621,8 @@ class IASimTask(MultibandSimTask):
         self,
         *,
         galaxy_catalog,
-        patch_id: int,
+        wcs,
+        bbox_outer,
         psf_obj,
         mag_zero: float,
         band: str,
@@ -633,16 +635,14 @@ class IASimTask(MultibandSimTask):
                 "IASimTask does not yet support use_field_distortion=True."
             )
 
-        patch_info = galaxy_catalog.tract_info[patch_id]
-        outer_bbox = patch_info.getOuterBBox()
-        xmin = outer_bbox.getMinX()
-        ymin = outer_bbox.getMinY()
-        xmax = outer_bbox.getMaxX()
-        ymax = outer_bbox.getMaxY()
-        width = outer_bbox.getWidth()
-        height = outer_bbox.getHeight()
+        xmin = bbox_outer.getMinX()
+        ymin = bbox_outer.getMinY()
+        xmax = bbox_outer.getMaxX()
+        ymax = bbox_outer.getMaxY()
+        width = bbox_outer.getWidth()
+        height = bbox_outer.getHeight()
 
-        wcs_gs = make_galsim_tanwcs(galaxy_catalog.tract_info)
+        wcs_gs = make_galsim_tanwcs(wcs)
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
         survey_name = self.config.survey_name
 

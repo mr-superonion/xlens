@@ -32,7 +32,7 @@ def test_wcs():
     # Set up the configuration
     tract_info = skymap[16012]
 
-    wcs_galsim = xlens.simulator.wcs.make_galsim_tanwcs(tract_info)
+    wcs_galsim = xlens.simulator.wcs.make_galsim_tanwcs(tract_info.getWcs())
     wcs_dm = xlens.simulator.wcs.make_dm_wcs(wcs_galsim)
     wcs_0 = tract_info.getWcs()
 
@@ -241,11 +241,14 @@ def test_galaxies_draw():
             tract_info=tract_info,
             layout_name="random",
         )
+        wcs = tract_info.getWcs()
+        bbox_outer = tract_info[0].getOuterBBox()
         psf_fwhm = 0.8
         psf_galsim = galsim.Moffat(fwhm=psf_fwhm, beta=2.5)
         gal_data1 = simtask.draw_catalog(
             galaxy_catalog=catalog,
-            patch_id=0,
+            wcs=wcs,
+            bbox_outer=bbox_outer,
             psf_obj=psf_galsim,
             mag_zero=30,
             band="i"
@@ -253,7 +256,8 @@ def test_galaxies_draw():
         catalog.rotate(np.pi / 2.0)
         gal_data2 = simtask.draw_catalog(
             galaxy_catalog=catalog,
-            patch_id=0,
+            wcs=wcs,
+            bbox_outer=bbox_outer,
             psf_obj=psf_galsim,
             mag_zero=30,
             band="i"
@@ -264,7 +268,8 @@ def test_galaxies_draw():
         catalog.lens(shear_obj=shear_obj)
         simtask.draw_catalog(
             galaxy_catalog=catalog,
-            patch_id=0,
+            wcs=wcs,
+            bbox_outer=bbox_outer,
             psf_obj=psf_galsim,
             mag_zero=30,
             band="i"
@@ -366,11 +371,14 @@ def test_galaxies_draw_mog_consistency():
         tract_info=tract_info,
         layout_name="random",
     )
+    wcs = tract_info.getWcs()
+    bbox_outer = tract_info[0].getOuterBBox()
     psf_galsim = galsim.Moffat(fwhm=0.8, beta=2.5)
 
     image_default = simtask.draw_catalog(
         galaxy_catalog=catalog,
-        patch_id=0,
+        wcs=wcs,
+        bbox_outer=bbox_outer,
         psf_obj=psf_galsim,
         mag_zero=30,
         band="i",
@@ -381,7 +389,8 @@ def test_galaxies_draw_mog_consistency():
     simtask = MultibandSimTask(config=config)
     image_mog = simtask.draw_catalog(
         galaxy_catalog=catalog,
-        patch_id=0,
+        wcs=wcs,
+        bbox_outer=bbox_outer,
         psf_obj=psf_galsim,
         mag_zero=30,
         band="i",

@@ -5,28 +5,24 @@ from lsst.afw.geom import makeSkyWcs
 RAD2ASEC = 206264.80624709636
 
 
-def make_galsim_tanwcs(tract_info):
+def make_galsim_tanwcs(wcs):
     """
-    Build a GalSim TanWCS consistent with an LSST SkyMap tract WCS.
+    Build a GalSim TanWCS consistent with an LSST SkyWcs.
 
     Parameters
     ----------
+    wcs : lsst.afw.geom.SkyWcs
+        LSST sky WCS object.
 
     Returns
     -------
     galsim.TanWCS
     """
-    # Pixel location of the tangent point
-
-    skyWcs = tract_info.getWcs()
-    sky_center = tract_info.getCtrCoord()
-    pix_center = skyWcs.skyToPixel(sky_center)
+    sky_center = wcs.getSkyOrigin()
+    pix_center = wcs.skyToPixel(sky_center)
     x0 = pix_center.getX()
     y0 = pix_center.getY()
-    # lin = skyWcs.linearizePixelToSky(sky_center, geom.radians)
-    # J = np.array(lin.getLinear().getMatrix(), dtype=np.float64)
-    # J_arcsec = J * RAD2ASEC
-    J_arcsec = skyWcs.getCdMatrix() * 3600
+    J_arcsec = wcs.getCdMatrix() * 3600
     aff = galsim.AffineTransform(
         dudx=-J_arcsec[0, 0], dudy=-J_arcsec[0, 1],
         dvdx=J_arcsec[1, 0], dvdy=J_arcsec[1, 1],
