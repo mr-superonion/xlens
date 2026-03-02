@@ -22,6 +22,7 @@ providing a self-contained set of utilities that are convenient for unit
 tests and tutorials bundled with ``xlens``.
 """
 
+import os
 from typing import Any
 
 import galsim
@@ -134,6 +135,10 @@ class MultibandSimConfig(
 ):
     """Configuration options controlling the multi-band simulation task."""
 
+    catsim_dir = Field[str](
+        doc="Directory containing input galaxy catalogs.",
+        default=os.environ.get("CATSIM_DIR", "."),
+    )
     galaxy_type = Field[str](
         doc="galaxy type",
         default="catsim2017",
@@ -504,6 +509,7 @@ class MultibandSimTask(PipelineTask):
         galaxy_catalog = GalClass.from_array(
             tract_info=tract_info,
             table=truthCatalog,
+            catsim_dir=self.config.catsim_dir,
         )
 
         galaxy_array = self.simulate_images(

@@ -46,7 +46,9 @@ class BaseGalaxyCatalog(ABC):
         select_upper_limit: Iterable[float] | None = None,
         extend_ratio: float = 1.08,
         force_pixel_center: bool = False,
+        catsim_dir: str | None = None,
     ):
+        self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
         self.prepare_tract_info(tract_info)
         wcs = tract_info.getWcs()
         ps = float(wcs.getPixelScale().asArcseconds())
@@ -188,6 +190,7 @@ class BaseGalaxyCatalog(ABC):
         select_observable: list[str] | str | None = None,
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
+        catsim_dir: str | None = None,
     ) -> "BaseGalaxyCatalog":
         """
         Build a catalog directly from a table structured array.
@@ -196,6 +199,9 @@ class BaseGalaxyCatalog(ABC):
         ----------
         table : np.ndarray
             Structured array with columns 'dx', 'dy', 'indices', 'angles'.
+        catsim_dir : str or None
+            Directory containing input galaxy catalogs.  Falls back to the
+            ``CATSIM_DIR`` environment variable when *None*.
         select_observable, select_lower_limit, select_upper_limit
             Passed to _read_catalog(...) so subclasses can load/filter
             input_catalog.
@@ -203,6 +209,7 @@ class BaseGalaxyCatalog(ABC):
         assert table.dtype.names is not None
         # Create instance without running __init__
         self = cls.__new__(cls)
+        self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
         self.prepare_tract_info(tract_info)
         wcs = tract_info.getWcs()
         self.pixel_scale = float(wcs.getPixelScale().asArcseconds())
@@ -374,7 +381,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         array with fields
         """
         fname = os.path.join(
-            os.environ.get("CATSIM_DIR", "."),
+            self.catsim_dir,
             "OneDegSq.fits",
         )
 
@@ -523,13 +530,13 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         """
         # galaxy catalog
         fname = os.path.join(
-            os.environ.get("CATSIM_DIR", "."),
+            self.catsim_dir,
             "rubinroman_nside32_10307.parquet",
         )
         if not os.path.isfile(fname):
             raise FileNotFoundError(
                 "Cannot find 'rubinroman_nside32_10307.parquet'",
-                "Please donwload it from and place it under $CATSIM_DIR",
+                "Please download it and place it under $CATSIM_DIR",
             )
 
         cat = get_catalog(fname)
@@ -631,7 +638,7 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         select_upper_limit=None,
     ):
         fname = os.path.join(
-            os.environ.get("CATSIM_DIR", "."),
+            self.catsim_dir,
             "flagship_cosmos.fits",
         )
         if not os.path.isfile(fname):

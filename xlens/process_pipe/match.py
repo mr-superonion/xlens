@@ -313,10 +313,17 @@ class matchPipe(PipelineTask):
         )
         return combined
 
-    def merge_truth(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
+    def merge_truth(
+        self,
+        src: np.ndarray,
+        mrc: np.ndarray,
+        pixel_scale=0.168,
+        catsim_dir: str | None = None,
+    ):
         assert isinstance(self.config, matchPipeConfig)
         if self._cat_ref is None:
-            path = os.path.join(os.environ["CATSIM_DIR"], "OneDegSq.fits")
+            catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
+            path = os.path.join(catsim_dir, "OneDegSq.fits")
             self.log.info("Caching truth catalog reference from %s", path)
             self._cat_ref = fitsio.read(
                 path,
@@ -363,6 +370,7 @@ class matchPipe(PipelineTask):
         catalog: NDArray,
         dm_catalog: NDArray | None = None,
         truth_catalog: NDArray | None = None,
+        catsim_dir: str | None = None,
         **kwargs,
     ):
         assert isinstance(self.config, matchPipeConfig)
@@ -374,6 +382,9 @@ class matchPipe(PipelineTask):
             catalog = self.merge_dm(catalog, dm_catalog, pixel_scale)
 
         if truth_catalog is not None:
-            catalog = self.merge_truth(catalog, truth_catalog, pixel_scale)
+            catalog = self.merge_truth(
+                catalog, truth_catalog, pixel_scale,
+                catsim_dir=catsim_dir,
+            )
 
         return Struct(catalog=catalog)

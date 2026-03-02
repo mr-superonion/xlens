@@ -16,6 +16,7 @@
 #
 """Pipeline task that prepares truth catalogs for image simulations."""
 
+import os
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
@@ -74,6 +75,10 @@ class CatalogConfig(
     pipelineConnections=CatalogConnections,
 ):
     """Configuration options used by :class:`CatalogTask`."""
+    catsim_dir = Field[str](
+        doc="Directory containing input galaxy catalogs.",
+        default=os.environ.get("CATSIM_DIR", "."),
+    )
     galaxy_type = Field[str](
         doc="galaxy type",
         default="catsim2017",
@@ -253,6 +258,7 @@ class CatalogTask(PipelineTask):
             indice_group_id=self.config.indice_group_id,
             extend_ratio=self.config.extend_ratio,
             force_pixel_center=self.config.force_pixel_center,
+            catsim_dir=self.config.catsim_dir,
             select_observable=(
                 select_observable
                 if select_observable
