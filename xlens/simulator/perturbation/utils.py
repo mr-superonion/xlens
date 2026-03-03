@@ -1,3 +1,6 @@
+"""Internal helpers shared by perturbation models."""
+
+
 def _ternary(n: int, n_digits: int) -> str:
     """Convert integer `n` to zero-padded base-3 string with `n_digits`
     length."""
@@ -13,7 +16,19 @@ def _ternary(n: int, n_digits: int) -> str:
 def _get_shear_res_dict(
     lensed_x, lensed_y, gamma1, gamma2, kappa, has_finite_shear
 ):
+    """Build the standard result dict returned by ``distort_galaxy`` methods.
 
+    Parameters
+    ----------
+    lensed_x, lensed_y : float
+        Post-lensing arcsecond positions on the tangent plane.
+    gamma1, gamma2 : float
+        Shear components at the galaxy position.
+    kappa : float
+        Convergence at the galaxy position.
+    has_finite_shear : bool
+        Whether the shear is physically valid (e.g. ``|g| < 1``).
+    """
     shear_res_dict = {
         "dx": lensed_x,
         "dy": lensed_y,

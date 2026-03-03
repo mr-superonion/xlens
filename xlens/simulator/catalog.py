@@ -212,6 +212,10 @@ class CatalogTask(PipelineTask):
     def get_perturbation_object(
         self, tract_info, seed: int, **kwargs: Any
     ) -> object:
+        """Return a perturbation object for lensing the catalog.
+
+        Must be implemented by subclasses (e.g. shear, halo, log-normal).
+        """
         raise NotImplementedError(
             "'get_perturbation_object' must be implemented by subclasses."
         )
@@ -319,6 +323,7 @@ class CatalogShearTaskConfig(
     CatalogConfig,
     pipelineConnections=CatalogConnections,
 ):
+    """Configuration for :class:`CatalogShearTask` (constant-shear test)."""
     z_bounds = ListField[float](
         doc="boundary list of the redshift",
         default=[-0.01, 20.0],
@@ -386,6 +391,8 @@ class CatalogShearTaskConfig(
 
 
 class CatalogShearTask(CatalogTask):
+    """Catalog task applying constant shear per redshift bin."""
+
     _DefaultName = "CatalogShearTask"
     ConfigClass = CatalogShearTaskConfig
 
@@ -407,6 +414,7 @@ class CatalogHaloTaskConfig(
     CatalogConfig,
     pipelineConnections=CatalogConnections,
 ):
+    """Configuration for :class:`CatalogHaloTask` (NFW halo lensing)."""
     mass = Field[float](
         doc="halo mass",
         default=5e14,
@@ -455,6 +463,8 @@ class CatalogHaloTaskConfig(
 
 
 class CatalogHaloTask(CatalogTask):
+    """Catalog task applying NFW halo lensing distortions."""
+
     _DefaultName = "CatalogHaloTask"
     ConfigClass = CatalogHaloTaskConfig
 
@@ -492,6 +502,7 @@ class CatalogLogNormalTaskConfig(
     CatalogConfig,
     pipelineConnections=CatalogConnections,
 ):
+    """Configuration for :class:`CatalogLogNormalTask`."""
     z_source = Field[float](
         doc="Fixed redshift for all galaxies.",
         default=1.0,
@@ -510,6 +521,8 @@ class CatalogLogNormalTaskConfig(
 
 
 class CatalogLogNormalTask(CatalogTask):
+    """Catalog task applying a log-normal shear field."""
+
     _DefaultName = "CatalogLogNormalTask"
     ConfigClass = CatalogLogNormalTaskConfig
 

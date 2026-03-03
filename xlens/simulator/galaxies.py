@@ -1,3 +1,10 @@
+"""Galaxy catalog classes for building GalSim objects from input truth tables.
+
+Provides an abstract :class:`BaseGalaxyCatalog` and concrete implementations
+for CatSim 2017, OpenUniverse 2024 Rubin-Roman, and Euclid Flagship 2025
+catalogs.
+"""
+
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Iterable
@@ -13,6 +20,18 @@ from .layout import Layout
 
 
 def get_catalog(fname):
+    """Read a FITS or Parquet catalog and append an ``indices`` column.
+
+    Parameters
+    ----------
+    fname : str
+        Path to a FITS or Parquet file readable by ``fitsio``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Structured array with an additional ``indices`` column (``int32``).
+    """
     cat = fitsio.read(fname)
     idx = np.arange(len(cat), dtype=np.int32)
     cat = rfn.append_fields(
@@ -48,6 +67,31 @@ class BaseGalaxyCatalog(ABC):
         force_pixel_center: bool = False,
         catsim_dir: str | None = None,
     ):
+        """Construct a galaxy catalog from scratch with a spatial layout.
+
+        Parameters
+        ----------
+        rng : numpy.random.RandomState
+            Random number generator (old NumPy API).
+        tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
+            Tract information providing WCS and bounding box.
+        layout_name : {'grid', 'hex', 'random', 'random_disk'}
+            Pattern used to place galaxies.
+        sep_arcsec : float or None, optional
+            Spacing for grid/hex layouts.
+        indice_group_id : int or None, optional
+            When non-negative, select a deterministic block of catalog
+            rows instead of random sampling.
+        select_observable, select_lower_limit, select_upper_limit
+            Optional filtering criteria forwarded to ``_read_catalog``.
+        extend_ratio : float, optional
+            Padding factor for the layout bounding box.
+        force_pixel_center : bool, optional
+            Snap galaxy centres to pixel centres.
+        catsim_dir : str or None, optional
+            Directory for input catalog files.  Falls back to the
+            ``CATSIM_DIR`` environment variable when *None*.
+        """
         self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
         self.prepare_tract_info(tract_info)
         wcs = tract_info.getWcs()
@@ -130,10 +174,12 @@ class BaseGalaxyCatalog(ABC):
         return
 
     def set_z_source(self, redshift):
+        """Override all galaxy redshifts with a fixed value."""
         self.data["redshift"][:] = redshift
         return
 
     def prepare_tract_info(self, tract_info):
+        """Store tract info and compute the pixel-centre coordinates."""
         self.tract_info = tract_info
         bbox = tract_info.getBBox()   # lsst.geom.Box2I
         center_pix = bbox.getCenter()
@@ -284,6 +330,17 @@ class BaseGalaxyCatalog(ABC):
         return
 
     def lens(self, *, shear_obj, apply_position_shifts: bool = True):
+        """Apply lensing distortions from ``shear_obj`` to every galaxy.
+
+        Parameters
+        ----------
+        shear_obj
+            Object with a ``distort_galaxy(src)`` method that returns a dict
+            with keys ``dx, dy, gamma1, gamma2, kappa, has_finite_shear``.
+        apply_position_shifts : bool, optional
+            If *True*, update image positions to the lensed coordinates;
+            otherwise keep pre-lensing positions.
+        """
         if self.lensed:
             raise ValueError("Cannot lens a lensed catalog")
         ps = self.pixel_scale
@@ -325,9 +382,29 @@ class BaseGalaxyCatalog(ABC):
         include_point_source: bool = True,
         survey_name: str = "",
     ) -> dict[str, list]:
-        """
+        """Build a lensed, rotated GalSim object for galaxy at index *ind*.
+
+        Parameters
+        ----------
+        ind : int
+            Index into ``self.data``.
+        mag_zero : float
+            Zeropoint magnitude for flux conversion.
+        band : str
+            Photometric band label.
+        use_mog : bool, optional
+            Use Mixture-of-Gaussians profiles instead of native GalSim.
+        force_isotropic : bool, optional
+            Force all galaxies to have circular isophotes.
+        include_point_source : bool, optional
+            Include AGN or point-source components.
+        survey_name : str, optional
+            Survey name used to select magnitude columns.
+
         Returns
         -------
+        galsim.GSObject
+            Lensed galaxy object ready for PSF convolution.
         """
         src = self.data[ind]
         entry = self.input_catalog[src["indices"]]
@@ -408,7 +485,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         return cat
 
     def _compute_density(self, cat) -> float:
-        # One square degree file; convert to arcmin^2
+        """Return density in objects/arcmin^2 for a 1-deg^2 catalog."""
         return cat.size / (60.0 * 60.0)
 
     def _probabilities_for_sampling(self, cat):
@@ -430,6 +507,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         force_isotropic=False,
         **kwargs,
     ) -> galsim.GSObject:
+        """Build a GalSim galaxy from a CatSim 2017 catalog row."""
         if use_mog:
             _simulator = mog
         else:
@@ -561,7 +639,7 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         return cat
 
     def _compute_density(self, cat) -> float:
-        # area of one nside=32 HEALPix pixel, in arcmin^2
+        """Return density in objects/arcmin^2 for an nside=32 HEALPix tile."""
         area_tot_arcmin = (
             60.0**2 * (180.0 / np.pi) ** 2 * 4.0 * np.pi / (12.0 * 32.0**2)
         )
@@ -576,9 +654,7 @@ class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
         force_isotropic=False,
         **kwargs,
     ) -> galsim.GSObject:
-        """
-        entry is a row of the columnar table (supports dict-like access).
-        """
+        """Build a GalSim galaxy from an OpenUniverse 2024 catalog row."""
         if use_mog:
             _simulator = mog
         else:
@@ -668,8 +744,7 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         return cat
 
     def _compute_density(self, cat) -> float:
-        """The catalog are a box on sky
-        """
+        """Return density in objects/arcmin^2 from the catalog sky footprint."""
         ra = cat["ra_gal"]
         dec = cat["dec_gal"]
         ra_range = ra.max() - ra.min()
@@ -688,6 +763,7 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         force_isotropic=False,
         **kwargs,
     ) -> galsim.GSObject:
+        """Build a GalSim galaxy from a Flagship 2025 catalog row."""
         assert not use_mog
         sname = survey_name
         if sname == "hsc":

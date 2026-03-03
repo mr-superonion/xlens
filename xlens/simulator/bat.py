@@ -21,7 +21,38 @@ def draw_ia(
     pixel_scale: float,
     entry,
 ) -> galsim.Image:
-    """Draw a postage stamp using the BATSim intrinsic alignment transform."""
+    """Draw a postage stamp using the BATSim intrinsic alignment transform.
+
+    Parameters
+    ----------
+    amplitude : float
+        IA amplitude parameter ``A`` passed to ``batsim.IaTransform``.
+    beta : float
+        IA beta parameter.
+    phi : float
+        IA orientation angle (radians).
+    clip_radius : float
+        Clip radius in units of half-light radii.
+    stamp_size : int
+        Side length (pixels) of the output stamp.
+    gal_obj : galsim.GSObject
+        Galaxy profile before PSF convolution.
+    psf_obj : galsim.GSObject
+        PSF profile.
+    image_pos : galsim.PositionD
+        Absolute pixel position of the galaxy on the coadd.
+    draw_method : str
+        GalSim draw method (e.g. ``"auto"``, ``"no_pixel"``).
+    pixel_scale : float
+        Pixel scale in arcseconds.
+    entry : numpy structured scalar
+        Galaxy catalog row; must contain ``"hlr"`` field.
+
+    Returns
+    -------
+    galsim.Image
+        Rendered postage stamp with bounds set on the coadd grid.
+    """
 
     if batsim is None:
         raise ImportError("Cannot import batsim")
@@ -64,7 +95,11 @@ def draw_flexion(
     pixel_scale: float,
     entry,
 ) -> galsim.Image:
-    """Draw a postage stamp using the BATSim flexion transform."""
+    """Draw a postage stamp using the BATSim flexion transform.
+
+    .. note::
+       Not yet implemented.
+    """
     pass
 
 

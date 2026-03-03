@@ -1,9 +1,30 @@
+"""Log-normal convergence and shear field on a flat sky."""
+
 import galsim
 import numpy as np
 import scipy.interpolate
 
 
 class ShearLogNormalFlat:
+
+    """Flat-sky log-normal shear field generated from a CCL weak-lensing
+    power spectrum.
+
+    The constructor computes kappa, gamma1, and gamma2 maps and builds
+    bivariate spline interpolators so that ``distort_galaxy`` can evaluate
+    the lensing fields at arbitrary sky positions.
+
+    Parameters
+    ----------
+    z_source : float
+        Source redshift for the weak-lensing tracer.
+    field_size_deg : float, optional
+        Side length of the square field in degrees.
+    npix : int, optional
+        Number of pixels per side used for the Fourier-space generation.
+    seed : int or None, optional
+        Random seed for reproducible field realisations.
+    """
 
     def __init__(
         self, z_source, field_size_deg=5.0, npix=2048, seed=None,
@@ -108,6 +129,18 @@ class ShearLogNormalFlat:
         )
 
     def distort_galaxy(self, src):
+        """Return lensing distortions interpolated at the galaxy position.
+
+        Parameters
+        ----------
+        src : numpy structured scalar
+            Row with ``"dx"`` and ``"dy"`` fields (arcseconds).
+
+        Returns
+        -------
+        dict
+            Standard shear result dict (see :func:`_get_shear_res_dict`).
+        """
         from .utils import _get_shear_res_dict
         dx_deg = src["dx"] / 3600.0
         dy_deg = src["dy"] / 3600.0

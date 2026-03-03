@@ -13,6 +13,8 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
+"""Pipeline task for adding correlated or uncorrelated noise to coadd exposures."""
+
 from typing import Any
 
 import anacal
@@ -41,6 +43,27 @@ def get_noise_array(
     shape: tuple[int, int],
     pixel_scale: float,
 ) -> NDArray:
+    """Generate a noise realisation, optionally with spatial correlation.
+
+    Parameters
+    ----------
+    seed_noise : int
+        Random seed for reproducibility.
+    noise_std : float
+        Standard deviation of the noise (before correlation scaling).
+    noise_corr : NDArray or None
+        Normalised noise correlation kernel.  When *None*, independent
+        Gaussian noise is drawn.
+    shape : tuple[int, int]
+        ``(height, width)`` of the output array.
+    pixel_scale : float
+        Pixel scale in arcseconds, passed to ``anacal.noise.simulate_noise``.
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional noise array.
+    """
     if noise_corr is None:
         noise_array = np.random.RandomState(seed_noise).normal(
             scale=noise_std,
@@ -68,6 +91,7 @@ class AddNoisePipeConnections(
         "noiseId": 0,
     },
 ):
+    """Butler connections for :class:`AddNoisePipe`."""
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
         name="deep_coadd_systematics_noisecorr",
@@ -97,6 +121,7 @@ class AddNoisePipeConfig(
     PipelineTaskConfig,
     pipelineConnections=AddNoisePipeConnections,
 ):
+    """Configuration for :class:`AddNoisePipe`."""
     idGenerator = SkyMapIdGeneratorConfig.make_field()
     survey_name = Field[str](
         doc="Name of the survey",
@@ -127,6 +152,8 @@ class AddNoisePipeConfig(
 
 
 class AddNoisePipe(PipelineTask):
+    """Pipeline task that adds noise to a simulated coadd exposure."""
+
     _DefaultName = "AddNoisePipe"
     ConfigClass = AddNoisePipeConfig
 
@@ -159,6 +186,26 @@ class AddNoisePipe(PipelineTask):
         noiseCorrImage: afwImage.ImageF | None = None,
         **kwargs,
     ):
+        """Add noise to an exposure and return the result.
+
+        Parameters
+        ----------
+        exposure : afwImage.ExposureF
+            Input simulated coadd exposure (modified in place).
+        seed : int
+            Base seed from the pipeline's ID generator.
+        band : str
+            Photometric band label.
+        noiseCorrImage : afwImage.ImageF or None, optional
+            Noise correlation kernel image.  When *None*, uncorrelated
+            Gaussian noise with default survey variance is used.
+
+        Returns
+        -------
+        lsst.pipe.base.Struct
+            Struct with ``simExposure`` attribute containing the noisy
+            exposure.
+        """
         assert isinstance(self.config, AddNoisePipeConfig)
         # Obtain Noise correlation array
         if noiseCorrImage is None:

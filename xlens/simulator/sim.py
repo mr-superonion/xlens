@@ -319,6 +319,32 @@ class MultibandSimTask(PipelineTask):
         nn_trunc: None | int = None,
         **kwargs,
     ):
+        """Iterate over galaxies in the catalog and render them into an image.
+
+        Parameters
+        ----------
+        galaxy_catalog
+            Galaxy catalog with ``data`` array and ``get_obj`` method.
+        wcs
+            LSST ``SkyWcs`` for the tangent-plane projection.
+        bbox_outer
+            ``lsst.geom.Box2I`` outer bounding box of the patch.
+        psf_obj
+            GalSim PSF object used for convolution.
+        mag_zero : float
+            Zeropoint magnitude.
+        band : str
+            Photometric band.
+        draw_method : str, optional
+            GalSim rendering method.
+        nn_trunc : int or None, optional
+            Stamp truncation size in pixels.  ``None`` means no truncation.
+
+        Returns
+        -------
+        numpy.ndarray
+            Two-dimensional pixel array.
+        """
         assert isinstance(self.config, MultibandSimConfig)
         xmin = bbox_outer.getMinX()
         ymin = bbox_outer.getMinY()
@@ -635,6 +661,7 @@ class IASimTask(MultibandSimTask):
         draw_method: str = "auto",
         **kwargs,
     ):
+        """Render galaxies with intrinsic-alignment distortions via BATSim."""
         assert isinstance(self.config, IASimConfig)
         if self.config.use_field_distortion:
             raise RuntimeError(

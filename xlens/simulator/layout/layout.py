@@ -1,3 +1,5 @@
+"""Layout class for computing galaxy positions on a coadd patch."""
+
 import math
 
 import lsst

@@ -1,7 +1,11 @@
+"""Differential chromatic refraction (DCR) perturbation model."""
+
 import galsim
 
 
 class DcrDistort(object):
+    """Apply an astrometric position shift to simulate DCR effects."""
+
     def __init__(self, distort_func):
         """Shear distortion from an astrometry error
 

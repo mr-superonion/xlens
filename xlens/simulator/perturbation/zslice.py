@@ -1,3 +1,5 @@
+"""Constant-shear perturbation applied per redshift slice."""
+
 import galsim
 import numpy as np
 
@@ -5,9 +7,26 @@ from .utils import _get_shear_res_dict, _ternary
 
 
 class ShearRedshift(object):
+    """Constant shear in each redshift slice.
+
+    The shear pattern across redshift bins is encoded as a ternary integer
+    (``mode``), where each base-3 digit maps to ``-shear_value``,
+    ``+shear_value``, or ``0.0``.
+
+    Parameters
+    ----------
+    z_bounds : list[float]
+        Redshift bin boundaries (length ``nz_bins + 1``).
+    mode : int
+        Ternary-encoded shear assignment (see class docstring).
+    g_dist : {'g1', 'g2'}
+        Which shear component receives the test signal.
+    shear_value : float
+        Absolute shear amplitude per bin.
+    kappa_value : float
+        Constant convergence applied to all bins.
     """
-    Constant shear in each redshift slice
-    """
+
     def __init__(
         self, z_bounds, mode, g_dist="g1", shear_value=0.02, kappa_value=0.0
     ):
@@ -33,11 +52,13 @@ class ShearRedshift(object):
         return
 
     def determine_shear_list(self, code):
+        """Convert a ternary code string into a list of shear values."""
         values = [-self.shear_value, self.shear_value, 0.0]
         shear_list = [values[int(i)] for i in code]
         return shear_list
 
     def _get_zshear(self, redshift):
+        """Return the shear value for a galaxy at the given redshift."""
         bin_num = np.searchsorted(a=self.z_bounds, v=redshift, side="left") - 1
         nz = len(self.z_bounds) - 1
         if bin_num < nz and bin_num >= 0:
@@ -50,6 +71,7 @@ class ShearRedshift(object):
         return shear
 
     def get_shear(self, redshift):
+        """Return ``(g1, g2, mu, gamma1, gamma2)`` for a given redshift."""
         shear = self._get_zshear(redshift=redshift)
         if self.g_dist == 'g1':
             gamma1, gamma2 = (shear, 0.)

@@ -1,3 +1,10 @@
+"""Mixture-of-Gaussians approximations for galaxy light profiles.
+
+Implements the Hogg & Lang (2012) decomposition of Exponential (Sersic n=1)
+and de Vaucouleurs (Sersic n=4) profiles into sums of circular Gaussians,
+providing fast, analytic alternatives to the native GalSim profiles.
+"""
+
 import galsim
 
 # ---- MoG coefficient tables from Hogg & Lang (2012), Table 1 ----
@@ -87,12 +94,34 @@ def _mog_gal(profile: str, M: int, flux: float, hlr: float):
 def Exponential(
     flux: float, half_light_radius: float, M: int = M_EXP_DEFAULT
 ):
+    """Build an Exponential profile as a mixture of ``M`` circular Gaussians.
+
+    Parameters
+    ----------
+    flux : float
+        Total flux of the galaxy.
+    half_light_radius : float
+        Half-light radius in arcseconds.
+    M : int, optional
+        Number of Gaussian components (4, 6, or 8).
+    """
     return _mog_gal("exp", M, flux, half_light_radius)
 
 
 def DeVaucouleurs(
     flux: float, half_light_radius: float, M: int = M_DEV_DEFAULT
 ):
+    """Build a de Vaucouleurs profile as a mixture of ``M`` circular Gaussians.
+
+    Parameters
+    ----------
+    flux : float
+        Total flux of the galaxy.
+    half_light_radius : float
+        Half-light radius in arcseconds.
+    M : int, optional
+        Number of Gaussian components (6, 8, or 10).
+    """
     return _mog_gal("dev", M, flux, half_light_radius)
 
 

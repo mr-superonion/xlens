@@ -1,3 +1,5 @@
+"""WCS conversion utilities between LSST and GalSim coordinate systems."""
+
 import galsim
 import lsst.geom as geom
 from lsst.afw.geom import makeSkyWcs

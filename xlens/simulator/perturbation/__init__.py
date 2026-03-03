@@ -1,3 +1,5 @@
+"""Lensing and astrometric perturbation models for simulated galaxies."""
+
 from . import utils
 from .dcr import DcrDistort
 from .halo import ShearHalo
