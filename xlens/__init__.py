@@ -8,6 +8,7 @@ try:
         processor,
         simulator,
         utils,
+        wcs,
     )
     __all__ = [
         "catalog",
@@ -16,6 +17,7 @@ try:
         "processor",
         "analysis",
         "process_pipe",
+        "wcs",
     ]
 except ModuleNotFoundError:
     from . import (

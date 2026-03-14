@@ -2,7 +2,6 @@ import os
 import subprocess
 
 
-
 def test_pipetask_shear():
     # setup butler
     this_dir = os.path.dirname(os.path.abspath(__file__))

@@ -49,6 +49,7 @@ from ..utils.random import (
     get_noise_seed,
     num_rot,
 )
+from ..wcs import tanwcs_dm2galsim
 from .bat import draw_ia
 from .defaults import (
     mag_zero_defaults,
@@ -62,7 +63,6 @@ from .galaxies import (
     OpenUniverse2024RubinRomanCatalog,
 )
 from .noise import get_noise_array
-from .wcs import tanwcs_dm2galsim
 
 SIM_INCLUSION_PADDING = 200  # pixels
 DEFAULT_BAT_STAMP_SIZE = 64
