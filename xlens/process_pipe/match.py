@@ -319,6 +319,7 @@ class matchPipe(PipelineTask):
         mrc: np.ndarray,
         pixel_scale=0.168,
         catsim_dir: str | None = None,
+        wcs=None,
     ):
         assert isinstance(self.config, matchPipeConfig)
         if self._cat_ref is None:
@@ -332,8 +333,12 @@ class matchPipe(PipelineTask):
         assert self._cat_ref is not None
         mag_mrc = self._cat_ref[mrc["indices"]]["i_ab"]
         mrc = mrc[mag_mrc < self.config.mag_max_truth]
-        x_mrc = np.array(mrc["image_x"])
-        y_mrc = np.array(mrc["image_y"])
+        assert wcs is not None, "wcs is required for merge_truth"
+        x_mrc, y_mrc = wcs.skyToPixelArray(
+            np.array(mrc["ra"]),
+            np.array(mrc["dec"]),
+            degrees=True,
+        )
 
         # Coordinates
         ana_coords = np.vstack(
@@ -382,9 +387,11 @@ class matchPipe(PipelineTask):
             catalog = self.merge_dm(catalog, dm_catalog, pixel_scale)
 
         if truth_catalog is not None:
+            wcs = skyMap[tract].getWcs()
             catalog = self.merge_truth(
                 catalog, truth_catalog, pixel_scale,
                 catsim_dir=catsim_dir,
+                wcs=wcs,
             )
 
         return Struct(catalog=catalog)

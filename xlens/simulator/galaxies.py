@@ -153,8 +153,7 @@ class BaseGalaxyCatalog(ABC):
             ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),
             ("dx", "f8"), ("dy", "f8"),
             ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec
-            ("image_x", "f8"), ("image_y", "f8"),
-            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),
+            ("prelensed_ra", "f8"), ("prelensed_dec", "f8"),
             ("has_finite_shear", "bool"),
             ("hlr", "f8"),
         ]
@@ -163,10 +162,16 @@ class BaseGalaxyCatalog(ABC):
         self.data["dy"] = shifts_array["dy"]
         self.data["angles"] = angles
         self.lensed = False
-        self.data["prelensed_image_x"] = self.x_center + self.data["dx"] / ps
-        self.data["prelensed_image_y"] = self.y_center + self.data["dy"] / ps
-        self.data["image_x"] = self.x_center + self.data["dx"] / ps
-        self.data["image_y"] = self.y_center + self.data["dy"] / ps
+        image_x = self.x_center + self.data["dx"] / ps
+        image_y = self.y_center + self.data["dy"] / ps
+        wcs = tract_info.getWcs()
+        ra, dec = wcs.pixelToSkyArray(
+            x=image_x, y=image_y, degrees=True,
+        )
+        self.data["ra"] = ra
+        self.data["dec"] = dec
+        self.data["prelensed_ra"] = ra
+        self.data["prelensed_dec"] = dec
         self.data["has_finite_shear"] = np.ones(num, dtype=bool)
         self.data["indices"] = self.input_catalog["indices"][idx]
         self.data["redshift"] = self.input_catalog["redshift"][idx]
@@ -288,8 +293,7 @@ class BaseGalaxyCatalog(ABC):
             ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),
             ("dx", "f8"), ("dy", "f8"),
             ("ra", "f8"), ("dec", "f8"),
-            ("image_x", "f8"), ("image_y", "f8"),
-            ("prelensed_image_x", "f8"), ("prelensed_image_y", "f8"),
+            ("prelensed_ra", "f8"), ("prelensed_dec", "f8"),
             ("has_finite_shear", "bool"),
             ("hlr", "f8"),
         ]
@@ -315,18 +319,16 @@ class BaseGalaxyCatalog(ABC):
         self.data["dy"] = y
         self.data["angles"] = self.data["angles"] + theta
         ps = self.pixel_scale
-        self.data["prelensed_image_x"] = self.x_center + self.data["dx"] / ps
-        self.data["prelensed_image_y"] = self.y_center + self.data["dy"] / ps
-        self.data["image_x"] = self.x_center + self.data["dx"] / ps
-        self.data["image_y"] = self.y_center + self.data["dy"] / ps
+        image_x = self.x_center + self.data["dx"] / ps
+        image_y = self.y_center + self.data["dy"] / ps
         wcs = self.tract_info.getWcs()
         ra, dec = wcs.pixelToSkyArray(
-            x=self.data["image_x"],
-            y=self.data["image_y"],
-            degrees=True,
+            x=image_x, y=image_y, degrees=True,
         )
         self.data["ra"] = ra
         self.data["dec"] = dec
+        self.data["prelensed_ra"] = ra
+        self.data["prelensed_dec"] = dec
         return
 
     def lens(self, *, shear_obj, apply_position_shifts: bool = True):
@@ -344,8 +346,14 @@ class BaseGalaxyCatalog(ABC):
         if self.lensed:
             raise ValueError("Cannot lens a lensed catalog")
         ps = self.pixel_scale
-        self.data["prelensed_image_x"] = self.x_center + self.data["dx"] / ps
-        self.data["prelensed_image_y"] = self.y_center + self.data["dy"] / ps
+        prelensed_x = self.x_center + self.data["dx"] / ps
+        prelensed_y = self.y_center + self.data["dy"] / ps
+        wcs = self.tract_info.getWcs()
+        pre_ra, pre_dec = wcs.pixelToSkyArray(
+            x=prelensed_x, y=prelensed_y, degrees=True,
+        )
+        self.data["prelensed_ra"] = pre_ra
+        self.data["prelensed_dec"] = pre_dec
         num = len(self.data)
         for _ in range(num):
             src = self.data[_]
@@ -357,17 +365,14 @@ class BaseGalaxyCatalog(ABC):
             self.data[_]["kappa"] = distort_res["kappa"]
             self.data[_]["has_finite_shear"] = distort_res["has_finite_shear"]
         if apply_position_shifts:
-            self.data["image_x"] = self.x_center + self.data["dx"] / ps
-            self.data["image_y"] = self.y_center + self.data["dy"] / ps
+            image_x = self.x_center + self.data["dx"] / ps
+            image_y = self.y_center + self.data["dy"] / ps
         else:
-            self.data["image_x"] = self.data["prelensed_image_x"]
-            self.data["image_y"] = self.data["prelensed_image_y"]
+            image_x = prelensed_x
+            image_y = prelensed_y
 
-        wcs = self.tract_info.getWcs()
         ra, dec = wcs.pixelToSkyArray(
-            x=self.data["image_x"],
-            y=self.data["image_y"],
-            degrees=True,
+            x=image_x, y=image_y, degrees=True,
         )
         self.data["ra"] = ra
         self.data["dec"] = dec

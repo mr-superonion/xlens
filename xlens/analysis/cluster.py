@@ -985,16 +985,24 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             truth_00_res = truth00.get()
             truth_01_res = truth01.get()
 
+            wcs = skymap[tract_id].getWcs()
+            true_x_00, true_y_00 = wcs.skyToPixelArray(
+                truth_00_res["ra"], truth_00_res["dec"], degrees=True,
+            )
+            true_x_01, true_y_01 = wcs.skyToPixelArray(
+                truth_01_res["ra"], truth_01_res["dec"], degrees=True,
+            )
+
             idx_00, match_dist_00 = self._match_input_to_det(
-                truth_00_res["image_x"],
-                truth_00_res["image_y"],
+                true_x_00,
+                true_y_00,
                 sr_00_res[xn] / pixel_scale,
                 sr_00_res[yn] / pixel_scale,
             )
 
             idx_01, match_dist_01 = self._match_input_to_det(
-                truth_01_res["image_x"],
-                truth_01_res["image_y"],
+                true_x_01,
+                true_y_01,
                 sr_01_res[xn] / pixel_scale,
                 sr_01_res[yn] / pixel_scale,
             )
@@ -1038,7 +1046,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                     sr_01_res[yn] / pixel_scale,
                 ]
             )
-            wcs = skymap[tract_id].getWcs()
             det_ra, det_dec = wcs.pixelToSkyArray(det_x, det_y, degrees=True)
 
             e1_g1 = np.concatenate([sr_00_res[e1g1n], sr_01_res[e1g1n]])
@@ -1088,30 +1095,36 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ]
             )
 
-            x = np.concatenate(
+            # Convert prelensed ra/dec to pixel positions via WCS
+            pre_ra = np.concatenate(
                 [
-                    truth_00_res["prelensed_image_x"][idx_00],
-                    truth_01_res["prelensed_image_x"][idx_01],
+                    truth_00_res["prelensed_ra"][idx_00],
+                    truth_01_res["prelensed_ra"][idx_01],
                 ]
             )
-            y = np.concatenate(
+            pre_dec = np.concatenate(
                 [
-                    truth_00_res["prelensed_image_y"][idx_00],
-                    truth_01_res["prelensed_image_y"][idx_01],
+                    truth_00_res["prelensed_dec"][idx_00],
+                    truth_01_res["prelensed_dec"][idx_01],
                 ]
             )
+            x, y = wcs.skyToPixelArray(pre_ra, pre_dec, degrees=True)
 
-            lensed_x = np.concatenate(
+            # Convert lensed ra/dec to pixel positions via WCS
+            lensed_ra = np.concatenate(
                 [
-                    truth_00_res["image_x"][idx_00],
-                    truth_01_res["image_x"][idx_01],
+                    truth_00_res["ra"][idx_00],
+                    truth_01_res["ra"][idx_01],
                 ]
             )
-            lensed_y = np.concatenate(
+            lensed_dec = np.concatenate(
                 [
-                    truth_00_res["image_y"][idx_00],
-                    truth_01_res["image_y"][idx_01],
+                    truth_00_res["dec"][idx_00],
+                    truth_01_res["dec"][idx_01],
                 ]
+            )
+            lensed_x, lensed_y = wcs.skyToPixelArray(
+                lensed_ra, lensed_dec, degrees=True,
             )
 
             all_true_ra = np.concatenate(

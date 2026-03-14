@@ -355,17 +355,25 @@ class MultibandSimTask(PipelineTask):
         wcs_gs = tanwcs_dm2galsim(wcs)
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
         survey_name = self.config.survey_name
+
+        # Convert ra/dec to pixel positions using the provided WCS
+        pix_x, pix_y = wcs.skyToPixelArray(
+            galaxy_catalog.data["ra"],
+            galaxy_catalog.data["dec"],
+            degrees=True,
+        )
+
         for i, src in enumerate(galaxy_catalog.data):
+            ix = pix_x[i]
+            iy = pix_y[i]
             if (
                 (xmin - SIM_INCLUSION_PADDING) <
-                src["image_x"] < (xmax + SIM_INCLUSION_PADDING)
+                ix < (xmax + SIM_INCLUSION_PADDING)
             ) and (
                 (ymin - SIM_INCLUSION_PADDING)
-                < src["image_y"] < (ymax + SIM_INCLUSION_PADDING)
+                < iy < (ymax + SIM_INCLUSION_PADDING)
             ) and src["has_finite_shear"]:
-                image_pos = galsim.PositionD(
-                    x=src["image_x"], y=src["image_y"]
-                )
+                image_pos = galsim.PositionD(x=ix, y=iy)
                 gal_obj = galaxy_catalog.get_obj(
                     ind=i, mag_zero=mag_zero, band=band,
                     use_mog=self.config.use_mog,
@@ -679,19 +687,26 @@ class IASimTask(MultibandSimTask):
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
         survey_name = self.config.survey_name
 
+        # Convert ra/dec to pixel positions using the provided WCS
+        pix_x, pix_y = wcs.skyToPixelArray(
+            galaxy_catalog.data["ra"],
+            galaxy_catalog.data["dec"],
+            degrees=True,
+        )
+
         for i, src in enumerate(galaxy_catalog.data):
+            ix = pix_x[i]
+            iy = pix_y[i]
             if (
                 (xmin - SIM_INCLUSION_PADDING)
-                < src["image_x"]
+                < ix
                 < (xmax + SIM_INCLUSION_PADDING)
             ) and (
                 (ymin - SIM_INCLUSION_PADDING)
-                < src["image_y"]
+                < iy
                 < (ymax + SIM_INCLUSION_PADDING)
             ) and src["has_finite_shear"]:
-                image_pos = galsim.PositionD(
-                    x=src["image_x"], y=src["image_y"]
-                )
+                image_pos = galsim.PositionD(x=ix, y=iy)
                 gal_obj = galaxy_catalog.get_obj(
                     ind=i, mag_zero=mag_zero, band=band,
                     use_mog=self.config.use_mog,

@@ -278,12 +278,12 @@ def test_catalog_disable_lensing_position_shifts():
     ).truthCatalog
 
     np.testing.assert_allclose(
-        catalog["image_x"],
-        catalog["prelensed_image_x"],
+        catalog["ra"],
+        catalog["prelensed_ra"],
     )
     np.testing.assert_allclose(
-        catalog["image_y"],
-        catalog["prelensed_image_y"],
+        catalog["dec"],
+        catalog["prelensed_dec"],
     )
     return
 
