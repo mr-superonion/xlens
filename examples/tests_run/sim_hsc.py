@@ -4,7 +4,6 @@ import gc
 import os
 
 import fitsio
-import lsst.afw.image as afwImage
 import numpy as np
 from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 from mpi4py import MPI

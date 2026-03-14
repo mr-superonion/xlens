@@ -32,8 +32,8 @@ def test_wcs():
     # Set up the configuration
     tract_info = skymap[16012]
 
-    wcs_galsim = xlens.simulator.wcs.make_galsim_tanwcs(tract_info.getWcs())
-    wcs_dm = xlens.simulator.wcs.make_dm_wcs(wcs_galsim)
+    wcs_galsim = xlens.simulator.wcs.tanwcs_dm2galsim(tract_info.getWcs())
+    wcs_dm = xlens.simulator.wcs.tanwcs_galsim2dm(wcs_galsim)
     wcs_0 = tract_info.getWcs()
 
     np.testing.assert_almost_equal(

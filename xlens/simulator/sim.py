@@ -62,7 +62,7 @@ from .galaxies import (
     OpenUniverse2024RubinRomanCatalog,
 )
 from .noise import get_noise_array
-from .wcs import make_galsim_tanwcs
+from .wcs import tanwcs_dm2galsim
 
 SIM_INCLUSION_PADDING = 200  # pixels
 DEFAULT_BAT_STAMP_SIZE = 64
@@ -352,7 +352,7 @@ class MultibandSimTask(PipelineTask):
         ymax = bbox_outer.getMaxY()
         width = bbox_outer.getWidth()
         height = bbox_outer.getHeight()
-        wcs_gs = make_galsim_tanwcs(wcs)
+        wcs_gs = tanwcs_dm2galsim(wcs)
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
         survey_name = self.config.survey_name
         for i, src in enumerate(galaxy_catalog.data):
@@ -675,7 +675,7 @@ class IASimTask(MultibandSimTask):
         width = bbox_outer.getWidth()
         height = bbox_outer.getHeight()
 
-        wcs_gs = make_galsim_tanwcs(wcs)
+        wcs_gs = tanwcs_dm2galsim(wcs)
         image = galsim.ImageF(width, height, xmin=xmin, ymin=ymin, wcs=wcs_gs)
         survey_name = self.config.survey_name
 

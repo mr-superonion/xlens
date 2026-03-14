@@ -2,7 +2,6 @@ from typing import Any
 
 import anacal
 import astropy.units as u
-import lsst.afw.image as afwImage
 import numpy as np
 from lsst.afw.image import ExposureF, MaskX
 from lsst.geom import Box2I, Extent2I, Point2D, Point2I
@@ -12,7 +11,10 @@ from lsst.meas.algorithms import (
 )
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import (
-    ConfigField, Field, ListField, FieldValidationError,
+    ConfigField,
+    Field,
+    FieldValidationError,
+    ListField,
 )
 from lsst.pipe.base import (
     PipelineTask,
@@ -200,7 +202,7 @@ class BuildSystematicsTask(PipelineTask):
         exposure_handles_dict: dict[str, Any],
         gaia_loader: ReferenceObjectLoader | None = None,
         cell_handles_dict: None | dict[str, Any] = None,
-        catalog = None,
+        catalog=None,
         seed: int | None = None,
         **kwargs,
     ) -> Struct:
@@ -226,7 +228,7 @@ class BuildSystematicsTask(PipelineTask):
                     & (~catalog[f"{b}_hsmShapeRegauss_flag"])
                 )
                 ngood += (test).astype(int)
-            catalog = catalog[ngood==ngood.max()]
+            catalog = catalog[ngood == ngood.max()]
 
         # Mask, PSF and Stars
         for band, exp_handle in exposure_handles_dict.items():
@@ -365,7 +367,7 @@ class BuildSystematicsTask(PipelineTask):
 
     def get_noise_corr(self, exposure, mask_array):
         assert isinstance(self.config, BuildSystematicsConfig)
-        mask = exposure.mask  # MaskX / afwImage.Mask
+        mask = exposure.mask
 
         # Always check what planes exist in this exposure:
         print(mask.getMaskPlaneDict().keys())

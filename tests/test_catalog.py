@@ -1,13 +1,12 @@
 import os
+import pickle
 from pathlib import Path
 
 import fitsio
 import numpy as np
 
 import xlens
-import pickle
-
-from xlens.catalog import measure_shear, ShearEstimator
+from xlens.catalog import ShearEstimator, measure_shear
 
 
 def test_pz_point_estimates():

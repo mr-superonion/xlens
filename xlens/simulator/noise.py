@@ -13,7 +13,8 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
-"""Pipeline task for adding correlated or uncorrelated noise to coadd exposures."""
+"""Pipeline task for adding correlated or uncorrelated noise to
+coadd exposures."""
 
 from typing import Any
 

@@ -1,4 +1,5 @@
-"""Helper functions that return structured arrays of (dx, dy) shifts in arcseconds."""
+"""Helper functions that return structured arrays of (dx, dy) shifts
+in arcseconds."""
 
 import numpy as np
 

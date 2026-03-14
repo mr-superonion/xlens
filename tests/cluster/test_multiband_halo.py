@@ -2,6 +2,7 @@ import os
 import subprocess
 
 
+
 def test_pipetask_shear():
     # setup butler
     this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,7 +28,10 @@ def test_pipetask_shear():
         "skymap='hsc_sim' AND tract=0 AND patch=0 AND band='i'",
         "--register-dataset-types",
     ]
-    result = subprocess.run(command, capture_output=True, text=True)
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    env["MPLBACKEND"] = "Agg"
+    result = subprocess.run(command, capture_output=True, text=True, env=env)
     # Assert that the command executed successfully
     assert result.returncode == 0, f"Command failed with error: {result.stderr}"
 

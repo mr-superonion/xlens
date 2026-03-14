@@ -122,7 +122,7 @@ def get_color(
         ferr = src[err_col]
 
         flux = flux_base + dg * dflux
-        mag = np.full(n, 40.0, dtype=np.float64)  #  default to faint mag=40.0
+        mag = np.full(n, 40.0, dtype=np.float64)  # default to faint mag=40.0
         pos = flux > 0
         if extinction is None:
             with np.errstate(divide="ignore", invalid="ignore"):

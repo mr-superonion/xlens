@@ -1,4 +1,42 @@
-"""WCS conversion utilities between LSST and GalSim coordinate systems."""
+"""WCS conversion utilities between LSST and GalSim coordinate systems.
+
+Coordinate conventions
+----------------------
+Both LSST and GalSim use tangent-plane (intermediate world) coordinates,
+Near the tangent point at (RA_0, Dec_0):
+
+    u' ≈ (RA - RA_0) * cos(Dec_0)     (East,  LSST/FITS)
+    v' ≈  Dec - Dec_0                 (North, LSST/FITS)
+
+    u  ≈ -(RA - RA_0) * cos(Dec_0)   (West,  GalSim)
+    v  ≈   Dec - Dec_0               (North, GalSim)
+
+So u = -u' and v = v'. The cos(Dec_0) factor is absorbed into the
+projection; the CD matrix entries do NOT scale with 1/cos(Dec).
+
+LSST/FITS CD matrix (getCdMatrix, makeSkyWcs cdMatrix, base_LocalWcs_CDMatrix):
+    [[du'/dx, du'/dy], [dv'/dx, dv'/dy]]
+    Units: degrees/pixel (getCdMatrix) or radians/pixel
+    (linearizePixelToSky with radians).
+
+GalSim Jacobian (dudx, dudy, dvdx, dvdy in AffineTransform / JacobianWCS):
+    [[du/dx, du/dy], [dv/dx, dv/dy]]
+    Units: arcsec/pixel (when units=galsim.arcsec).
+
+GalSim FITS CD matrix (TanWCS.cd property):
+    Same as LSST/FITS convention in degrees/pixel.
+    GalSim converts internally between this and its (u, v) Jacobian.
+
+Conversion rule
+---------------
+To go from LSST/FITS CD matrix to GalSim Jacobian:
+    Negate the first row (u' East -> u West) and convert units.
+    du/dx = -du'/dx,  du/dy = -du'/dy
+    dv/dx =  dv'/dx,  dv/dy =  dv'/dy
+
+To go from GalSim to LSST:
+    Use TanWCS.cd (already in FITS convention), pass directly to makeSkyWcs.
+"""
 
 import galsim
 import lsst.geom as geom
@@ -7,9 +45,12 @@ from lsst.afw.geom import makeSkyWcs
 RAD2ASEC = 206264.80624709636
 
 
-def make_galsim_tanwcs(wcs):
-    """
-    Build a GalSim TanWCS consistent with an LSST SkyWcs.
+def tanwcs_dm2galsim(wcs):
+    """Build a GalSim TanWCS from an LSST SkyWcs.
+
+    Converts the LSST CD matrix (u'=East, degrees/pixel) to GalSim's
+    Jacobian (u=West, arcsec/pixel) by negating the first row and
+    scaling by 3600. See module docstring for coordinate conventions.
 
     Parameters
     ----------
@@ -41,18 +82,22 @@ def make_galsim_tanwcs(wcs):
     return wcs_galsim
 
 
-def make_dm_wcs(wcs_gs):
-    """
-    convert galsim wcs to stack wcs
+def tanwcs_galsim2dm(wcs_gs):
+    """Convert a GalSim TanWCS to an LSST SkyWcs.
+
+    Uses GalSim's .cd property, which returns the FITS CD matrix
+    (u'=East, degrees/pixel) — the same convention as LSST's makeSkyWcs
+    cdMatrix parameter. No sign flip is needed.
+    See module docstring for coordinate conventions.
 
     Parameters
     ----------
-    wcs_gs: galsim WCS
-        Should be TAN or TAN-SIP
+    wcs_gs : galsim.TanWCS
+        GalSim TAN WCS object.
 
     Returns
     -------
-    DM Stack sky wcs
+    lsst.afw.geom.SkyWcs
     """
 
     if wcs_gs.wcs_type == 'TAN':

@@ -1,5 +1,5 @@
 from . import model, redshift, utils
-from .base import get_esq, measure_shear, ShearEstimator
+from .base import ShearEstimator, get_esq, measure_shear
 
 __all__ = [
     "utils", "model",
