@@ -11,7 +11,7 @@ from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 
 import xlens
 from xlens.wcs import (
-    correct_fpfs_ellipticity_wcs,
+    correct_ellipticity_wcs,
     correct_fpfs_spin2_wcs,
     extract_perturbation_dm_wcs,
     extract_perturbation_galsim_wcs,
@@ -363,7 +363,7 @@ def test_isotropic_galaxy(wcs_g1, wcs_g2, wcs_rho):
     g1_ref = ells_ref["fpfs1_e1"][0] / ells_ref["fpfs1_de1_dg1"][0]
     g2_ref = ells_ref["fpfs1_e2"][0] / ells_ref["fpfs1_de2_dg2"][0]
 
-    e1_corr, e2_corr = correct_fpfs_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
+    e1_corr, e2_corr = correct_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
     g1_corr = e1_corr[0] / ells["fpfs1_de1_dg1"][0]
     g2_corr = e2_corr[0] / ells["fpfs1_de2_dg2"][0]
 
@@ -444,7 +444,7 @@ def test_sheared_galaxy(wcs_g1, wcs_g2, wcs_rho, gal_g1, gal_g2):
         e1_raw_sum += ells["fpfs1_e1"][0]
         e2_raw_sum += ells["fpfs1_e2"][0]
 
-        e1_c, e2_c = correct_fpfs_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
+        e1_c, e2_c = correct_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
         e1_corr_sum += e1_c[0]
         e2_corr_sum += e2_c[0]
 

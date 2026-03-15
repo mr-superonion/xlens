@@ -1,6 +1,7 @@
 # xlens (Gravitational Lensing from Image Pixels)
 
 [![tests](https://github.com/mr-superonion/xlens/actions/workflows/tests.yml/badge.svg)](https://github.com/mr-superonion/xlens/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/mr-superonion/xlens/branch/main/graph/badge.svg)](https://codecov.io/gh/mr-superonion/xlens)
 [![conda-forge](https://anaconda.org/conda-forge/xlens/badges/version.svg)](https://anaconda.org/conda-forge/xlens)
 [![docs](https://readthedocs.org/projects/xlens/badge/?version=latest)](https://xlens.readthedocs.io/en/latest/index.html)
 

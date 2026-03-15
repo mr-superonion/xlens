@@ -60,4 +60,13 @@ exclude = [".git", "__pycache__", "docs", "build", "dist"]
 max-line-length = 80
 
 [tool.coverage.run]
-omit=["xlens/__version__.py"]
+source = ["xlens"]
+omit = ["xlens/__version__.py"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "raise NotImplementedError",
+]

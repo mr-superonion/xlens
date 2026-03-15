@@ -539,7 +539,7 @@ def correct_fpfs_spin2_wcs(data, g1, g2, rho, prefix=""):
     return out
 
 
-def correct_fpfs_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
+def correct_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
     """Correct FPFS ellipticities for WCS shear and rotation.
 
     Undoes the WCS-induced shear and rotation on the nonlinear

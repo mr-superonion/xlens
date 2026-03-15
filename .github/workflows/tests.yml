@@ -63,10 +63,19 @@ jobs:
           pip install --no-deps FlexCode
           pip install .
 
-      - name: Test with pytest
+      - name: Test with pytest and coverage
         shell: bash -l {0}
         run: |
           wget https://github.com/mr-superonion/xlens/releases/download/v0.3.0/catsim-v4.tar.gz
           tar xvfz catsim-v4.tar.gz
           export CATSIM_DIR=$(realpath catsim-v4)
-          pytest
+          pytest tests/ --cov --cov-report=xml --cov-report=term -vv -s
+          pytest examples/ --nbval --nbval-lax --nbval-current-env -vv -s
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          fail_ci_if_error: false

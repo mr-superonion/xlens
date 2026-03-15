@@ -1,5 +1,6 @@
 nbval
 flake8-pyproject
 pytest>=3.4
+pytest-cov>=4.0
 pytest-xdist>=1.19
 pytest-timeout>=1.2
