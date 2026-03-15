@@ -537,3 +537,52 @@ def correct_fpfs_spin2_wcs(data, g1, g2, rho, prefix=""):
     out[f"{p}m42c"] = m42c_s * cos2 + m42s_s * sin2
     out[f"{p}m42s"] = -m42c_s * sin2 + m42s_s * cos2
     return out
+
+
+def correct_fpfs_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
+    """Correct FPFS ellipticities for WCS shear and rotation.
+
+    Undoes the WCS-induced shear and rotation on the nonlinear
+    ellipticity estimates (e1, e2) produced by
+    :func:`anacal.fpfs.process_image`.
+
+    The correction is applied in two steps:
+
+    1. **Undo shear**: subtract the shear contribution using the
+       diagonal shear response:
+       ``e1_corr = e1 - g1 * de1/dg1``,
+       ``e2_corr = e2 - g2 * de2/dg2``.
+    2. **Undo rotation**: rotate by ``-2*rho``:
+       ``e1' =  e1*cos(2*rho) + e2*sin(2*rho)``,
+       ``e2' = -e1*sin(2*rho) + e2*cos(2*rho)``.
+
+    Parameters
+    ----------
+    ells : np.ndarray
+        Structured array from :func:`anacal.fpfs.process_image` with
+        fields ``{prefix}e1``, ``{prefix}e2``, ``{prefix}de1_dg1``,
+        ``{prefix}de2_dg2``.
+    g1, g2 : float
+        WCS shear components in lensing convention.
+    rho : float
+        WCS rotation angle in radians.
+    prefix : str, optional
+        Column name prefix (e.g. ``"fpfs1_"``). Default is ``"fpfs1_"``.
+
+    Returns
+    -------
+    e1_corrected, e2_corrected : np.ndarray
+        Corrected ellipticity arrays.
+    """
+    p = prefix
+    # Step 1: Undo shear using response
+    e1_shear = ells[f"{p}e1"] - g1 * ells[f"{p}de1_dg1"]
+    e2_shear = ells[f"{p}e2"] - g2 * ells[f"{p}de2_dg2"]
+
+    # Step 2: Undo rotation (rotate by -2*rho)
+    cos2rho = np.cos(2.0 * rho)
+    sin2rho = np.sin(2.0 * rho)
+    e1_corrected = e1_shear * cos2rho + e2_shear * sin2rho
+    e2_corrected = -e1_shear * sin2rho + e2_shear * cos2rho
+
+    return e1_corrected, e2_corrected

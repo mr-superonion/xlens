@@ -39,4 +39,4 @@ Run the test suite:
 
    Home page <self>
    API Reference <autoapi/index>
-   Notebooks <notebooks>
+   Example Notebooks <notebooks>

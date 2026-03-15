@@ -11,6 +11,7 @@ from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 
 import xlens
 from xlens.wcs import (
+    correct_fpfs_ellipticity_wcs,
     correct_fpfs_spin2_wcs,
     extract_perturbation_dm_wcs,
     extract_perturbation_galsim_wcs,
@@ -27,34 +28,6 @@ from xlens.wcs import (
 # Helpers for FPFS shape measurement tests
 # ---------------------------------------------------------------------------
 
-
-def correct_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
-    """Apply full WCS correction: shear first, then rotation.
-
-    The parameters (g1, g2, rho) follow the lensing distortion convention.
-    The WCS distortion maps pixel->world. In pixel coords, the galaxy image
-    picks up shear (+g) and rotation in the lensing convention.
-    The measured ellipticity is:
-        e_pixel ≈ e_sky * exp(+2i*rho) + g  (to first order)
-
-    To correct:
-    1. Undo shear: e_after_shear = e_raw - g * de/dg
-    2. Undo rotation: rotate by -2*rho (exp(-2i*rho)):
-        e1_corrected = e1 * cos(2*rho) + e2 * sin(2*rho)
-        e2_corrected = -e1 * sin(2*rho) + e2 * cos(2*rho)
-    """
-    p = prefix
-    # Step 1: Undo shear using response
-    e1_shear = ells[f"{p}e1"] - g1 * ells[f"{p}de1_dg1"]
-    e2_shear = ells[f"{p}e2"] - g2 * ells[f"{p}de2_dg2"]
-
-    # Step 2: Undo rotation (rotate by -2*rho)
-    cos2rho = np.cos(2.0 * rho)
-    sin2rho = np.sin(2.0 * rho)
-    e1_corrected = e1_shear * cos2rho + e2_shear * sin2rho
-    e2_corrected = -e1_shear * sin2rho + e2_shear * cos2rho
-
-    return e1_corrected, e2_corrected
 
 
 def _draw_images(gal_obj, psf_obj, wcs, stamp_size, center):
@@ -390,7 +363,7 @@ def test_isotropic_galaxy(wcs_g1, wcs_g2, wcs_rho):
     g1_ref = ells_ref["fpfs1_e1"][0] / ells_ref["fpfs1_de1_dg1"][0]
     g2_ref = ells_ref["fpfs1_e2"][0] / ells_ref["fpfs1_de2_dg2"][0]
 
-    e1_corr, e2_corr = correct_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
+    e1_corr, e2_corr = correct_fpfs_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
     g1_corr = e1_corr[0] / ells["fpfs1_de1_dg1"][0]
     g2_corr = e2_corr[0] / ells["fpfs1_de2_dg2"][0]
 
@@ -471,7 +444,7 @@ def test_sheared_galaxy(wcs_g1, wcs_g2, wcs_rho, gal_g1, gal_g2):
         e1_raw_sum += ells["fpfs1_e1"][0]
         e2_raw_sum += ells["fpfs1_e2"][0]
 
-        e1_c, e2_c = correct_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
+        e1_c, e2_c = correct_fpfs_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
         e1_corr_sum += e1_c[0]
         e2_corr_sum += e2_c[0]
 

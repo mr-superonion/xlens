@@ -49,4 +49,7 @@ autoapi_ignore = ["*/__main__.py", "*/_version.py"]
 autoapi_add_toc_tree_entry = False
 autoapi_member_order = "bysource"
 
+# Do not execute notebooks during the docs build (they need heavy deps)
+nbsphinx_execute = "never"
+
 html_theme = "sphinx_rtd_theme"
