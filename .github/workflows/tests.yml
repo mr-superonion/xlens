@@ -69,8 +69,9 @@ jobs:
           wget https://github.com/mr-superonion/xlens/releases/download/v0.3.0/catsim-v4.tar.gz
           tar xvfz catsim-v4.tar.gz
           export CATSIM_DIR=$(realpath catsim-v4)
-          pytest tests/ --cov --cov-report=xml --cov-report=term -vv -s
-          pytest examples/ --nbval --nbval-lax --nbval-current-env -vv -s
+          pytest tests/ --cov --cov-report=xml --cov-report=term
+          pytest examples/shear
+          pytest examples/cluster
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.11'
