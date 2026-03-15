@@ -444,7 +444,7 @@ def make_tanwcs_dm(pixel_scale, g1, g2, rho, ra_deg, dec_deg,
     return tanwcs_galsim2dm(wcs_gs)
 
 
-def correct_fpfs_spin2_wcs(data, g1, g2, rho, prefix=""):
+def correct_fpfs_spin2_wcs(data, g1, g2, rho, prefix="", flipu=False):
     """Correct FPFS linear shapelet moments for WCS shear and rotation.
 
     Transforms the spin-2 shapelet moments measured in pixel coordinates
@@ -469,6 +469,10 @@ def correct_fpfs_spin2_wcs(data, g1, g2, rho, prefix=""):
         WCS rotation angle in radians.
     prefix : str, optional
         Column name prefix (e.g. ``"fpfs1_"``). Default is ``""``.
+    flipu : bool, optional
+        If True, flip the output to LSST/FITS convention (u=East)
+        from the default GalSim convention (u=West).  This negates
+        all sine components (m22s, m42s, m44s, m64s).
 
     Returns
     -------
@@ -536,10 +540,15 @@ def correct_fpfs_spin2_wcs(data, g1, g2, rho, prefix=""):
     m42s_s = out[f"{p}m42s"].copy()
     out[f"{p}m42c"] = m42c_s * cos2 + m42s_s * sin2
     out[f"{p}m42s"] = -m42c_s * sin2 + m42s_s * cos2
+    if flipu:
+        out[f"{p}m22s"] = -out[f"{p}m22s"]
+        out[f"{p}m42s"] = -out[f"{p}m42s"]
+        out[f"{p}m44s"] = -out[f"{p}m44s"]
+        out[f"{p}m64s"] = -out[f"{p}m64s"]
     return out
 
 
-def correct_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
+def correct_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_", flipu=False):
     """Correct FPFS ellipticities for WCS shear and rotation.
 
     Undoes the WCS-induced shear and rotation on the nonlinear
@@ -555,6 +564,7 @@ def correct_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
     2. **Undo rotation**: rotate by ``-2*rho``:
        ``e1' =  e1*cos(2*rho) + e2*sin(2*rho)``,
        ``e2' = -e1*sin(2*rho) + e2*cos(2*rho)``.
+    3. flip u axis if required
 
     Parameters
     ----------
@@ -568,6 +578,10 @@ def correct_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
         WCS rotation angle in radians.
     prefix : str, optional
         Column name prefix (e.g. ``"fpfs1_"``). Default is ``"fpfs1_"``.
+    flipu : bool, optional
+        If True, flip the output to LSST/FITS convention (u=East)
+        from the default GalSim convention (u=West).  This negates
+        e2.
 
     Returns
     -------
@@ -584,5 +598,6 @@ def correct_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
     sin2rho = np.sin(2.0 * rho)
     e1_corrected = e1_shear * cos2rho + e2_shear * sin2rho
     e2_corrected = -e1_shear * sin2rho + e2_shear * cos2rho
-
+    if flipu:
+        e2_corrected = -e2_corrected
     return e1_corrected, e2_corrected
