@@ -2,6 +2,7 @@
 
 [![tests](https://github.com/mr-superonion/xlens/actions/workflows/tests.yml/badge.svg)](https://github.com/mr-superonion/xlens/actions/workflows/tests.yml)
 [![conda-forge](https://anaconda.org/conda-forge/xlens/badges/version.svg)](https://anaconda.org/conda-forge/xlens)
+[![docs](https://readthedocs.org/projects/xlens/badge/?version=latest)](https://xlens.readthedocs.io/en/latest/index.html)
 
 
 ## Installation
