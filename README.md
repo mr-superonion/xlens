@@ -15,11 +15,11 @@ shapes with FPFS shapelets, and correcting for WCS distortions.
 
 | Subpackage | Description |
 |---|---|
-| `simulator` | Galaxy image simulation with realistic WCS, lensing, PSF, and noise |
-| `processor` | Shape measurement pipelines (FPFS, NGMIX) |
 | `catalog` | Truth catalog generation with controlled shear signals |
-| `analysis` | Shear calibration and cluster lensing analysis |
-| `wcs` | WCS coordinate conversion and shapelet moment correction |
+| `simulator` | Galaxy image simulation with realistic WCS, lensing, PSF, and noise |
+| `processor` | Shear measurement pipelines calibrated with AnaCal (FPFS, NGMIX) |
+| `analysis` | Shear measurement validation and cluster lensing analysis |
+| `wcs` | WCS coordinate conversion and shape correction |
 
 ## Installation
 
