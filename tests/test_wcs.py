@@ -11,6 +11,7 @@ from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 
 import xlens
 from xlens.wcs import (
+    correct_fpfs_spin2_wcs,
     extract_perturbation_dm_wcs,
     extract_perturbation_galsim_wcs,
     extract_perturbation_jwcs,
@@ -27,7 +28,7 @@ from xlens.wcs import (
 # ---------------------------------------------------------------------------
 
 
-def correct_ellipticity_wcs(ells, g1, g2, rho):
+def correct_ellipticity_wcs(ells, g1, g2, rho, prefix="fpfs1_"):
     """Apply full WCS correction: shear first, then rotation.
 
     The parameters (g1, g2, rho) follow the lensing distortion convention.
@@ -42,9 +43,10 @@ def correct_ellipticity_wcs(ells, g1, g2, rho):
         e1_corrected = e1 * cos(2*rho) + e2 * sin(2*rho)
         e2_corrected = -e1 * sin(2*rho) + e2 * cos(2*rho)
     """
+    p = prefix
     # Step 1: Undo shear using response
-    e1_shear = ells["e1"] - g1 * ells["de1_dg1"]
-    e2_shear = ells["e2"] - g2 * ells["de2_dg2"]
+    e1_shear = ells[f"{p}e1"] - g1 * ells[f"{p}de1_dg1"]
+    e2_shear = ells[f"{p}e2"] - g2 * ells[f"{p}de2_dg2"]
 
     # Step 2: Undo rotation (rotate by -2*rho)
     cos2rho = np.cos(2.0 * rho)
@@ -55,12 +57,9 @@ def correct_ellipticity_wcs(ells, g1, g2, rho):
     return e1_corrected, e2_corrected
 
 
-def simulate_and_measure(
-    gal_obj, psf_obj, wcs, stamp_size, center, pixel_scale, sigma_shapelets,
-):
-    """Draw galaxy+PSF with given WCS and measure FPFS shapes."""
+def _draw_images(gal_obj, psf_obj, wcs, stamp_size, center):
+    """Draw galaxy and PSF images with given WCS."""
     gal_conv = galsim.Convolve(gal_obj, psf_obj)
-
     gal_image = gal_conv.drawImage(
         nx=stamp_size, ny=stamp_size,
         wcs=wcs, center=galsim.PositionD(center, center),
@@ -69,27 +68,63 @@ def simulate_and_measure(
         nx=stamp_size, ny=stamp_size,
         wcs=wcs, center=galsim.PositionD(center, center),
     )
+    return gal_image, psf_image
 
-    ftask = anacal.fpfs.FpfsTask(
-        npix=stamp_size,
+
+def _make_fpfs_config_and_det(center, sigma_shapelets):
+    """Build FpfsConfig and single-source detection array."""
+    det_dtype = np.dtype([("y", np.float64), ("x", np.float64)])
+    det = np.array([(center, center)], dtype=det_dtype)
+    fpfs_config = anacal.fpfs.FpfsConfig(
+        sigma_shapelets1=sigma_shapelets,
+    )
+    return fpfs_config, det
+
+
+def simulate_and_measure(
+    gal_obj, psf_obj, wcs, stamp_size, center, pixel_scale, sigma_shapelets,
+):
+    """Draw galaxy+PSF with given WCS and measure FPFS shapes."""
+    gal_image, psf_image = _draw_images(
+        gal_obj, psf_obj, wcs, stamp_size, center,
+    )
+    fpfs_config, det = _make_fpfs_config_and_det(center, sigma_shapelets)
+    return anacal.fpfs.process_image(
+        fpfs_config=fpfs_config,
         pixel_scale=pixel_scale,
-        sigma_shapelets=sigma_shapelets,
-        psf_array=psf_image.array,
-        do_detection=False,
-    )
-
-    src = ftask.run(
+        mag_zero=30.0,
+        noise_variance=0.0,
         gal_array=gal_image.array,
-        psf=psf_image.array,
-        det=[(center, center)],
+        psf_array=psf_image.array,
+        mask_array=None,
+        noise_array=None,
+        detection=det,
+        do_compute_detect_weight=False,
     )
 
-    ells = anacal.fpfs.measure_fpfs(
-        C0=4,
-        x_array=src["data"],
-        y_array=src["noise"],
+
+def simulate_and_measure_linear(
+    gal_obj, psf_obj, wcs, stamp_size, center, pixel_scale, sigma_shapelets,
+):
+    """Draw galaxy+PSF with given WCS and return raw linear shapelet moments."""
+    gal_image, psf_image = _draw_images(
+        gal_obj, psf_obj, wcs, stamp_size, center,
     )
-    return ells
+    fpfs_config, det = _make_fpfs_config_and_det(center, sigma_shapelets)
+    return anacal.fpfs.process_image(
+        fpfs_config=fpfs_config,
+        pixel_scale=pixel_scale,
+        mag_zero=30.0,
+        noise_variance=0.0,
+        gal_array=gal_image.array,
+        psf_array=psf_image.array,
+        mask_array=None,
+        noise_array=None,
+        detection=det,
+        do_compute_detect_weight=False,
+        return_only_linear_modes=True,
+        pack_linear_modes=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -352,15 +387,32 @@ def test_isotropic_galaxy(wcs_g1, wcs_g2, wcs_rho):
         pixel_scale, sigma_shapelets,
     )
 
-    g1_ref = ells_ref["e1"][0] / ells_ref["de1_dg1"][0]
-    g2_ref = ells_ref["e2"][0] / ells_ref["de2_dg2"][0]
+    g1_ref = ells_ref["fpfs1_e1"][0] / ells_ref["fpfs1_de1_dg1"][0]
+    g2_ref = ells_ref["fpfs1_e2"][0] / ells_ref["fpfs1_de2_dg2"][0]
 
     e1_corr, e2_corr = correct_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
-    g1_corr = e1_corr[0] / ells["de1_dg1"][0]
-    g2_corr = e2_corr[0] / ells["de2_dg2"][0]
+    g1_corr = e1_corr[0] / ells["fpfs1_de1_dg1"][0]
+    g2_corr = e2_corr[0] / ells["fpfs1_de2_dg2"][0]
 
     np.testing.assert_allclose(g1_corr, g1_ref, atol=5e-4)
     np.testing.assert_allclose(g2_corr, g2_ref, atol=5e-4)
+
+    # Also check linear moment correction via correct_fpfs_spin2_wcs
+    data = simulate_and_measure_linear(
+        gal, psf_obj, wcs, stamp_size, center, pixel_scale, sigma_shapelets,
+    )
+    data_ref = simulate_and_measure_linear(
+        gal, psf_obj, wcs_ref, stamp_size, center,
+        pixel_scale, sigma_shapelets,
+    )
+    corrected = correct_fpfs_spin2_wcs(
+        data, rec_g1, rec_g2, rec_rho, prefix="fpfs1_",
+    )
+    for col in ["fpfs1_m22c", "fpfs1_m22s", "fpfs1_m42c", "fpfs1_m42s"]:
+        np.testing.assert_allclose(
+            corrected[col][0], data_ref[col][0], atol=1.0,
+            err_msg=f"{col} mismatch",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -414,10 +466,10 @@ def test_sheared_galaxy(wcs_g1, wcs_g2, wcs_rho, gal_g1, gal_g2):
             pixel_scale, sigma_shapelets,
         )
 
-        e1_ref_sum += ells_ref["e1"][0]
-        e2_ref_sum += ells_ref["e2"][0]
-        e1_raw_sum += ells["e1"][0]
-        e2_raw_sum += ells["e2"][0]
+        e1_ref_sum += ells_ref["fpfs1_e1"][0]
+        e2_ref_sum += ells_ref["fpfs1_e2"][0]
+        e1_raw_sum += ells["fpfs1_e1"][0]
+        e2_raw_sum += ells["fpfs1_e2"][0]
 
         e1_c, e2_c = correct_ellipticity_wcs(ells, rec_g1, rec_g2, rec_rho)
         e1_corr_sum += e1_c[0]
@@ -443,3 +495,23 @@ def test_sheared_galaxy(wcs_g1, wcs_g2, wcs_rho, gal_g1, gal_g2):
     assert raw_mag > 1e-3, (
         f"Raw avg too small ({raw_mag:.2e}), WCS distortion not visible"
     )
+
+    # Also check linear moment correction on a single sheared galaxy
+    gal_single = gal_base
+    data = simulate_and_measure_linear(
+        gal_single, psf_obj, wcs, stamp_size, center,
+        pixel_scale, sigma_shapelets,
+    )
+    data_ref = simulate_and_measure_linear(
+        gal_single, psf_obj, wcs_ref, stamp_size, center,
+        pixel_scale, sigma_shapelets,
+    )
+    corrected = correct_fpfs_spin2_wcs(
+        data, rec_g1, rec_g2, rec_rho, prefix="fpfs1_",
+    )
+    for col in ["fpfs1_m22c", "fpfs1_m22s", "fpfs1_m42c", "fpfs1_m42s"]:
+        np.testing.assert_allclose(
+            corrected[col][0], data_ref[col][0],
+            rtol=5e-2,
+            err_msg=f"{col} mismatch",
+        )

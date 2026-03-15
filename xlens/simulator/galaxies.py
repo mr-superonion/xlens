@@ -434,8 +434,11 @@ class BaseGalaxyCatalog(ABC):
 # Concrete implementation: CatSim2017 catalog
 # --------------------------------------------
 class CatSim2017Catalog(BaseGalaxyCatalog):
-    """
-    Catalog of galaxies from catsim2017 (OneDegSq.fits)
+    """Galaxy catalog from CatSim 2017 (``OneDegSq.fits``).
+
+    Each galaxy is a single Sersic profile with half-light radius,
+    Sersic index, axis ratio, and position angle read from the
+    input FITS file.
     """
 
     def _read_catalog(
@@ -583,8 +586,11 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
 # Concrete implementation: OpenUniverse 2024 Rubin–Roman
 # ---------------------------------------------------------
 class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
-    """
-    DiffSky-based Rubin–Roman input galaxies (nside=32 tile)
+    """DiffSky-based Rubin-Roman input galaxies (``OpenUniverse2024``).
+
+    Galaxies are decomposed into bulge + disk components, each with
+    its own Sersic index, half-light radius, and axis ratio.  Read
+    from HEALPix nside=32 tiles.
     """
 
     def _read_catalog(

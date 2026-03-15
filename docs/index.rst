@@ -1,46 +1,38 @@
-.. xlens documentation main file.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+xlens documentation
+===================
 
-Welcome to xlens's documentation!
-========================================================================================
+**xlens** is a weak gravitational lensing analysis framework built on
+`AnaCal <https://github.com/mr-superonion/AnaCal>`_ and the
+`LSST Science Pipelines <https://pipelines.lsst.io/>`_.
+It provides tools for simulating galaxy images, measuring shapes with
+FPFS shapelets, and correcting for WCS distortions.
 
-Dev Guide - Getting Started
----------------------------
+Subpackages
+-----------
 
-Before installing any dependencies or writing code, it's a great idea to create a
-virtual environment. LINCC-Frameworks engineers primarily use `conda` to manage virtual
-environments. If you have conda installed locally, you can run the following to
-create and activate a new environment.
+- **simulator** -- Galaxy image simulation with realistic WCS,
+  lensing distortions, PSF convolution, and noise.
+- **processor** -- Shape measurement pipelines (FPFS, NGMIX).
+- **catalog** -- Truth catalog generation with controlled shear signals.
+- **analysis** -- Shear calibration and cluster lensing analysis.
+- **wcs** -- WCS coordinate conversion and shapelet moment correction
+  between LSST and GalSim conventions.
+
+Getting Started
+---------------
+
+Install into a conda environment with the LSST Science Pipelines
+(e.g. via `stackvana <https://github.com/conda-forge/stackvana>`_):
 
 .. code-block:: bash
 
-   >> conda create env -n <env_name> python=3.10
-   >> conda activate <env_name>
+   pip install -e '.[dev]'
 
-
-Once you have created a new environment, you can install this project for local
-development using the following commands:
+Run the test suite:
 
 .. code-block:: bash
 
-   >> pip install -e .'[dev]'
-   >> pre-commit install
-   >> conda install pandoc
-
-
-Notes:
-
-1) The single quotes around ``'[dev]'`` may not be required for your operating system.
-2) ``pre-commit install`` will initialize pre-commit for this local repository, so
-   that a set of tests will be run prior to completing a local commit. For more
-   information, see the Python Project Template documentation on
-   `pre-commit <https://lincc-ppt.readthedocs.io/en/latest/practices/precommit.html>`_.
-3) Installing ``pandoc`` allows you to verify that automatic rendering of Jupyter notebooks
-   into documentation for ReadTheDocs works as expected. For more information, see
-   the Python Project Template documentation on
-   `Sphinx and Python Notebooks <https://lincc-ppt.readthedocs.io/en/latest/practices/sphinx.html#python-notebooks>`_.
-
+   pytest -vv
 
 .. toctree::
    :hidden:

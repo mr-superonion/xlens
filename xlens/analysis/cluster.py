@@ -19,6 +19,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+"""Cluster lensing shear profile measurement and multiplicative bias estimation.
+
+Provides :class:`HaloMcBiasMultibandPipe`, a pipeline task that matches
+detected sources to truth catalogs around NFW halos, measures tangential
+shear profiles, and estimates multiplicative bias from the ratio of
+measured-to-true reduced shear.
+"""
+
 __all__ = [
     "HaloMcBiasMultibandPipeConfig",
     "HaloMcBiasMultibandPipe",
@@ -54,6 +62,8 @@ class HaloMcBiasMultibandPipeConnections(
         "version": "",
     },
 ):
+    """Butler connections for :class:`HaloMcBiasMultibandPipe`."""
+
     skymap = cT.Input(
         doc="SkyMap to use in processing",
         name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
@@ -128,6 +138,8 @@ class HaloMcBiasMultibandPipeConfig(
     PipelineTaskConfig,
     pipelineConnections=HaloMcBiasMultibandPipeConnections,
 ):
+    """Configuration for :class:`HaloMcBiasMultibandPipe`."""
+
     ename = Field[str](
         doc="ellipticity column name",
         default="e",
@@ -175,6 +187,14 @@ class HaloMcBiasMultibandPipeConfig(
 
 
 class HaloMcBiasMultibandPipe(PipelineTask):
+    """Measure tangential shear profiles around NFW halos and estimate
+    multiplicative shear bias.
+
+    Matches detected source catalogs to truth catalogs, computes
+    tangential and cross shear in radial bins, and compares measured
+    shear to the true input shear to derive the multiplicative bias.
+    """
+
     _DefaultName = "HaloMcTask"
     ConfigClass = HaloMcBiasMultibandPipeConfig
 

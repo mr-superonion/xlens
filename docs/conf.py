@@ -9,7 +9,7 @@ import sys
 from importlib.metadata import version
 
 # Define path to the code to be documented **relative to where conf.py (this file) is kept**
-sys.path.insert(0, os.path.abspath("../src/"))
+sys.path.insert(0, os.path.abspath("../"))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -44,7 +44,7 @@ html_show_sourcelink = False
 add_module_names = False
 
 autoapi_type = "python"
-autoapi_dirs = ["../src"]
+autoapi_dirs = ["../xlens"]
 autoapi_ignore = ["*/__main__.py", "*/_version.py"]
 autoapi_add_toc_tree_entry = False
 autoapi_member_order = "bysource"

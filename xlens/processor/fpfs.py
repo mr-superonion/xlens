@@ -1,3 +1,10 @@
+"""FPFS shape measurement task wrapping :mod:`anacal.fpfs`.
+
+Provides :class:`FpfsMeasurementTask`, a Rubin-style ``Task`` that measures
+FPFS shapelet moments from coadd exposures and returns structured catalogs
+ready for shear estimation.
+"""
+
 from typing import Any
 
 import anacal
@@ -12,6 +19,8 @@ from ..utils.random import num_rot
 
 
 class FpfsMeasurementConfig(Config):
+    """Configuration for :class:`FpfsMeasurementTask`."""
+
     npix = Field[int](
         doc="number of pixels in stamp [pixel]",
         default=64,
@@ -119,7 +128,12 @@ class FpfsMeasurementConfig(Config):
 
 
 class FpfsMeasurementTask(Task):
-    """Measure Fpfs FPFS observables"""
+    """Measure FPFS shapelet observables from coadd image data.
+
+    Wraps :func:`anacal.fpfs.process_image` behind the Rubin ``Task``
+    interface.  Call :meth:`prepare_data` to extract arrays from an
+    LSST ``ExposureF``, then :meth:`run` to perform the measurement.
+    """
 
     _DefaultName = "FpfsMeasurementTask"
     ConfigClass = FpfsMeasurementConfig
@@ -157,6 +171,39 @@ class FpfsMeasurementTask(Task):
         begin_y: int = 0,
         **kwargs,
     ):
+        """Run FPFS measurement on image arrays.
+
+        Parameters
+        ----------
+        pixel_scale : float
+            Pixel scale in arcsec/pixel.
+        mag_zero : float
+            Magnitude zeropoint.
+        noise_variance : float
+            Per-pixel noise variance.
+        gal_array : NDArray
+            Galaxy image array.
+        psf_array : NDArray
+            PSF image array.
+        mask_array : NDArray
+            Bad-pixel mask array.
+        noise_array : NDArray or None
+            Noise realisation for noise-bias correction.
+        detection : NDArray or None
+            External detection catalog with ``x1_det``, ``x2_det`` columns
+            (in arcsec). If *None*, peaks are detected internally.
+        psf_object : LsstPsf or None
+            Position-dependent PSF model.
+        base_column_name : str or None
+            Prefix prepended to all output column names.
+        begin_x, begin_y : int
+            Pixel origin offset for sub-images.
+
+        Returns
+        -------
+        np.ndarray
+            Structured array of FPFS shape measurements.
+        """
         assert isinstance(self.config, FpfsMeasurementConfig)
         if detection is not None:
             fpfs_peaks_dtype = np.dtype([

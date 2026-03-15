@@ -152,10 +152,23 @@ def jacobian_decomposition(jac, pixel_scale):
 
 
 def make_jwcs(pixel_scale, g1, g2, rho):
-    """Build a JacobianWCS with shear (g1, g2) and rotation (rho).
+    """Build a GalSim JacobianWCS with shear and rotation.
 
-    Uses jacobian_reconstruction to build the matrix, then wraps it
-    in a GalSim JacobianWCS.
+    Constructs a 2x2 Jacobian via :func:`jacobian_reconstruction`
+    and wraps it in a ``galsim.JacobianWCS``.
+
+    Parameters
+    ----------
+    pixel_scale : float
+        Pixel scale in arcsec/pixel.
+    g1, g2 : float
+        Reduced shear components in lensing convention.
+    rho : float
+        Rotation angle in radians.
+
+    Returns
+    -------
+    galsim.JacobianWCS
     """
     jac = jacobian_reconstruction(pixel_scale, g1, g2, rho)
     return galsim.JacobianWCS(
@@ -167,12 +180,20 @@ def make_jwcs(pixel_scale, g1, g2, rho):
 def extract_perturbation_jwcs(wcs, pixel_scale):
     """Extract (g1, g2, rho, kappa) from a GalSim JacobianWCS.
 
-    GalSim's JacobianWCS stores the Jacobian as
-    [[du/dx, du/dy], [dv/dx, dv/dy]] where (u, v) are tangent-plane
-    coordinates with u=West, v=North, in arcsec/pixel.
-    This is passed directly to jacobian_decomposition with no sign changes.
+    Reads the 2x2 matrix from a ``galsim.JacobianWCS`` and decomposes
+    it via :func:`jacobian_decomposition`.
 
-    The returned perturbations follow GalSim's (u=West, v=North) convention.
+    Parameters
+    ----------
+    wcs : galsim.JacobianWCS
+        GalSim Jacobian WCS (u=West, v=North, arcsec/pixel).
+    pixel_scale : float
+        Reference pixel scale in arcsec/pixel.
+
+    Returns
+    -------
+    g1, g2, rho, kappa : float
+        Shear, rotation, and convergence perturbations.
     """
     return jacobian_decomposition(wcs.getMatrix(), pixel_scale)
 
@@ -421,3 +442,98 @@ def make_tanwcs_dm(pixel_scale, g1, g2, rho, ra_deg, dec_deg,
         pixel_scale, g1, g2, rho, ra_deg, dec_deg, x_pix, y_pix,
     )
     return tanwcs_galsim2dm(wcs_gs)
+
+
+def correct_fpfs_spin2_wcs(data, g1, g2, rho, prefix=""):
+    """Correct FPFS linear shapelet moments for WCS shear and rotation.
+
+    Transforms the spin-2 shapelet moments measured in pixel coordinates
+    to sky coordinates by undoing the WCS-induced shear and rotation.
+
+    The correction is applied in two steps:
+    1. Undo shear: subtract the first-order shear response from each
+       moment using the relations from the shapelet shear algebra
+       (see notes/shapelets.tex).
+    2. Undo rotation: rotate spin-s moments by -s*rho.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Structured array of FPFS shapelet moments with fields
+        m00, m20, m22c, m22s, m40, m42c, m42s, m44c, m44s,
+        m60, m64c, m64s (dtype ``FpfsShapelets``), optionally with
+        a common prefix (e.g. ``"fpfs1_"``).
+    g1, g2 : float
+        WCS shear components in lensing convention.
+    rho : float
+        WCS rotation angle in radians.
+    prefix : str, optional
+        Column name prefix (e.g. ``"fpfs1_"``). Default is ``""``.
+
+    Returns
+    -------
+    np.ndarray
+        Corrected shapelet moments (same dtype as input).
+    """
+    out = data.copy()
+    p = prefix
+
+    # --- Step 1: undo shear ---
+    # From shapelets.tex: M_corrected = M_observed - g1*R1 - g2*R2
+    # where R1, R2 are the shear correction coefficients matching the
+    # measure_shapelets_dg responses in AnaCal's catalog.h.
+    sqrt2 = np.sqrt(2.0)
+    sqrt3 = np.sqrt(3.0)
+    sqrt5 = np.sqrt(5.0)
+    sqrt6 = np.sqrt(6.0)
+
+    m00 = data[f"{p}m00"]
+    m20 = data[f"{p}m20"]
+    m22c = data[f"{p}m22c"]
+    m22s = data[f"{p}m22s"]
+    m40 = data[f"{p}m40"]
+    m42c = data[f"{p}m42c"]
+    m42s = data[f"{p}m42s"]
+    m44c = data[f"{p}m44c"]
+    m44s = data[f"{p}m44s"]
+    m60 = data[f"{p}m60"]
+    m64c = data[f"{p}m64c"]
+    m64s = data[f"{p}m64s"]
+
+    # Shear correction coefficients (same as measure_shapelets_dg in C++)
+
+    dm22c_dg1 = (1.0 / sqrt2) * (m00 - m40) - sqrt3 * m44c
+    dm22c_dg2 = -sqrt3 * m44s
+    dm22s_dg1 = -sqrt3 * m44s
+    dm22s_dg2 = (1.0 / sqrt2) * (m00 - m40) + sqrt3 * m44c
+
+    dm42c_dg1 = (sqrt6 / 2.0) * (m20 - m60) - sqrt5 * m64c
+    dm42c_dg2 = -sqrt5 * m64s
+    dm42s_dg1 = -sqrt5 * m64s
+    dm42s_dg2 = (sqrt6 / 2.0) * (m20 - m60) + sqrt5 * m64c
+
+    # Apply correction: M_corrected = M_observed - g1*dm_dg1 - g2*dm_dg2
+    out[f"{p}m22c"] = m22c - g1 * dm22c_dg1 - g2 * dm22c_dg2
+    out[f"{p}m22s"] = m22s - g1 * dm22s_dg1 - g2 * dm22s_dg2
+    out[f"{p}m42c"] = m42c - g1 * dm42c_dg1 - g2 * dm42c_dg2
+    out[f"{p}m42s"] = m42s - g1 * dm42s_dg1 - g2 * dm42s_dg2
+
+    # --- Step 2: undo rotation ---
+    # Spin-s moments rotate by exp(-i*s*rho):
+    #   m'_c =  m_c * cos(s*rho) + m_s * sin(s*rho)
+    #   m'_s = -m_c * sin(s*rho) + m_s * cos(s*rho)
+
+    # Spin-2: m22, m42
+    cos2 = np.cos(2.0 * rho)
+    sin2 = np.sin(2.0 * rho)
+
+    m22c_s = out[f"{p}m22c"].copy()
+    m22s_s = out[f"{p}m22s"].copy()
+    out[f"{p}m22c"] = m22c_s * cos2 + m22s_s * sin2
+    out[f"{p}m22s"] = -m22c_s * sin2 + m22s_s * cos2
+
+    m42c_s = out[f"{p}m42c"].copy()
+    m42s_s = out[f"{p}m42s"].copy()
+    out[f"{p}m42c"] = m42c_s * cos2 + m42s_s * sin2
+    out[f"{p}m42s"] = -m42c_s * sin2 + m42s_s * cos2
+    return out
