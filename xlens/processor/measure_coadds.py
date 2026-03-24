@@ -296,20 +296,43 @@ class MeasureCoaddsPipe(PipelineTask):
         tract: int,
         patch: int,
         mask: MaskX | None = None,
+        detection: NDArray | None = None,
         **kwargs,
     ):
+        """Run detection (or use external catalog) then forced measurement.
+
+        Parameters
+        ----------
+        exposure_handles_dict : dict
+            Mapping of band name to deferred exposure handle.
+        corr_array : np.ndarray or None
+            Stacked noise correlation array.
+        skyMap : BaseSkyMap
+            Sky map used for processing.
+        tract, patch : int
+            Tract and patch identifiers.
+        mask : MaskX or None
+            Combined bad-pixel / bright-star mask.
+        detection : NDArray or None
+            External detection catalog.  When provided the internal
+            detection step is skipped and this catalog is used directly
+            for forced measurement.
+        """
         if mask is not None:
             mask_array = mask.getArray()
         else:
             mask_array = None
-        det_cat = self._detect(
-            exposure_handles_dict=exposure_handles_dict,
-            corr_array=corr_array,
-            skyMap=skyMap,
-            tract=tract,
-            patch=patch,
-            mask_array=mask_array,
-        )
+        if detection is not None:
+            det_cat = detection
+        else:
+            det_cat = self._detect(
+                exposure_handles_dict=exposure_handles_dict,
+                corr_array=corr_array,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                mask_array=mask_array,
+            )
         force_cat = self._force(
             detection=det_cat,
             exposure_handles_dict=exposure_handles_dict,

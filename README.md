@@ -49,7 +49,8 @@ export CATSIM_DIR=$(realpath catsim-v4)
 Example notebooks are in the [`examples/`](examples/) directory:
 
 **Shear measurement**
-- [Isolated galaxy simulation (forced positions)](examples/shear/example1_isolated_sim_force.ipynb)
+- [Isolated galaxy simulation (forced positions)](examples/shear/example1_1_isolated_sim_force.ipynb)
+- [Multiband simulation with linear-to-e shear estimation](examples/shear/example1_2_isolated_sim_force_multiband_linear.ipynb)
 - [Isolated galaxy simulation](examples/shear/example2_isolated_sim.ipynb)
 - [Blended simulation with matching](examples/shear/example3_blended_sim_measure_match.ipynb)
 - [Lognormal field shear test](examples/shear/example4_lognormal.ipynb)

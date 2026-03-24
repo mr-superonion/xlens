@@ -6,7 +6,8 @@ Shear Measurement
 
 .. toctree::
 
-    Isolated galaxy simulation (forced positions) <notebooks/example1_isolated_sim_force>
+    Isolated galaxy simulation (forced positions) <notebooks/example1_1_isolated_sim_force>
+    Multiband simulation with linear-to-e shear estimation <notebooks/example1_2_isolated_sim_force_multiband_linear>
     Isolated galaxy simulation <notebooks/example2_isolated_sim>
     Blended simulation with matching <notebooks/example3_blended_sim_measure_match>
     Lognormal field shear test <notebooks/example4_lognormal>
