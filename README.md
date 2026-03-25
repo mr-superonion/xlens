@@ -37,7 +37,7 @@ conda install -c conda-forge xlens
 ```
 
 ### Input Galaxy Catalog
-Download and set up the CatSim 2017 galaxy catalog:
+Download and set up the DESC DC1 (2017) galaxy catalog:
 ```shell
 wget https://github.com/mr-superonion/xlens/releases/download/v0.3.0/catsim-v4.tar.gz
 tar xvfz catsim-v4.tar.gz
