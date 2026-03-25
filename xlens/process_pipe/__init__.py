@@ -7,12 +7,10 @@ from . import (
     fpfs_joint,
     hsc,
     match,
-    systematics_multiband,
 )
 
 __all__ = [
     "detect_multiband",
-    "systematics_multiband",
     "fpfs_joint",
     "fpfs_force",
     "hsc",
