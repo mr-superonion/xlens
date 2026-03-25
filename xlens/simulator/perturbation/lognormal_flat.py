@@ -48,7 +48,8 @@ class ShearLogNormalFlat:
         # Create a narrow redshift distribution for the WeakLensingTracer
         z_arr = np.linspace(0, 2 * self.z_source, 100)
         dndz_arr = np.exp(-(z_arr - self.z_source)**2 / (2 * 0.01**2))
-        dndz_arr /= np.trapz(dndz_arr, z_arr)
+        _trapz = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+        dndz_arr /= _trapz(dndz_arr, z_arr)
 
         tracer = ccl.WeakLensingTracer(self.cosmo, dndz=(z_arr, dndz_arr))
 

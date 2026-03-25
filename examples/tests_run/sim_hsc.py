@@ -13,7 +13,7 @@ from xlens.process_pipe.anacal_detect import (
     AnacalDetectPipe,
     AnacalDetectPipeConfig,
 )
-from xlens.process_pipe.match import (
+from xlens.processor.match import (
     matchPipe,
     matchPipeConfig,
 )
