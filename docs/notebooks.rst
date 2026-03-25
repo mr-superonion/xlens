@@ -9,8 +9,9 @@ Shear Measurement
     Isolated galaxy simulation (forced positions) <notebooks/example1_1_isolated_sim_force>
     Multiband simulation with linear-to-e shear estimation <notebooks/example1_2_isolated_sim_force_multiband_linear>
     Isolated galaxy simulation <notebooks/example2_isolated_sim>
-    Blended simulation with matching <notebooks/example3_blended_sim_measure_match>
-    Lognormal field shear test <notebooks/example4_lognormal>
+    FPFS measurement on blended galaxies (noiseless) <notebooks/example3_fpfs_blended_anacal_noiseless>
+    Blended simulation with matching <notebooks/example4_blended_sim_measure_match>
+    Lognormal field shear test <notebooks/example5_lognormal>
 
 Cluster Lensing
 ---------------
