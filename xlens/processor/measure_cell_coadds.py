@@ -47,6 +47,7 @@ from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
+from ..utils.image import resize_array, truncate_square
 
 band_order = "ugrizy"
 
@@ -111,7 +112,7 @@ class MeasureCellCoaddsPipeConfig(
         super().validate()
         if self.fpfs.sigma_shapelets1 < 0.0:
             raise FieldValidationError(
-                self.fpfs.fields["sigma_shapelets1"],
+                self.fpfs.__class__.sigma_shapelets1,
                 self,
                 "sigma_shapelets1 in a wrong range",
             )
@@ -189,6 +190,23 @@ class MeasureCellCoaddsPipe(PipelineTask):
         )
         return noise_corr
 
+    def _compute_cell_psf(self, exposure) -> np.ndarray:
+        """Compute PSF at the center of a stitched cell exposure."""
+        assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
+        npix = self.config.anacal.npix
+        bbox = exposure.getBBox()
+        xc = (bbox.getMinX() + bbox.getMaxX()) / 2.0
+        yc = (bbox.getMinY() + bbox.getMaxY()) / 2.0
+        from lsst.geom import Point2D
+        psf_img = exposure.getPsf().computeImage(Point2D(xc, yc)).getArray()
+        psf_array = np.asarray(
+            resize_array(psf_img, (npix, npix)), dtype=np.float64,
+        )
+        psf_array /= np.sum(psf_array)
+        psf_rcut = npix // 2 - 2
+        truncate_square(psf_array, psf_rcut)
+        return psf_array
+
     def _detect_cell(
         self,
         *,
@@ -203,6 +221,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         exposure.getPsf().setCacheCapacity(self.config.psfCache)
         noise_corr = self._load_noise_corr(corr_array, band)
+        psf_array = self._compute_cell_psf(exposure)
         data = self.anacal.prepare_data(
             exposure=exposure,
             band=band,
@@ -212,6 +231,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            psf_array=psf_array,
         )
         return self.anacal.run(**data)
 
@@ -232,6 +252,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
             exposure.getPsf().setCacheCapacity(self.config.psfCache)
 
             noise_corr = self._load_noise_corr(corr_array, band)
+            psf_array = self._compute_cell_psf(exposure)
             data = self.anacal.prepare_data(
                 exposure=exposure,
                 seed=seed,
@@ -241,6 +262,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
                 skyMap=skyMap,
                 tract=tract,
                 patch=patch,
+                psf_array=psf_array,
             )
 
             colnames = [
