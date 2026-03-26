@@ -46,6 +46,7 @@ from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
 from ..simulator.sim import MultibandSimTask
+from ..utils.catalog import set_isPrimary
 from .anacal import AnacalTask
 from .fpfs import FpfsMeasurementTask
 
@@ -423,4 +424,12 @@ class MeasureSimsTask(PipelineTask):
             )
             del exposure
         force_cat = rfn.merge_arrays(force_outputs, flatten=True)
-        return Struct(output_catalog=force_cat)
+        final = rfn.merge_arrays([det_cat, force_cat], flatten=True)
+        if skyMap is not None:
+            tractInfo = skyMap[tract]
+            patchInfo = tractInfo[patch]
+            pixel_scale = float(
+                tractInfo.getWcs().getPixelScale().asArcseconds()
+            )
+            set_isPrimary(final, skyMap, tractInfo, patchInfo, pixel_scale)
+        return Struct(output_catalog=final)

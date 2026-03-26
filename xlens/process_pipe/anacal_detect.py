@@ -49,6 +49,7 @@ from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
+from ..utils.catalog import set_isPrimary
 
 
 class AnacalDetectPipeConnections(
@@ -230,4 +231,11 @@ class AnacalDetectPipe(PipelineTask):
             mask_array=mask_array,
         )
         catalog = self.run_measure(data)
+        if skyMap is not None:
+            tractInfo = skyMap[tract]
+            patchInfo = tractInfo[patch]
+            pixel_scale = float(
+                tractInfo.getWcs().getPixelScale().asArcseconds()
+            )
+            set_isPrimary(catalog, skyMap, tractInfo, patchInfo, pixel_scale)
         return Struct(output_catalog=catalog)

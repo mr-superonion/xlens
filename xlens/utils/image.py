@@ -664,6 +664,10 @@ def prepare_data(
                 noiseId=noiseId,
                 rotId=rotId,
             )
+        else:
+            # Rotate noise image by 90 degrees CCW to remove anisotropy from
+            # noise
+            noise_array = np.rot90(noise_array, k=1)
         # apply pixel mask to pure noise image
         anacal.mask.mask_galaxy_image(
             noise_array,
@@ -671,6 +675,7 @@ def prepare_data(
             False,  # extend mask
             star_cat,
         )
+
     else:
         noise_array = None
 

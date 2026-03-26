@@ -46,6 +46,7 @@ from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
+from ..utils.catalog import set_isPrimary
 
 band_order = "ugrizy"
 
@@ -343,4 +344,11 @@ class MeasureCoaddsPipe(PipelineTask):
             mask_array=mask_array,
         )
         final = rfn.merge_arrays([det_cat, force_cat], flatten=True)
+        if skyMap is not None:
+            tractInfo = skyMap[tract]
+            patchInfo = tractInfo[patch]
+            pixel_scale = float(
+                tractInfo.getWcs().getPixelScale().asArcseconds()
+            )
+            set_isPrimary(final, skyMap, tractInfo, patchInfo, pixel_scale)
         return Struct(output_catalog=final)

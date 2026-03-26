@@ -212,19 +212,6 @@ class AnacalTask(Task):
             )
             catalog["ra"] = ra
             catalog["dec"] = dec
-        condition = (
-            (skyMap is not None)
-            and (tractInfo is not None)
-            and (patchInfo is not None)
-        )
-        if condition:
-            utils.catalog.set_isPrimary(
-                catalog,
-                skyMap,
-                tractInfo,
-                patchInfo,
-                pixel_scale,
-            )
         return catalog
 
     def prepare_cell_data(self, cell_coadd):
