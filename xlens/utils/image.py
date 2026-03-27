@@ -937,4 +937,6 @@ def prepare_data_cell(
         "detection": detection,
         "blocks": blocks,
         "psf_object": None,
+        "lsst_psf": None,
+        "base_column_name": (band + "_") if band is not None else None,
     }
