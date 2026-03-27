@@ -29,10 +29,8 @@ import logging
 from typing import Any
 
 import anacal
-import lsst.afw.image as afwImage
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.cell_coadds import MultipleCellCoadd
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import ConfigurableField, Field, FieldValidationError
 from lsst.pipe.base import (
@@ -49,7 +47,7 @@ from numpy.typing import NDArray
 from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
 from ..utils.catalog import set_isPrimary
-from ..utils.image import resize_array, truncate_square
+from ..utils.image import prepare_data_cell
 
 
 class MeasureCellCoaddsPipeConnections(
@@ -70,6 +68,14 @@ class MeasureCellCoaddsPipeConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
         deferLoad=True,
+    )
+    mask = cT.Input(
+        doc="Combined mask from cell-based systematics.",
+        name="deep_coadd_cell_systematics_mask",
+        storageClass="Mask",
+        dimensions=("skymap", "tract", "patch"),
+        minimum=0,
+        multiple=False,
     )
     output_catalog = cT.Output(
         doc="anacal catalog",
@@ -128,8 +134,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
 
     The noise realization stored in each cell coadd is passed directly
     to anacal for noise bias correction. The noise image is rotated by
-    90 degrees inside ``prepare_data`` to decorrelate noise from shear,
-    matching the LSST metadetection convention.
+    90 degrees inside ``prepare_data`` to remove anisotropy.
     """
 
     _DefaultName = "MeasureCellCoaddsPipe"
@@ -167,50 +172,23 @@ class MeasureCellCoaddsPipe(PipelineTask):
             skyMap=inputs["skyMap"],
             tract=tract,
             patch=patch,
+            mask=inputs.get("mask", None),
         )
         butlerQC.put(outputs, outputRefs)
 
-    def _compute_cell_psf(self, psf_image_array: NDArray) -> np.ndarray:
-        """Compute PSF array from a SingleCellCoadd's psf_image."""
-        assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
-        npix = self.config.anacal.npix
-        psf_array = np.asarray(
-            resize_array(psf_image_array, (npix, npix)), dtype=np.float64,
-        )
-        psf_array /= np.sum(psf_array)
-        psf_rcut = npix // 2 - 2
-        truncate_square(psf_array, psf_rcut)
-        return psf_array
-
     @staticmethod
-    def _build_cell_exposure(cell, photoCalib) -> afwImage.ExposureF:
-        """Build an ExposureF from a SingleCellCoadd's outer region."""
-        mi = cell.outer.asMaskedImage()
-        exp = afwImage.ExposureF(mi)
-        exp.setWcs(cell.wcs)
-        exp.setPhotoCalib(photoCalib)
-        return exp
-
-    @staticmethod
-    def _get_cell_noise(cell) -> NDArray | None:
-        """Extract the noise array from a SingleCellCoadd's outer region."""
-        noise_reals = cell.outer.noise_realizations
-        if len(noise_reals) > 0:
-            return np.asarray(noise_reals[0].array, dtype=np.float64)
-        return None
-
-    @staticmethod
-    def _build_single_block(exposure, psf_array, pixel_scale):
-        """Build a single anacal block covering the full 250x250 cell.
+    def _build_cell_block(cell, psf_array):
+        """Build a single anacal block covering the full cell outer region.
 
         The block inner region is set with pad=50, matching the cell's
         inner/outer structure (250x250 outer, 150x150 inner, 50px on
         each side). Anacal only keeps detections whose centers fall
         within the block inner region [50, 200) x [50, 200).
         """
-        bbox = exposure.getBBox()
+        bbox = cell.outer.bbox
         width = bbox.getWidth()
         height = bbox.getHeight()
+        pixel_scale = float(cell.wcs.getPixelScale().asArcseconds())
         pad = 50
         bb = anacal.geometry.block(
             int(width // 2),   # xcen
@@ -226,90 +204,115 @@ class MeasureCellCoaddsPipe(PipelineTask):
         bb.psf_array = psf_array.copy()
         return [bb]
 
-    def _detect_cell(
+    @staticmethod
+    def _extract_cell_mask(mask_array, mask_origin, cell_bbox):
+        """Extract the mask for a cell's outer bbox from the stitched mask.
+
+        Parameters
+        ----------
+        mask_array : NDArray
+            Full stitched mask array.
+        mask_origin : tuple of int
+            (x0, y0) origin of the stitched mask in pixel coordinates.
+        cell_bbox : lsst.geom.Box2I
+            Outer bounding box of the cell.
+
+        Returns
+        -------
+        NDArray
+            Mask slice for the cell's outer region.
+        """
+        x0, y0 = mask_origin
+        sx = cell_bbox.getMinX() - x0
+        sy = cell_bbox.getMinY() - y0
+        return mask_array[
+            sy: sy + cell_bbox.getHeight(),
+            sx: sx + cell_bbox.getWidth(),
+        ].copy()
+
+    def _prepare_cell(
         self,
+        cell,
         *,
-        exposure,
-        psf_array: NDArray,
-        noise_array: NDArray | None,
+        band: str,
+        seed: int,
+        mag_zero: float,
         skyMap,
         tract: int,
         patch: int,
-        seed: int,
-        band: str = "i",
-    ) -> np.ndarray:
+        detection: NDArray | None = None,
+        mask_array: NDArray | None = None,
+    ) -> dict:
+        """Build the data dict for a single cell via prepare_data_cell."""
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
-        pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
-        blocks = self._build_single_block(exposure, psf_array, pixel_scale)
-        data = self.anacal.prepare_data(
-            exposure=exposure,
+        npix = self.config.anacal.npix
+        blocks = self._build_cell_block(cell, np.zeros((npix, npix)))
+        noise_correction = self.config.anacal.do_noise_bias_correction
+        data = prepare_data_cell(
+            cell=cell,
             band=band,
             seed=seed,
-            detection=None,
+            mag_zero=mag_zero,
+            npix=npix,
+            do_noise_bias_correction=noise_correction,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
-            psf_array=psf_array,
-            noise_array=noise_array,
+            detection=detection,
             blocks=blocks,
+            mask_array=mask_array,
         )
+        # Update block PSF with the actual computed PSF
+        data["blocks"][0].psf_array = data["psf_array"].copy()
+        return data
+
+    def _detect_cell(self, data: dict) -> np.ndarray:
+        """Run detection on a prepared cell data dict."""
         return self.anacal.run(**data)
 
-    def _force_cell(
+    def _measure_one_band(
         self,
         *,
+        cell,
+        band: str,
         detection: NDArray,
-        exposures_dict: dict[str, Any],
-        psf_arrays_dict: dict[str, NDArray],
-        noise_arrays_dict: dict[str, NDArray | None],
+        seed: int,
+        mag_zero: float,
         skyMap,
         tract: int,
         patch: int,
-        seed: int,
+        mask_array: NDArray | None = None,
     ) -> np.ndarray:
+        """Run forced measurement on one band for a single cell."""
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
-        per_band = []
-        for band, exposure in exposures_dict.items():
-            psf_array = psf_arrays_dict[band]
-            noise_array = noise_arrays_dict.get(band, None)
-            pixel_scale = float(
-                exposure.getWcs().getPixelScale().asArcseconds()
-            )
-            blocks = self._build_single_block(
-                exposure, psf_array, pixel_scale,
-            )
-            data = self.anacal.prepare_data(
-                exposure=exposure,
-                seed=seed,
-                detection=detection,
-                band=band,
-                skyMap=skyMap,
-                tract=tract,
-                patch=patch,
-                psf_array=psf_array,
-                noise_array=noise_array,
-                blocks=blocks,
-            )
+        data = self._prepare_cell(
+            cell,
+            band=band,
+            seed=seed,
+            mag_zero=mag_zero,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
+            detection=detection,
+            mask_array=mask_array,
+        )
 
-            colnames = [
-                "flux_gauss0", "dflux_gauss0_dg1", "dflux_gauss0_dg2",
-                "flux_gauss2", "dflux_gauss2_dg1", "dflux_gauss2_dg2",
-                "flux_gauss4", "dflux_gauss4_dg1", "dflux_gauss4_dg2",
-                "flux_gauss0_err", "flux_gauss2_err", "flux_gauss4_err",
-            ]
-            out = []
-            out.append(
-                rfn.repack_fields(
-                    self.anacal.run(**data)[colnames]
-                )
+        colnames = [
+            "flux_gauss0", "dflux_gauss0_dg1", "dflux_gauss0_dg2",
+            "flux_gauss2", "dflux_gauss2_dg1", "dflux_gauss2_dg2",
+            "flux_gauss4", "dflux_gauss4_dg1", "dflux_gauss4_dg2",
+            "flux_gauss0_err", "flux_gauss2_err", "flux_gauss4_err",
+        ]
+        out = []
+        out.append(
+            rfn.repack_fields(
+                self.anacal.run(**data)[colnames]
             )
-            out.append(self.fpfs.run(**data))
-            res = rfn.merge_arrays(out, flatten=True)
-            map_dict = {name: f"{band}_{name}" for name in colnames}
-            res = rfn.rename_fields(res, map_dict)
-            per_band.append(res)
-
-        return rfn.merge_arrays(per_band, flatten=True)
+        )
+        out.append(self.fpfs.run(**data))
+        res = rfn.merge_arrays(out, flatten=True)
+        map_dict = {name: f"{band}_{name}" for name in colnames}
+        return rfn.rename_fields(res, map_dict)
 
     def run(
         self,
@@ -318,16 +321,15 @@ class MeasureCellCoaddsPipe(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
-        detection: NDArray | None = None,
+        mask=None,
         **kwargs,
     ):
         """Run detection and forced measurement on cell-based coadds.
 
-        Iterates over individual SingleCellCoadd objects. For each cell,
-        measurement is performed on the full 250x250 outer region so
-        objects near inner-region boundaries have complete pixel data.
-        The anacal block inner region (pad=50) retains only objects in
-        the 150x150 inner region, ensuring no double-counting.
+        Detection is performed using i-band only. Forced measurement
+        processes one band at a time to minimize memory usage: each
+        band's MultipleCellCoadd is loaded, measured across all cells,
+        then released before loading the next band.
 
         Parameters
         ----------
@@ -337,93 +339,131 @@ class MeasureCellCoaddsPipe(PipelineTask):
             Sky map used for processing.
         tract, patch : int
             Tract and patch identifiers.
-        detection : NDArray or None
-            External detection catalog. When provided the internal
-            detection step is skipped and this catalog is used directly
-            for forced measurement.
+        mask : MaskX or None
+            Combined stitched mask from BuildCellSystematicsTask.
+            If provided, per-cell masks are extracted by slicing.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
 
-        # Load all MultipleCellCoadd objects (deferred)
-        coadds_by_band: dict[str, MultipleCellCoadd] = {
-            band: handle.get()
-            for band, handle in coadd_handles_dict.items()
-        }
-
-        # Use i-band to define cells
         det_band = "i"
-        if det_band not in coadds_by_band:
+        if det_band not in coadd_handles_dict:
             raise KeyError(
-                f"band '{det_band}' not in {coadds_by_band.keys()}"
+                f"band '{det_band}' not in {coadd_handles_dict.keys()}"
             )
-        det_coadd = coadds_by_band[det_band]
 
         idGenerator = self.config.idGenerator.apply(
             coadd_handles_dict[det_band].dataId
         )
         seed = idGenerator.catalog_id
 
-        # Get photoCalib from the stitched coadd (spatially constant)
+        # Prepare stitched mask for per-cell extraction
+        if mask is not None:
+            stitched_mask_array = mask.getArray()
+            mask_origin = (mask.getX0(), mask.getY0())
+        else:
+            stitched_mask_array = None
+            mask_origin = None
+
+        # --- Phase 1: Detection (i-band only) ---
+        det_coadd = coadd_handles_dict[det_band].get()
         photoCalib = det_coadd.stitch().asExposure().getPhotoCalib()
+        mag_zero = float(
+            np.log10(photoCalib.getInstFluxAtZeroMagnitude()) / 0.4
+        )
+        # Copy cell references before releasing the coadd
+        det_cells = dict(det_coadd.cells)
 
-        cell_results = []
-        for cell_id, det_cell in det_coadd.cells.items():
-            ix, iy = int(cell_id.x), int(cell_id.y)
-            self.log.debug("Processing cell (%d, %d)", ix, iy)
-
-            # Build outer exposures, PSF arrays, and noise per band
-            cell_exposures: dict[str, Any] = {}
-            cell_psf_arrays: dict[str, NDArray] = {}
-            cell_noise_arrays: dict[str, NDArray | None] = {}
-            for band, band_coadd in coadds_by_band.items():
-                cell = band_coadd.cells[cell_id]
-                cell_exposures[band] = self._build_cell_exposure(
-                    cell, photoCalib,
+        # Per-cell detection catalogs keyed by cell_id
+        det_cats: dict = {}
+        for cell_id, det_cell in det_cells.items():
+            # Extract per-cell mask from stitched mask
+            cell_mask = None
+            if stitched_mask_array is not None:
+                cell_mask = self._extract_cell_mask(
+                    stitched_mask_array, mask_origin,
+                    det_cell.outer.bbox,
                 )
-                cell_psf_arrays[band] = self._compute_cell_psf(
-                    cell.psf_image.array,
-                )
-                cell_noise_arrays[band] = self._get_cell_noise(cell)
-
             try:
-                # Detection on i-band outer region
-                if detection is not None:
-                    det_cat = detection
-                else:
-                    det_cat = self._detect_cell(
-                        exposure=cell_exposures[det_band],
-                        psf_array=cell_psf_arrays[det_band],
-                        noise_array=cell_noise_arrays.get(det_band, None),
-                        skyMap=skyMap,
-                        tract=tract,
-                        patch=patch,
-                        seed=seed,
-                        band=det_band,
-                    )
-
-                if len(det_cat) == 0:
-                    continue
-
-                # Forced measurement on all bands (outer region)
-                force_cat = self._force_cell(
-                    detection=det_cat,
-                    exposures_dict=cell_exposures,
-                    psf_arrays_dict=cell_psf_arrays,
-                    noise_arrays_dict=cell_noise_arrays,
+                det_data = self._prepare_cell(
+                    det_cell,
+                    band=det_band,
+                    seed=seed,
+                    mag_zero=mag_zero,
                     skyMap=skyMap,
                     tract=tract,
                     patch=patch,
-                    seed=seed,
+                    mask_array=cell_mask,
                 )
-                final = rfn.merge_arrays(
-                    [det_cat, force_cat], flatten=True,
-                )
-                cell_results.append(final)
+                det_cat = self._detect_cell(det_data)
+                del det_data
+                if len(det_cat) > 0:
+                    det_cats[cell_id] = det_cat
             except Exception as e:
+                ix, iy = int(cell_id.x), int(cell_id.y)
                 self.log.error(
-                    "Failed to process cell (%d, %d): %s", ix, iy, e,
+                    "Detection failed tract=%d patch=%d cell=(%d, %d): %s",
+                    tract, patch, ix, iy, e,
                 )
+        del det_coadd, det_cells
+        if not det_cats:
+            raise RuntimeError("No objects found in any cell")
+
+        # Cell IDs with detections
+        active_cell_ids = list(det_cats.keys())
+
+        # --- Phase 2: Forced measurement (one band at a time) ---
+        cell_force_parts: dict[Any, list] = {
+            cid: [] for cid in active_cell_ids
+        }
+
+        bands = list(coadd_handles_dict.keys())
+        for band in bands:
+            self.log.debug("Measuring band %s", band)
+            band_coadd = coadd_handles_dict[band].get()
+
+            for cell_id in active_cell_ids:
+                cell = band_coadd.cells[cell_id]
+                # Extract per-cell mask
+                cell_mask = None
+                if stitched_mask_array is not None:
+                    cell_mask = self._extract_cell_mask(
+                        stitched_mask_array, mask_origin,
+                        cell.outer.bbox,
+                    )
+                try:
+                    res = self._measure_one_band(
+                        cell=cell,
+                        band=band,
+                        detection=det_cats[cell_id],
+                        seed=seed,
+                        mag_zero=mag_zero,
+                        skyMap=skyMap,
+                        tract=tract,
+                        patch=patch,
+                        mask_array=cell_mask,
+                    )
+                    cell_force_parts[cell_id].append(res)
+                except Exception as e:
+                    ix, iy = int(cell_id.x), int(cell_id.y)
+                    self.log.error(
+                        "Measurement failed tract=%d patch=%d "
+                        "cell=(%d, %d) band=%s: %s",
+                        tract, patch, ix, iy, band, e,
+                    )
+
+            del band_coadd
+
+        # --- Phase 3: Merge results ---
+        cell_results = []
+        for cell_id in active_cell_ids:
+            parts = cell_force_parts[cell_id]
+            if len(parts) != len(bands):
                 continue
+            force_cat = rfn.merge_arrays(parts, flatten=True)
+            final = rfn.merge_arrays(
+                [det_cats[cell_id], force_cat], flatten=True,
+            )
+            cell_results.append(final)
 
         if not cell_results:
             raise RuntimeError("No objects found in any cell")

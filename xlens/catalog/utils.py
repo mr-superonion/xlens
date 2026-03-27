@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 
+
 def _linear_modes_to_derivs(xx: dict[str, NDArray]) -> dict[str, NDArray]:
     d: dict[str, NDArray] = {}
     d["dm00_dg1"] = -np.sqrt(2.0) * xx["m22c"]

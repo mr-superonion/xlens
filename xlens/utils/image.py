@@ -497,31 +497,242 @@ def generate_pure_noise(
     return noise_array
 
 
-def estimate_noise_variance(exposure, mask_array=None):
-    if mask_array is None:
-        mm = (
-            (exposure.variance.array < 1e5) &
-            (exposure.mask.array == 0)
+def estimate_noise_variance(
+    variance_array: NDArray,
+    mask_raw: NDArray,
+    mask_array: NDArray | None = None,
+) -> float:
+    """Estimate noise variance from the variance plane.
+
+    Parameters
+    ----------
+    variance_array : NDArray
+        Variance plane of the image.
+    mask_raw : NDArray
+        Raw mask plane (e.g., from exposure.mask.array).
+    mask_array : NDArray or None
+        Processed mask (bad pixels, bright stars, etc.).
+        If None, only mask_raw is used for pixel selection.
+
+    Returns
+    -------
+    float
+        Median noise variance over valid pixels.
+    """
+    mm = (variance_array < 1e5) & (mask_raw == 0)
+    if mask_array is not None:
+        mm &= (mask_array == 0)
+    if np.sum(mm) < 10:
+        raise ValueError("Not enough valid pixels for noise estimation")
+    noise_variance = float(np.nanmedian(variance_array[mm]))
+    if noise_variance < 1e-10 or np.isnan(noise_variance):
+        raise ValueError("Estimated noise variance must be positive")
+    return noise_variance
+
+
+def prepare_psf_array(
+    exposure,
+    npix: int,
+) -> NDArray:
+    """Compute average PSF array from an LSST exposure."""
+    psf_array = np.asarray(
+        get_psf_array(
+            lsst_psf=exposure.getPsf(),
+            lsst_bbox=exposure.getBBox(),
+            npix=npix,
+            dg=250,
+            lsst_mask=exposure.mask,
+        ),
+        dtype=np.float64,
+    )
+    return psf_array
+
+
+def prepare_psf_array_cell(
+    cell,
+    npix: int,
+) -> NDArray:
+    """Compute PSF array from a SingleCellCoadd's psf_image."""
+    psf_img = cell.psf_image.array
+    psf_array = np.asarray(
+        resize_array(psf_img, (npix, npix)), dtype=np.float64,
+    )
+    psf_array /= np.sum(psf_array)
+    psf_rcut = npix // 2 - 2
+    truncate_square(psf_array, psf_rcut)
+    return psf_array
+
+
+def prepare_mask(
+    image_array: NDArray,
+    mask_array_raw: NDArray,
+    variance_array: NDArray,
+    bitv: int,
+) -> NDArray:
+    """Build a combined mask from raw mask, variance, and image planes.
+
+    Pixels are flagged if they match ``bitv`` in the raw mask or if
+    the image value is below -6 sigma (based on the variance plane).
+
+    Parameters
+    ----------
+    image_array : NDArray
+        Science image array.
+    mask_array_raw : NDArray
+        Raw mask plane (e.g., from exposure.mask.array).
+    variance_array : NDArray
+        Variance plane.
+    bitv : int
+        Bitmask value for bad planes.
+
+    Returns
+    -------
+    NDArray
+        Combined mask as int16 array.
+    """
+    return (
+        ((mask_array_raw & bitv) != 0)
+        | (
+            image_array
+            < (
+                -6.0
+                * np.sqrt(
+                    np.where(variance_array < 0, 0, variance_array)
+                )
+            )
+        )
+    ).astype(np.int16)
+
+
+def prepare_noise_array(
+    *,
+    noise_array: NDArray | None,
+    do_noise_bias_correction: bool,
+    gal_shape: tuple[int, int],
+    pixel_scale: float,
+    seed: int,
+    band: str | None,
+    noise_variance: float,
+    noise_corr: NDArray | None = None,
+    noiseId: int = 0,
+    rotId: int = 0,
+    mask_array: NDArray | None = None,
+    star_cat: NDArray | None = None,
+) -> NDArray | None:
+    """Prepare the noise array for noise bias correction.
+
+    If ``noise_array`` is provided, it is rotated 90 degrees CCW
+    to decorrelate noise from shear. If ``None``, a pure noise
+    realisation is generated. The result is masked by ``mask_array``.
+
+    Parameters
+    ----------
+    noise_array : NDArray or None
+        Pre-existing noise array (e.g., from cell coadd noise
+        realisations). Rotated 90 degrees if provided.
+    do_noise_bias_correction : bool
+        Whether to include noise bias correction.
+    gal_shape : tuple of int
+        ``(ny, nx)`` shape of the galaxy image.
+    pixel_scale : float
+        Pixel scale in arcseconds.
+    seed : int
+        Random seed for noise generation.
+    band : str or None
+        Photometric band label.
+    noise_variance : float
+        Estimated noise variance.
+    noise_corr : NDArray or None
+        Noise correlation function.
+    noiseId, rotId : int
+        Noise and rotation identifiers.
+    mask_array : NDArray or None
+        Mask to apply to the noise array.
+    star_cat : NDArray or None
+        Star catalogue for masking.
+
+    Returns
+    -------
+    NDArray or None
+        Prepared noise array, or None if correction is disabled.
+    """
+    if not do_noise_bias_correction:
+        return None
+
+    if noise_array is None:
+        ny, nx = gal_shape
+        noise_array = generate_pure_noise(
+            ny=ny,
+            nx=nx,
+            pixel_scale=pixel_scale,
+            seed=seed,
+            band=band,
+            noise_variance=noise_variance,
+            noise_corr=noise_corr,
+            noiseId=noiseId,
+            rotId=rotId,
         )
     else:
-        mm = (
-            (exposure.variance.array < 1e5) &
-            (exposure.mask.array == 0) &
-            (mask_array == 0)
-        )
-    if np.sum(mm) < 10:
-        raise ValueError(
-            "Do not have enough valid pixels"
-        )
-    noise_variance = np.nanmedian(
-        exposure.variance.array[mm],
+        # Rotate noise image by 90 degrees CCW to remove anisotropy
+        noise_array = np.rot90(noise_array, k=1)
+
+    anacal.mask.mask_galaxy_image(
+        noise_array,
+        mask_array,
+        False,
+        star_cat,
     )
-    del mm
-    if (noise_variance < 1e-10) | (np.isnan(noise_variance)):
-        raise ValueError(
-            "the estimated image noise variance should be positive."
-        )
-    return noise_variance
+    return noise_array
+
+
+def prepare_detection(
+    detection: astropy.table.Table | NDArray | None,
+    *,
+    pixel_scale: float,
+    beginx: int,
+    beginy: int,
+    blocks: List | None = None,
+) -> NDArray | None:
+    """Prepare a detection catalog for forced measurement.
+
+    Copies the catalog, selects anacal columns, and assigns block IDs
+    based on detection positions.
+
+    Parameters
+    ----------
+    detection : astropy.table.Table, NDArray, or None
+        Input detection catalog.
+    pixel_scale : float
+        Pixel scale in arcseconds.
+    beginx, beginy : int
+        Image origin in pixel coordinates.
+    blocks : list or None
+        Anacal block list for block ID assignment.
+
+    Returns
+    -------
+    NDArray or None
+        Prepared detection catalog, or None if input is None.
+    """
+    if detection is None:
+        return None
+    if isinstance(detection, astropy.table.Table):
+        detection = detection.copy().as_array()
+    elif isinstance(detection, np.ndarray):
+        detection = detection.copy()
+    detection = rfn.repack_fields(
+        detection[list(anacal.table.column_names())]
+    )
+    if blocks is not None:
+        for bb in blocks:
+            mm = (
+                (detection["x2_det"] / pixel_scale - beginy >= bb.ymin_in)
+                & (detection["x2_det"] / pixel_scale - beginy < bb.ymax_in)
+                & (detection["x1_det"] / pixel_scale - beginx >= bb.xmin_in)
+                & (detection["x1_det"] / pixel_scale - beginx < bb.xmax_in)
+            )
+            detection["block_id"][mm] = bb.index
+    return detection
 
 
 def prepare_data(
@@ -546,138 +757,46 @@ def prepare_data(
     blocks: List | None = None,
     **kwargs,
 ):
-    """Collect metadata and auxiliary arrays for shear measurement tasks.
-
-    The routine orchestrates several helper utilities in this module to build
-    a dictionary consumed by the analysis pipeline.  It extracts PSF postage
-    stamps, prepares the galaxy image data, and computes deterministic random
-    seeds used when adding synthetic noise.
-
-    Parameters
-    ----------
-    band : str
-        Photometric band label used to tag the output dictionary.
-    exposure : lsst.afw.image.ExposureF
-        LSST exposure containing the science image and its associated PSF and
-        mask information.
-    seed : int
-        Base seed that, together with ``noiseId`` and ``rotId``, controls the
-        stochastic components of the processing.
-    noiseId : int, optional
-        Identifier for the noise realisation.  Defaults to ``0``.
-    rotId : int, optional
-        Identifier for the rotation realisation.  Defaults to ``0``.
-    npix : int, optional
-        Target size of the PSF postage stamp in pixels.  Defaults to ``32``.
-    noise_corr : numpy.ndarray, optional
-        Noise correlation function sampled on the same grid as the PSF stamp.
-    do_noise_bias_correction : bool, optional
-        If ``True`` (default) include the per-block noise-bias correction
-        arrays in the output payload.
-    badMaskPlanes : list of str, optional
-        Collection of mask plane names that should be treated as invalid.
-    skyMap : optional
-        Sky-map descriptor propagated to the output dictionary unchanged.
-    tract, patch : int, optional
-        Identifiers for the tract and patch associated with ``exposure``.
-    star_cat : numpy.ndarray, optional
-        Catalogue of reference stars used for PSF modelling.
-    mask_array : numpy.ndarray, optional
-        Pre-computed boolean mask array.  If ``None`` the mask is built from
-        ``exposure`` directly.
-    noise_array : numpy.ndarray, optional
-        Pre-computed pure noise array.  If ``None`` the mask is built from
-        ``exposure`` directly.
-    detection : astropy.table.Table, optional
-        Detection catalogue that provides initial estimates for source
-        properties.
-    **kwargs
-        Additional keyword arguments propagated to downstream consumers.
-
-    Returns
-    -------
-    dict
-        A dictionary containing harmonised image data, PSF information, and
-        metadata ready for the ``anacal`` measurement pipeline.
-    """
-
+    """Collect metadata and auxiliary arrays from an LSST ExposureF."""
     pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
     mag_zero = (
         np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()) / 0.4
     )
     wcs = exposure.getWcs()
-
     lsst_bbox = exposure.getBBox()
+
     if psf_array is None:
-        psf_array = np.asarray(
-            get_psf_array(
-                lsst_psf=exposure.getPsf(),
-                lsst_bbox=lsst_bbox,
-                npix=npix,
-                dg=250,
-                lsst_mask=exposure.mask,
-            ),
-            dtype=np.float64,
-        )
-    gal_array = np.asarray(
-        exposure.image.array,
-        dtype=np.float64,
-    )
+        psf_array = prepare_psf_array(exposure, npix)
+
+    gal_array = np.asarray(exposure.image.array, dtype=np.float64)
 
     if mask_array is None:
         bitv = exposure.mask.getPlaneBitMask(badMaskPlanes)
-        mask_array = (
-            ((exposure.mask.array & bitv) != 0)
-            | (
-                exposure.image.array
-                < (
-                    -6.0
-                    * np.sqrt(
-                        np.where(
-                            exposure.variance.array < 0,
-                            0, exposure.variance.array,
-                        )
-                    )
-                )
-            )
-        ).astype(np.int16)
-    # Set the value inside star mask to zero
-    anacal.mask.mask_galaxy_image(
-        gal_array,
-        mask_array,
-        False,  # extend mask
-        star_cat,
-    )
-
-    noise_variance = estimate_noise_variance(exposure, mask_array)
-    if do_noise_bias_correction:
-        if noise_array is None:
-            ny, nx = gal_array.shape
-            noise_array = generate_pure_noise(
-                ny=ny,
-                nx=nx,
-                pixel_scale=pixel_scale,
-                seed=seed,
-                band=band,
-                noise_variance=noise_variance,
-                noise_corr=noise_corr,
-                noiseId=noiseId,
-                rotId=rotId,
-            )
-        else:
-            # Rotate noise image by 90 degrees CCW to remove anisotropy from
-            # noise
-            noise_array = np.rot90(noise_array, k=1)
-        # apply pixel mask to pure noise image
-        anacal.mask.mask_galaxy_image(
-            noise_array,
-            mask_array,
-            False,  # extend mask
-            star_cat,
+        mask_array = prepare_mask(
+            exposure.image.array, exposure.mask.array,
+            exposure.variance.array, bitv,
         )
 
-    else:
-        noise_array = None
+    anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
+
+    noise_variance = estimate_noise_variance(
+        exposure.variance.array, exposure.mask.array, mask_array,
+    )
+
+    noise_array = prepare_noise_array(
+        noise_array=noise_array,
+        do_noise_bias_correction=do_noise_bias_correction,
+        gal_shape=gal_array.shape,
+        pixel_scale=pixel_scale,
+        seed=seed,
+        band=band,
+        noise_variance=noise_variance,
+        noise_corr=noise_corr,
+        noiseId=noiseId,
+        rotId=rotId,
+        mask_array=mask_array,
+        star_cat=star_cat,
+    )
 
     if skyMap is not None:
         tractInfo = skyMap[tract]
@@ -685,27 +804,16 @@ def prepare_data(
     else:
         tractInfo = None
         patchInfo = None
+
     beginx = lsst_bbox.beginX
     beginy = lsst_bbox.beginY
-    if detection is not None:
-        if isinstance(detection, astropy.table.Table):
-            detection = detection.copy().as_array()
-        elif isinstance(detection, np.ndarray):
-            detection = detection.copy()
-        assert detection is not None
-        detection = rfn.repack_fields(
-            detection[list(anacal.table.column_names())]
-        )
-        if blocks is not None:
-            assert detection is not None
-            for bb in blocks:
-                mm = (
-                    (detection["x2_det"] / pixel_scale - beginy >= bb.ymin_in)
-                    & (detection["x2_det"] / pixel_scale - beginy < bb.ymax_in)
-                    & (detection["x1_det"] / pixel_scale - beginx >= bb.xmin_in)
-                    & (detection["x1_det"] / pixel_scale - beginx < bb.xmax_in)
-                )
-                detection["block_id"][mm] = bb.index
+    detection = prepare_detection(
+        detection,
+        pixel_scale=pixel_scale,
+        beginx=beginx,
+        beginy=beginy,
+        blocks=blocks,
+    )
 
     return {
         "pixel_scale": pixel_scale,
@@ -723,4 +831,110 @@ def prepare_data(
         "patchInfo": patchInfo,
         "detection": detection,
         "blocks": blocks,
+    }
+
+
+def prepare_data_cell(
+    *,
+    cell,
+    band: str | None,
+    seed: int,
+    mag_zero: float,
+    npix: int = 32,
+    do_noise_bias_correction: bool = True,
+    badMaskPlanes: List[str] = badMaskDefault,
+    skyMap=None,
+    tract: int = 0,
+    patch: int = 0,
+    star_cat: NDArray | None = None,
+    psf_array: NDArray | None = None,
+    mask_array: NDArray | None = None,
+    noise_array: NDArray | None = None,
+    detection: astropy.table.Table | None = None,
+    blocks: List | None = None,
+    **kwargs,
+):
+    """Collect metadata and auxiliary arrays from a SingleCellCoadd."""
+    outer = cell.outer
+    wcs = cell.wcs
+    pixel_scale = float(wcs.getPixelScale().asArcseconds())
+
+    bbox = outer.bbox
+    gal_array = np.asarray(outer.image.array, dtype=np.float64)
+
+    if psf_array is None:
+        psf_array = prepare_psf_array_cell(cell, npix)
+
+    if mask_array is None:
+        bitv = 0
+        for plane in badMaskPlanes:
+            try:
+                bitv |= outer.mask.getPlaneBitMask(plane)
+            except Exception:
+                pass
+        mask_array = prepare_mask(
+            outer.image.array, outer.mask.array,
+            outer.variance.array, bitv,
+        )
+
+    anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
+
+    noise_variance = estimate_noise_variance(
+        outer.variance.array, outer.mask.array, mask_array,
+    )
+
+    # Extract noise from cell if available and not provided
+    if do_noise_bias_correction and noise_array is None:
+        noise_reals = outer.noise_realizations
+        if len(noise_reals) > 0:
+            noise_array = np.asarray(
+                noise_reals[0].array, dtype=np.float64,
+            )
+
+    noise_array = prepare_noise_array(
+        noise_array=noise_array,
+        do_noise_bias_correction=do_noise_bias_correction,
+        gal_shape=gal_array.shape,
+        pixel_scale=pixel_scale,
+        seed=seed,
+        band=band,
+        noise_variance=noise_variance,
+        mask_array=mask_array,
+        star_cat=star_cat,
+    )
+
+    if skyMap is not None:
+        tractInfo = skyMap[tract]
+        patchInfo = tractInfo[patch]
+    else:
+        tractInfo = None
+        patchInfo = None
+
+    beginx = bbox.getMinX()
+    beginy = bbox.getMinY()
+    detection = prepare_detection(
+        detection,
+        pixel_scale=pixel_scale,
+        beginx=beginx,
+        beginy=beginy,
+        blocks=blocks,
+    )
+
+    return {
+        "pixel_scale": pixel_scale,
+        "mag_zero": mag_zero,
+        "noise_variance": noise_variance,
+        "gal_array": gal_array,
+        "psf_array": psf_array,
+        "mask_array": mask_array,
+        "noise_array": noise_array,
+        "begin_x": beginx,
+        "begin_y": beginy,
+        "wcs": wcs,
+        "skyMap": skyMap,
+        "tractInfo": tractInfo,
+        "patchInfo": patchInfo,
+        "detection": detection,
+        "blocks": blocks,
+        "psf_object": None,
     }

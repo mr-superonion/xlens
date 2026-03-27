@@ -201,7 +201,7 @@ def get_exposure(truth_catalog, sim_seed, band=None):
             nx = exp.getWidth()
             ny = exp.getHeight()
             noise_variance = estimate_noise_variance(
-                exposure=exp, mask_array=None,
+                exp.variance.array, exp.mask.array,
             )
             explist.append(
                 exp

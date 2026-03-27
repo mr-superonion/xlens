@@ -1,5 +1,3 @@
-from .__version__ import __version__  # noqa
-
 from . import (  # noqa
     analysis,
     catalog,
@@ -9,6 +7,7 @@ from . import (  # noqa
     utils,
     wcs,
 )
+from .__version__ import __version__  # noqa
 
 __all__ = [
     "analysis",
