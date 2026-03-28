@@ -96,7 +96,7 @@ def _multiband_moments2ell(
     dw_dg1_list: list[NDArray],
     dw_dg2_list: list[NDArray],
     moments: dict[str, dict[str, NDArray]],
-    pb_derivs: dict[str, dict[str, NDArray]],
+    dmom_dg: dict[str, dict[str, NDArray]],
 ) -> NDArray:
     W = np.sum(w_list, axis=0)
     dW_dg1 = np.sum(dw_dg1_list, axis=0)
@@ -136,7 +136,7 @@ def _multiband_moments2ell(
         num = np.zeros(nobj)
         for ib, b in enumerate(bands):
             num += (
-                w_list[ib] * pb_derivs[b][dg_name]
+                w_list[ib] * dmom_dg[b][dg_name]
                 + dw_list[ib] * moments[b][mn]
             )
         dc[dg_name] = num / W - mc[mn] * dW / W
@@ -195,7 +195,7 @@ def multiband_shapelets_linear2ell(
         }
 
     # --- per-band dm_dg using (m - 2n) ------------------------------------
-    pb_derivs: dict[str, dict[str, NDArray]] = {}
+    dmom_dg: dict[str, dict[str, NDArray]] = {}
     for b in bands:
         m = moments[b]
         n = noises[b]
@@ -203,12 +203,12 @@ def multiband_shapelets_linear2ell(
             mn: m[mn] - 2.0 * n[nn]
             for mn, nn in zip(moment_names, noise_names)
         }
-        pb_derivs[b] = _linear_modes_to_derivs(xx)
+        dmom_dg[b] = _linear_modes_to_derivs(xx)
 
     return _multiband_moments2ell(
         nobj, bands, C0, prefix,
         w_list, dw_dg1_list, dw_dg2_list,
-        moments, pb_derivs,
+        moments, dmom_dg,
     )
 
 
@@ -233,7 +233,7 @@ def multiband_shapelets2ell(
     dw_dg1_list = []
     dw_dg2_list = []
     moments: dict[str, dict[str, NDArray]] = {}
-    pb_derivs: dict[str, dict[str, NDArray]] = {}
+    dmom_dg: dict[str, dict[str, NDArray]] = {}
 
     for b in bands:
         flux = cat[f"{b}_flux_gauss2"]
@@ -249,7 +249,7 @@ def multiband_shapelets2ell(
             mn: np.asarray(cat[f"{b}_{p}{mn}"], dtype=np.float64)
             for mn in moment_names
         }
-        pb_derivs[b] = {
+        dmom_dg[b] = {
             dn: np.asarray(cat[f"{b}_{p}{dn}"], dtype=np.float64)
             for dn in deriv_names
         }
@@ -257,7 +257,7 @@ def multiband_shapelets2ell(
     return _multiband_moments2ell(
         nobj, bands, C0, prefix,
         w_list, dw_dg1_list, dw_dg2_list,
-        moments, pb_derivs,
+        moments, dmom_dg,
     )
 
 
