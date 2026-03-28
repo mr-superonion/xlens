@@ -202,6 +202,8 @@ class MeasureCellCoaddsPipe(PipelineTask):
             0,                 # index
         )
         bb.psf_array = psf_array.copy()
+        bb.xmsk = [True] * width
+        bb.ymsk = [True] * height
         return [bb]
 
     @staticmethod
