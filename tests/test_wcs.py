@@ -488,3 +488,64 @@ def test_sheared_galaxy(wcs_g1, wcs_g2, wcs_rho, gal_g1, gal_g2):
             rtol=5e-2,
             err_msg=f"{col} mismatch",
         )
+
+
+# ---------------------------------------------------------------------------
+# Test: make_tanwcs_dm -> CDMatrix -> jacobian_decomposition round-trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "g1, g2, rho, kappa",
+    [
+        (0.0, 0.0, 0.0, 0.0),
+        (0.01, 0.0, 0.0, 0.0),
+        (0.0, 0.02, 0.0, 0.0),
+        (0.0, 0.0, 0.05, 0.0),
+        (0.0, 0.0, 0.0, 0.01),
+        (0.01, -0.02, 0.03, 0.005),
+        (0.05, 0.03, -0.1, 0.02),
+        (-0.03, 0.04, 0.2, -0.01),
+    ],
+)
+def test_cdmatrix_roundtrip(g1, g2, rho, kappa):
+    """make_tanwcs_dm -> linearizePixelToSky (CDMatrix) ->
+    jacobian_decomposition recovers input g1, g2, rho, kappa."""
+    pixel_scale = 0.168
+    ra_deg = 180.0
+    dec_deg = 0.0
+    x_pix = 2000.0
+    y_pix = 2000.0
+
+    # make_tanwcs_dm does not take kappa; absorb into effective pixel scale
+    sim_scale_effective = pixel_scale * (1.0 - kappa)
+    wcs_dm = make_tanwcs_dm(
+        sim_scale_effective, g1, g2, rho,
+        ra_deg, dec_deg, x_pix, y_pix,
+    )
+
+    # Extract CDMatrix at the reference pixel (same as base_LocalWcs_CDMatrix)
+    pixel_point = geom.Point2D(x_pix, y_pix)
+    local_transform = wcs_dm.linearizePixelToSky(pixel_point, geom.radians)
+    linear = local_transform.getLinear()
+    cd_matrix = np.array([
+        [linear[0, 0], linear[0, 1]],
+        [linear[1, 0], linear[1, 1]],
+    ])
+
+    # Convert LSST CDMatrix (radians/pixel, u=East) to GalSim Jacobian
+    # (arcsec/pixel, u=West): negate first row, radians -> arcsec
+    rad_to_arcsec = (180.0 / np.pi) * 3600.0
+    jac = np.array([
+        [-cd_matrix[0, 0] * rad_to_arcsec, -cd_matrix[0, 1] * rad_to_arcsec],
+        [cd_matrix[1, 0] * rad_to_arcsec, cd_matrix[1, 1] * rad_to_arcsec],
+    ])
+
+    # Decompose and check round-trip
+    g1_out, g2_out, rho_out, kappa_out = jacobian_decomposition(
+        jac, pixel_scale,
+    )
+    np.testing.assert_allclose(g1_out, g1, atol=1e-9)
+    np.testing.assert_allclose(g2_out, g2, atol=1e-9)
+    np.testing.assert_allclose(rho_out, rho, atol=1e-9)
+    np.testing.assert_allclose(kappa_out, kappa, atol=1e-9)

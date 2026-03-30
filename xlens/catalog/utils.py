@@ -6,6 +6,8 @@ def _linear_modes_to_derivs(xx: dict[str, NDArray]) -> dict[str, NDArray]:
     d: dict[str, NDArray] = {}
     d["dm00_dg1"] = -np.sqrt(2.0) * xx["m22c"]
     d["dm00_dg2"] = -np.sqrt(2.0) * xx["m22s"]
+    d["dm20_dg1"] = -np.sqrt(6.0) / 2.0 * xx["m42c"]
+    d["dm20_dg2"] = -np.sqrt(6.0) / 2.0 * xx["m42s"]
     d["dm22c_dg1"] = (
         (1.0 / np.sqrt(2.0)) * (xx["m00"] - xx["m40"])
         - np.sqrt(3.0) * xx["m44c"]
@@ -24,10 +26,13 @@ def _moments_to_ell(
     C0: float,
     prefix: str,
     m00: NDArray,
+    m20: NDArray,
     m22c: NDArray,
     m22s: NDArray,
     dm00_dg1: NDArray,
     dm00_dg2: NDArray,
+    dm20_dg1: NDArray,
+    dm20_dg2: NDArray,
     dm22c_dg1: NDArray,
     dm22c_dg2: NDArray,
     dm22s_dg1: NDArray,
@@ -45,6 +50,14 @@ def _moments_to_ell(
     de2_dg1 = dm22s_dg1 / denom - dm00_dg1 * m22s / denom_sq
     de2_dg2 = dm22s_dg2 / denom - dm00_dg2 * m22s / denom_sq
 
+    # m0 = m00, m2 = m00 + m20
+    m0 = m00
+    m2 = m00 + m20
+    dm0_dg1 = dm00_dg1
+    dm0_dg2 = dm00_dg2
+    dm2_dg1 = dm00_dg1 + dm20_dg1
+    dm2_dg2 = dm00_dg2 + dm20_dg2
+
     out = np.zeros(
         nobj,
         dtype=np.dtype([
@@ -54,6 +67,12 @@ def _moments_to_ell(
             (f"{p}e2", np.float64),
             (f"{p}de2_dg1", np.float64),
             (f"{p}de2_dg2", np.float64),
+            (f"{p}m0", np.float64),
+            (f"{p}dm0_dg1", np.float64),
+            (f"{p}dm0_dg2", np.float64),
+            (f"{p}m2", np.float64),
+            (f"{p}dm2_dg1", np.float64),
+            (f"{p}dm2_dg2", np.float64),
         ]),
     )
     out[f"{p}e1"] = e1
@@ -62,6 +81,12 @@ def _moments_to_ell(
     out[f"{p}e2"] = e2
     out[f"{p}de2_dg1"] = de2_dg1
     out[f"{p}de2_dg2"] = de2_dg2
+    out[f"{p}m0"] = m0
+    out[f"{p}dm0_dg1"] = dm0_dg1
+    out[f"{p}dm0_dg2"] = dm0_dg2
+    out[f"{p}m2"] = m2
+    out[f"{p}dm2_dg1"] = dm2_dg1
+    out[f"{p}dm2_dg2"] = dm2_dg2
     return out
 
 
@@ -71,8 +96,14 @@ def shapelets_linear2ell(
     prefix: str = "fpfs1_",
 ) -> NDArray:
     p = prefix
-    moment_names = ["m00", "m22c", "m22s", "m40", "m44c", "m44s"]
-    noise_names = ["n00", "n22c", "n22s", "n40", "n44c", "n44s"]
+    moment_names = [
+        "m00", "m20", "m22c", "m22s",
+        "m40", "m42c", "m42s", "m44c", "m44s",
+    ]
+    noise_names = [
+        "n00", "n20", "n22c", "n22s",
+        "n40", "n42c", "n42s", "n44c", "n44s",
+    ]
     xx = {
         mn: data[f"{p}{mn}"] - 2.0 * data[f"{p}{nn}"]
         for mn, nn in zip(moment_names, noise_names)
@@ -80,8 +111,10 @@ def shapelets_linear2ell(
     d = _linear_modes_to_derivs(xx)
     return _moments_to_ell(
         len(data), C0, prefix,
-        data[f"{p}m00"], data[f"{p}m22c"], data[f"{p}m22s"],
+        data[f"{p}m00"], data[f"{p}m20"],
+        data[f"{p}m22c"], data[f"{p}m22s"],
         d["dm00_dg1"], d["dm00_dg2"],
+        d["dm20_dg1"], d["dm20_dg2"],
         d["dm22c_dg1"], d["dm22c_dg2"],
         d["dm22s_dg1"], d["dm22s_dg2"],
     )
@@ -104,7 +137,7 @@ def _multiband_moments2ell(
 
     # --- weight-average raw moments ---------------------------------------
     mc = {}
-    for mn in ["m00", "m22c", "m22s"]:
+    for mn in ["m00", "m20", "m22c", "m22s"]:
         s = np.zeros(nobj)
         for ib, b in enumerate(bands):
             s += w_list[ib] * moments[b][mn]
@@ -113,17 +146,21 @@ def _multiband_moments2ell(
     # --- combined moment derivatives with weight response -----------------
     deriv_names = [
         "dm00_dg1", "dm00_dg2",
+        "dm20_dg1", "dm20_dg2",
         "dm22c_dg1", "dm22c_dg2",
         "dm22s_dg1", "dm22s_dg2",
     ]
     moment_for_deriv = {
         "dm00_dg1": "m00", "dm00_dg2": "m00",
+        "dm20_dg1": "m20", "dm20_dg2": "m20",
         "dm22c_dg1": "m22c", "dm22c_dg2": "m22c",
         "dm22s_dg1": "m22s", "dm22s_dg2": "m22s",
     }
     dw_for_deriv = {
         "dm00_dg1": (dw_dg1_list, dW_dg1),
         "dm00_dg2": (dw_dg2_list, dW_dg2),
+        "dm20_dg1": (dw_dg1_list, dW_dg1),
+        "dm20_dg2": (dw_dg2_list, dW_dg2),
         "dm22c_dg1": (dw_dg1_list, dW_dg1),
         "dm22c_dg2": (dw_dg2_list, dW_dg2),
         "dm22s_dg1": (dw_dg1_list, dW_dg1),
@@ -143,8 +180,9 @@ def _multiband_moments2ell(
 
     return _moments_to_ell(
         nobj, C0, prefix,
-        mc["m00"], mc["m22c"], mc["m22s"],
+        mc["m00"], mc["m20"], mc["m22c"], mc["m22s"],
         dc["dm00_dg1"], dc["dm00_dg2"],
+        dc["dm20_dg1"], dc["dm20_dg2"],
         dc["dm22c_dg1"], dc["dm22c_dg2"],
         dc["dm22s_dg1"], dc["dm22s_dg2"],
     )
@@ -160,12 +198,12 @@ def multiband_shapelets_linear2ell(
     nobj = len(cat)
 
     moment_names = [
-        "m00", "m22c", "m22s",
-        "m40", "m44c", "m44s",
+        "m00", "m20", "m22c", "m22s",
+        "m40", "m42c", "m42s", "m44c", "m44s",
     ]
     noise_names = [
-        "n00", "n22c", "n22s",
-        "n40", "n44c", "n44s",
+        "n00", "n20", "n22c", "n22s",
+        "n40", "n42c", "n42s", "n44c", "n44s",
     ]
 
     # --- per-band weights and their shear derivatives ---------------------
@@ -221,9 +259,10 @@ def multiband_shapelets2ell(
     p = prefix
     nobj = len(cat)
 
-    moment_names = ["m00", "m22c", "m22s"]
+    moment_names = ["m00", "m20", "m22c", "m22s"]
     deriv_names = [
         "dm00_dg1", "dm00_dg2",
+        "dm20_dg1", "dm20_dg2",
         "dm22c_dg1", "dm22c_dg2",
         "dm22s_dg1", "dm22s_dg2",
     ]
