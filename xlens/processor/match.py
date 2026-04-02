@@ -140,6 +140,10 @@ class matchPipeConfig(
         doc="matching distance in pixels",
         default=6,
     )
+    catsim_dir = Field[str](
+        doc="Directory containing input galaxy catalogs.",
+        default=os.environ.get("CATSIM_DIR", "."),
+    )
     band_column_names = DictField(
         keytype=str,
         itemtype=str,
@@ -232,6 +236,7 @@ class matchPipe(PipelineTask):
             catalog=anacal_catalog,
             dm_catalog=dm_catalog,
             truth_catalog=truth_catalog,
+            catsim_dir=self.config.catsim_dir,
         )
         butlerQC.put(outputs, outputRefs)
         return
