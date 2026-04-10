@@ -1,17 +1,12 @@
 """Default survey parameters for LSST and HSC simulations.
 
-Module-level dictionaries provide magnitude zero-points, pixel scales,
-PSF FWHM values, and per-band noise variances keyed by survey name.
+Module-level dictionaries provide magnitude zero-points, PSF FWHM values,
+and per-band noise variances keyed by survey name.
 """
 
 mag_zero_defaults = {
     "lsst": 30.0,
     "hsc": 27.0,
-}
-
-pixel_scale_defaults = {
-    "lsst": 0.2,
-    "hsc": 0.168,
 }
 
 psf_fwhm_defaults = {
