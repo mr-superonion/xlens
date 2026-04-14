@@ -1,7 +1,7 @@
 """Build systematics products from cell-based coadds.
 
 Estimates noise correlation functions per band from stitched cell coadd
-images and stacks per-cell PSFs.
+images, stacks per-cell PSFs, and builds bright star masks from GAIA.
 """
 
 __all__ = [
@@ -10,10 +10,18 @@ __all__ = [
     "BuildCellSystematicsConnections",
 ]
 
+from typing import Any
+
+import anacal
+import astropy.units as u
 import numpy as np
 from lsst.afw.image import MaskX
+from lsst.meas.algorithms import (
+    LoadReferenceObjectsConfig,
+    ReferenceObjectLoader,
+)
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import Field, FieldValidationError, ListField
+from lsst.pex.config import ConfigField, Field, FieldValidationError, ListField
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -46,6 +54,15 @@ class BuildCellSystematicsConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
         deferLoad=True,
+    )
+    gaia = cT.PrerequisiteInput(
+        doc="GAIA sources for bright star masking",
+        name="gaia_dr3_20230707",
+        storageClass="SimpleCatalog",
+        dimensions=("skypix",),
+        multiple=True,
+        deferLoad=True,
+        minimum=0,
     )
     outputMask = cT.Output(
         doc="Combined mask from bad pixels across all bands on stitched image.",
@@ -82,7 +99,20 @@ class BuildCellSystematicsConfig(
         doc="Mask planes used to reject bad pixels.",
         default=["BAD", "CR", "NO_DATA", "SAT", "UNMASKEDNAN"],
     )
+    gaiaPadding = Field[int](
+        doc="Padding (pixels) when selecting GAIA sources around the patch.",
+        default=300,
+    )
+    gaiaLoader = ConfigField(
+        dtype=LoadReferenceObjectsConfig,
+        doc="Reference catalog loader for GAIA",
+    )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
+
+    def setDefaults(self):
+        super().setDefaults()
+        self.gaiaLoader.requireProperMotion = False
+        self.gaiaLoader.anyFilterMapsToThis = "phot_g_mean"
 
     def validate(self):
         super().validate()
@@ -115,11 +145,27 @@ class BuildCellSystematicsTask(PipelineTask):
         cell_handles_dict = {
             h.dataId["band"]: h for h in cell_handles
         }
+        if len(inputs["gaia"]) > 0:
+            gaia_loader = ReferenceObjectLoader(
+                dataIds=[ref.datasetRef.dataId for ref in inputRefs.gaia],
+                refCats=inputs.pop("gaia"),
+                name="gaia_dr3_20230707",
+                config=self.config.gaiaLoader,
+            )
+        else:
+            gaia_loader = None
+            self.log.warning(
+                "No GAIA reference catalog found for tract=%d patch=%d. "
+                "Bright star masking will be skipped. "
+                "Ensure refcats/DM-39298/gaia_dr3_20230707 is in input collections.",
+                tract, patch,
+            )
         outputs = self.run(
             cell_handles_dict=cell_handles_dict,
             skyMap=inputs["skyMap"],
             tract=tract,
             patch=patch,
+            gaia_loader=gaia_loader,
         )
         butlerQC.put(outputs, outputRefs)
 
@@ -214,6 +260,7 @@ class BuildCellSystematicsTask(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
+        gaia_loader: ReferenceObjectLoader | None = None,
         **kwargs,
     ) -> Struct:
         """Build noise correlation and PSF arrays from cell coadds.
@@ -226,12 +273,15 @@ class BuildCellSystematicsTask(PipelineTask):
             Sky map used for processing.
         tract, patch : int
             Tract and patch identifiers.
+        gaia_loader : ReferenceObjectLoader or None
+            Loader for GAIA reference catalog for bright star masking.
 
         Returns
         -------
         Struct
             outputMask : MaskX
-                Combined mask from stitched images across all bands.
+                Combined mask from stitched images across all bands,
+                including bright star masks from GAIA.
             outputNoiseCorr : np.ndarray (6, npix, npix)
             outputPsf : np.ndarray (6, npix, npix)
         """
@@ -242,6 +292,7 @@ class BuildCellSystematicsTask(PipelineTask):
         psf_array = np.zeros((6, npix, npix))
         mask_array: np.ndarray | None = None
         stitched_bbox = None
+        stitched_wcs = None
 
         for band, handle in cell_handles_dict.items():
             if band not in band_order:
@@ -264,6 +315,7 @@ class BuildCellSystematicsTask(PipelineTask):
 
             if stitched_bbox is None:
                 stitched_bbox = exp.getBBox()
+                stitched_wcs = exp.getWcs()
 
             # Mask: merge across bands
             band_mask = self._build_mask_band(exp)
@@ -279,8 +331,34 @@ class BuildCellSystematicsTask(PipelineTask):
 
             del cell_coadd, stitched, exp
 
-        # Convert mask to MaskX
+        # Add bright star mask from GAIA
         assert mask_array is not None
+        if (
+            gaia_loader is not None
+            and stitched_wcs is not None
+            and stitched_bbox is not None
+        ):
+            gaia = gaia_loader.loadPixelBox(
+                bbox=stitched_bbox,
+                filterName="phot_g_mean",
+                wcs=stitched_wcs,
+                bboxToSpherePadding=self.config.gaiaPadding,
+            ).refCat
+            gaia_array = self._get_gaia_mask_sources(
+                wcs=stitched_wcs,
+                bbox=stitched_bbox,
+                gaia_catalog=gaia,
+            )
+            if gaia_array is not None:
+                self.log.info(
+                    "Adding bright star mask for %d GAIA sources",
+                    len(gaia_array),
+                )
+                anacal.mask.add_bright_star_mask(
+                    mask_array=mask_array, star_array=gaia_array,
+                )
+
+        # Convert mask to MaskX
         h, w = mask_array.shape
         output_msk = MaskX(width=w, height=h)
         output_msk.getArray()[:, :] = mask_array.astype(
@@ -294,6 +372,43 @@ class BuildCellSystematicsTask(PipelineTask):
             outputNoiseCorr=noise_corr_array,
             outputPsf=psf_array,
         )
+
+    def _get_gaia_mask_sources(
+        self,
+        *,
+        wcs,
+        bbox,
+        gaia_catalog: Any,
+    ) -> np.ndarray | None:
+        """Build a bright star array from GAIA catalog for masking."""
+        gaia_astropy = gaia_catalog.asAstropy()
+        flux = gaia_astropy["phot_g_mean_flux"]
+        mag = (np.asarray(flux) * u.nJy).to_value(u.ABmag)
+        x, y = wcs.skyToPixelArray(
+            ra=gaia_astropy["coord_ra"] * 180 / np.pi,
+            dec=gaia_astropy["coord_dec"] * 180 / np.pi,
+            degrees=True,
+        )
+        mask = mag <= 17.0
+        if not np.any(mask):
+            return None
+
+        x = x[mask] - bbox.getBeginX()
+        y = y[mask] - bbox.getBeginY()
+        mag = mag[mask]
+        conds = [
+            mag <= 11.0,
+            (mag > 11.0) & (mag <= 14.0),
+            (mag > 14.0) & (mag <= 17.0),
+        ]
+        choices = [450.0, 200.0, 100.0]
+        r = np.select(conds, choices, default=100.0)
+        dtype = np.dtype([("x", float), ("y", float), ("r", float)])
+        xy_r = np.zeros(len(x), dtype=dtype)
+        xy_r["x"] = x
+        xy_r["y"] = y
+        xy_r["r"] = r
+        return xy_r
 
     def _build_mask_band(self, exposure) -> np.ndarray:
         """Build a bad-pixel mask for one band from a stitched exposure."""

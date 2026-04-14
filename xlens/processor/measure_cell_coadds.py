@@ -119,6 +119,7 @@ class MeasureCellCoaddsPipeConfig(
         super().setDefaults()
         self.anacal.force_size = True
         self.anacal.force_center = True
+        self.anacal.bound = 5
         self.fpfs.do_compute_detect_weight = False
 
 
