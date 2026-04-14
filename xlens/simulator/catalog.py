@@ -39,7 +39,7 @@ from .galaxies import (
     Flagship2025Catalog,
     OpenUniverse2024RubinRomanCatalog,
 )
-from .perturbation import ShearHalo, ShearLogNormalFlat, ShearRedshift
+from .perturbation import ShearHalo, ShearLogNormalFlat, ShearRedshift, ShearTanCross
 
 
 class CatalogConnections(
@@ -558,4 +558,77 @@ class CatalogLogNormalTask(CatalogTask):
             field_size_deg=field_size_deg,
             npix=npix,
             seed=seed,
+        )
+
+class CatalogTanCrossShearTaskConfig(
+    CatalogConfig,
+    pipelineConnections=CatalogConnections,
+):
+    """Configuration for :class:`CatalogTanCrossShearTask` (constant tangential/cross shear test)."""
+    mode = Field[int](
+        doc=(
+            "Ternary-encoded shear assignment per z-bin.\n"
+            "Each digit in base-3 is one bin \n"
+            "(lowest-z is least significant digit):\n"
+            "  0 -> -test_value,  1 -> +test_value,  2 -> 0.0."
+        ),
+        default=0,
+    )
+    test_target = Field[str](
+        doc="the shear component to test",
+        default="gt",
+    )
+    test_value = Field[float](
+        doc="absolute value of the shear",
+        default=0.02,
+    )
+    kappa_value = Field[float](
+        doc="kappa value to use, 0. means no kappa",
+        default=0.,
+    )
+
+    def validate(self):
+        super().validate()
+        if self.mode not in [0, 1, 2]:
+            raise FieldValidationError(
+                self.__class__.mode,
+                self,
+                "mode needs to be one of [0, 1, 2]",
+            )
+
+        if self.test_target not in ["gt", "gx"]:
+            raise FieldValidationError(
+                self.__class__.test_target,
+                self,
+                "test target can only be 'gt' or 'gx'",
+            )
+
+        if self.test_value < 0.0 or self.test_value > 0.50:
+            raise FieldValidationError(
+                self.__class__.test_value,
+                self,
+                "test_value should be in [0.00, 0.50]",
+            )
+
+    def setDefaults(self):
+        super().setDefaults()
+
+
+
+class CatalogTanCrossShearTask(CatalogTask):
+    """Catalog task applying constant shear per redshift bin."""
+
+    _DefaultName = "CatalogTanCrossShearTask"
+    ConfigClass = CatalogTanCrossShearTaskConfig
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+
+    def get_perturbation_object(self, tract_info, seed: int, **kwargs: Any):
+        assert isinstance(self.config, CatalogTanCrossShearTaskConfig)
+        return ShearTanCross(
+            mode=self.config.mode,
+            g_dist=self.config.test_target,
+            shear_value=self.config.test_value,
+            kappa_value=self.config.kappa_value,
         )
