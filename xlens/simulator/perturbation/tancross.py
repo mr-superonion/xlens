@@ -58,11 +58,11 @@ class ShearTanCross(object):
         theta = np.arctan2(src["dy"], src["dx"])
 
         if self.g_dist == "gt":
-            gamma1 = self.shear_value * np.cos(2.0 * theta)
-            gamma2 = self.shear_value * np.sin(2.0 * theta)
+            gamma1 = -self.shear_value * np.cos(2.0 * theta)
+            gamma2 = -self.shear_value * np.sin(2.0 * theta)
         else:
-            gamma1 = self.shear_value * np.sin(2.0 * theta)
-            gamma2 = -self.shear_value * np.cos(2.0 * theta)
+            gamma1 = -self.shear_value * np.sin(2.0 * theta)
+            gamma2 = self.shear_value * np.cos(2.0 * theta)
 
         g1 = gamma1 / (1 - self.kappa)
         g2 = gamma2 / (1 - self.kappa)
