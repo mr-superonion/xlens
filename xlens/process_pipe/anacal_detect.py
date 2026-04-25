@@ -232,6 +232,7 @@ class AnacalDetectPipe(PipelineTask):
         )
         catalog = self.run_measure(data)
         if skyMap is not None:
+            # Use skymap's patchInfo for is_primary (not exposure bbox)
             tractInfo = skyMap[tract]
             patchInfo = tractInfo[patch]
             pixel_scale = float(

@@ -529,6 +529,7 @@ class MeasureCoaddsPipe(PipelineTask):
         )
         final = rfn.merge_arrays([det_cat, force_cat], flatten=True)
         if skyMap is not None:
+            # Use skymap's patchInfo for is_primary (not exposure bbox)
             tractInfo = skyMap[tract]
             patchInfo = tractInfo[patch]
             pixel_scale = float(

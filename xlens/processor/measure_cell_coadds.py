@@ -473,6 +473,10 @@ class MeasureCellCoaddsPipe(PipelineTask):
 
         output = np.concatenate(cell_results)
         if skyMap is not None:
+            # Use skymap's patchInfo (not MultipleCellCoadd.inner_bbox)
+            # for is_primary deduplication. The skymap patch inner bbox
+            # (3000x3000) defines the non-overlapping tiling, while
+            # MultipleCellCoadd.inner_bbox equals the patch outer bbox.
             tractInfo = skyMap[tract]
             patchInfo = tractInfo[patch]
             pixel_scale = float(
