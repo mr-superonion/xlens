@@ -23,22 +23,31 @@ __all__ = [
     "MeasureCoaddsPipeConfig",
     "MeasureCoaddsPipe",
     "MeasureCoaddsPipeConnections",
+    "SimulatedExposureHandle",
 ]
 
+import dataclasses
 import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.afw.image import MaskX
+from lsst.afw.image import ExposureF, MaskX
+from lsst.daf.butler import DataCoordinate
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import ConfigurableField, Field, FieldValidationError
+from lsst.pex.config import (
+    ConfigurableField,
+    Field,
+    FieldValidationError,
+    ListField,
+)
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
     Struct,
 )
+from lsst.pipe.tasks.coaddBase import makeSkyInfo
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
@@ -46,15 +55,71 @@ from numpy.typing import NDArray
 
 from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
+from ..simulator.sim import MultibandSimTask
 from ..utils.catalog import set_isPrimary
 
 band_order = "ugrizy"
 
 
+class SimulatedExposureHandle:
+    """Lazy stand-in for a butler ``DeferredDatasetHandle`` whose
+    ``.get()`` produces a freshly simulated exposure for one band.
+
+    Provides the same ``.get()`` / ``.dataId`` interface used by
+    :class:`MeasureCoaddsPipe`, so the same downstream code path can
+    measure both real coadds and simulated exposures without branching.
+    """
+
+    def __init__(
+        self,
+        *,
+        simulator: MultibandSimTask,
+        tract_info,
+        patch: int,
+        band: str,
+        seed: int,
+        truthCatalog,
+        data_id: DataCoordinate,
+        psf_array: NDArray | None = None,
+        corr_array: NDArray | None = None,
+        mask: MaskX | None = None,
+    ):
+        self._simulator = simulator
+        self._tract_info = tract_info
+        self._patch = patch
+        self._band = band
+        self._seed = seed
+        self._truthCatalog = truthCatalog
+        self._psf_array = psf_array
+        self._corr_array = corr_array
+        self._mask = mask
+        self.dataId = data_id
+
+    def get(self) -> ExposureF:
+        kwargs: dict[str, Any] = {
+            "tract_info": self._tract_info,
+            "patch_id": self._patch,
+            "band": self._band,
+            "seed": self._seed,
+            "truthCatalog": self._truthCatalog,
+        }
+        if self._psf_array is not None:
+            kwargs["psfArray"] = self._psf_array
+        if self._corr_array is not None:
+            kwargs["noiseCorrArray"] = self._corr_array
+        if self._mask is not None:
+            kwargs["mask"] = self._mask
+        return self._simulator.run(**kwargs).simExposure
+
+
 class MeasureCoaddsPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
-    defaultTemplates={"coaddName": "deep"},
+    defaultTemplates={
+        "coaddName": "deep",
+        "mode": "0",
+        "rotId": "0",
+    },
 ):
     skyMap = cT.Input(
         doc="SkyMap to use in processing",
@@ -63,16 +128,32 @@ class MeasureCoaddsPipeConnections(
         dimensions=("skymap",),
     )
     exposure = cT.Input(
-        doc="Input coadd image",
+        doc="Input coadd image (one per band).",
         name="{coaddName}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
         deferLoad=True,
+        minimum=0,
+    )
+    truthCatalog = cT.Input(
+        doc="Truth catalog used to drive image simulation.",
+        name="{coaddName}_{mode}_rot{rotId}_coadd_truthCatalog",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap", "tract"),
+        minimum=0,
+    )
+    psfArray = cT.Input(
+        doc="Stacked PSF image array (6 x npix x npix).",
+        name="{coaddName}_coadd_systematics_psfcentered_6bands",
+        storageClass="NumpyArray",
+        dimensions=("skymap", "tract", "patch"),
+        multiple=False,
+        minimum=0,
     )
     noiseCorrArray = cT.Input(
         doc="Stacked noise correlation array (6 x npix x npix).",
-        name="deep_coadd_systematics_noisecorr_6bands",
+        name="{coaddName}_coadd_systematics_noisecorr_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
@@ -80,7 +161,7 @@ class MeasureCoaddsPipeConnections(
     )
     mask = cT.Input(
         doc="Combined mask from bad pixels and bright stars across all bands.",
-        name="deep_coadd_systematics_mask",
+        name="{coaddName}_coadd_systematics_mask",
         storageClass="Mask",
         dimensions=("skymap", "tract", "patch"),
         minimum=0,
@@ -95,6 +176,25 @@ class MeasureCoaddsPipeConnections(
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
+        if config is None:
+            return
+
+        coaddName = config.connections.coaddName
+        # When operating on simulated exposures we use the bundled-mode
+        # output naming so different simulation modes/rotations don't
+        # collide.
+        if coaddName == "sim":
+            self.anacalCatalog = dataclasses.replace(
+                self.anacalCatalog,
+                name="{coaddName}_{mode}_rot{rotId}_coadd_anacal_catalog",
+            )
+
+        # Drop inputs that don't apply to the chosen mode.
+        if config.use_sim:
+            self.inputs.discard("exposure")
+        else:
+            self.inputs.discard("truthCatalog")
+            self.inputs.discard("psfArray")
 
 
 class MeasureCoaddsPipeConfig(
@@ -109,6 +209,21 @@ class MeasureCoaddsPipeConfig(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
     )
+    simulator = ConfigurableField(
+        target=MultibandSimTask,
+        doc="Simulation task used to generate per-band exposures.",
+    )
+    use_sim = Field[bool](
+        doc=(
+            "If True, run image simulation per band instead of reading "
+            "real coadd exposures. Requires ``truthCatalog`` input."
+        ),
+        default=False,
+    )
+    sim_bands = ListField[str](
+        doc="Bands to simulate when ``use_sim`` is True.",
+        default=["u", "g", "r", "i", "z", "y"],
+    )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
@@ -122,6 +237,12 @@ class MeasureCoaddsPipeConfig(
                 self.fpfs.fields["sigma_shapelets1"],
                 self,
                 "sigma_shapelets1 in a wrong range",
+            )
+        if self.use_sim and "i" not in self.sim_bands:
+            raise FieldValidationError(
+                self.__class__.sim_bands,
+                self,
+                "sim_bands must include 'i' (the detection band).",
             )
 
     def setDefaults(self):
@@ -151,6 +272,8 @@ class MeasureCoaddsPipe(PipelineTask):
 
         self.makeSubtask("anacal")
         self.makeSubtask("fpfs")
+        if self.config.use_sim:
+            self.makeSubtask("simulator")
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
@@ -159,8 +282,31 @@ class MeasureCoaddsPipe(PipelineTask):
         tract = int(butlerQC.quantum.dataId["tract"])
         patch = int(butlerQC.quantum.dataId["patch"])
 
-        exposure_handles = inputs["exposure"]
-        exposure_handles_dict = {h.dataId["band"]: h for h in exposure_handles}
+        if self.config.use_sim:
+            truthCatalog = inputs.get("truthCatalog", None)
+            if truthCatalog is None:
+                raise RuntimeError(
+                    "use_sim=True requires a truthCatalog input."
+                )
+            exposure_handles_dict = self._build_simulated_handles(
+                quantum_data_id=butlerQC.quantum.dataId,
+                truthCatalog=truthCatalog,
+                skyMap=inputs["skyMap"],
+                tract=tract,
+                patch=patch,
+                psf_array=inputs.get("psfArray", None),
+                corr_array=inputs.get("noiseCorrArray", None),
+                mask=inputs.get("mask", None),
+            )
+        else:
+            exposure_handles = inputs.get("exposure", None)
+            if not exposure_handles:
+                raise RuntimeError(
+                    "use_sim=False requires the 'exposure' input."
+                )
+            exposure_handles_dict = {
+                h.dataId["band"]: h for h in exposure_handles
+            }
 
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
@@ -171,6 +317,42 @@ class MeasureCoaddsPipe(PipelineTask):
             mask=inputs.get("mask", None),
         )
         butlerQC.put(outputs, outputRefs)
+
+    def _build_simulated_handles(
+        self,
+        *,
+        quantum_data_id: DataCoordinate,
+        truthCatalog,
+        skyMap,
+        tract: int,
+        patch: int,
+        psf_array: NDArray | None,
+        corr_array: NDArray | None,
+        mask: MaskX | None,
+    ) -> dict:
+        assert isinstance(self.config, MeasureCoaddsPipeConfig)
+        sky_info = makeSkyInfo(skyMap, tractId=tract, patchId=patch)
+        tract_info = sky_info.tractInfo
+
+        handles: dict = {}
+        for band in self.config.sim_bands:
+            band_data_id = DataCoordinate.standardize(
+                quantum_data_id, band=band,
+            )
+            seed = self.config.idGenerator.apply(band_data_id).catalog_id
+            handles[band] = SimulatedExposureHandle(
+                simulator=self.simulator,
+                tract_info=tract_info,
+                patch=patch,
+                band=band,
+                seed=seed,
+                truthCatalog=truthCatalog,
+                data_id=band_data_id,
+                psf_array=psf_array,
+                corr_array=corr_array,
+                mask=mask,
+            )
+        return handles
 
     def _load_noise_corr(
         self, corr_array: np.ndarray | None, band: str
@@ -305,7 +487,9 @@ class MeasureCoaddsPipe(PipelineTask):
         Parameters
         ----------
         exposure_handles_dict : dict
-            Mapping of band name to deferred exposure handle.
+            Mapping of band name to deferred exposure handle.  Handles
+            may be real butler handles or
+            :class:`SimulatedExposureHandle` instances.
         corr_array : np.ndarray or None
             Stacked noise correlation array.
         skyMap : BaseSkyMap
