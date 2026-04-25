@@ -7,6 +7,7 @@ from . import (
     measure_cell_coadds,
     measure_coadds,
     measure_coadds_sim,
+    photoz,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "measure_coadds",
     "measure_cell_coadds",
     "measure_coadds_sim",
+    "photoz",
 ]

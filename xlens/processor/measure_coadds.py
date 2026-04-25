@@ -86,7 +86,7 @@ class MeasureCoaddsPipeConnections(
         minimum=0,
         multiple=False,
     )
-    output_catalog = cT.Output(
+    anacalCatalog = cT.Output(
         doc="anacal catalog",
         name="{coaddName}_coadd_anacal_catalog",
         dimensions=("skymap", "tract", "patch"),
@@ -351,4 +351,4 @@ class MeasureCoaddsPipe(PipelineTask):
                 tractInfo.getWcs().getPixelScale().asArcseconds()
             )
             set_isPrimary(final, skyMap, tractInfo, patchInfo, pixel_scale)
-        return Struct(output_catalog=final)
+        return Struct(anacalCatalog=final)

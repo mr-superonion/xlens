@@ -1,0 +1,273 @@
+# This file is part of pipe_tasks.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+__all__ = [
+    "photoZPipeConfig",
+    "photoZPipe",
+    "photoZPipeConnections",
+]
+
+import gc
+import logging
+import pickle
+from typing import Any
+
+import astropy.table
+import lsst.pipe.base.connectionTypes as cT
+import numpy as np
+from lsst.pex.config import Field, FieldValidationError
+from lsst.pipe.base import (
+    PipelineTask,
+    PipelineTaskConfig,
+    PipelineTaskConnections,
+    Struct,
+)
+from lsst.utils.logging import LsstLogAdapter
+from numpy.typing import NDArray
+
+from ..catalog.redshift import NUM_Z_GRIDS, flexzboostEstimator
+
+POINT_KEYS = ("zmode", "z025", "z160", "z500", "z840", "z975", "zbest")
+
+# (suffix, comp, dg) -- suffix "0" is the undistorted version
+DISTORTIONS = (
+    ("0",  1,  0.00),
+    ("1p", 1,  0.01),
+    ("1m", 1, -0.01),
+    ("2p", 2,  0.01),
+    ("2m", 2, -0.01),
+)
+
+
+class photoZPipeConnections(
+    PipelineTaskConnections,
+    dimensions=("skymap", "tract", "patch"),
+    defaultTemplates={
+        "coaddName": "deep",
+    },
+):
+    anacalCatalog = cT.Input(
+        doc="anacal catalog with per-band fluxes and shear derivatives",
+        name="{coaddName}_coadd_anacal_catalog",
+        dimensions=("skymap", "tract", "patch"),
+        storageClass="ArrowAstropy",
+        multiple=False,
+    )
+    extinction = cT.Input(
+        doc=(
+            "Per-object extinction magnitudes with columns a_g, a_r, ... "
+            "row-matched to anacalCatalog. Optional."
+        ),
+        name="{coaddName}_coadd_anacal_extinction",
+        dimensions=("skymap", "tract", "patch"),
+        storageClass="ArrowAstropy",
+        multiple=False,
+        minimum=0,
+    )
+    redshiftCatalog = cT.Output(
+        doc="FlexZBoost point estimates per object and per distortion.",
+        name="{coaddName}_coadd_anacal_fzb_point",
+        dimensions=("skymap", "tract", "patch"),
+        storageClass="ArrowAstropy",
+    )
+    redshiftPdfs = cT.Output(
+        doc="FlexZBoost p(z) grids with shape (N, ndist, nz).",
+        name="{coaddName}_coadd_anacal_fzb_pdfs",
+        dimensions=("skymap", "tract", "patch"),
+        storageClass="NumpyArray",
+    )
+
+    def __init__(self, *, config=None):
+        super().__init__(config=config)
+        if config is not None and not config.output_pdfs:
+            self.outputs.remove("redshiftPdfs")
+
+
+class photoZPipeConfig(
+    PipelineTaskConfig,
+    pipelineConnections=photoZPipeConnections,
+):
+    model_path = Field[str](
+        doc="Path to the pickled FlexZBoost photo-z model.",
+        default="",
+    )
+    mag_zero = Field[float](
+        doc="Magnitude zero point of the input fluxes.",
+        default=27.0,
+    )
+    flux_name = Field[str](
+        doc="Flux column suffix (e.g. gauss2 -> {band}_fluxgauss2).",
+        default="gauss2",
+    )
+    bands = Field[str](
+        doc="String of band names used as color features, in order.",
+        default="grizy",
+    )
+    ref_band = Field[str](
+        doc="Reference band for the reference magnitude feature.",
+        default="i",
+    )
+    id_column = Field[str](
+        doc="Column used to label rows in the output catalog.",
+        default="object_id",
+    )
+    do_distortions = Field[bool](
+        doc=(
+            "If True run all five shear distortions (0, 1p, 1m, 2p, 2m); "
+            "if False only the undistorted call is made."
+        ),
+        default=True,
+    )
+    output_pdfs = Field[bool](
+        doc="If True also write the full p(z) grid as a second output.",
+        default=False,
+    )
+    include_mag_err = Field[bool](
+        doc="If True include color errors as additional features.",
+        default=False,
+    )
+
+    def validate(self):
+        super().validate()
+        if not self.model_path:
+            raise FieldValidationError(
+                self.__class__.model_path,
+                self,
+                "model_path must be set to a FlexZBoost pickle file.",
+            )
+        if self.ref_band not in self.bands:
+            raise FieldValidationError(
+                self.__class__.ref_band,
+                self,
+                f"ref_band={self.ref_band!r} not in bands={self.bands!r}.",
+            )
+
+    def setDefaults(self):
+        super().setDefaults()
+
+
+class photoZPipe(PipelineTask):
+    _DefaultName = "photoZPipe"
+    ConfigClass = photoZPipeConfig
+
+    def __init__(
+        self,
+        *,
+        config: photoZPipeConfig | None = None,
+        log: logging.Logger | LsstLogAdapter | None = None,
+        initInputs: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(
+            config=config, log=log, initInputs=initInputs, **kwargs
+        )
+        assert isinstance(self.config, photoZPipeConfig)
+        with open(self.config.model_path, "rb") as f:
+            pz_obj = pickle.load(f)
+        self.zobj = flexzboostEstimator(pz_obj=pz_obj)
+        return
+
+    def runQuantum(self, butlerQC, inputRefs, outputRefs):
+        assert isinstance(self.config, photoZPipeConfig)
+        inputs = butlerQC.get(inputRefs)
+
+        anacal_catalog = inputs["anacalCatalog"].as_array()
+        extinction = inputs.get("extinction", None)
+        if extinction is not None:
+            extinction = extinction.as_array()
+
+        outputs = self.run(
+            catalog=anacal_catalog,
+            extinction=extinction,
+        )
+        butlerQC.put(outputs, outputRefs)
+        return
+
+    def run(
+        self,
+        *,
+        catalog: NDArray,
+        extinction: NDArray | None = None,
+        **kwargs,
+    ):
+        assert isinstance(self.config, photoZPipeConfig)
+        cfg = self.config
+
+        if extinction is not None and len(extinction) != len(catalog):
+            raise ValueError(
+                f"extinction length ({len(extinction)}) does not match "
+                f"catalog length ({len(catalog)})"
+            )
+
+        distortions = DISTORTIONS if cfg.do_distortions else DISTORTIONS[:1]
+        n = catalog.shape[0]
+
+        common_kwargs = dict(
+            mag_zero=cfg.mag_zero,
+            flux_name=cfg.flux_name,
+            bands=cfg.bands,
+            ref_band=cfg.ref_band,
+            extinction=extinction,
+            include_mag_err=cfg.include_mag_err,
+            return_pdfs=cfg.output_pdfs,
+        )
+
+        has_id = cfg.id_column in catalog.dtype.names
+        dtype: list = []
+        if has_id:
+            dtype.append((cfg.id_column, catalog.dtype[cfg.id_column]))
+        dtype += [
+            (f"{key}_{suf}", "f4")
+            for suf, _, _ in distortions
+            for key in POINT_KEYS
+        ]
+        points = np.empty(n, dtype=dtype)
+        if has_id:
+            points[cfg.id_column] = catalog[cfg.id_column]
+
+        pdfs: NDArray | None = None
+        if cfg.output_pdfs:
+            pdfs = np.empty(
+                (n, len(distortions), NUM_Z_GRIDS), dtype=np.float32,
+            )
+
+        for i, (suf, comp, dg) in enumerate(distortions):
+            self.log.info(
+                "FlexZBoost distortion suf=%s comp=%d dg=%+0.2f",
+                suf, comp, dg,
+            )
+            res = self.zobj.get_z(
+                src=catalog,
+                comp=comp,
+                dg=dg,
+                **common_kwargs,
+            )
+            for key in POINT_KEYS:
+                points[f"{key}_{suf}"] = res[key]
+            if pdfs is not None:
+                pdfs[:, i, :] = res["pdfs"].astype(np.float32)
+            del res
+            gc.collect()
+
+        result = Struct(redshiftCatalog=astropy.table.Table(points))
+        if cfg.output_pdfs:
+            result.redshiftPdfs = pdfs
+        return result

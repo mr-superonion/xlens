@@ -101,7 +101,7 @@ class MeasureSimsConnections(
         minimum=0,
         deferLoad=True,
     )
-    output_catalog = cT.Output(
+    anacalCatalog = cT.Output(
         doc="Measurement catalog on simulated exposures",
         name="{simCoaddName}_coadd_anacal_catalog",
         dimensions=("skymap", "tract", "patch"),
@@ -432,4 +432,4 @@ class MeasureSimsTask(PipelineTask):
                 tractInfo.getWcs().getPixelScale().asArcseconds()
             )
             set_isPrimary(final, skyMap, tractInfo, patchInfo, pixel_scale)
-        return Struct(output_catalog=final)
+        return Struct(anacalCatalog=final)
