@@ -2,7 +2,9 @@ import numpy as np
 import pytest
 from lsst.afw.image import ExposureF
 from lsst.geom import Box2I, Extent2I, Point2I
+from lsst.meas.base import SkyMapIdGeneratorConfig
 
+from xlens.utils.handle import make_data_id
 from xlens.utils.image import combine_sim_exposures
 
 
@@ -64,3 +66,21 @@ def test_combine_sim_exposures_raises_on_empty_inputs():
     # Also mismatched lengths should raise
     with pytest.raises(ValueError):
         combine_sim_exposures([_make_exposure(1.0, 1.0)], [])
+
+
+def test_make_data_id_catalog_id_sweep_patch():
+    """For tract=0, patch in range(0, 1000) the SkyMapDimensionPacker
+    formula reduces to ``catalog_id = patch + 1_000_000 * tract`` with
+    the stand-in skymap record from ``xlens.utils.handle`` (tract_max=
+    100, patch_nx_max=patch_ny_max=1000), so the catalog_id sequence
+    must equal np.arange(0, 1000).
+    """
+    cfg = SkyMapIdGeneratorConfig()
+    catalog_ids = np.array(
+        [
+            cfg.apply(make_data_id(tract=0, patch=p, band="i")).catalog_id
+            for p in range(0, 1000)
+        ],
+        dtype=np.int64,
+    )
+    np.testing.assert_array_equal(catalog_ids, np.arange(0, 1000))

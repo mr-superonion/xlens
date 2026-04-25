@@ -49,10 +49,10 @@ POINT_KEYS = ("zmode", "z025", "z160", "z500", "z840", "z975", "zbest")
 
 # (suffix, comp, dg) -- suffix "0" is the undistorted version
 DISTORTIONS = (
-    ("0",  1,  0.00),
-    ("1p", 1,  0.01),
+    ("0", 1, 0.00),
+    ("1p", 1, 0.01),
     ("1m", 1, -0.01),
-    ("2p", 2,  0.01),
+    ("2p", 2, 0.01),
     ("2m", 2, -0.01),
 )
 
@@ -124,10 +124,6 @@ class photoZPipeConfig(
     ref_band = Field[str](
         doc="Reference band for the reference magnitude feature.",
         default="i",
-    )
-    id_column = Field[str](
-        doc="Column used to label rows in the output catalog.",
-        default="object_id",
     )
     do_distortions = Field[bool](
         doc=(
@@ -230,18 +226,14 @@ class photoZPipe(PipelineTask):
             return_pdfs=cfg.output_pdfs,
         )
 
-        has_id = cfg.id_column in catalog.dtype.names
-        dtype: list = []
-        if has_id:
-            dtype.append((cfg.id_column, catalog.dtype[cfg.id_column]))
+        dtype: list = [("object_id", catalog.dtype["object_id"])]
         dtype += [
             (f"{key}_{suf}", "f4")
             for suf, _, _ in distortions
             for key in POINT_KEYS
         ]
         points = np.empty(n, dtype=dtype)
-        if has_id:
-            points[cfg.id_column] = catalog[cfg.id_column]
+        points["object_id"] = catalog["object_id"]
 
         pdfs: NDArray | None = None
         if cfg.output_pdfs:
