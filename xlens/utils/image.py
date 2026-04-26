@@ -252,12 +252,18 @@ def get_psf_array(
     x_min, y_min = lsst_bbox.getMin().getX(), lsst_bbox.getMin().getY()
     x_max, y_max = lsst_bbox.getMax().getX(), lsst_bbox.getMax().getY()
 
-    # Ensure grid stays within the bbox and aligned with step size
+    # Ensure grid stays within the bbox and aligned with step size.
+    # For patches small enough that the strided grid is empty, fall
+    # back to a single center sample so we still get one PSF estimate.
     width = (x_max - x_min) // dg * dg
     height = (y_max - y_min) // dg * dg
 
     x_array = np.arange(x_min + 20, x_min + width - 20, dg, dtype=int)
     y_array = np.arange(y_min + 20, y_min + height - 20, dg, dtype=int)
+    if len(x_array) == 0:
+        x_array = np.array([(x_min + x_max) // 2], dtype=int)
+    if len(y_array) == 0:
+        y_array = np.array([(y_min + y_max) // 2], dtype=int)
 
     mask_array = None
     out = np.zeros(shape=(npix, npix), dtype=np.float32)
@@ -277,8 +283,8 @@ def get_psf_array(
             except Exception:
                 continue
 
-    if ncount < 2:
-        raise ValueError("Could not find enough valid PSF samples to average.")
+    if ncount < 1:
+        raise ValueError("Could not find any valid PSF sample.")
 
     out /= ncount
     psf_rcut = npix // 2 - 2

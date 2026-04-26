@@ -125,58 +125,36 @@ def _multiband_moments2ell(
     bands: list[str],
     C0: float,
     prefix: str,
-    w_list: list[NDArray],
-    dw_dg1_list: list[NDArray],
-    dw_dg2_list: list[NDArray],
+    w_list: list[float],
     moments: dict[str, dict[str, NDArray]],
     dmom_dg: dict[str, dict[str, NDArray]],
 ) -> NDArray:
-    W = np.sum(w_list, axis=0)
-    dW_dg1 = np.sum(dw_dg1_list, axis=0)
-    dW_dg2 = np.sum(dw_dg2_list, axis=0)
-
-    # --- weight-average raw moments ---------------------------------------
-    mc = {}
-    for mn in ["m00", "m20", "m22c", "m22s"]:
-        s = np.zeros(nobj)
-        for ib, b in enumerate(bands):
-            s += w_list[ib] * moments[b][mn]
-        mc[mn] = s / W
-
-    # --- combined moment derivatives with weight response -----------------
+    """Combine per-band shapelet moments into a single shape catalog
+    using user-supplied constant per-band weights ``w_list`` (which
+    must already be normalized to sum to 1).  Because the weights are
+    constant in shear, ``dw/dg`` is zero and only the per-band moment
+    derivatives contribute to the combined response.
+    """
     deriv_names = [
         "dm00_dg1", "dm00_dg2",
         "dm20_dg1", "dm20_dg2",
         "dm22c_dg1", "dm22c_dg2",
         "dm22s_dg1", "dm22s_dg2",
     ]
-    moment_for_deriv = {
-        "dm00_dg1": "m00", "dm00_dg2": "m00",
-        "dm20_dg1": "m20", "dm20_dg2": "m20",
-        "dm22c_dg1": "m22c", "dm22c_dg2": "m22c",
-        "dm22s_dg1": "m22s", "dm22s_dg2": "m22s",
-    }
-    dw_for_deriv = {
-        "dm00_dg1": (dw_dg1_list, dW_dg1),
-        "dm00_dg2": (dw_dg2_list, dW_dg2),
-        "dm20_dg1": (dw_dg1_list, dW_dg1),
-        "dm20_dg2": (dw_dg2_list, dW_dg2),
-        "dm22c_dg1": (dw_dg1_list, dW_dg1),
-        "dm22c_dg2": (dw_dg2_list, dW_dg2),
-        "dm22s_dg1": (dw_dg1_list, dW_dg1),
-        "dm22s_dg2": (dw_dg2_list, dW_dg2),
-    }
+
+    mc: dict[str, NDArray] = {}
+    for mn in ["m00", "m20", "m22c", "m22s"]:
+        s = np.zeros(nobj)
+        for ib, b in enumerate(bands):
+            s += w_list[ib] * moments[b][mn]
+        mc[mn] = s
+
     dc: dict[str, NDArray] = {}
     for dg_name in deriv_names:
-        mn = moment_for_deriv[dg_name]
-        dw_list, dW = dw_for_deriv[dg_name]
-        num = np.zeros(nobj)
+        s = np.zeros(nobj)
         for ib, b in enumerate(bands):
-            num += (
-                w_list[ib] * dmom_dg[b][dg_name]
-                + dw_list[ib] * moments[b][mn]
-            )
-        dc[dg_name] = num / W - mc[mn] * dW / W
+            s += w_list[ib] * dmom_dg[b][dg_name]
+        dc[dg_name] = s
 
     return _moments_to_ell(
         nobj, C0, prefix,
@@ -188,12 +166,45 @@ def _multiband_moments2ell(
     )
 
 
+def _normalize_band_weights(
+    bands: list[str],
+    weights: list[float] | None,
+) -> list[float]:
+    """Return per-band constant weights normalized to sum to 1.  If
+    ``weights`` is ``None`` an equal 1/N split is used.
+    """
+    n = len(bands)
+    if n == 0:
+        raise ValueError("bands must be non-empty")
+    if weights is None:
+        return [1.0 / n] * n
+    if len(weights) != n:
+        raise ValueError(
+            f"weights length {len(weights)} does not match "
+            f"bands length {n}"
+        )
+    arr = np.asarray(weights, dtype=np.float64)
+    if np.any(arr < 0):
+        raise ValueError("weights must be non-negative")
+    total = float(arr.sum())
+    if not (total > 0):
+        raise ValueError("weights must have positive sum")
+    return (arr / total).tolist()
+
+
 def multiband_shapelets_linear2ell(
     cat: NDArray,
     bands: list[str],
     C0: float,
     prefix: str = "fpfs1_",
+    weights: list[float] | None = None,
 ) -> NDArray:
+    """Combine per-band linear-mode shapelets into a single shape catalog.
+
+    Per-band weights are user-supplied constants (no per-object error
+    needed); they are normalized to sum to 1.  Because the weights are
+    constant in shear, ``dw/dg1`` and ``dw/dg2`` are exactly zero.
+    """
     p = prefix
     nobj = len(cat)
 
@@ -206,23 +217,11 @@ def multiband_shapelets_linear2ell(
         "n40", "n42c", "n42s", "n44c", "n44s",
     ]
 
-    # --- per-band weights and their shear derivatives ---------------------
-    w_list = []
-    dw_dg1_list = []
-    dw_dg2_list = []
+    w_list = _normalize_band_weights(bands, weights)
+
     moments: dict[str, dict[str, NDArray]] = {}
     noises: dict[str, dict[str, NDArray]] = {}
-
     for b in bands:
-        flux = cat[f"{b}_flux_gauss2"]
-        err_sq = cat[f"{b}_flux_gauss2_err"] ** 2
-        w_list.append(flux * flux / err_sq)
-        dw_dg1_list.append(
-            2.0 * flux * cat[f"{b}_dflux_gauss2_dg1"] / err_sq
-        )
-        dw_dg2_list.append(
-            2.0 * flux * cat[f"{b}_dflux_gauss2_dg2"] / err_sq
-        )
         moments[b] = {
             mn: np.asarray(cat[f"{b}_{p}{mn}"], dtype=np.float64)
             for mn in moment_names
@@ -244,9 +243,7 @@ def multiband_shapelets_linear2ell(
         dmom_dg[b] = _linear_modes_to_derivs(xx)
 
     return _multiband_moments2ell(
-        nobj, bands, C0, prefix,
-        w_list, dw_dg1_list, dw_dg2_list,
-        moments, dmom_dg,
+        nobj, bands, C0, prefix, w_list, moments, dmom_dg,
     )
 
 
@@ -255,7 +252,12 @@ def multiband_shapelets2ell(
     bands: list[str],
     C0: float,
     prefix: str = "fpfs1_",
+    weights: list[float] | None = None,
 ) -> NDArray:
+    """Combine per-band shapelets (with explicit dm/dg columns) into a
+    single shape catalog using user-supplied constant per-band weights
+    (normalized to sum to 1).  ``dw/dg`` is zero by construction.
+    """
     p = prefix
     nobj = len(cat)
 
@@ -267,23 +269,11 @@ def multiband_shapelets2ell(
         "dm22s_dg1", "dm22s_dg2",
     ]
 
-    # --- per-band weights and their shear derivatives ---------------------
-    w_list = []
-    dw_dg1_list = []
-    dw_dg2_list = []
+    w_list = _normalize_band_weights(bands, weights)
+
     moments: dict[str, dict[str, NDArray]] = {}
     dmom_dg: dict[str, dict[str, NDArray]] = {}
-
     for b in bands:
-        flux = cat[f"{b}_flux_gauss2"]
-        err_sq = cat[f"{b}_flux_gauss2_err"] ** 2
-        w_list.append(flux * flux / err_sq)
-        dw_dg1_list.append(
-            2.0 * flux * cat[f"{b}_dflux_gauss2_dg1"] / err_sq
-        )
-        dw_dg2_list.append(
-            2.0 * flux * cat[f"{b}_dflux_gauss2_dg2"] / err_sq
-        )
         moments[b] = {
             mn: np.asarray(cat[f"{b}_{p}{mn}"], dtype=np.float64)
             for mn in moment_names
@@ -294,9 +284,7 @@ def multiband_shapelets2ell(
         }
 
     return _multiband_moments2ell(
-        nobj, bands, C0, prefix,
-        w_list, dw_dg1_list, dw_dg2_list,
-        moments, dmom_dg,
+        nobj, bands, C0, prefix, w_list, moments, dmom_dg,
     )
 
 

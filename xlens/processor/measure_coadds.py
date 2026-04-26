@@ -57,6 +57,10 @@ from ..processor.anacal import AnacalTask
 from ..processor.fpfs import FpfsMeasurementTask
 from ..simulator.sim import MultibandSimTask
 from ..utils.catalog import set_isPrimary
+from ..utils.columns import (
+    rename_flux_to_photoz_format,
+    select_detection_columns,
+)
 
 band_order = "ugrizy"
 
@@ -161,7 +165,7 @@ class MeasureCoaddsPipeConnections(
     )
     mask = cT.Input(
         doc="Combined mask from bad pixels and bright stars across all bands.",
-        name="{coaddName}_coadd_systematics_mask",
+        name="deep_coadd_systematics_mask",
         storageClass="Mask",
         dimensions=("skymap", "tract", "patch"),
         minimum=0,
@@ -383,6 +387,7 @@ class MeasureCoaddsPipe(PipelineTask):
         self,
         *,
         exposure_handles_dict: dict,
+        seed: int,
         corr_array: np.ndarray | None,
         skyMap,
         tract: int,
@@ -399,13 +404,11 @@ class MeasureCoaddsPipe(PipelineTask):
         handle = exposure_handles_dict[band]
         exposure = handle.get()
         exposure.getPsf().setCacheCapacity(self.config.psfCache)
-
         noise_corr = self._load_noise_corr(corr_array, band)
-        idGenerator = self.config.idGenerator.apply(handle.dataId)
         data = self.anacal.prepare_data(
             exposure=exposure,
             band=band,
-            seed=idGenerator.catalog_id,
+            seed=seed,
             noise_corr=noise_corr,
             detection=None,
             skyMap=skyMap,
@@ -420,6 +423,7 @@ class MeasureCoaddsPipe(PipelineTask):
         *,
         detection: NDArray,
         exposure_handles_dict: dict,
+        seed: int,
         corr_array: np.ndarray | None,
         skyMap,
         tract: int,
@@ -434,12 +438,10 @@ class MeasureCoaddsPipe(PipelineTask):
         for band, handle in exposure_handles_dict.items():
             exposure = handle.get()
             exposure.getPsf().setCacheCapacity(self.config.psfCache)
-
             noise_corr = self._load_noise_corr(corr_array, band)
-            idGenerator = self.config.idGenerator.apply(handle.dataId)
             data = self.anacal.prepare_data(
                 exposure=exposure,
-                seed=idGenerator.catalog_id,
+                seed=seed,
                 noise_corr=noise_corr,
                 detection=detection,
                 band=band,
@@ -448,25 +450,9 @@ class MeasureCoaddsPipe(PipelineTask):
                 patch=patch,
                 mask_array=mask_array,
             )
-
-            colnames = [
-                "flux_gauss0", "dflux_gauss0_dg1", "dflux_gauss0_dg2",
-                "flux_gauss2", "dflux_gauss2_dg1", "dflux_gauss2_dg2",
-                "flux_gauss4", "dflux_gauss4_dg1", "dflux_gauss4_dg2",
-                'flux_gauss0_err', 'flux_gauss2_err', 'flux_gauss4_err',
-            ]
-            out = []
-            out.append(
-                rfn.repack_fields(
-                    self.anacal.run(**data)[colnames]
-                )
+            per_band.append(
+                rename_flux_to_photoz_format(self.fpfs.run(**data), band)
             )
-            out.append(self.fpfs.run(**data))
-            res = rfn.merge_arrays(out, flatten=True)
-            # Prefix all per-band columns: g_flux_gauss0, r_flux_gauss0, ...
-            map_dict = {name: f"{band}_{name}" for name in colnames}
-            res = rfn.rename_fields(res, map_dict)
-            per_band.append(res)
 
         return rfn.merge_arrays(per_band, flatten=True)
 
@@ -503,6 +489,13 @@ class MeasureCoaddsPipe(PipelineTask):
             detection step is skipped and this catalog is used directly
             for forced measurement.
         """
+        # Seed is band-independent under the default
+        # SkyMapIdGeneratorConfig (n_bands=0), so any handle in the dict
+        # gives the same catalog_id.  Use the first one to avoid hard-
+        # coding "i".
+        first_handle = next(iter(exposure_handles_dict.values()))
+        idGenerator = self.config.idGenerator.apply(first_handle.dataId)
+        seed = idGenerator.catalog_id
         if mask is not None:
             mask_array = mask.getArray()
         else:
@@ -512,6 +505,7 @@ class MeasureCoaddsPipe(PipelineTask):
         else:
             det_cat = self._detect(
                 exposure_handles_dict=exposure_handles_dict,
+                seed=seed,
                 corr_array=corr_array,
                 skyMap=skyMap,
                 tract=tract,
@@ -521,13 +515,16 @@ class MeasureCoaddsPipe(PipelineTask):
         force_cat = self._force(
             detection=det_cat,
             exposure_handles_dict=exposure_handles_dict,
+            seed=seed,
             corr_array=corr_array,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
             mask_array=mask_array,
         )
-        final = rfn.merge_arrays([det_cat, force_cat], flatten=True)
+        final = rfn.merge_arrays(
+            [select_detection_columns(det_cat), force_cat], flatten=True,
+        )
         if skyMap is not None:
             # Use skymap's patchInfo for is_primary (not exposure bbox)
             tractInfo = skyMap[tract]
