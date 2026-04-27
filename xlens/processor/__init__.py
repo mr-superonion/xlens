@@ -6,6 +6,7 @@ from . import (
     match,
     measure_cell_coadds,
     measure_coadds,
+    merge,
     photoz,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "match",
     "measure_coadds",
     "measure_cell_coadds",
+    "merge",
     "photoz",
 ]

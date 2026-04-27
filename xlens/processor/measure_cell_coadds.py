@@ -55,8 +55,8 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-from ..processor.anacal import AnacalTask
-from ..processor.fpfs import FpfsMeasurementTask
+from .anacal import AnacalTask
+from .fpfs import FpfsMeasurementTask
 from ..utils.catalog import set_isPrimary
 from ..utils.columns import (
     rename_flux_to_photoz_format,
@@ -673,6 +673,15 @@ class MeasureCellCoaddsPipe(PipelineTask):
             raise RuntimeError("No objects found in any cell")
 
         output = np.concatenate(cell_results)
+        # Stable per-object IDs derived from the patch-level seed. Used
+        # downstream by ``photoZPipe`` and any object-level joiners.
+        object_ids = (
+            np.int64(seed) * np.int64(1_000_000)
+            + np.arange(len(output), dtype=np.int64)
+        )
+        output = rfn.append_fields(
+            output, "object_id", object_ids, usemask=False,
+        )
         if skyMap is not None:
             # Use skymap's patchInfo (not MultipleCellCoadd.inner_bbox)
             # for is_primary deduplication. The skymap patch inner bbox

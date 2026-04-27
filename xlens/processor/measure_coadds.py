@@ -23,7 +23,6 @@ __all__ = [
     "MeasureCoaddsPipeConfig",
     "MeasureCoaddsPipe",
     "MeasureCoaddsPipeConnections",
-    "SimulatedExposureHandle",
 ]
 
 import dataclasses
@@ -53,67 +52,17 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-from ..processor.anacal import AnacalTask
-from ..processor.fpfs import FpfsMeasurementTask
+from .anacal import AnacalTask
+from .fpfs import FpfsMeasurementTask
 from ..simulator.sim import MultibandSimTask
 from ..utils.catalog import set_isPrimary
 from ..utils.columns import (
     rename_flux_to_photoz_format,
     select_detection_columns,
 )
+from ..utils.handle import SimulatedExposureHandle
 
 band_order = "ugrizy"
-
-
-class SimulatedExposureHandle:
-    """Lazy stand-in for a butler ``DeferredDatasetHandle`` whose
-    ``.get()`` produces a freshly simulated exposure for one band.
-
-    Provides the same ``.get()`` / ``.dataId`` interface used by
-    :class:`MeasureCoaddsPipe`, so the same downstream code path can
-    measure both real coadds and simulated exposures without branching.
-    """
-
-    def __init__(
-        self,
-        *,
-        simulator: MultibandSimTask,
-        tract_info,
-        patch: int,
-        band: str,
-        seed: int,
-        truthCatalog,
-        data_id: DataCoordinate,
-        psf_array: NDArray | None = None,
-        corr_array: NDArray | None = None,
-        mask: MaskX | None = None,
-    ):
-        self._simulator = simulator
-        self._tract_info = tract_info
-        self._patch = patch
-        self._band = band
-        self._seed = seed
-        self._truthCatalog = truthCatalog
-        self._psf_array = psf_array
-        self._corr_array = corr_array
-        self._mask = mask
-        self.dataId = data_id
-
-    def get(self) -> ExposureF:
-        kwargs: dict[str, Any] = {
-            "tract_info": self._tract_info,
-            "patch_id": self._patch,
-            "band": self._band,
-            "seed": self._seed,
-            "truthCatalog": self._truthCatalog,
-        }
-        if self._psf_array is not None:
-            kwargs["psfArray"] = self._psf_array
-        if self._corr_array is not None:
-            kwargs["noiseCorrArray"] = self._corr_array
-        if self._mask is not None:
-            kwargs["mask"] = self._mask
-        return self._simulator.run(**kwargs).simExposure
 
 
 class MeasureCoaddsPipeConnections(
