@@ -7,11 +7,10 @@ import fitsio
 import numpy as np
 from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 from mpi4py import MPI
-from numpy.lib import recfunctions as rfn
 
-from xlens.process_pipe.anacal_detect import (
-    AnacalDetectPipe,
-    AnacalDetectPipeConfig,
+from xlens.processor.measure_coadds import (
+    MeasureCoaddsPipe,
+    MeasureCoaddsPipeConfig,
 )
 from xlens.processor.match import (
     matchPipe,
@@ -22,6 +21,7 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+from xlens.utils.handle import make_exposure_handles
 
 COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()
@@ -47,7 +47,7 @@ parser.add_argument(
     "--start", type=int, default=0, help="start id (inclusive)",
 )
 parser.add_argument(
-    "--end", type=int, default=2, help="end id (exclusive)",
+    "--end", type=int, default=10, help="end id (exclusive)",
 )
 parser.add_argument(
     "--shear", type=float, default=0.02, help="Shear value",
@@ -58,10 +58,6 @@ parser.add_argument(
 parser.add_argument(
     "--layout", type=str, default="grid",
     choices=["grid", "random"], help="layout",
-)
-parser.add_argument(
-    "--band", type=str, default="a",
-    help="single band (g,r,i,z,y) or a for multiband",
 )
 args, unknown_args = parser.parse_known_args()
 if unknown_args:
@@ -78,9 +74,8 @@ if iend - istart <= 0:
     raise ValueError(f"Invalid range: start={istart}, end={iend}")
 
 
-band = args.band
-if band not in "ugrizya":
-    raise ValueError("Band not in [ugrizya]")
+bands = ["u", "g", "r", "i", "z", "y"]
+band_order_str = "ugrizy"
 if args.layout == "random":
     extend_ratio = 1.08
 elif args.layout == "grid":
@@ -105,7 +100,7 @@ config.decList = [0.0]
 config.radiusList = [0.1]
 config.rotation = 0.0
 config.projection = "TAN"
-config.patchInnerDimensions = [4000, 4000]
+config.patchInnerDimensions = [1500, 1500]
 config.patchBorder = 0
 config.pixelScale = 0.20
 config.tractOverlap = 0.0
@@ -136,16 +131,17 @@ cfg_sim.use_real_psf = True
 sim_task = MultibandSimTask(config=cfg_sim)
 
 # ------------------------------
-# Detection Task
+# Detection + per-band forced measurement (all bands together)
 # ------------------------------
-detect_config = AnacalDetectPipeConfig()
+detect_config = MeasureCoaddsPipeConfig()
 detect_config.anacal.sigma_arcsec = 0.50
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
-detect_config.do_fpfs = (args.band == "a")
+detect_config.fpfs.do_noise_bias_correction = True
 detect_config.fpfs.sigma_shapelets1 = 0.50 * np.sqrt(2.0)
-det_task = AnacalDetectPipe(config=detect_config)
+detect_config.use_sim = False
+det_task = MeasureCoaddsPipe(config=detect_config)
 
 config = matchPipeConfig()
 config.mag_zero = 31.4
@@ -173,102 +169,82 @@ full = fitsio.read(
 )
 n_patches = len(full)
 
-colnames = [
-    "flux_gauss2",
-    "dflux_gauss2_dg1",
-    "dflux_gauss2_dg2",
-    "flux_gauss2_err",
-    "flux_gauss4",
-    "dflux_gauss4_dg1",
-    "dflux_gauss4_dg2",
-    "flux_gauss4_err",
-]
-
 
 # ------------------------------
 # Work loop (unique seeds per RANK if MPI)
 # ------------------------------
 for i in range(istart, iend):
     sim_seed = i * SIZE + RANK
-
-    if band == "a":
-        detection = None
-        outfname = os.path.join(
-            outdir, "cat-%05d.fits" % (sim_seed)
-        )
-        band_use = "i"
-    else:
-        detfname = os.path.join(
-            outdir, "cat-%05d.fits" % (sim_seed)
-        )
-        if os.path.isfile(detfname):
-            detection = fitsio.read(detfname)
-        else:
-            raise ValueError("Run detection with band=a first")
-        outfname = os.path.join(
-            outdir, "cat-%05d-%s.fits" % (sim_seed, band)
-        )
-        band_use = band
+    outfname = os.path.join(outdir, "cat-%05d.fits" % (sim_seed))
     if os.path.isfile(outfname):
         continue
 
     entry = full[int(sim_seed % n_patches)]
     tid = int(entry["tract"])
     pid = int(entry["patch_id"])
-    noiseCorrArray = fitsio.read(
-        f"{pscratch}/deepCoadd_noisecorr/{tid}/{pid}/{band_use}/noise.fits"
-    )
-    psfArray = fitsio.read(
-        f"{pscratch}/deepCoadd_psf/{tid}/{pid}/{band_use}/psf.fits"
-    )
 
     truth_catalog = cat_task.run(
         tract_info=skymap[tract_id],
         seed=sim_seed,
     ).truthCatalog
-    truthfname = os.path.join(
-        outdir, "truth-%05d.fits" % (sim_seed)
-    )
-    if (band == "a") and (not os.path.isfile(truthfname)):
+    truthfname = os.path.join(outdir, "truth-%05d.fits" % (sim_seed))
+    if not os.path.isfile(truthfname):
         fitsio.write(truthfname, truth_catalog)
 
-    exposure = sim_task.run(
-        tract_info=skymap[tract_id],
-        patch_id=patch_id,
-        band=band_use,
-        seed=sim_seed,
-        truthCatalog=truth_catalog,
-        psfArray=psfArray,
-        noiseCorrArray=noiseCorrArray,
-    ).simExposure
-    prep = det_task.anacal.prepare_data(
-        exposure=exposure,
-        seed=100000 + sim_seed,
-        detection=detection,
-        band=band_use,
+    exposures: dict = {}
+    corr_array_6 = None
+    for bb in bands:
+        noiseCorrArray = fitsio.read(
+            f"{pscratch}/deepCoadd_noisecorr/{tid}/{pid}/{bb}/noise.fits"
+        )
+        psfArray = fitsio.read(
+            f"{pscratch}/deepCoadd_psf/{tid}/{pid}/{bb}/psf.fits"
+        )
+        exposures[bb] = sim_task.run(
+            tract_info=skymap[tract_id],
+            patch_id=patch_id,
+            band=bb,
+            seed=sim_seed,
+            truthCatalog=truth_catalog,
+            psfArray=psfArray,
+            noiseCorrArray=noiseCorrArray,
+        ).simExposure
+        if corr_array_6 is None:
+            ny, nx = noiseCorrArray.shape
+            corr_array_6 = np.zeros((len(band_order_str), ny, nx))
+        corr_array_6[band_order_str.index(bb)] = noiseCorrArray
+
+    handles = make_exposure_handles(
+        exposures,
+        skymap="test",
+        tract=tract_id,
+        patch=patch_id,
+        skyMap=skymap,
+    )
+    res = det_task.run(
+        exposure_handles_dict=handles,
+        corr_array=corr_array_6,
         skyMap=skymap,
         tract=tract_id,
         patch=patch_id,
-        noise_corr=noiseCorrArray,
-    )
-    res = det_task.run_measure(prep)
-    if band != "a":
-        res = rfn.repack_fields(res[colnames])
-        map_dict = {name: f"{band}_" + name for name in colnames}
-        res = rfn.rename_fields(res, map_dict)
-    else:
-        res = match_task.run(
-            skyMap=skymap,
-            tract=tract_id,
-            patch=patch_id,
-            catalog=res,
-            dm_catalog=None,
-            truth_catalog=truth_catalog,
-        ).catalog
-        res = res[res["wsel"] > 1e-7]
+        mask=None,
+        detection=None,
+        seed=100000 + sim_seed,
+    ).anacalCatalog
+
+    res = match_task.run(
+        skyMap=skymap,
+        tract=tract_id,
+        patch=patch_id,
+        catalog=res,
+        dm_catalog=None,
+        truth_catalog=truth_catalog,
+    ).catalog
+    res = res[res["wsel"] > 1e-7]
     fitsio.write(outfname, res)
+
     # clean up
-    del prep, exposure, truth_catalog, res
+    del exposures, handles, truth_catalog, res
     gc.collect()
 
 # Ensure all ranks finish (no-op in single process)

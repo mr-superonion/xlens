@@ -151,7 +151,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stamp-dim",
         type=int,
-        default=3900,
+        default=1350,
         help="Usable image dimension (pixels) for density/area calc.",
     )
     parser.add_argument(
@@ -220,20 +220,8 @@ def base_path(pscratch, layout, target, shear):
 
 
 def cat_read(base_dir: str, sim_id: int, mode: int, bands: str) -> np.ndarray:
-    arrs = []
     main_path = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}.fits")
-    main = fitsio.read(main_path, columns=colnames)
-    arrs.append(main)
-
-    for b in bands:
-        fn = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}-{b}.fits")
-        barr = fitsio.read(fn)
-        arrs.append(barr)
-
-    merged = rfn.merge_arrays(
-        arrs, flatten=True, asrecarray=False, usemask=False,
-    )
-    return rfn.repack_fields(merged)
+    return fitsio.read(main_path)
 
 
 def per_rank_work(
@@ -262,7 +250,7 @@ def per_rank_work(
         "dg": dg,
         "z_width95_max": z_width95_max,
         "mag_zero": mag_zero,
-        "flux_name": "gauss2",
+        "flux_name": "fpfs1",
         "bands": bands,
         "ref_band": "i",
     }

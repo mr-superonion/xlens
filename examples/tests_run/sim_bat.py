@@ -9,9 +9,9 @@ from lsst.afw.image import ExposureF
 from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 from mpi4py import MPI
 
-from xlens.process_pipe.anacal_detect import (
-    AnacalDetectPipe,
-    AnacalDetectPipeConfig,
+from xlens.processor.measure_coadds import (
+    MeasureCoaddsPipe,
+    MeasureCoaddsPipeConfig,
 )
 from xlens.processor.match import (
     matchPipe,
@@ -22,6 +22,7 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import IASimConfig, IASimTask
+from xlens.utils.handle import make_exposure_handles
 
 COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()
@@ -47,7 +48,7 @@ parser.add_argument(
     "--start", type=int, default=0, help="start id (inclusive)",
 )
 parser.add_argument(
-    "--end", type=int, default=2, help="end id (exclusive)",
+    "--end", type=int, default=10, help="end id (exclusive)",
 )
 parser.add_argument(
     "--shear", type=float, default=0.02, help="Shear value",
@@ -100,7 +101,7 @@ config.decList = [0.0]
 config.radiusList = [0.1]
 config.rotation = 0.0
 config.projection = "TAN"
-config.patchInnerDimensions = [4000, 4000]
+config.patchInnerDimensions = [1500, 1500]
 config.patchBorder = 0
 config.pixelScale = pixel_scale
 config.tractOverlap = 0.0
@@ -130,16 +131,17 @@ cfg_sim.ia_amplitude = 0.0
 sim_task = IASimTask(config=cfg_sim)
 
 # ------------------------------
-# Detection Task
+# Detection + i-band forced measurement
 # ------------------------------
-detect_config = AnacalDetectPipeConfig()
+detect_config = MeasureCoaddsPipeConfig()
 detect_config.anacal.sigma_arcsec = 0.38
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
-detect_config.do_fpfs = True
+detect_config.fpfs.do_noise_bias_correction = True
 detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
-det_task = AnacalDetectPipe(config=detect_config)
+detect_config.use_sim = False
+det_task = MeasureCoaddsPipe(config=detect_config)
 
 config = matchPipeConfig()
 config.mag_zero = 30.0
@@ -198,19 +200,24 @@ for i in range(istart, iend):
     else:
         exposure = ExposureF.readFits(expfname)
 
-    prep = det_task.anacal.prepare_data(
-        exposure=exposure,
-        seed=100000 + sim_seed,
-        noise_corr=None,
-        detection=None,
-        band=band,
+    handles = make_exposure_handles(
+        {band: exposure},
+        skymap="test",
+        tract=tract_id,
+        patch=patch_id,
+        skyMap=skymap,
+    )
+    res = det_task.run(
+        exposure_handles_dict=handles,
+        corr_array=None,
         skyMap=skymap,
         tract=tract_id,
         patch=patch_id,
-        noise_array=None,
-    )
-    res = det_task.run_measure(prep)
-    del prep, exposure
+        mask=None,
+        detection=None,
+        seed=100000 + sim_seed,
+    ).anacalCatalog
+    del exposure, handles
     res = match_task.run(
         skyMap=skymap,
         tract=tract_id,

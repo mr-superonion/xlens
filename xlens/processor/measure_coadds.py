@@ -282,17 +282,20 @@ class MeasureCoaddsPipe(PipelineTask):
         psf_array: NDArray | None,
         corr_array: NDArray | None,
         mask: MaskX | None,
+        seed: int | None = None,
     ) -> dict:
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
+        if seed is None:
+            band_data_id = DataCoordinate.standardize(
+                quantum_data_id, band="i",
+            )
+            seed = self.config.idGenerator.apply(band_data_id).catalog_id
+
         sky_info = makeSkyInfo(skyMap, tractId=tract, patchId=patch)
         tract_info = sky_info.tractInfo
 
         handles: dict = {}
         for band in self.config.sim_bands:
-            band_data_id = DataCoordinate.standardize(
-                quantum_data_id, band=band,
-            )
-            seed = self.config.idGenerator.apply(band_data_id).catalog_id
             handles[band] = SimulatedExposureHandle(
                 simulator=self.simulator,
                 tract_info=tract_info,
@@ -415,6 +418,7 @@ class MeasureCoaddsPipe(PipelineTask):
         patch: int,
         mask: MaskX | None = None,
         detection: NDArray | None = None,
+        seed: int | None = None,
         **kwargs,
     ):
         """Run detection (or use external catalog) then forced measurement.
@@ -442,9 +446,10 @@ class MeasureCoaddsPipe(PipelineTask):
         # SkyMapIdGeneratorConfig (n_bands=0), so any handle in the dict
         # gives the same catalog_id.  Use the first one to avoid hard-
         # coding "i".
-        first_handle = next(iter(exposure_handles_dict.values()))
-        idGenerator = self.config.idGenerator.apply(first_handle.dataId)
-        seed = idGenerator.catalog_id
+        if seed is None:
+            first_handle = next(iter(exposure_handles_dict.values()))
+            idGenerator = self.config.idGenerator.apply(first_handle.dataId)
+            seed = idGenerator.catalog_id
         if mask is not None:
             mask_array = mask.getArray()
         else:

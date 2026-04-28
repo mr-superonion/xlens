@@ -7,11 +7,10 @@ import fitsio
 import numpy as np
 from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 from mpi4py import MPI
-from numpy.lib import recfunctions as rfn
 
-from xlens.process_pipe.anacal_detect import (
-    AnacalDetectPipe,
-    AnacalDetectPipeConfig,
+from xlens.processor.measure_coadds import (
+    MeasureCoaddsPipe,
+    MeasureCoaddsPipeConfig,
 )
 from xlens.processor.match import (
     matchPipe,
@@ -22,11 +21,7 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
-from xlens.utils.image import (
-    combine_sim_exposures,
-    estimate_noise_variance,
-    generate_pure_noise,
-)
+from xlens.utils.handle import make_exposure_handles
 
 COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()
@@ -52,7 +47,7 @@ parser.add_argument(
     "--start", type=int, default=0, help="start id (inclusive)",
 )
 parser.add_argument(
-    "--end", type=int, default=2, help="end id (exclusive)",
+    "--end", type=int, default=10, help="end id (exclusive)",
 )
 parser.add_argument(
     "--shear", type=float, default=0.02, help="Shear value",
@@ -63,10 +58,6 @@ parser.add_argument(
 parser.add_argument(
     "--layout", type=str, default="grid",
     choices=["grid", "random"], help="layout",
-)
-parser.add_argument(
-    "--band", type=str, default="a",
-    help="single band (g,r,i,z,y) or None for multiband",
 )
 args, unknown_args = parser.parse_known_args()
 if unknown_args:
@@ -83,9 +74,7 @@ if iend - istart <= 0:
     raise ValueError(f"Invalid range: start={istart}, end={iend}")
 
 
-band = args.band
-if band not in "ugrizy":
-    band = None
+bands = ["u", "g", "r", "i", "z", "y"]
 if args.layout == "random":
     extend_ratio = 1.08
 elif args.layout == "grid":
@@ -111,7 +100,7 @@ config.decList = [0.0]
 config.radiusList = [0.1]
 config.rotation = 0.0
 config.projection = "TAN"
-config.patchInnerDimensions = [4000, 4000]
+config.patchInnerDimensions = [1500, 1500]
 config.patchBorder = 0
 config.pixelScale = pixel_scale
 config.tractOverlap = 0.0
@@ -137,20 +126,20 @@ cat_task = CatalogShearTask(config=cfg_cat)
 cfg_sim = MultibandSimConfig()
 cfg_sim.survey_name = "lsst"
 cfg_sim.draw_image_noise = True
-# cfg_sim.truncate_stamp_size = 65
 sim_task = MultibandSimTask(config=cfg_sim)
 
 # ------------------------------
-# Detection Task
+# Detection + per-band forced measurement (all bands together)
 # ------------------------------
-detect_config = AnacalDetectPipeConfig()
+detect_config = MeasureCoaddsPipeConfig()
 detect_config.anacal.sigma_arcsec = 0.38
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
-detect_config.do_fpfs = (band is None)
+detect_config.fpfs.do_noise_bias_correction = True
 detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
-det_task = AnacalDetectPipe(config=detect_config)
+detect_config.use_sim = False
+det_task = MeasureCoaddsPipe(config=detect_config)
 
 config = matchPipeConfig()
 config.mag_zero = 30.0
@@ -170,89 +159,13 @@ outdir = os.path.join(
 )
 os.makedirs(outdir, exist_ok=True)
 
-colnames = [
-    "flux_gauss0",
-    "dflux_gauss0_dg1",
-    "dflux_gauss0_dg2",
-    "flux_gauss0_err",
-    "flux_gauss2",
-    "dflux_gauss2_dg1",
-    "dflux_gauss2_dg2",
-    "flux_gauss2_err",
-    "flux_gauss4",
-    "dflux_gauss4_dg1",
-    "dflux_gauss4_dg2",
-    "flux_gauss4_err",
-]
-
-
-def get_exposure(truth_catalog, sim_seed, band=None):
-    if band is None:
-        explist = []
-        noiselist = []
-        for bb in ["g", "r", "i", "z"]:
-            exp = sim_task.run(
-                tract_info=skymap[tract_id],
-                patch_id=patch_id,
-                band=bb,
-                seed=sim_seed,
-                truthCatalog=truth_catalog,
-            ).simExposure
-            nx = exp.getWidth()
-            ny = exp.getHeight()
-            noise_variance = estimate_noise_variance(
-                exp.variance.array, exp.mask.array,
-            )
-            explist.append(
-                exp
-            )
-            noise_array = generate_pure_noise(
-                ny=ny,
-                nx=nx,
-                pixel_scale=pixel_scale,
-                seed=100000 + sim_seed,
-                band=bb,
-                noise_variance=noise_variance,
-                noise_corr=None,
-                noiseId=0,
-                rotId=args.rot,
-            )
-            noiselist.append(noise_array)
-        exposure, noise_array = combine_sim_exposures(explist, noiselist)
-    else:
-        exposure = sim_task.run(
-            tract_info=skymap[tract_id],
-            patch_id=patch_id,
-            band=band,
-            seed=sim_seed,
-            truthCatalog=truth_catalog,
-        ).simExposure
-        noise_array = None
-    return exposure, noise_array
-
 
 # ------------------------------
 # Work loop (unique seeds per RANK if MPI)
 # ------------------------------
 for i in range(istart, iend):
     sim_seed = i * SIZE + RANK
-    if band is not None:
-        outfname = os.path.join(
-            outdir, "cat-%05d-%s.fits" % (sim_seed, band)
-        )
-        detfname = os.path.join(
-            outdir, "cat-%05d.fits" % (sim_seed)
-        )
-        if os.path.isfile(detfname):
-            detection = fitsio.read(detfname)
-        else:
-            raise ValueError("Run detection with band=None first")
-    else:
-        outfname = os.path.join(
-            outdir, "cat-%05d.fits" % (sim_seed)
-        )
-        detection = None
-
+    outfname = os.path.join(outdir, "cat-%05d.fits" % (sim_seed))
     if os.path.isfile(outfname):
         continue
 
@@ -260,46 +173,52 @@ for i in range(istart, iend):
         tract_info=skymap[tract_id],
         seed=sim_seed,
     ).truthCatalog
-    truthfname = os.path.join(
-        outdir, "truth-%05d.fits" % (sim_seed)
-    )
-    if (band is None) and (not os.path.isfile(truthfname)):
+    truthfname = os.path.join(outdir, "truth-%05d.fits" % (sim_seed))
+    if not os.path.isfile(truthfname):
         fitsio.write(truthfname, truth_catalog)
 
-    exposure, noise_array = get_exposure(
-        truth_catalog=truth_catalog, sim_seed=sim_seed, band=band,
+    exposures = {
+        bb: sim_task.run(
+            tract_info=skymap[tract_id],
+            patch_id=patch_id,
+            band=bb,
+            seed=sim_seed,
+            truthCatalog=truth_catalog,
+        ).simExposure
+        for bb in bands
+    }
+
+    handles = make_exposure_handles(
+        exposures,
+        skymap="test",
+        tract=tract_id,
+        patch=patch_id,
+        skyMap=skymap,
     )
-    prep = det_task.anacal.prepare_data(
-        exposure=exposure,
-        seed=100000 + sim_seed,
-        noise_corr=None,
-        detection=detection,
-        band=band,
+    res = det_task.run(
+        exposure_handles_dict=handles,
+        corr_array=None,
         skyMap=skymap,
         tract=tract_id,
         patch=patch_id,
-        noise_array=noise_array,
-    )
-    res = det_task.run_measure(prep)
+        mask=None,
+        detection=None,
+        seed=100000 + sim_seed,
+    ).anacalCatalog
 
-    if band is not None:
-        map_dict = {name: f"{band}_" + name for name in colnames}
-        res = rfn.repack_fields(res[colnames])
-        res = rfn.rename_fields(res, map_dict)
-    else:
-        res = match_task.run(
-            skyMap=skymap,
-            tract=tract_id,
-            patch=patch_id,
-            catalog=res,
-            dm_catalog=None,
-            truth_catalog=truth_catalog,
-        ).catalog
-        res = res[res["wsel"] > 1e-7]
+    res = match_task.run(
+        skyMap=skymap,
+        tract=tract_id,
+        patch=patch_id,
+        catalog=res,
+        dm_catalog=None,
+        truth_catalog=truth_catalog,
+    ).catalog
+    res = res[res["wsel"] > 1e-7]
     fitsio.write(outfname, res)
 
     # clean up
-    del prep, exposure, truth_catalog, res
+    del exposures, handles, truth_catalog, res
     gc.collect()
 
 # Ensure all ranks finish (no-op in single process)
