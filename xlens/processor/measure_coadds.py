@@ -69,9 +69,9 @@ class MeasureCoaddsPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
     defaultTemplates={
-        "coaddName": "deep",
-        "mode": "0",
-        "rotId": "0",
+        "coaddName": "deep_coadd",
+        "outName": "deep_coadd",
+        "catName": "cat"
     },
 ):
     skyMap = cT.Input(
@@ -82,7 +82,7 @@ class MeasureCoaddsPipeConnections(
     )
     exposure = cT.Input(
         doc="Input coadd image (one per band).",
-        name="{coaddName}_coadd",
+        name="{coaddName}",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
@@ -91,38 +91,35 @@ class MeasureCoaddsPipeConnections(
     )
     truthCatalog = cT.Input(
         doc="Truth catalog used to drive image simulation.",
-        name="{coaddName}_{mode}_rot{rotId}_coadd_truthCatalog",
+        name="{catName}_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),
         minimum=0,
     )
     psfArray = cT.Input(
         doc="Stacked PSF image array (6 x npix x npix).",
-        name="{coaddName}_coadd_systematics_psfcentered_6bands",
+        name="{coaddName}_systematics_psfcentered_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
-        minimum=0,
     )
     noiseCorrArray = cT.Input(
         doc="Stacked noise correlation array (6 x npix x npix).",
-        name="{coaddName}_coadd_systematics_noisecorr_6bands",
+        name="{coaddName}_systematics_noisecorr_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
-        minimum=0,
     )
     mask = cT.Input(
         doc="Combined mask from bad pixels and bright stars across all bands.",
-        name="deep_coadd_systematics_mask",
+        name="{coaddName}_systematics_mask",
         storageClass="Mask",
         dimensions=("skymap", "tract", "patch"),
-        minimum=0,
         multiple=False,
     )
     anacalCatalog = cT.Output(
         doc="anacal catalog",
-        name="{coaddName}_coadd_anacal_catalog",
+        name="{outName}_coadd_anacal_catalog",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -133,15 +130,6 @@ class MeasureCoaddsPipeConnections(
             return
 
         coaddName = config.connections.coaddName
-        # When operating on simulated exposures we use the bundled-mode
-        # output naming so different simulation modes/rotations don't
-        # collide.
-        if coaddName == "sim":
-            self.anacalCatalog = dataclasses.replace(
-                self.anacalCatalog,
-                name="{coaddName}_{mode}_rot{rotId}_coadd_anacal_catalog",
-            )
-
         # Drop inputs that don't apply to the chosen mode.
         if config.use_sim:
             self.inputs.discard("exposure")
@@ -235,12 +223,22 @@ class MeasureCoaddsPipe(PipelineTask):
         tract = int(butlerQC.quantum.dataId["tract"])
         patch = int(butlerQC.quantum.dataId["patch"])
 
+        seed: int | None = None
         if self.config.use_sim:
             truthCatalog = inputs.get("truthCatalog", None)
             if truthCatalog is None:
                 raise RuntimeError(
                     "use_sim=True requires a truthCatalog input."
                 )
+            # ``butlerQC.quantum.dataId`` may not carry dimension records,
+            # but every input ref's dataId does. ``psfArray`` is a
+            # required ``(skymap, tract, patch)`` input under use_sim, so
+            # use it to seed the IdGenerator (matches the patch-level
+            # quantum dimensions). The same seed is forwarded to ``run``
+            # because ``SimulatedExposureHandle`` carries no dataId.
+            seed = self.config.idGenerator.apply(
+                inputRefs.psfArray.dataId
+            ).catalog_id
             exposure_handles_dict = self._build_simulated_handles(
                 quantum_data_id=butlerQC.quantum.dataId,
                 truthCatalog=truthCatalog,
@@ -250,6 +248,7 @@ class MeasureCoaddsPipe(PipelineTask):
                 psf_array=inputs.get("psfArray", None),
                 corr_array=inputs.get("noiseCorrArray", None),
                 mask=inputs.get("mask", None),
+                seed=seed,
             )
         else:
             exposure_handles = inputs.get("exposure", None)
@@ -268,6 +267,7 @@ class MeasureCoaddsPipe(PipelineTask):
             tract=tract,
             patch=patch,
             mask=inputs.get("mask", None),
+            seed=seed,
         )
         butlerQC.put(outputs, outputRefs)
 
@@ -303,7 +303,6 @@ class MeasureCoaddsPipe(PipelineTask):
                 band=band,
                 seed=seed,
                 truthCatalog=truthCatalog,
-                data_id=band_data_id,
                 psf_array=psf_array,
                 corr_array=corr_array,
                 mask=mask,

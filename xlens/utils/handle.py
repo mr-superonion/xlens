@@ -148,7 +148,6 @@ class SimulatedExposureHandle:
         band: str,
         seed: int,
         truthCatalog,
-        data_id: DataCoordinate,
         psf_array: NDArray | None = None,
         corr_array: NDArray | None = None,
         mask: MaskX | None = None,
@@ -162,7 +161,6 @@ class SimulatedExposureHandle:
         self._psf_array = psf_array
         self._corr_array = corr_array
         self._mask = mask
-        self.dataId = data_id
 
     def get(self) -> ExposureF:
         kwargs: dict[str, Any] = {

@@ -566,9 +566,12 @@ class MultibandSimTask(PipelineTask):
                 noise_corr = noiseCorrArray[isys]
             else:
                 noise_corr = noiseCorrArray
-            # collect variance
-            variance = np.amax(noise_corr) * var_ratio
-            # normalized noise correlation function
+            # Peak of the auto-covariance is the per-pixel noise variance
+            # at the input data's zero point; normalise to 1 at the
+            # centre and use that peak directly as the variance. Caller
+            # is responsible for ensuring ``mag_zero`` matches the data
+            # behind the array (no ``var_ratio`` rescaling here).
+            variance = float(np.amax(noise_corr))
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
             assert noise_corr[ny // 2, nx // 2] == 1
