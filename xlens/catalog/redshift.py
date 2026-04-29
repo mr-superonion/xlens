@@ -22,7 +22,7 @@ def risk(zx: float, p_norm: np.ndarray) -> float:
     t = dz / GAMMA_RISK
     t2 = t * t
     loss_vec = t2 / (1.0 + t2)  # same as 1 - 1/(1+t2)
-    return float(simpson(p_norm * loss_vec, Z_GRIDS))
+    return float(simpson(y=p_norm * loss_vec, x=Z_GRIDS))
 
 
 def get_point_estimate(p):

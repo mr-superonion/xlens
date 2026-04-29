@@ -59,6 +59,10 @@ parser.add_argument(
     "--layout", type=str, default="grid",
     choices=["grid", "random"], help="layout",
 )
+parser.add_argument(
+    "--band", type=str, default="u,g,r,i,z,y",
+    help="comma-separated bands list (e.g. 'r,i,z')",
+)
 args, unknown_args = parser.parse_known_args()
 if unknown_args:
     print("[warn] Ignoring unknown args:", unknown_args)
@@ -74,7 +78,9 @@ if iend - istart <= 0:
     raise ValueError(f"Invalid range: start={istart}, end={iend}")
 
 
-bands = ["u", "g", "r", "i", "z", "y"]
+bands = [b.strip() for b in args.band.split(",") if b.strip()]
+if not bands:
+    raise ValueError(f"Invalid --band argument: {args.band!r}")
 if args.layout == "random":
     extend_ratio = 1.08
 elif args.layout == "grid":
@@ -100,7 +106,7 @@ config.decList = [0.0]
 config.radiusList = [0.1]
 config.rotation = 0.0
 config.projection = "TAN"
-config.patchInnerDimensions = [1500, 1500]
+config.patchInnerDimensions = [256, 256]
 config.patchBorder = 0
 config.pixelScale = pixel_scale
 config.tractOverlap = 0.0
@@ -139,7 +145,7 @@ detect_config.anacal.do_noise_bias_correction = True
 detect_config.fpfs.do_noise_bias_correction = True
 detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
 detect_config.use_sim = False
-det_task = MeasureCoaddsPipe(config=detect_config)
+meas_task = MeasureCoaddsPipe(config=detect_config)
 
 config = matchPipeConfig()
 config.mag_zero = 30.0
@@ -195,7 +201,7 @@ for i in range(istart, iend):
         patch=patch_id,
         skyMap=skymap,
     )
-    res = det_task.run(
+    res = meas_task.run(
         exposure_handles_dict=handles,
         corr_array=None,
         skyMap=skymap,

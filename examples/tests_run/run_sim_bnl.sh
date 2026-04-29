@@ -17,7 +17,7 @@ SHEAR="0.02"                # --shear F
 KAPPA="0.0"                 # --kappa F
 ROT="0"                     # --rot N
 LAYOUT="random"             # --layout STR
-BAND="a"                    # --band STR
+BAND="u,g,r,i,z,y"          # --band STR
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="sim.py"
