@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -54,9 +58,7 @@ jobs:
           # Use mamba (installed by setup-miniconda) to reduce solve time / churn
           conda config --set always_yes yes
 
-          mamba install --file requirements.txt -c conda-forge
-          conda clean -a -y
-          mamba install --file requirements_test.txt -c conda-forge
+          mamba install --file requirements.txt --file requirements_test.txt -c conda-forge
           conda clean -a -y
 
           python -m pip install --upgrade pip setuptools
