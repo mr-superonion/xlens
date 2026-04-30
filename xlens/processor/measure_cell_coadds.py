@@ -68,7 +68,7 @@ from ..utils.image import prepare_data_cell
 class MeasureCellCoaddsPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
-    defaultTemplates={"coaddName": "deep"},
+    defaultTemplates={"inputName": "deep_coadd_cell"},
 ):
     skyMap = cT.Input(
         doc="SkyMap to use in processing",
@@ -78,7 +78,7 @@ class MeasureCellCoaddsPipeConnections(
     )
     cellCoadd = cT.Input(
         doc="Input cell-based coadd image",
-        name="{coaddName}_coadd_cell_predetection",
+        name="{inputName}_predetection",
         storageClass="MultipleCellCoadd",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
@@ -86,7 +86,7 @@ class MeasureCellCoaddsPipeConnections(
     )
     mask = cT.Input(
         doc="Combined mask from cell-based systematics.",
-        name="deep_coadd_cell_systematics_mask",
+        name="{inputName}_systematics_mask",
         storageClass="Mask",
         dimensions=("skymap", "tract", "patch"),
         minimum=0,
@@ -94,7 +94,7 @@ class MeasureCellCoaddsPipeConnections(
     )
     anacalCatalog = cT.Output(
         doc="anacal catalog",
-        name="{coaddName}_cell_coadd_anacal_catalog",
+        name="{inputName}_anacal_catalog",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )

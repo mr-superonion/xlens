@@ -61,12 +61,12 @@ class photoZPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
     defaultTemplates={
-        "coaddName": "deep",
+        "inputName": "deep_coadd_cell",
     },
 ):
     anacalCatalog = cT.Input(
         doc="anacal catalog with per-band fluxes and shear derivatives",
-        name="{coaddName}_coadd_anacal_catalog",
+        name="{inputName}_anacal_catalog",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,
@@ -76,7 +76,7 @@ class photoZPipeConnections(
             "Per-object extinction magnitudes with columns a_g, a_r, ... "
             "row-matched to anacalCatalog. Optional."
         ),
-        name="{coaddName}_coadd_anacal_extinction",
+        name="extinction",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
         multiple=False,
@@ -84,13 +84,13 @@ class photoZPipeConnections(
     )
     redshiftCatalog = cT.Output(
         doc="FlexZBoost point estimates per object and per distortion.",
-        name="{coaddName}_coadd_anacal_fzb_point",
+        name="{inputName}_anacal_fzb_point",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
     redshiftPdfs = cT.Output(
         doc="FlexZBoost p(z) grids with shape (N, ndist, nz).",
-        name="{coaddName}_coadd_anacal_fzb_pdfs",
+        name="{inputName}_anacal_fzb_pdfs",
         dimensions=("skymap", "tract", "patch"),
         storageClass="NumpyArray",
     )

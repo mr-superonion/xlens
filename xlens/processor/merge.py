@@ -9,8 +9,8 @@ combined ellipticity using the linearized tract WCS at each detection
 position.
 
 The connection schema mirrors :mod:`xlens.analysis.cluster` — inputs are
-templated by ``coaddName`` and ``dataType`` so the same task can merge
-catalogs at any of the standard pipeline stages.
+templated by ``inputName``  so the same task can merge catalogs at any of the
+standard pipeline stages.
 """
 
 __all__ = [
@@ -43,8 +43,7 @@ class MergePipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract"),
     defaultTemplates={
-        "coaddName": "deep",
-        "dataType": "catalog",
+        "inputName": "deep_coadd_cell",
     },
 ):
     """Butler connections for :class:`MergePipe`."""
@@ -57,7 +56,7 @@ class MergePipeConnections(
     )
     srcList = cT.Input(
         doc="Per-patch anacal catalogs to merge for one tract.",
-        name="{coaddName}_coadd_anacal_{dataType}",
+        name="{inputName}_anacal_catalog",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
         multiple=True,
@@ -70,7 +69,7 @@ class MergePipeConnections(
             "the photo-z columns are joined onto each patch's catalog "
             "before stacking."
         ),
-        name="{coaddName}_coadd_anacal_fzb_point",
+        name="{inputName}_anacal_fzb_point",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
         multiple=True,
@@ -79,7 +78,7 @@ class MergePipeConnections(
     )
     mergedCatalog = cT.Output(
         doc="Tract-level merged anacal catalog (band-combined + WCS-corrected).",
-        name="{coaddName}_coadd_anacal_{dataType}_merged",
+        name="{inputName}_anacal_merged",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),
     )

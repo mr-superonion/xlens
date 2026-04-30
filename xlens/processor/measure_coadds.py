@@ -69,7 +69,7 @@ class MeasureCoaddsPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
     defaultTemplates={
-        "coaddName": "deep_coadd",
+        "inputName": "deep_coadd",
         "outName": "deep_coadd",
         "catName": "cat"
     },
@@ -82,7 +82,7 @@ class MeasureCoaddsPipeConnections(
     )
     exposure = cT.Input(
         doc="Input coadd image (one per band).",
-        name="{coaddName}",
+        name="{inputName}",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
@@ -98,28 +98,28 @@ class MeasureCoaddsPipeConnections(
     )
     psfArray = cT.Input(
         doc="Stacked PSF image array (6 x npix x npix).",
-        name="{coaddName}_systematics_psfcentered_6bands",
+        name="{inputName}_systematics_psfcentered_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
     )
     noiseCorrArray = cT.Input(
         doc="Stacked noise correlation array (6 x npix x npix).",
-        name="{coaddName}_systematics_noisecorr_6bands",
+        name="{inputName}_systematics_noisecorr_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
     )
     mask = cT.Input(
         doc="Combined mask from bad pixels and bright stars across all bands.",
-        name="{coaddName}_systematics_mask",
+        name="{inputName}_systematics_mask",
         storageClass="Mask",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
     )
     anacalCatalog = cT.Output(
         doc="anacal catalog",
-        name="{outName}_coadd_anacal_catalog",
+        name="{outName}_anacal_catalog",
         dimensions=("skymap", "tract", "patch"),
         storageClass="ArrowAstropy",
     )
@@ -129,7 +129,7 @@ class MeasureCoaddsPipeConnections(
         if config is None:
             return
 
-        coaddName = config.connections.coaddName
+        inputName = config.connections.inputName
         # Drop inputs that don't apply to the chosen mode.
         if config.use_sim:
             self.inputs.discard("exposure")
@@ -477,6 +477,13 @@ class MeasureCoaddsPipe(PipelineTask):
         )
         final = rfn.merge_arrays(
             [select_detection_columns(det_cat), force_cat], flatten=True,
+        )
+        object_ids = (
+            np.int64(seed) * np.int64(1_000_000)
+            + np.arange(len(final), dtype=np.int64)
+        )
+        final = rfn.append_fields(
+            final, "object_id", object_ids, usemask=False,
         )
         if skyMap is not None:
             # Use skymap's patchInfo for is_primary (not exposure bbox)
