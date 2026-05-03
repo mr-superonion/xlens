@@ -58,6 +58,7 @@ from ..simulator.sim import MultibandSimTask
 from ..utils.catalog import set_isPrimary
 from ..utils.columns import (
     rename_flux_to_photoz_format,
+    select_band_gauss_fluxes,
     select_detection_columns,
 )
 from ..utils.handle import SimulatedExposureHandle
@@ -401,9 +402,15 @@ class MeasureCoaddsPipe(PipelineTask):
                 patch=patch,
                 mask_array=mask_array,
             )
-            per_band.append(
-                rename_flux_to_photoz_format(self.fpfs.run(**data), band)
+            cat = rename_flux_to_photoz_format(self.fpfs.run(**data), band)
+            gauss_cat = select_band_gauss_fluxes(
+                self.anacal.run(**data), band,
             )
+            if gauss_cat is not None:
+                cat = np.asarray(
+                    rfn.merge_arrays([cat, gauss_cat], flatten=True)
+                )
+            per_band.append(cat)
 
         return rfn.merge_arrays(per_band, flatten=True)
 

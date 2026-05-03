@@ -214,34 +214,6 @@ class AnacalTask(Task):
             catalog["dec"] = dec
         return catalog
 
-    def prepare_cell_data(self, cell_coadd):
-        assert isinstance(self.config, AnacalConfig)
-        npix = self.config.npix
-        pixel_scale = float(cell_coadd.wcs.getPixelScale().asArcseconds())
-        blocks = utils.image.get_blocks_cells(
-            cell_coadd=cell_coadd,
-            pixel_scale=pixel_scale,
-            npix=npix,
-        )
-
-        psf_array = np.zeros(
-            shape=(npix, npix),
-            dtype=np.float64,
-        )
-        ncount = 0
-        for bb in blocks:
-            psf_array += bb.psf_array
-            ncount += 1
-
-        if ncount < 2:
-            raise ValueError(
-                "Could not find enough valid PSF samples to average."
-            )
-        psf_array /= ncount
-        psf_rcut = npix // 2 - 2
-        utils.image.truncate_square(psf_array, psf_rcut)
-        return psf_array, blocks
-
     def prepare_data(
         self,
         *,

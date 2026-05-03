@@ -34,6 +34,7 @@ from typing import Any, List, Sequence
 import anacal
 import astropy
 import lsst.geom as lsst_geom
+import lsst.pex.exceptions as pexExcept
 import numpy as np
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
@@ -323,54 +324,6 @@ def get_blocks(
     return new_blocks
 
 
-def get_blocks_cells(
-    *, cell_coadd, pixel_scale, npix
-):
-    x_start_coadd = cell_coadd.outer_bbox.beginX
-    y_start_coadd = cell_coadd.outer_bbox.beginY
-    blocks = []
-    for index, cell in enumerate(cell_coadd.cells.values()):
-        p0 = None
-        psf_image = getattr(cell, "psf_image", None)
-        if psf_image is not None:
-            p0 = getattr(psf_image, "array", None)
-        if (p0 is not None) and np.isfinite(p0).all():
-            xmin = cell.outer.bbox.beginX - x_start_coadd
-            ymin = cell.outer.bbox.beginY - y_start_coadd
-            xmax = cell.outer.bbox.endX - x_start_coadd
-            ymax = cell.outer.bbox.endY - y_start_coadd
-            xmin_in = max(
-                cell.inner.bbox.beginX - x_start_coadd,
-                xmin + 10,
-            )
-            ymin_in = max(
-                cell.inner.bbox.beginY - y_start_coadd,
-                ymin + 10,
-            )
-            xmax_in = min(
-                cell.inner.bbox.endX - x_start_coadd,
-                xmax - 10,
-            )
-            ymax_in = min(
-                cell.inner.bbox.endY - y_start_coadd,
-                ymax - 10,
-            )
-            xcen = int((xmin + xmax) // 2)
-            ycen = int((ymin + ymax) // 2)
-            bb = anacal.geometry.block(
-                xcen, ycen, xmin, ymin, xmax, ymax, xmin_in, ymin_in, xmax_in,
-                ymax_in, pixel_scale, index,
-            )
-            bb.psf_array = resize_array(
-                p0,
-                (npix, npix),
-            )
-            norm = np.sum(bb.psf_array)
-            bb.psf_array = bb.psf_array / norm
-            blocks.append(bb)
-    return blocks
-
-
 def stack_psfs_cells(
     *, cell_coadd, npix
 ):
@@ -571,32 +524,50 @@ def prepare_psf_array_cell(
 
 def prepare_mask(
     image_array: NDArray,
-    mask_array_raw: NDArray,
+    mask_object,
     variance_array: NDArray,
-    bitv: int,
+    badMaskPlanes: List[str],
+    original_mask_array: NDArray | None = None,
 ) -> NDArray:
     """Build a combined mask from raw mask, variance, and image planes.
 
-    Pixels are flagged if they match ``bitv`` in the raw mask or if
-    the image value is below -6 sigma (based on the variance plane).
+    Resolves ``badMaskPlanes`` against ``mask_object`` (an LSST
+    ``Mask`` instance) to compute the bitmask, OR-flags any pixel
+    matching that bitmask, and additionally flags pixels whose image
+    value drops below -6 sigma (using the variance plane).
+
+    If ``original_mask_array`` is provided (e.g., a pre-existing
+    caller-supplied mask), the freshly computed mask is OR-ed with
+    it; otherwise the freshly computed mask is returned as-is.
 
     Parameters
     ----------
     image_array : NDArray
         Science image array.
-    mask_array_raw : NDArray
-        Raw mask plane (e.g., from exposure.mask.array).
+    mask_object : lsst.afw.image.Mask
+        Mask object exposing ``.array`` and ``getPlaneBitMask(plane)``.
+        Plane names absent from this mask are silently skipped.
     variance_array : NDArray
         Variance plane.
-    bitv : int
-        Bitmask value for bad planes.
+    badMaskPlanes : list of str
+        Mask plane names to flag.
+    original_mask_array : NDArray or None, optional
+        Pre-existing mask to OR into the result.  ``None`` (default)
+        means start from scratch.
 
     Returns
     -------
     NDArray
         Combined mask as int16 array.
     """
-    return (
+    bitv = 0
+    for plane in badMaskPlanes:
+        try:
+            bitv |= mask_object.getPlaneBitMask(plane)
+        except pexExcept.InvalidParameterError:
+            pass
+    mask_array_raw = mask_object.array
+    new_mask = (
         ((mask_array_raw & bitv) != 0)
         | (
             image_array
@@ -608,6 +579,9 @@ def prepare_mask(
             )
         )
     ).astype(np.int16)
+    if original_mask_array is None:
+        return new_mask
+    return (new_mask | original_mask_array.astype(np.int16)).astype(np.int16)
 
 
 def prepare_noise_array(
@@ -748,7 +722,7 @@ def prepare_data(
     seed: int,
     noiseId: int = 0,
     rotId: int = 0,
-    npix: int = 32,
+    npix: int = 64,
     noise_corr: NDArray | None = None,
     do_noise_bias_correction: bool = True,
     badMaskPlanes: List[str] = badMaskDefault,
@@ -776,12 +750,11 @@ def prepare_data(
 
     gal_array = np.asarray(exposure.image.array, dtype=np.float64)
 
-    if mask_array is None:
-        bitv = exposure.mask.getPlaneBitMask(badMaskPlanes)
-        mask_array = prepare_mask(
-            exposure.image.array, exposure.mask.array,
-            exposure.variance.array, bitv,
-        )
+    mask_array = prepare_mask(
+        exposure.image.array, exposure.mask,
+        exposure.variance.array, badMaskPlanes,
+        original_mask_array=mask_array,
+    )
 
     anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
 
@@ -840,13 +813,13 @@ def prepare_data(
     }
 
 
-def prepare_data_cell(
+def prepare_data_one_cell(
     *,
     cell,
     band: str | None,
     seed: int,
     mag_zero: float,
-    npix: int = 32,
+    npix: int = 64,
     do_noise_bias_correction: bool = True,
     badMaskPlanes: List[str] = badMaskDefault,
     skyMap=None,
@@ -871,17 +844,11 @@ def prepare_data_cell(
     if psf_array is None:
         psf_array = prepare_psf_array_cell(cell, npix)
 
-    if mask_array is None:
-        bitv = 0
-        for plane in badMaskPlanes:
-            try:
-                bitv |= outer.mask.getPlaneBitMask(plane)
-            except Exception:
-                pass
-        mask_array = prepare_mask(
-            outer.image.array, outer.mask.array,
-            outer.variance.array, bitv,
-        )
+    mask_array = prepare_mask(
+        outer.image.array, outer.mask,
+        outer.variance.array, badMaskPlanes,
+        original_mask_array=mask_array,
+    )
 
     anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
 

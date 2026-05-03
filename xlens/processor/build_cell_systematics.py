@@ -97,7 +97,10 @@ class BuildCellSystematicsConfig(
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
-        default=["BAD", "CR", "NO_DATA", "SAT", "UNMASKEDNAN"],
+        default=[
+            "BAD", "SAT", "CR", "NO_DATA", "UNMASKEDNAN", "CROSSTALK", "INTRP",
+            "STREAK", "VIGNETTED", "CLIPPED",
+        ],
     )
     gaiaPadding = Field[int](
         doc="Padding (pixels) when selecting GAIA sources around the patch.",

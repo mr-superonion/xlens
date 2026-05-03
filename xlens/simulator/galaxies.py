@@ -19,6 +19,11 @@ from . import mog
 from .layout import Layout
 
 
+def _galsim_round_sersic(n, sersic_prec):
+    """Round a Sersic index to the nearest multiple of *sersic_prec*."""
+    return float(int(n / sersic_prec + 0.5)) * sersic_prec
+
+
 def get_catalog(fname):
     """Read a FITS or Parquet catalog and append an ``indices`` column.
 
@@ -810,6 +815,7 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         if bulge_flux > 0:
             bulge_hlr = max(float(entry["bulge_r50"]), 1e-4)
             bulge_n = float(entry["bulge_nsersic"])
+            bulge_n = _galsim_round_sersic(bulge_n, 0.1)
             if force_isotropic:
                 q_b = 1.0
             else:
