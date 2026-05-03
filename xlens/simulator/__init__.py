@@ -18,13 +18,13 @@ from . import (
 )
 
 __all__ = [
-    "sim",
-    "perturbation",
+    "bat",
+    "catalog",
     "defaults",
     "galaxies",
     "layout",
-    "catalog",
-    "noise",
-    "bat",
     "mog",
+    "noise",
+    "perturbation",
+    "sim",
 ]

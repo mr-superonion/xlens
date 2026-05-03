@@ -1,3 +1,3 @@
-from . import catalog, handle, image, random
+from . import catalog, columns, handle, image, random
 
-__all__ = ["image", "random", "catalog", "handle"]
+__all__ = ["catalog", "columns", "handle", "image", "random"]

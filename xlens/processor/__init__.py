@@ -1,8 +1,8 @@
 from . import (
     anacal,
+    build_cell_systematics,
     build_systematics,
     fpfs,
-    hsc,
     match,
     measure_cell_coadds,
     measure_coadds,
@@ -13,8 +13,8 @@ from . import (
 __all__ = [
     "fpfs",
     "anacal",
+    "build_cell_systematics",
     "build_systematics",
-    "hsc",
     "match",
     "measure_coadds",
     "measure_cell_coadds",
