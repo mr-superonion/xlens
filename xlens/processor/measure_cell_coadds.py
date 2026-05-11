@@ -116,6 +116,14 @@ class MeasureCellCoaddsPipeConfig(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
     )
+    do_measure_flux_gauss = Field[bool](
+        doc=(
+            "If True, also run AnaCal forced measurement during the "
+            "force stage to extract per-band Gaussian fluxes and merge "
+            "them into the output catalog."
+        ),
+        default=False,
+    )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
@@ -409,10 +417,10 @@ class MeasureCellCoaddsPipe(PipelineTask):
                     cat = rename_flux_to_photoz_format(
                         self.fpfs.run(**data), band,
                     )
-                    gauss_cat = select_band_gauss_fluxes(
-                        self.anacal.run(**data), band,
-                    )
-                    if gauss_cat is not None:
+                    if self.config.do_measure_flux_gauss:
+                        gauss_cat = select_band_gauss_fluxes(
+                            self.anacal.run(**data), band,
+                        )
                         cat = np.asarray(
                             rfn.merge_arrays(
                                 [cat, gauss_cat], flatten=True,
