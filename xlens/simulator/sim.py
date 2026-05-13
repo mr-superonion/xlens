@@ -61,6 +61,7 @@ from .galaxies import (
     CatSim2017Catalog,
     Flagship2025Catalog,
     OpenUniverse2024RubinRomanCatalog,
+    DiffskyCatalog,
 )
 from .noise import get_noise_array
 
@@ -226,13 +227,13 @@ class MultibandSimConfig(
                 "We require noiseId >=0 ",
             )
         if self.galaxy_type not in [
-            "catsim2017", "RomanRubin2024", "flagship2025",
+            "catsim2017", "RomanRubin2024", "flagship2025", "diffsky"
         ]:
             raise FieldValidationError(
                 self.__class__.galaxy_type,
                 self,
                 "We require galaxy_type in "
-                "['catsim2017', 'RomanRubin2024', 'flagship2025']",
+                "['catsim2017', 'RomanRubin2024', 'flagship2025', 'diffsky']",
             )
 
     def setDefaults(self):
@@ -538,6 +539,8 @@ class MultibandSimTask(PipelineTask):
             GalClass = OpenUniverse2024RubinRomanCatalog
         elif self.config.galaxy_type == "flagship2025":
             GalClass = Flagship2025Catalog
+        elif self.config.galaxy_type == 'diffsky':
+            GalClass = DiffskyCatalog
         else:
             raise ValueError("invalid galaxy_type")
         galaxy_catalog = GalClass.from_array(

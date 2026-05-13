@@ -872,33 +872,30 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         import opencosmo as oc
         import astropy.units as u
         from astropy.coordinates import SkyCoord
-        import healpix as hp
+        import healpy as hp
 
         fname = os.path.join(
             self.catsim_dir,
             "hltds_cosmos_260215_04_07_2026", # this needs to become the folder for diffsky opencosmo
         )
-        if not os.path.isfile(fname):
+        if not os.path.isdir(fname):
             raise FileNotFoundError(
-                "Cannot find 'hltds_cosmos_260215_04_07_2026'",
+                "Cannot find 'hltds_cosmos_260215_04_07_2026' folder",
                 "Please download it and place it under $CATSIM_DIR",
             )
         
         diffsky_path = glob(f'{fname}/lc_cores*.hdf5')
 
-        temp = oc.open(diffsky_path[0], synth_cores=True)
-        temp = temp.select(['ra','dec'])
-        temp = temp.get_data('numpy')
-        temp['hpix'] = hp.ang2pix(32, np.radians(90-temp['dec']), np.radians(temp['ra']), nested=True)
-        hpix = np.mode(temp['hpix'])
-
         cat = oc.open(diffsky_path, synth_cores=True)
-        cat = cat.select(['redshift', 'ellipticity_disk','ellipticity_bulge',
+        cat = cat.select(['ra','dec','redshift', 'ellipticity_disk','ellipticity_bulge',
                           'r50_disk','r50_bulge','psi_bulge','psi_disk',
                           'lsst_u_bulge','lsst_u_disk','lsst_g_bulge','lsst_g_disk',
                           'lsst_r_bulge','lsst_r_disk','lsst_i_bulge','lsst_i_disk',
                           'lsst_z_bulge','lsst_z_disk','lsst_y_bulge','lsst_y_disk',])
-        cat = cat.bound(oc.spatial.HealpixRegion(hpix, 32))
+
+        # hard coded for diffsky 4_7 catalog
+        region = oc.make_cone(SkyCoord(100*u.deg, 86*u.deg), 1*u.deg)
+        cat = cat.bound(region)
 
         if select_observable is not None:
             select_observable = np.atleast_1d(select_observable)
@@ -919,11 +916,17 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         
         cosmology = cat.cosmology
         cat = cat.get_data('numpy')
+        cat['indices'] = np.arange(len(cat['redshift']))
         dA = cosmology.angular_diameter_distance(cat['redshift'])
         for i in ['r50_bulge','r50_disk']:
             theta = (cat[i] * u.kpc / dA)* u.rad
             cat[f'{i}_as'] = theta.to(u.arcsec).value
-        return cat
+
+        dtype = [(name, np.array(values).dtype) for name, values in cat.items()]
+        arr = np.zeros(len(next(iter(cat.values()))), dtype=dtype)
+        for name, values in cat.items():
+            arr[name] = values
+        return arr
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for an nside=32 HEALPix tile."""
