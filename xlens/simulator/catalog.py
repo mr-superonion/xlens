@@ -38,6 +38,7 @@ from .galaxies import (
     CatSim2017Catalog,
     Flagship2025Catalog,
     OpenUniverse2024RubinRomanCatalog,
+    DiffskyCatalog,
 )
 from .perturbation import ShearHalo, ShearLogNormalFlat, ShearRedshift
 
@@ -153,13 +154,13 @@ class CatalogConfig(
                 f"rotId needs to be smaller than {num_rot}",
             )
         if self.galaxy_type not in [
-            "catsim2017", "RomanRubin2024", "flagship2025",
+            "catsim2017", "RomanRubin2024", "flagship2025", "diffsky"
         ]:
             raise FieldValidationError(
                 self.__class__.galaxy_type,
                 self,
                 "We require galaxy_type in "
-                "['catsim2017', 'RomanRubin2024', 'flagship2025']",
+                "['catsim2017', 'RomanRubin2024', 'flagship2025', 'diffsky']",
             )
         lists = {
             "select_observable": self.select_observable,
@@ -231,6 +232,8 @@ class CatalogTask(PipelineTask):
             GalClass = OpenUniverse2024RubinRomanCatalog
         elif self.config.galaxy_type == "flagship2025":
             GalClass = Flagship2025Catalog
+        elif self.config.galaxy_type == "diffsky":
+            GalClass = DiffskyCatalog
         else:
             raise ValueError("invalid galaxy_type")
 

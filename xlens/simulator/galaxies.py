@@ -830,3 +830,158 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
             return galsim.Gaussian(flux=flux, sigma=1e-4)
 
         return galsim.Add(components)
+
+# ---------------------------------------------------------
+# Concrete implementation: OpenUniverse 2024 Rubin–Roman
+# ---------------------------------------------------------
+class DiffskyCatalog(BaseGalaxyCatalog):
+    """DiffSky input galaxies (``Diffsky``).
+
+    Galaxies are decomposed into bulge + disk components, each with
+    its own Sersic index, half-light radius, and axis ratio.  Read 
+    from Diffsky mock catalog.
+    """
+
+    def _read_catalog(
+        self,
+        *,
+        select_observable=None,
+        select_lower_limit=None,
+        select_upper_limit=None,
+    ):
+        """
+        Read the catalog from the cache, but update the position angles each
+        time
+
+        Parameters
+        ----------
+        select_observable: list[str] | str
+            A list of observables to apply selection
+        select_lower_limit: list[float] | ndarray[float]
+            lower limits of the slection cuts
+        select_upper_limit: list[float] | ndarray[float]
+            upper limits of the slection cuts
+
+        Returns
+        -------
+        array with fields
+        """
+        # galaxy catalog
+
+        from glob import glob
+        import opencosmo as oc
+        import astropy.units as u
+        from astropy.coordinates import SkyCoord
+        import healpy as hp
+
+        fname = os.path.join(
+            self.catsim_dir,
+            "hltds_cosmos_260215_04_07_2026", # this needs to become the folder for diffsky opencosmo
+        )
+        if not os.path.isdir(fname):
+            raise FileNotFoundError(
+                "Cannot find 'hltds_cosmos_260215_04_07_2026' folder",
+                "Please download it and place it under $CATSIM_DIR",
+            )
+        
+        diffsky_path = glob(f'{fname}/lc_cores*.hdf5')
+
+        cat = oc.open(diffsky_path, synth_cores=True)
+        cat = cat.select(['ra','dec','redshift', 'ellipticity_disk','ellipticity_bulge',
+                          'r50_disk','r50_bulge','psi_bulge','psi_disk',
+                          'lsst_u_bulge','lsst_u_disk','lsst_g_bulge','lsst_g_disk',
+                          'lsst_r_bulge','lsst_r_disk','lsst_i_bulge','lsst_i_disk',
+                          'lsst_z_bulge','lsst_z_disk','lsst_y_bulge','lsst_y_disk',])
+
+        # hard coded for diffsky 4_7 catalog
+        region = oc.make_cone(SkyCoord(100*u.deg, 86*u.deg), 1*u.deg)
+        cat = cat.bound(region)
+
+        if select_observable is not None:
+            select_observable = np.atleast_1d(select_observable)
+            if not set(select_observable) < set(cat.columns):
+                raise ValueError(
+                    "Selection observables not in the catalog columns"
+                )
+            if select_lower_limit is not None:
+                select_lower_limit = np.atleast_1d(select_lower_limit)
+                assert len(select_observable) == len(select_lower_limit)
+                for nn, ll in zip(select_observable, select_lower_limit):
+                    cat = cat.filter(oc.col(nn) < ll)
+            if select_upper_limit is not None:
+                select_upper_limit = np.atleast_1d(select_upper_limit)
+                assert len(select_observable) == len(select_upper_limit)
+                for nn, ul in zip(select_observable, select_upper_limit):
+                    cat = cat.filter(oc.col(nn) > ul)
+        
+        cosmology = cat.cosmology
+        cat = cat.get_data('numpy')
+        cat['indices'] = np.arange(len(cat['redshift']))
+        dA = cosmology.angular_diameter_distance(cat['redshift'])
+        for i in ['r50_bulge','r50_disk']:
+            theta = (cat[i] * u.kpc / dA)* u.rad
+            cat[f'{i}_as'] = theta.to(u.arcsec).value
+
+        dtype = [(name, np.array(values).dtype) for name, values in cat.items()]
+        arr = np.zeros(len(next(iter(cat.values()))), dtype=dtype)
+        for name, values in cat.items():
+            arr[name] = values
+        return arr
+
+    def _compute_density(self, cat) -> float:
+        """Return density in objects/arcmin^2 for an nside=32 HEALPix tile."""
+        area_tot_arcmin = (
+            60.0**2 * (180.0 / np.pi) ** 2 * 4.0 * np.pi / (12.0 * 32.0**2)
+        )
+        return len(cat) / area_tot_arcmin
+
+    def _half_light_radius(self, catalog) -> np.ndarray:
+        return catalog["r50_disk_as"]
+
+    def _generate_galaxy(
+        self, *, entry, mag_zero, band, survey_name,
+        use_mog=False,
+        force_isotropic=False,
+        **kwargs,
+    ) -> galsim.GSObject:
+        """Build a GalSim galaxy from a Diffsky catalog row."""
+        if use_mog:
+            _simulator = mog
+        else:
+            _simulator = galsim
+        if survey_name == "hsc":
+            sname = "lsst"
+        else:
+            sname = survey_name
+
+        bulge_hlr = entry["r50_bulge_as"]
+        disk_hlr = entry["r50_disk_as"]
+
+        # shear-ellipticity components
+        if force_isotropic:
+            disk_e1, disk_e2 = 0.0, 0.0
+            bulge_e1, bulge_e2 = 0.0, 0.0
+        else:
+            # ellipticity = 1 - q in diffsky catalog
+            disk_e = entry['ellipticity_disk'] / (2 - entry['ellipticity_disk']) 
+            disk_e1 = disk_e * np.cos(2*entry[f'psi_disk'])
+            disk_e2 = disk_e * np.sin(2*entry[f'psi_disk'])
+
+            bulge_e = entry['ellipticity_bulge'] / (2 - entry['ellipticity_bulge'])
+            bulge_e1 = bulge_e * np.cos(2*entry[f'psi_bulge'])
+            bulge_e2 = bulge_e * np.sin(2*entry[f'psi_bulge'])
+
+        disk_mag = entry[f"{sname}_{band}_disk"]
+        disk_flux = 10 ** ((mag_zero - disk_mag) / 2.5)
+        disk = _simulator.Exponential(
+            flux=disk_flux, half_light_radius=disk_hlr,
+        ).shear(g1=disk_e1, g2=disk_e2)
+
+        bulge_mag = entry[f"{sname}_{band}_bulge"]
+        bulge_flux = 10 ** ((mag_zero - bulge_mag) / 2.5)
+        bulge = _simulator.DeVaucouleurs(
+            flux=bulge_flux, half_light_radius=bulge_hlr
+        ).shear(g1=bulge_e1, g2=bulge_e2)
+        
+        gal = (bulge + disk).withFlux(disk_flux + bulge_flux)
+        return gal
