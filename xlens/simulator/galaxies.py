@@ -871,6 +871,8 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         from glob import glob
         import opencosmo as oc
         import astropy.units as u
+        from astropy.coordinates import SkyCoord
+        import healpix as hp
 
         fname = os.path.join(
             self.catsim_dir,
@@ -878,17 +880,25 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         )
         if not os.path.isfile(fname):
             raise FileNotFoundError(
-                "Cannot find 'hltds_cosmos_260215_04_07_2026/'",
+                "Cannot find 'hltds_cosmos_260215_04_07_2026'",
                 "Please download it and place it under $CATSIM_DIR",
             )
-
+        
         diffsky_path = glob(f'{fname}/lc_cores*.hdf5')
+
+        temp = oc.open(diffsky_path[0], synth_cores=True)
+        temp = temp.select(['ra','dec'])
+        temp = temp.get_data('numpy')
+        temp['hpix'] = hp.ang2pix(32, np.radians(90-temp['dec']), np.radians(temp['ra']), nested=True)
+        hpix = np.mode(temp['hpix'])
+
         cat = oc.open(diffsky_path, synth_cores=True)
         cat = cat.select(['redshift', 'ellipticity_disk','ellipticity_bulge',
                           'r50_disk','r50_bulge','psi_bulge','psi_disk',
                           'lsst_u_bulge','lsst_u_disk','lsst_g_bulge','lsst_g_disk',
                           'lsst_r_bulge','lsst_r_disk','lsst_i_bulge','lsst_i_disk',
                           'lsst_z_bulge','lsst_z_disk','lsst_y_bulge','lsst_y_disk',])
+        cat = cat.bound(oc.spatial.HealpixRegion(hpix, 32))
 
         if select_observable is not None:
             select_observable = np.atleast_1d(select_observable)
@@ -917,7 +927,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for diffsky 4_7 catalog."""
-        area_tot_arcmin = 100 * 60 **2                       # ~100 deg^2 for 4_7 diffsky mock
+        area_tot_arcmin = 3 * 60 **2                       # ~100 deg^2 for full 4_7 diffsky mock
         return len(cat) / area_tot_arcmin
 
     def _half_light_radius(self, catalog) -> np.ndarray:
