@@ -24,7 +24,6 @@ from lsst.pipe.base import (
 )
 from lsst.pipe.base import connectionTypes as cT
 
-import xlens
 from xlens.utils.image import resize_array, subpixel_shift
 
 band_order = "ugrizy"
@@ -44,15 +43,6 @@ class BuildSystematicsConnections(
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
         deferLoad=True,
-    )
-    cellexposure = cT.Input(
-        doc="Input cell coadd exposure to build systematics mask from.",
-        name="{coaddName}_coadd_cell_predetection",
-        storageClass="MultipleCellCoadd",
-        dimensions=("skymap", "tract", "patch", "band"),
-        multiple=True,
-        deferLoad=True,
-        minimum=0,
     )
     catalog = cT.Input(
         doc="Catalog containing single-band measurement information.",
@@ -91,12 +81,6 @@ class BuildSystematicsConnections(
     outputStarCentered = cT.Output(
         doc="Stacked star image array (6 x npix x npix).",
         name="deep_coadd_systematics_starcentered_6bands",
-        storageClass="NumpyArray",
-        dimensions=("skymap", "tract", "patch"),
-    )
-    outputPsf = cT.Output(
-        doc="Stacked PSF array (6 x npix x npix).",
-        name="deep_coadd_systematics_psfcentered_6bands_cell",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
     )
@@ -180,17 +164,11 @@ class BuildSystematicsTask(PipelineTask):
             handle.dataId["band"]: handle for handle in exposure_handles
         }
 
-        cell_handles = inputs["cellexposure"]
-        if len(cell_handles) == 0:
-            cell_handles_dict = None
-        else:
-            cell_handles_dict = {h.dataId["band"]: h for h in cell_handles}
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
             tract=tract,
             patch=patch,
             gaia_loader=gaia_loader,
-            cell_handles_dict=cell_handles_dict,
             catalog=inputs["catalog"],
             seed=seed,
         )
@@ -204,7 +182,6 @@ class BuildSystematicsTask(PipelineTask):
         patch: int,
         exposure_handles_dict: dict[str, Any],
         gaia_loader: ReferenceObjectLoader | None = None,
-        cell_handles_dict: None | dict[str, Any] = None,
         catalog=None,
         seed: int | None = None,
         **kwargs,
@@ -288,20 +265,6 @@ class BuildSystematicsTask(PipelineTask):
             copy=False
         )
 
-        if cell_handles_dict is not None:
-            psf_array = np.zeros((6, npix, npix))
-            for i, band in enumerate(band_order):
-                if band in cell_handles_dict.keys():
-                    cell_coadd = cell_handles_dict[band].get()
-                    psf_array[i] = xlens.utils.image.stack_psfs_cells(
-                        cell_coadd=cell_coadd,
-                        npix=npix,
-
-                    )
-                    del cell_coadd
-        else:
-            psf_array = None
-
         # noise correlation
         for band, exp_handle in exposure_handles_dict.items():
             exp = exp_handle.get()
@@ -312,7 +275,6 @@ class BuildSystematicsTask(PipelineTask):
 
         return Struct(
             outputMask=output_msk,
-            outputPsf=psf_array,
             outputNoiseCorr=noise_corr_array,
             outputPsfCentered=psf_centered_array,
             outputStarCentered=star_centered_array,
