@@ -926,8 +926,10 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         return cat
 
     def _compute_density(self, cat) -> float:
-        """Return density in objects/arcmin^2 for diffsky 4_7 catalog."""
-        area_tot_arcmin = 3 * 60 **2                       # ~100 deg^2 for full 4_7 diffsky mock
+        """Return density in objects/arcmin^2 for an nside=32 HEALPix tile."""
+        area_tot_arcmin = (
+            60.0**2 * (180.0 / np.pi) ** 2 * 4.0 * np.pi / (12.0 * 32.0**2)
+        )
         return len(cat) / area_tot_arcmin
 
     def _half_light_radius(self, catalog) -> np.ndarray:
