@@ -930,9 +930,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for an nside=32 HEALPix tile."""
-        area_tot_arcmin = (
-            60.0**2 * (180.0 / np.pi) ** 2 * 4.0 * np.pi / (12.0 * 32.0**2)
-        )
+        area_tot_arcmin = 2*np.pi * (1 - np.cos(np.radians(1))) * (180 * 60/np.pi)**2 # cone with radius 1 deg
         return len(cat) / area_tot_arcmin
 
     def _half_light_radius(self, catalog) -> np.ndarray:
