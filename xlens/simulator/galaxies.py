@@ -894,7 +894,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
                           'lsst_z_bulge','lsst_z_disk','lsst_y_bulge','lsst_y_disk',])
 
         # hard coded for diffsky 4_7 catalog
-        region = oc.make_cone(SkyCoord(100*u.deg, 86*u.deg), 1*u.deg)
+        region = oc.make_cone(SkyCoord(100*u.deg, 84.5*u.deg), 1*u.deg)
         cat = cat.bound(region)
 
         if select_observable is not None:
@@ -907,12 +907,12 @@ class DiffskyCatalog(BaseGalaxyCatalog):
                 select_lower_limit = np.atleast_1d(select_lower_limit)
                 assert len(select_observable) == len(select_lower_limit)
                 for nn, ll in zip(select_observable, select_lower_limit):
-                    cat = cat.filter(oc.col(nn) < ll)
+                    cat = cat.filter(oc.col(nn) > ll)
             if select_upper_limit is not None:
                 select_upper_limit = np.atleast_1d(select_upper_limit)
                 assert len(select_observable) == len(select_upper_limit)
                 for nn, ul in zip(select_observable, select_upper_limit):
-                    cat = cat.filter(oc.col(nn) > ul)
+                    cat = cat.filter(oc.col(nn) <= ul)
         
         cosmology = cat.cosmology
         cat = cat.get_data('numpy')
