@@ -545,7 +545,7 @@ class MultibandSimTask(PipelineTask):
             raise ValueError("invalid galaxy_type")
         galaxy_catalog = GalClass.from_array(
             tract_info=tract_info,
-            table=truthCatalog,
+            truthCatalog=truthCatalog,
             catsim_dir=self.config.catsim_dir,
         )
 

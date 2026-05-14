@@ -110,14 +110,14 @@ class BaseGalaxyCatalog(ABC):
             sep_arcsec=sep_arcsec,
             extend_ratio=extend_ratio,
         )
-        self.input_catalog = self._read_catalog(
+        input_catalog = self._read_catalog(
             select_observable=select_observable,
             select_lower_limit=select_lower_limit,
             select_upper_limit=select_upper_limit,
         )
 
         # density drives how many objects the layout will place
-        density = self._compute_density(self.input_catalog)
+        density = self._compute_density(input_catalog)
         # positions to place galaxies
         shifts_array = layout.get_shifts(
             rng=rng, density=density
@@ -134,9 +134,9 @@ class BaseGalaxyCatalog(ABC):
 
         # choose which catalog rows populate those positions
         num = len(shifts_array)
-        catalog_size = len(self.input_catalog)
+        catalog_size = len(input_catalog)
         if (indice_group_id is None) or (indice_group_id < 0):
-            probs = self._probabilities_for_sampling(self.input_catalog)
+            probs = self._probabilities_for_sampling(input_catalog)
             integers = np.arange(0, catalog_size, dtype=int)
             idx = rng.choice(integers, size=num, p=probs)
         else:
@@ -151,7 +151,10 @@ class BaseGalaxyCatalog(ABC):
             shifts_array = shifts_array[0:num]
         # random orientation for each placed galaxy
         angles = rng.uniform(low=0.0, high=2.0*np.pi, size=num)
-        self.dtype = [
+        # rows of the input galaxy catalog that populate the placed objects
+        selected = input_catalog[idx]
+
+        placement_dtype = [
             ("indices", "i8"),
             ("redshift", "f8"),
             ("angles", "f8"),
@@ -162,25 +165,42 @@ class BaseGalaxyCatalog(ABC):
             ("has_finite_shear", "bool"),
             ("hlr", "f8"),
         ]
-        self.data = np.zeros(num, dtype=self.dtype)
-        self.data["dx"] = shifts_array["dx"]
-        self.data["dy"] = shifts_array["dy"]
-        self.data["angles"] = angles
-        self.lensed = False
-        image_x = self.x_center + self.data["dx"] / ps
-        image_y = self.y_center + self.data["dy"] / ps
+        placement = np.zeros(num, dtype=placement_dtype)
+        placement["dx"] = shifts_array["dx"]
+        placement["dy"] = shifts_array["dy"]
+        placement["angles"] = angles
+        image_x = self.x_center + placement["dx"] / ps
+        image_y = self.y_center + placement["dy"] / ps
         wcs = tract_info.getWcs()
         ra, dec = wcs.pixelToSkyArray(
             x=image_x, y=image_y, degrees=True,
         )
-        self.data["ra"] = ra
-        self.data["dec"] = dec
-        self.data["prelensed_ra"] = ra
-        self.data["prelensed_dec"] = dec
-        self.data["has_finite_shear"] = np.ones(num, dtype=bool)
-        self.data["indices"] = self.input_catalog["indices"][idx]
-        self.data["redshift"] = self.input_catalog["redshift"][idx]
-        self.data["hlr"] = self._build_hlr_array(idx)
+        placement["ra"] = ra
+        placement["dec"] = dec
+        placement["prelensed_ra"] = ra
+        placement["prelensed_dec"] = dec
+        placement["has_finite_shear"] = np.ones(num, dtype=bool)
+        placement["indices"] = selected["indices"]
+        placement["redshift"] = selected["redshift"]
+        placement["hlr"] = self._build_hlr_array(selected)
+
+        # Merge the selected input-catalog rows into ``data`` so the truth
+        # catalog is self-contained: ``from_array`` rebuilds the catalog
+        # directly from this array, with no need to re-read the input
+        # galaxy catalog from disk.  ``selected[extra]`` is a multi-field
+        # view (no copy); ``merge_arrays`` does a single allocation.
+        # Placement columns win over identically named input columns.
+        extra = [
+            name for name in selected.dtype.names
+            if name not in placement.dtype.names
+        ]
+        self.data = np.asarray(
+            rfn.merge_arrays(
+                [placement, selected[extra]], flatten=True, usemask=False,
+            )
+        )
+        self.dtype = self.data.dtype
+        self.lensed = False
         return
 
     def set_z_source(self, redshift):
@@ -224,8 +244,7 @@ class BaseGalaxyCatalog(ABC):
     def _half_light_radius(self, catalog) -> np.ndarray:
         """Return galaxy half-light radii (arcsec) for the given entries."""
 
-    def _build_hlr_array(self, indices: np.ndarray) -> np.ndarray:
-        catalog = self.input_catalog[indices]
+    def _build_hlr_array(self, catalog) -> np.ndarray:
         hlr = self._half_light_radius(catalog)
         return np.asarray(hlr, dtype=float)
 
@@ -241,28 +260,34 @@ class BaseGalaxyCatalog(ABC):
     def from_array(
         cls,
         *,
-        table: np.ndarray,
+        truthCatalog: np.ndarray,
         tract_info: lsst.skymap.tractInfo.ExplicitTractInfo,
-        select_observable: list[str] | str | None = None,
-        select_lower_limit: Iterable[float] | None = None,
-        select_upper_limit: Iterable[float] | None = None,
         catsim_dir: str | None = None,
     ) -> "BaseGalaxyCatalog":
         """
-        Build a catalog directly from a table structured array.
+        Build a catalog directly from a truth-catalog structured array.
+
+        ``truthCatalog`` is the self-contained array produced by
+        :class:`~xlens.simulator.catalog.CatalogTask` (``galaxy_catalog.data``).
+        It carries the galaxy placement and shear columns together with the
+        input galaxy-property columns merged in by ``__init__``, so the input
+        galaxy catalog never has to be re-read from disk here.
 
         Parameters
         ----------
-        table : np.ndarray
-            Structured array with columns 'dx', 'dy', 'indices', 'angles'.
+        truthCatalog : np.ndarray
+            Truth-catalog structured array (``galaxy_catalog.data``).  Must
+            contain at least the ``dx``, ``dy``, ``indices`` and ``angles``
+            columns, along with the per-galaxy property columns consumed by
+            ``_generate_galaxy``.
+        tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
+            Tract information providing the WCS and bounding box.
         catsim_dir : str or None
-            Directory containing input galaxy catalogs.  Falls back to the
-            ``CATSIM_DIR`` environment variable when *None*.
-        select_observable, select_lower_limit, select_upper_limit
-            Passed to _read_catalog(...) so subclasses can load/filter
-            input_catalog.
+            Directory containing input galaxy catalogs.  Retained for
+            interface compatibility; unused now that the catalog is rebuilt
+            directly from ``truthCatalog``.
         """
-        assert table.dtype.names is not None
+        assert truthCatalog.dtype.names is not None
         # Create instance without running __init__
         self = cls.__new__(cls)
         self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
@@ -270,43 +295,17 @@ class BaseGalaxyCatalog(ABC):
         wcs = tract_info.getWcs()
         self.pixel_scale = float(wcs.getPixelScale().asArcseconds())
 
-        # Load catalog (subclass hook)
-        self.input_catalog = self._read_catalog(
-            select_observable=select_observable,
-            select_lower_limit=select_lower_limit,
-            select_upper_limit=select_upper_limit,
-        )
-
-        # Validate fields
+        # Validate required placement columns
         for col in ["dx", "dy", "indices", "angles"]:
-            if col not in list(table.dtype.names):
+            if col not in list(truthCatalog.dtype.names):
                 raise ValueError(
-                    f"Missing required column '{col}' in table array"
+                    f"Missing required column '{col}' in truthCatalog array"
                 )
-        input_size = len(self.input_catalog)
-        if (
-            (table["indices"] < 0).any() or
-            (table["indices"] >= input_size).any()
-        ):
-            raise IndexError(
-                "Indices in table array out of range for input_catalog"
-            )
-        self.dtype = [
-            ("indices", "i8"),
-            ("redshift", "f8"),
-            ("angles", "f8"),
-            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),
-            ("dx", "f8"), ("dy", "f8"),
-            ("ra", "f8"), ("dec", "f8"),
-            ("prelensed_ra", "f8"), ("prelensed_dec", "f8"),
-            ("has_finite_shear", "bool"),
-            ("hlr", "f8"),
-        ]
-        self.data = np.zeros(len(table), dtype=self.dtype)
-        assert self.data.dtype.names is not None
-        for name in table.dtype.names:
-            if name in list(self.data.dtype.names):
-                self.data[name] = table[name]
+        # The truth catalog is self-contained (placement + shear + galaxy
+        # property columns), so use it directly instead of re-reading the
+        # input galaxy catalog from disk.
+        self.data = np.array(truthCatalog)
+        self.dtype = self.data.dtype
         self.lensed = True
         return self
 
@@ -417,9 +416,10 @@ class BaseGalaxyCatalog(ABC):
             Lensed galaxy object ready for PSF convolution.
         """
         src = self.data[ind]
-        entry = self.input_catalog[src["indices"]]
+        # ``data`` carries the merged input-catalog property columns, so the
+        # galaxy is rendered directly from it without an input-catalog lookup.
         gal = self._generate_galaxy(
-            entry=entry, mag_zero=mag_zero, band=band, use_mog=use_mog,
+            entry=src, mag_zero=mag_zero, band=band, use_mog=use_mog,
             include_point_source=include_point_source,
             force_isotropic=force_isotropic,
             survey_name=survey_name,
