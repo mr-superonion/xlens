@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Iterable
 
 import fitsio
+import pyarrow.parquet as pq
 import galsim
 import lsst
 import numpy as np
@@ -866,8 +867,6 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         -------
         array with fields
         """
-
-        import pyarrow.parquet as pq
 
         fname = os.path.join(
             self.catsim_dir,
