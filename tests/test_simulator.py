@@ -70,7 +70,7 @@ def test_galaxies_init():
     )
     arr = catalog.data
     catalog2 = xlens.simulator.galaxies.CatSim2017Catalog.from_array(
-        table=arr,
+        truthCatalog=arr,
         tract_info=tract_info,
     )
     np.testing.assert_almost_equal(
@@ -443,9 +443,16 @@ def test_reproducible():
         seed=base_seed,
     ).truthCatalog.copy()
 
+    # truth_catalog now also carries the merged input-catalog property
+    # columns; compare only the columns stored in the reference fixture.
+    ref_catalog = fitsio.read(catfname)
+    assert ref_catalog.dtype.names is not None
+    common = list(ref_catalog.dtype.names)
     np.testing.assert_array_almost_equal(
-        rfn.structured_to_unstructured(truth_catalog),
-        rfn.structured_to_unstructured(fitsio.read(catfname)),
+        rfn.structured_to_unstructured(
+            rfn.repack_fields(truth_catalog[common])
+        ),
+        rfn.structured_to_unstructured(ref_catalog),
         decimal=3,
     )
 
