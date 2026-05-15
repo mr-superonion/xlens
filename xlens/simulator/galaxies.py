@@ -869,6 +869,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         # galaxy catalog
 
         from glob import glob
+        import pyarrow.parquet as pq
         import opencosmo as oc
         import astropy.units as u
         from astropy.coordinates import SkyCoord
@@ -876,7 +877,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
         fname = os.path.join(
             self.catsim_dir,
-            "hltds_cosmos_260215_04_07_2026", # this needs to become the folder for diffsky opencosmo
+            "diffsky_arr.parquet" #this is for "hltds_cosmos_260215_04_07_2026"
         )
         if not os.path.isdir(fname):
             raise FileNotFoundError(
@@ -884,49 +885,27 @@ class DiffskyCatalog(BaseGalaxyCatalog):
                 "Please download it and place it under $CATSIM_DIR",
             )
         
-        diffsky_path = glob(f'{fname}/lc_cores*.hdf5')
-
-        cat = oc.open(diffsky_path, synth_cores=True)
-        cat = cat.select(['ra','dec','redshift', 'ellipticity_disk','ellipticity_bulge',
-                          'r50_disk','r50_bulge','psi_bulge','psi_disk',
-                          'lsst_u_bulge','lsst_u_disk','lsst_g_bulge','lsst_g_disk',
-                          'lsst_r_bulge','lsst_r_disk','lsst_i_bulge','lsst_i_disk',
-                          'lsst_z_bulge','lsst_z_disk','lsst_y_bulge','lsst_y_disk',])
-
-        # hard coded for diffsky 4_7 catalog
-        region = oc.make_cone(SkyCoord(100*u.deg, 84.5*u.deg), 1*u.deg)
-        cat = cat.bound(region)
+        cat = pq.read_table(fname).to_pandas().to_records(index=False)
 
         if select_observable is not None:
             select_observable = np.atleast_1d(select_observable)
-            if not set(select_observable) < set(cat.columns):
+            if not set(select_observable) < set(cat.dtype.names):
                 raise ValueError(
                     "Selection observables not in the catalog columns"
                 )
+            mask = np.ones(len(cat)).astype(bool)
             if select_lower_limit is not None:
                 select_lower_limit = np.atleast_1d(select_lower_limit)
                 assert len(select_observable) == len(select_lower_limit)
                 for nn, ll in zip(select_observable, select_lower_limit):
-                    cat = cat.filter(oc.col(nn) > ll)
+                    mask = mask & (cat[nn] > ll)
             if select_upper_limit is not None:
                 select_upper_limit = np.atleast_1d(select_upper_limit)
                 assert len(select_observable) == len(select_upper_limit)
                 for nn, ul in zip(select_observable, select_upper_limit):
-                    cat = cat.filter(oc.col(nn) <= ul)
-        
-        cosmology = cat.cosmology
-        cat = cat.get_data('numpy')
-        cat['indices'] = np.arange(len(cat['redshift']))
-        dA = cosmology.angular_diameter_distance(cat['redshift'])
-        for i in ['r50_bulge','r50_disk']:
-            theta = (cat[i] * u.kpc / dA)* u.rad
-            cat[f'{i}_as'] = theta.to(u.arcsec).value
-
-        dtype = [(name, np.array(values).dtype) for name, values in cat.items()]
-        arr = np.zeros(len(next(iter(cat.values()))), dtype=dtype)
-        for name, values in cat.items():
-            arr[name] = values
-        return arr
+                    mask = mask & (cat[nn] <= ul)
+            cat = cat[mask]
+        return cat
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for an nside=32 HEALPix tile."""
