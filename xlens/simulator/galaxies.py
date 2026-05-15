@@ -866,14 +866,8 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         -------
         array with fields
         """
-        # galaxy catalog
 
-        from glob import glob
         import pyarrow.parquet as pq
-        import opencosmo as oc
-        import astropy.units as u
-        from astropy.coordinates import SkyCoord
-        import healpy as hp
 
         fname = os.path.join(
             self.catsim_dir,
