@@ -1,0 +1,6 @@
+subdirs:
+  linux-64:
+    packages:
+      __glibc: "2.39"
+      __linux: "6.8"
+      __unix: "0"

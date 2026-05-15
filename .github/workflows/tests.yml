@@ -45,31 +45,41 @@ jobs:
       - name: Set up conda (Python ${{ matrix.python-version }})
         uses: conda-incubator/setup-miniconda@v4
         with:
-          python-version: ${{ matrix.python-version }}
           miniforge-version: latest
           channels: conda-forge
           channel-priority: strict
           conda-remove-defaults: true
-          auto-update-conda: true
-          mamba-version: "*"
-          activate-environment: test
+          auto-update-conda: false
+          # No environment activated yet; we create it from the lock file.
+          activate-environment: ""
 
-      - name: Install dependencies
+      - name: Cache conda pkgs
+        uses: actions/cache@v4
+        with:
+          path: ~/conda_pkgs_dir
+          key: conda-pkgs-${{ runner.os }}-${{ hashFiles('conda-lock.yml') }}
+
+      - name: Install environment from conda-lock.yml
         shell: bash -l {0}
         run: |
-          # Use mamba (installed by setup-miniconda) to reduce solve time / churn
           conda config --set always_yes yes
-
-          mamba install --override-channels -c conda-forge --file requirements.txt --file requirements_test.txt
+          conda config --set channel_priority strict
+          # conda-lock is published on conda-forge; install into base, then
+          # use it to materialise the pinned `test` env without solving.
+          mamba install -n base -c conda-forge conda-lock
+          conda-lock install --name test conda-lock.yml
           conda clean -a -y
 
-          python -m pip install --upgrade pip setuptools
-          pip install --no-deps FlexCode
+      - name: Install xlens (editable)
+        shell: bash -l {0}
+        run: |
+          conda activate test
           pip install -e .
 
       - name: Test with pytest and coverage
         shell: bash -l {0}
         run: |
+          conda activate test
           wget https://github.com/mr-superonion/xlens/releases/download/v0.3.0/catsim-v4.tar.gz
           tar xvfz catsim-v4.tar.gz
           export CATSIM_DIR=$(realpath catsim-v4)

@@ -1,0 +1,29 @@
+name: test
+channels:
+  - conda-forge
+dependencies:
+  # runtime (mirrors requirements.txt)
+  - python=3.13
+  - anacal=0.7.5=py313*
+  - stackvana>=0.2026.13=py313*
+  - click
+  - healpy
+  - astropy
+  - fitsio
+  - lenstronomy
+  - matplotlib
+  - pyccl
+  - namaster
+  - scikit-learn
+  - pywavelets
+  - xgboost
+  # test (mirrors requirements_test.txt)
+  - nbval
+  - flake8-pyproject
+  - pytest
+  - pytest-cov
+  - pytest-xdist
+  - pytest-timeout
+  - pip
+  - pip:
+      - FlexCode
