@@ -15,14 +15,14 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.13"]
 
     steps:
-      - name: Free disk space (ubuntu-latest)
+      - name: Free disk space (ubuntu-24.04)
         if: runner.os == 'Linux'
         run: |
           df -h
