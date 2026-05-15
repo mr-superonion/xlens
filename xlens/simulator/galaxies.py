@@ -879,7 +879,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
             self.catsim_dir,
             "diffsky_arr.parquet" #this is for "hltds_cosmos_260215_04_07_2026"
         )
-        if not os.path.isdir(fname):
+        if not os.path.isfile(fname):
             raise FileNotFoundError(
                 "Cannot find 'hltds_cosmos_260215_04_07_2026' folder",
                 "Please download it and place it under $CATSIM_DIR",
