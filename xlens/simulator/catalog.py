@@ -36,9 +36,9 @@ from ..utils.random import (
 )
 from .galaxies import (
     CatSim2017Catalog,
+    DiffskyCatalog,
     Flagship2025Catalog,
     OpenUniverse2024RubinRomanCatalog,
-    DiffskyCatalog,
 )
 from .perturbation import ShearHalo, ShearLogNormalFlat, ShearRedshift
 

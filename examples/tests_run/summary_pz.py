@@ -10,7 +10,6 @@ from typing import Iterable, List, Optional, Tuple
 import fitsio
 import numpy as np
 from astropy.stats import sigma_clipped_stats
-from numpy.lib import recfunctions as rfn
 
 from xlens.catalog import ShearEstimator
 from xlens.catalog.redshift import (

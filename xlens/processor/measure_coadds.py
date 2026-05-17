@@ -25,13 +25,12 @@ __all__ = [
     "MeasureCoaddsPipeConnections",
 ]
 
-import dataclasses
 import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.afw.image import ExposureF, MaskX
+from lsst.afw.image import MaskX
 from lsst.daf.butler import DataCoordinate
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import (
@@ -52,8 +51,6 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-from .anacal import AnacalTask
-from .fpfs import FpfsMeasurementTask
 from ..simulator.sim import MultibandSimTask
 from ..utils.catalog import set_isPrimary
 from ..utils.columns import (
@@ -62,6 +59,8 @@ from ..utils.columns import (
     select_detection_columns,
 )
 from ..utils.handle import SimulatedExposureHandle
+from .anacal import AnacalTask
+from .fpfs import FpfsMeasurementTask
 
 band_order = "ugrizy"
 
@@ -130,7 +129,6 @@ class MeasureCoaddsPipeConnections(
         if config is None:
             return
 
-        inputName = config.connections.inputName
         # Drop inputs that don't apply to the chosen mode.
         if config.use_sim:
             self.inputs.discard("exposure")

@@ -29,18 +29,10 @@ import logging
 from typing import Any
 
 import anacal
-import lsst.afw.detection as afwDetection
-import lsst.afw.geom as afwGeom
-import lsst.afw.image as afwImage
-import lsst.afw.table as afwTable
 import lsst.meas.extensions.shapeHSM  # noqa: F401  (registers HSM plugins)
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.afw.math import FixedKernel
-from lsst.meas.algorithms import KernelPsf
 from lsst.meas.base import (
-    SingleFrameMeasurementConfig,
-    SingleFrameMeasurementTask,
     SkyMapIdGeneratorConfig,
 )
 from lsst.pex.config import ConfigurableField, Field, FieldValidationError
@@ -55,8 +47,6 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-from .anacal import AnacalTask
-from .fpfs import FpfsMeasurementTask
 from ..utils.catalog import set_isPrimary
 from ..utils.columns import (
     rename_flux_to_photoz_format,
@@ -64,6 +54,8 @@ from ..utils.columns import (
     select_detection_columns,
 )
 from ..utils.image import prepare_data_one_cell
+from .anacal import AnacalTask
+from .fpfs import FpfsMeasurementTask
 
 
 class MeasureCellCoaddsPipeConnections(

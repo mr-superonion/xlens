@@ -59,9 +59,9 @@ from .defaults import (
 )
 from .galaxies import (
     CatSim2017Catalog,
+    DiffskyCatalog,
     Flagship2025Catalog,
     OpenUniverse2024RubinRomanCatalog,
-    DiffskyCatalog,
 )
 from .noise import get_noise_array
 

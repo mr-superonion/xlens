@@ -77,7 +77,10 @@ class MergePipeConnections(
         minimum=0,
     )
     mergedCatalog = cT.Output(
-        doc="Tract-level merged anacal catalog (band-combined + WCS-corrected).",
+        doc=(
+            "Tract-level merged anacal catalog "
+            "(band-combined + WCS-corrected)."
+        ),
         name="{inputName}_anacal_merged",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),

@@ -160,7 +160,8 @@ class BuildCellSystematicsTask(PipelineTask):
             self.log.warning(
                 "No GAIA reference catalog found for tract=%d patch=%d. "
                 "Bright star masking will be skipped. "
-                "Ensure refcats/DM-39298/gaia_dr3_20230707 is in input collections.",
+                "Ensure refcats/DM-39298/gaia_dr3_20230707 is in input "
+                "collections.",
                 tract, patch,
             )
         outputs = self.run(

@@ -10,10 +10,10 @@ from abc import ABC, abstractmethod
 from typing import Any, Iterable
 
 import fitsio
-import pyarrow.parquet as pq
 import galsim
 import lsst
 import numpy as np
+import pyarrow.parquet as pq
 from numpy.lib import recfunctions as rfn
 
 from . import mog
@@ -589,129 +589,6 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
 
 
 # ---------------------------------------------------------
-# Concrete implementation: OpenUniverse 2024 Rubin–Roman
-# ---------------------------------------------------------
-class OpenUniverse2024RubinRomanCatalog(BaseGalaxyCatalog):
-    """DiffSky-based Rubin-Roman input galaxies (``OpenUniverse2024``).
-
-    Galaxies are decomposed into bulge + disk components, each with
-    its own Sersic index, half-light radius, and axis ratio.  Read
-    from HEALPix nside=32 tiles.
-    """
-
-    def _read_catalog(
-        self,
-        *,
-        select_observable=None,
-        select_lower_limit=None,
-        select_upper_limit=None,
-    ):
-        """
-        Read the catalog from the cache, but update the position angles each
-        time
-
-        Parameters
-        ----------
-        select_observable: list[str] | str
-            A list of observables to apply selection
-        select_lower_limit: list[float] | ndarray[float]
-            lower limits of the slection cuts
-        select_upper_limit: list[float] | ndarray[float]
-            upper limits of the slection cuts
-
-        Returns
-        -------
-        array with fields
-        """
-        # galaxy catalog
-        fname = os.path.join(
-            self.catsim_dir,
-            "rubinroman_nside32_10307.parquet",
-        )
-        if not os.path.isfile(fname):
-            raise FileNotFoundError(
-                "Cannot find 'rubinroman_nside32_10307.parquet'",
-                "Please download it and place it under $CATSIM_DIR",
-            )
-
-        cat = get_catalog(fname)
-        if select_observable is not None:
-            select_observable = np.atleast_1d(select_observable)
-            if not set(select_observable) < set(cat.dtype.names):
-                raise ValueError(
-                    "Selection observables not in the catalog columns"
-                )
-            mask = np.ones(len(cat)).astype(bool)
-            if select_lower_limit is not None:
-                select_lower_limit = np.atleast_1d(select_lower_limit)
-                assert len(select_observable) == len(select_lower_limit)
-                for nn, ll in zip(select_observable, select_lower_limit):
-                    mask = mask & (cat[nn] > ll)
-            if select_upper_limit is not None:
-                select_upper_limit = np.atleast_1d(select_upper_limit)
-                assert len(select_observable) == len(select_upper_limit)
-                for nn, ul in zip(select_observable, select_upper_limit):
-                    mask = mask & (cat[nn] <= ul)
-            cat = cat[mask]
-        return cat
-
-    def _compute_density(self, cat) -> float:
-        """Return density in objects/arcmin^2 for an nside=32 HEALPix tile."""
-        area_tot_arcmin = (
-            60.0**2 * (180.0 / np.pi) ** 2 * 4.0 * np.pi / (12.0 * 32.0**2)
-        )
-        return len(cat) / area_tot_arcmin
-
-    def _half_light_radius(self, catalog) -> np.ndarray:
-        return catalog["diskHalfLightRadiusArcsec"]
-
-    def _generate_galaxy(
-        self, *, entry, mag_zero, band, survey_name,
-        use_mog=False,
-        force_isotropic=False,
-        **kwargs,
-    ) -> galsim.GSObject:
-        """Build a GalSim galaxy from an OpenUniverse 2024 catalog row."""
-        if use_mog:
-            _simulator = mog
-        else:
-            _simulator = galsim
-        if survey_name == "hsc":
-            sname = "lsst"
-        else:
-            sname = survey_name
-
-        bulge_hlr = entry["spheroidHalfLightRadiusArcsec"]
-        disk_hlr = entry["diskHalfLightRadiusArcsec"]
-
-        # shear-ellipticity components
-        if force_isotropic:
-            disk_e1, disk_e2 = 0.0, 0.0
-            bulge_e1, bulge_e2 = 0.0, 0.0
-        else:
-            disk_e1, disk_e2 = (
-                entry["diskEllipticity1"], entry["diskEllipticity2"]
-            )
-            bulge_e1, bulge_e2 = (
-                entry["spheroidEllipticity1"], entry["spheroidEllipticity2"]
-            )
-
-        mag = entry[f"{sname}_mag_{band}"]
-        flux = 10 ** ((mag_zero - mag) / 2.5)
-        bulge_frac = entry[f"{sname}_bulgefrac_{band}"]
-
-        bulge = _simulator.DeVaucouleurs(
-            flux=flux * bulge_frac, half_light_radius=bulge_hlr
-        ).shear(g1=bulge_e1, g2=bulge_e2)
-        disk = _simulator.Exponential(
-            flux=flux * (1.0 - bulge_frac), half_light_radius=disk_hlr,
-        ).shear(g1=disk_e1, g2=disk_e2)
-
-        gal = (bulge + disk).withFlux(flux)
-        return gal
-
-
-# ---------------------------------------------------------
 # Concrete implementation: Euclid Flagship 2025 (COSMOS)
 # ---------------------------------------------------------
 class Flagship2025Catalog(BaseGalaxyCatalog):
@@ -832,14 +709,15 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
 
         return galsim.Add(components)
 
+
 # ---------------------------------------------------------
-# Concrete implementation: OpenUniverse 2024 Rubin–Roman
+# Concrete implementation: Diffsky Simulation
 # ---------------------------------------------------------
 class DiffskyCatalog(BaseGalaxyCatalog):
     """DiffSky input galaxies (``Diffsky``).
 
     Galaxies are decomposed into bulge + disk components, each with
-    its own Sersic index, half-light radius, and axis ratio.  Read 
+    its own Sersic index, half-light radius, and axis ratio.  Read
     from Diffsky mock catalog.
     """
 
@@ -868,16 +746,17 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         array with fields
         """
 
+        # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
         fname = os.path.join(
             self.catsim_dir,
-            "diffsky_arr.parquet" #this is for "hltds_cosmos_260215_04_07_2026"
+            "diffsky_arr.parquet",
         )
         if not os.path.isfile(fname):
             raise FileNotFoundError(
                 "Cannot find 'diffsky_arr.parquet' file",
                 "Please download it and place it under $CATSIM_DIR",
             )
-        
+
         cat = pq.read_table(fname).to_pandas().to_records(index=False)
 
         if select_observable is not None:
@@ -902,7 +781,10 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a cone with a 1 deg radius"""
-        area_tot_arcmin = 2*np.pi * (1 - np.cos(np.radians(1))) * (180 * 60/np.pi)**2
+        area_tot_arcmin = (
+            2 * np.pi * (1 - np.cos(np.radians(1)))
+            * (180 * 60 / np.pi) ** 2
+        )
         return len(cat) / area_tot_arcmin
 
     def _half_light_radius(self, catalog) -> np.ndarray:
@@ -933,13 +815,19 @@ class DiffskyCatalog(BaseGalaxyCatalog):
             bulge_e1, bulge_e2 = 0.0, 0.0
         else:
             # ellipticity = 1 - q in diffsky catalog
-            disk_e = entry['ellipticity_disk'] / (2 - entry['ellipticity_disk']) 
-            disk_e1 = disk_e * np.cos(2*entry[f'psi_disk'])
-            disk_e2 = disk_e * np.sin(2*entry[f'psi_disk'])
+            disk_e = (
+                entry['ellipticity_disk']
+                / (2 - entry['ellipticity_disk'])
+            )
+            disk_e1 = disk_e * np.cos(2 * entry['psi_disk'])
+            disk_e2 = disk_e * np.sin(2 * entry['psi_disk'])
 
-            bulge_e = entry['ellipticity_bulge'] / (2 - entry['ellipticity_bulge'])
-            bulge_e1 = bulge_e * np.cos(2*entry[f'psi_bulge'])
-            bulge_e2 = bulge_e * np.sin(2*entry[f'psi_bulge'])
+            bulge_e = (
+                entry['ellipticity_bulge']
+                / (2 - entry['ellipticity_bulge'])
+            )
+            bulge_e1 = bulge_e * np.cos(2 * entry['psi_bulge'])
+            bulge_e2 = bulge_e * np.sin(2 * entry['psi_bulge'])
 
         disk_mag = entry[f"{sname}_{band}_disk"]
         disk_flux = 10 ** ((mag_zero - disk_mag) / 2.5)
@@ -952,6 +840,6 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         bulge = _simulator.DeVaucouleurs(
             flux=bulge_flux, half_light_radius=bulge_hlr
         ).shear(g1=bulge_e1, g2=bulge_e2)
-        
+
         gal = (bulge + disk).withFlux(disk_flux + bulge_flux)
         return gal
