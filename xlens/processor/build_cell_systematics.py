@@ -172,13 +172,16 @@ class BuildCellSystematicsTask(PipelineTask):
         )
         butlerQC.put(outputs, outputRefs)
 
-    def get_noise_corr(self, stitched_coadd, badMaskPlanes):
+    def get_noise_corr(self, stitched_coadd, mask_array, badMaskPlanes):
         """Estimate noise correlation from a stitched cell coadd.
 
         Parameters
         ----------
         stitched_coadd : StitchedCoadd
             Full-patch stitched cell coadd.
+        mask_array : np.ndarray
+            Combined systematics mask (incl. cross-band bad pixels and
+            GAIA bright-star halos); nonzero pixels are excluded.
         badMaskPlanes : list of str
             Mask plane names to exclude.
 
@@ -215,6 +218,7 @@ class BuildCellSystematicsTask(PipelineTask):
         variance_sub = variance_array[y0:y1, x0:x1]
         window_array = (
             ((mask.array[y0:y1, x0:x1] & bits) == 0)
+            & (mask_array[y0:y1, x0:x1] == 0)
         ).astype(np.float32)
         window_array *= (
             (noise_array ** 2.0 < variance_sub * 9)
@@ -296,6 +300,9 @@ class BuildCellSystematicsTask(PipelineTask):
         mask_array: np.ndarray | None = None
         stitched_bbox = None
         stitched_wcs = None
+        # Cache stitched coadds for the second (noise-corr) pass so the
+        # augmented mask_array (incl. GAIA) is in hand before correlating.
+        stitched_by_band: dict[str, Any] = {}
 
         for band, handle in cell_handles_dict.items():
             if band not in band_order:
@@ -327,12 +334,8 @@ class BuildCellSystematicsTask(PipelineTask):
             else:
                 mask_array = (mask_array | band_mask).astype(np.int16)
 
-            # Noise correlation
-            noise_corr_array[i] = self.get_noise_corr(
-                stitched, self.config.badMaskPlanes,
-            )
-
-            del cell_coadd, stitched, exp
+            stitched_by_band[band] = stitched
+            del cell_coadd, exp
 
         # Add bright star mask from GAIA
         assert mask_array is not None
@@ -360,6 +363,16 @@ class BuildCellSystematicsTask(PipelineTask):
                 anacal.mask.add_bright_star_mask(
                     mask_array=mask_array, star_array=gaia_array,
                 )
+
+        # Noise correlation: use the augmented mask (bad pixels OR'd across
+        # bands AND GAIA bright-star halos) so bright-star wings don't leak
+        # correlated power into the per-band estimate.
+        for band, stitched in stitched_by_band.items():
+            i = band_order.index(band)
+            noise_corr_array[i] = self.get_noise_corr(
+                stitched, mask_array, self.config.badMaskPlanes,
+            )
+        stitched_by_band.clear()
 
         # Convert mask to MaskX
         h, w = mask_array.shape
