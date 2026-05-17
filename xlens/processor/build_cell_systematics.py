@@ -225,7 +225,13 @@ class BuildCellSystematicsTask(PipelineTask):
             & (~np.isnan(variance_sub))
         )
 
-        noise_array[~window_array.astype(bool)] = 0.0
+        # Mean-subtract over the kept pixels before zeroing the masked ones.
+        # A nonzero DC offset would otherwise spread to a flat μ² pedestal
+        # across every lag of the windowed autocorrelation.
+        window_bool = window_array.astype(bool)
+        if window_bool.any():
+            noise_array -= noise_array[window_bool].mean()
+        noise_array[~window_bool] = 0.0
 
         # Pad to avoid FFT wrap-around
         pad_width = ((10, 10), (10, 10))
