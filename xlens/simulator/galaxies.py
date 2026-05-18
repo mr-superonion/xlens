@@ -7,7 +7,7 @@ catalogs.
 
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Iterable
+from typing import Any, ClassVar, Iterable
 
 import fitsio
 import galsim
@@ -220,16 +220,87 @@ class BaseGalaxyCatalog(ABC):
 
     # ---------- required subclass hooks ----------
 
-    @abstractmethod
-    def _read_catalog(
-        self,
+    # Basename of the catalog file under ``catsim_dir``. Subclasses MUST
+    # set this; ``_read_catalog`` resolves it against ``self.catsim_dir``.
+    catalog_filename: ClassVar[str]
+
+    def _load_catalog_file(self, fname: str) -> Any:
+        """Load the raw catalog from ``fname``.
+
+        Default implementation reads a FITS file via :func:`get_catalog`,
+        which also appends an ``indices`` column.  Subclasses with a
+        non-FITS on-disk format (e.g. Parquet) should override this.
+        """
+        return get_catalog(fname)
+
+    @staticmethod
+    def _apply_selection(
+        cat,
         *,
         select_observable,
         select_lower_limit,
         select_upper_limit,
+    ):
+        """Apply per-column lower / upper bound cuts to a structured array.
+
+        Shared by all subclasses; called from :meth:`_read_catalog`.
+        """
+        if select_observable is None:
+            return cat
+        select_observable = np.atleast_1d(select_observable)
+        if not set(select_observable) < set(cat.dtype.names):
+            raise ValueError(
+                "Selection observables not in the catalog columns"
+            )
+        mask = np.ones(len(cat), dtype=bool)
+        if select_lower_limit is not None:
+            select_lower_limit = np.atleast_1d(select_lower_limit)
+            if len(select_observable) != len(select_lower_limit):
+                raise ValueError(
+                    "select_lower_limit length "
+                    f"({len(select_lower_limit)}) must match "
+                    f"select_observable ({len(select_observable)})"
+                )
+            for nn, ll in zip(select_observable, select_lower_limit):
+                mask = mask & (cat[nn] > ll)
+        if select_upper_limit is not None:
+            select_upper_limit = np.atleast_1d(select_upper_limit)
+            if len(select_observable) != len(select_upper_limit):
+                raise ValueError(
+                    "select_upper_limit length "
+                    f"({len(select_upper_limit)}) must match "
+                    f"select_observable ({len(select_observable)})"
+                )
+            for nn, ul in zip(select_observable, select_upper_limit):
+                mask = mask & (cat[nn] <= ul)
+        return cat[mask]
+
+    def _read_catalog(
+        self,
+        *,
+        select_observable=None,
+        select_lower_limit=None,
+        select_upper_limit=None,
     ) -> Any:
-        """Return the catalog object (array / table) with any requested
-        filtering applied."""
+        """Load the input galaxy catalog and apply optional selection cuts.
+
+        Subclasses customise this by setting ``catalog_filename`` and,
+        if needed, overriding :meth:`_load_catalog_file`.
+        """
+        fname = os.path.join(self.catsim_dir, self.catalog_filename)
+        if not os.path.isfile(fname):
+            raise FileNotFoundError(
+                f"Cannot find '{self.catalog_filename}' under "
+                f"{self.catsim_dir}. "
+                "Please download it and place it under $CATSIM_DIR."
+            )
+        cat = self._load_catalog_file(fname)
+        return self._apply_selection(
+            cat,
+            select_observable=select_observable,
+            select_lower_limit=select_lower_limit,
+            select_upper_limit=select_upper_limit,
+        )
 
     @abstractmethod
     def _compute_density(self, cat: Any) -> float:
@@ -288,7 +359,10 @@ class BaseGalaxyCatalog(ABC):
             interface compatibility; unused now that the catalog is rebuilt
             directly from ``truthCatalog``.
         """
-        assert truthCatalog.dtype.names is not None
+        if truthCatalog.dtype.names is None:
+            raise TypeError(
+                "truthCatalog must be a structured array with named fields"
+            )
         # Create instance without running __init__
         self = cls.__new__(cls)
         self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
@@ -310,12 +384,45 @@ class BaseGalaxyCatalog(ABC):
         self.lensed = True
         return self
 
-    def rotate(self, theta, degrees=False):
-        """Rotate by an angle theta (radians)."""
+    def rotate(self, theta):
+        """Rotate the catalog rigidly around the tract centre.
+
+        Applies a 2D rotation by angle ``theta`` (radians, counter-clockwise)
+        to every galaxy's tangent-plane offset ``(dx, dy)``, adds the same
+        angle to each galaxy's intrinsic position-angle column
+        (``angles``), and recomputes the sky positions ``(ra, dec)`` and
+        ``(prelensed_ra, prelensed_dec)`` from the new pixel positions via
+        the tract WCS.
+
+        Typical use is the noise-cancellation trick for shear bias tests:
+        rendering the same catalog twice, with the second realisation
+        rotated by 90 degrees, lets the average of the two images cancel
+        the intrinsic shape noise.
+
+        Rotating a catalog after lensing has been applied is not supported
+        and raises ``ValueError``: the lensing operation breaks the
+        rotation symmetry of the underlying galaxy positions, and rotating
+        the lensed catalog would no longer be equivalent to lensing a
+        rotated catalog.
+
+        Parameters
+        ----------
+        theta : float
+            Rotation angle in radians (counter-clockwise).
+
+        Returns
+        -------
+        None
+            The catalog is rotated in place.
+
+        Raises
+        ------
+        ValueError
+            If the catalog has already been lensed (``self.lensed`` is
+            ``True``).
+        """
         if self.lensed:
             raise ValueError("Cannot rotate a lensed catalog")
-        if degrees:
-            theta = theta / np.pi * 180.0
 
         c, s = np.cos(theta), np.sin(theta)
         x = c * self.data["dx"] - s * self.data["dy"]
@@ -359,16 +466,12 @@ class BaseGalaxyCatalog(ABC):
         )
         self.data["prelensed_ra"] = pre_ra
         self.data["prelensed_dec"] = pre_dec
-        num = len(self.data)
-        for _ in range(num):
-            src = self.data[_]
-            distort_res = shear_obj.distort_galaxy(src)
-            self.data[_]["dx"] = distort_res["dx"]
-            self.data[_]["dy"] = distort_res["dy"]
-            self.data[_]["gamma1"] = distort_res["gamma1"]
-            self.data[_]["gamma2"] = distort_res["gamma2"]
-            self.data[_]["kappa"] = distort_res["kappa"]
-            self.data[_]["has_finite_shear"] = distort_res["has_finite_shear"]
+        for row in self.data:
+            res = shear_obj.distort_galaxy(row)
+            for key in (
+                "dx", "dy", "gamma1", "gamma2", "kappa", "has_finite_shear",
+            ):
+                row[key] = res[key]
         if apply_position_shifts:
             image_x = self.x_center + self.data["dx"] / ps
             image_y = self.y_center + self.data["dy"] / ps
@@ -447,56 +550,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
     input FITS file.
     """
 
-    def _read_catalog(
-        self,
-        *,
-        select_observable=None,
-        select_lower_limit=None,
-        select_upper_limit=None,
-    ):
-        """
-        Read the catalog from the cache, but update the position angles each
-        time
-
-        Parameters
-        ----------
-        select_observable: list[str] | str
-            A list of observables to apply selection
-        select_lower_limit: list[float] | ndarray[float]
-            lower limits of the slection cuts
-        select_upper_limit: list[float] | ndarray[float]
-            upper limits of the slection cuts
-
-        Returns
-        -------
-        array with fields
-        """
-        fname = os.path.join(
-            self.catsim_dir,
-            "OneDegSq.fits",
-        )
-
-        # not thread safe
-        cat = get_catalog(fname)
-        if select_observable is not None:
-            select_observable = np.atleast_1d(select_observable)
-            if not set(select_observable) < set(cat.dtype.names):
-                raise ValueError(
-                    "Selection observables not in the catalog columns"
-                )
-            mask = np.ones(len(cat)).astype(bool)
-            if select_lower_limit is not None:
-                select_lower_limit = np.atleast_1d(select_lower_limit)
-                assert len(select_observable) == len(select_lower_limit)
-                for nn, ll in zip(select_observable, select_lower_limit):
-                    mask = mask & (cat[nn] > ll)
-            if select_upper_limit is not None:
-                select_upper_limit = np.atleast_1d(select_upper_limit)
-                assert len(select_observable) == len(select_upper_limit)
-                for nn, ul in zip(select_observable, select_upper_limit):
-                    mask = mask & (cat[nn] <= ul)
-            cat = cat[mask]
-        return cat
+    catalog_filename = "OneDegSq.fits"
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a 1-deg^2 catalog."""
@@ -600,42 +654,7 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
     minor/major ratio, which maps directly to GalSim's ``q`` parameter.
     """
 
-    def _read_catalog(
-        self,
-        *,
-        select_observable=None,
-        select_lower_limit=None,
-        select_upper_limit=None,
-    ):
-        fname = os.path.join(
-            self.catsim_dir,
-            "flagship_cosmos.fits",
-        )
-        if not os.path.isfile(fname):
-            raise FileNotFoundError(
-                "Cannot find 'flagship_cosmos.fits'",
-                "Please download it and place it under $CATSIM_DIR",
-            )
-        cat = get_catalog(fname)
-        if select_observable is not None:
-            select_observable = np.atleast_1d(select_observable)
-            if not set(select_observable) < set(cat.dtype.names):
-                raise ValueError(
-                    "Selection observables not in the catalog columns"
-                )
-            mask = np.ones(len(cat)).astype(bool)
-            if select_lower_limit is not None:
-                select_lower_limit = np.atleast_1d(select_lower_limit)
-                assert len(select_observable) == len(select_lower_limit)
-                for nn, ll in zip(select_observable, select_lower_limit):
-                    mask = mask & (cat[nn] > ll)
-            if select_upper_limit is not None:
-                select_upper_limit = np.atleast_1d(select_upper_limit)
-                assert len(select_observable) == len(select_upper_limit)
-                for nn, ul in zip(select_observable, select_upper_limit):
-                    mask = mask & (cat[nn] <= ul)
-            cat = cat[mask]
-        return cat
+    catalog_filename = "flagship_cosmos.fits"
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 from the catalog sky footprint."""
@@ -658,7 +677,10 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Flagship 2025 catalog row."""
-        assert not use_mog
+        if use_mog:
+            raise NotImplementedError(
+                "Flagship2025Catalog does not support the MoG renderer"
+            )
         sname = survey_name
         if sname == "hsc":
             sname = "lsst"
@@ -721,63 +743,11 @@ class DiffskyCatalog(BaseGalaxyCatalog):
     from Diffsky mock catalog.
     """
 
-    def _read_catalog(
-        self,
-        *,
-        select_observable=None,
-        select_lower_limit=None,
-        select_upper_limit=None,
-    ):
-        """
-        Read the catalog from the cache, but update the position angles each
-        time
+    # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
+    catalog_filename = "diffsky_arr.parquet"
 
-        Parameters
-        ----------
-        select_observable: list[str] | str
-            A list of observables to apply selection
-        select_lower_limit: list[float] | ndarray[float]
-            lower limits of the slection cuts
-        select_upper_limit: list[float] | ndarray[float]
-            upper limits of the slection cuts
-
-        Returns
-        -------
-        array with fields
-        """
-
-        # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
-        fname = os.path.join(
-            self.catsim_dir,
-            "diffsky_arr.parquet",
-        )
-        if not os.path.isfile(fname):
-            raise FileNotFoundError(
-                "Cannot find 'diffsky_arr.parquet' file",
-                "Please download it and place it under $CATSIM_DIR",
-            )
-
-        cat = pq.read_table(fname).to_pandas().to_records(index=False)
-
-        if select_observable is not None:
-            select_observable = np.atleast_1d(select_observable)
-            if not set(select_observable) < set(cat.dtype.names):
-                raise ValueError(
-                    "Selection observables not in the catalog columns"
-                )
-            mask = np.ones(len(cat)).astype(bool)
-            if select_lower_limit is not None:
-                select_lower_limit = np.atleast_1d(select_lower_limit)
-                assert len(select_observable) == len(select_lower_limit)
-                for nn, ll in zip(select_observable, select_lower_limit):
-                    mask = mask & (cat[nn] > ll)
-            if select_upper_limit is not None:
-                select_upper_limit = np.atleast_1d(select_upper_limit)
-                assert len(select_observable) == len(select_upper_limit)
-                for nn, ul in zip(select_observable, select_upper_limit):
-                    mask = mask & (cat[nn] <= ul)
-            cat = cat[mask]
-        return cat
+    def _load_catalog_file(self, fname: str):
+        return pq.read_table(fname).to_pandas().to_records(index=False)
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a cone with a 1 deg radius"""

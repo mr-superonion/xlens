@@ -283,7 +283,10 @@ def load_bpz_templates(
         for j, f in enumerate(filters):
             model = f"{s}.{f}.AB"
             model_path = os.path.join(data_path, "AB", model)
-            assert os.path.isfile(model_path), "Cannot find model"
+            if not os.path.isfile(model_path):
+                raise FileNotFoundError(
+                    f"Cannot find template model: {model_path}"
+                )
             zo, f_mod_0 = get_data(model_path, (0, 1))
             flux_templates[:, i, j] = match_resol(zo, f_mod_0, z)
     return flux_templates

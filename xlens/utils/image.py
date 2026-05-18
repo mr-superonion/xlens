@@ -405,9 +405,14 @@ def rotate_noise_corr(noise_corr):
     noise_max = np.amax(noise_corr)
     noise_corr = noise_corr / noise_max
     ny2, nx2 = noise_corr.shape
-    assert ny2 % 2 == 1
-    assert nx2 % 2 == 1
-    assert noise_corr[ny2 // 2, nx2 // 2] == 1
+    if ny2 % 2 != 1 or nx2 % 2 != 1:
+        raise ValueError(
+            f"noise correlation must have odd dimensions; got {ny2}x{nx2}"
+        )
+    if noise_corr[ny2 // 2, nx2 // 2] != 1:
+        raise RuntimeError(
+            "noise correlation peak is not at the center pixel"
+        )
     return np.rot90(m=noise_corr, k=-1)
 
 

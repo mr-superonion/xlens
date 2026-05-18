@@ -218,7 +218,10 @@ class AddNoisePipe(PipelineTask):
             variance = np.amax(noise_corr)
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
-            assert noise_corr[ny // 2, nx // 2] == 1
+            if noise_corr[ny // 2, nx // 2] != 1:
+                raise RuntimeError(
+                    "noise correlation peak is not at the center pixel"
+                )
             self.log.debug("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
         galaxy_seed = seed * gal_seed_base + self.config.galId

@@ -63,7 +63,10 @@ class Layout:
         sep_arcsec: float | None = None,
         extend_ratio: float = 1.08,
     ):
-        assert extend_ratio > 0.8 and extend_ratio < 1.2
+        if not (0.8 < extend_ratio < 1.2):
+            raise ValueError(
+                f"extend_ratio must be in (0.8, 1.2); got {extend_ratio}"
+            )
         self.sep = sep_arcsec
         # Pixel scale (arcsec/pixel)
         pixel_scale_arcsec = float(wcs.getPixelScale().asArcseconds())

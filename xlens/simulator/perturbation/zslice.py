@@ -30,7 +30,10 @@ class ShearRedshift(object):
     def __init__(
         self, z_bounds, mode, g_dist="g1", shear_value=0.02, kappa_value=0.0
     ):
-        assert isinstance(mode, int), "mode must be an integer"
+        if not isinstance(mode, int):
+            raise TypeError(
+                f"mode must be an integer; got {type(mode).__name__}"
+            )
         self.nz_bins = int(len(z_bounds) - 1)
         # nz_bins is the number of redshift bins
         # note that there are three options in each redshift bin
@@ -39,7 +42,11 @@ class ShearRedshift(object):
         # 1.5, 2.0]) if mode = 7 which in ternary is "0021" --- meaning that
         # the shear is (-0.02, -0.02, 0.00, 0.02) in each bin, respectively.
         self.code = _ternary(int(mode), self.nz_bins)
-        assert 0 <= int(mode) < 3 ** self.nz_bins, "mode code is too large"
+        if not (0 <= int(mode) < 3 ** self.nz_bins):
+            raise ValueError(
+                f"mode={mode} out of range [0, {3 ** self.nz_bins}) "
+                f"for nz_bins={self.nz_bins}"
+            )
         # maybe we need it to be more flexible in the future
         # but now we keep the linear spacing
         self.z_bounds = z_bounds
