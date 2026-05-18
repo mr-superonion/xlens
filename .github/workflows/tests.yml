@@ -80,9 +80,9 @@ jobs:
         shell: bash -l {0}
         run: |
           conda activate test
-          wget https://github.com/mr-superonion/xlens/releases/download/v0.3.0/catsim-v4.tar.gz
-          tar xvfz catsim-v4.tar.gz
-          export CATSIM_DIR=$(realpath catsim-v4)
+          wget https://www.cosmo.bnl.gov/www/xiangchong/data/catsim_test.tar.xz
+          tar xvfJ catsim_test.tar.xz
+          export CATSIM_DIR=$(realpath catsim_test)
           pytest tests/ --cov --cov-report=xml --cov-report=term
           pytest examples/shear
           pytest examples/cluster
