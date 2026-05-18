@@ -8,13 +8,13 @@ import numpy as np
 from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 from mpi4py import MPI
 
-from xlens.processor.measure_coadds import (
-    MeasureCoaddsPipe,
-    MeasureCoaddsPipeConfig,
-)
 from xlens.processor.match import (
     matchPipe,
     matchPipeConfig,
+)
+from xlens.processor.measure_coadds import (
+    MeasureCoaddsPipe,
+    MeasureCoaddsPipeConfig,
 )
 from xlens.simulator.catalog import (
     CatalogShearTask,

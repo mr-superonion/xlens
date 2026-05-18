@@ -1,10 +1,11 @@
-import opencosmo as oc
-import numpy as np
 from glob import glob
+
 import astropy.units as u
-from astropy.coordinates import SkyCoord
+import numpy as np
+import opencosmo as oc
 import pyarrow as pa
 import pyarrow.parquet as pq
+from astropy.coordinates import SkyCoord
 
 diff_folder = (
     '/global/cfs/cdirs/hacc/OpenCosmo/LastJourney/synthetic_galaxies/'

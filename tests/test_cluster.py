@@ -17,15 +17,18 @@ import lsst.geom as geom
 import numpy as np
 import pytest
 from lsst.skymap.ringsSkyMap import (
-    RingsSkyMap, RingsSkyMapConfig,
+    RingsSkyMap,
+    RingsSkyMapConfig,
 )
 
 from xlens.analysis.cluster import HaloMcBiasMultibandPipe as ClusterPipe
 from xlens.simulator.catalog import (
-    CatalogHaloTask, CatalogHaloTaskConfig,
+    CatalogHaloTask,
+    CatalogHaloTaskConfig,
 )
 from xlens.simulator.sim import (
-    MultibandSimConfig, MultibandSimTask,
+    MultibandSimConfig,
+    MultibandSimTask,
 )
 
 PATCH_DIM = 1001

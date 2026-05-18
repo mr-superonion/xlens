@@ -12,16 +12,19 @@ from pathlib import Path
 import numpy as np
 import pytest
 from lsst.skymap.discreteSkyMap import (
-    DiscreteSkyMap, DiscreteSkyMapConfig,
+    DiscreteSkyMap,
+    DiscreteSkyMapConfig,
 )
 from numpy.lib import recfunctions as rfn
 
 from xlens.processor.measure_coadds import (
-    MeasureCoaddsPipe, MeasureCoaddsPipeConfig,
+    MeasureCoaddsPipe,
+    MeasureCoaddsPipeConfig,
 )
 from xlens.processor.photoz import photoZPipe, photoZPipeConfig
 from xlens.simulator.catalog import (
-    CatalogShearTask, CatalogShearTaskConfig,
+    CatalogShearTask,
+    CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
 from xlens.utils.handle import make_exposure_handles
