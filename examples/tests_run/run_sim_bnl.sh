@@ -109,12 +109,11 @@ universe        = vanilla
 initialdir      = ${PWD}
 notification    = never
 getenv          = true
-# request_memory  = 10240
-request_memory  = 2048
+request_memory  = 1228
 request_cpus    = 1
 
-executable      = ${PYTHON_EXE_PATH}
-arguments       = ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$(start) --end \$(end) --layout ${LAYOUT} --band ${BAND}
+executable      = /bin/bash
+arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} || exit 1; done'"
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).out
 error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log

@@ -37,8 +37,8 @@ colnames = [
 ]
 
 SUMMARY_DIR_NAMES = {
-    "flexzboost": "summary-flexz-40-00-mag246-3",
-    "bpz": "summary-bpz-40-00-mag246-3",
+    "flexzboost": "summary-flexz-40-00",
+    "bpz": "summary-bpz-40-00",
 }
 
 DEFAULT_BPZ_DATA_PATH = "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/bpz/"
