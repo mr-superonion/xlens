@@ -35,6 +35,12 @@ from xlens.utils.image import stack_psfs_cells
 
 band_order = "ugrizy"
 
+_GAIA_TABLE_DTYPE = np.dtype([
+    ("x_in_tract", np.float64),
+    ("y_in_tract", np.float64),
+    ("gaia_g_mag", np.float64),
+])
+
 
 class BuildCellSystematicsConnections(
     PipelineTaskConnections,
@@ -82,6 +88,16 @@ class BuildCellSystematicsConnections(
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
     )
+    outputGaiaCatalog = cT.Output(
+        doc=(
+            "GAIA sources covering this patch, with tract-pixel coordinates "
+            "and Gaia g-band magnitude (columns x_in_tract, y_in_tract, "
+            "gaia_g_mag). Empty when no GAIA refcat is in the inputs."
+        ),
+        name="deep_coadd_cell_systematics_gaia",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap", "tract", "patch"),
+    )
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
@@ -105,6 +121,14 @@ class BuildCellSystematicsConfig(
     gaiaPadding = Field[int](
         doc="Padding (pixels) when selecting GAIA sources around the patch.",
         default=300,
+    )
+    bands = ListField[str](
+        doc=(
+            "Bands required to be present in the input cell coadd dict. "
+            "The task raises if the set of bands actually delivered by "
+            "the butler does not match this list (no partial-band runs)."
+        ),
+        default=["g", "r", "i", "z"],
     )
     gaiaLoader = ConfigField(
         dtype=LoadReferenceObjectsConfig,
@@ -300,6 +324,18 @@ class BuildCellSystematicsTask(PipelineTask):
             outputPsf : np.ndarray (6, npix, npix)
         """
         assert isinstance(self.config, BuildCellSystematicsConfig)
+
+        expected = set(self.config.bands)
+        provided = set(cell_handles_dict.keys())
+        if provided != expected:
+            raise RuntimeError(
+                f"band mismatch for tract={tract} patch={patch}: "
+                f"expected {sorted(expected)}, "
+                f"got {sorted(provided)} "
+                f"(missing={sorted(expected - provided)}, "
+                f"extra={sorted(provided - expected)})"
+            )
+
         npix = self.config.npix
 
         noise_corr_array = np.zeros((6, npix, npix))
@@ -346,6 +382,7 @@ class BuildCellSystematicsTask(PipelineTask):
 
         # Add bright star mask from GAIA
         assert mask_array is not None
+        gaia_table = np.empty(0, dtype=_GAIA_TABLE_DTYPE)
         if (
             gaia_loader is not None
             and stitched_wcs is not None
@@ -357,10 +394,11 @@ class BuildCellSystematicsTask(PipelineTask):
                 wcs=stitched_wcs,
                 bboxToSpherePadding=self.config.gaiaPadding,
             ).refCat
+            gaia_table = self._build_gaia_table(
+                wcs=stitched_wcs, gaia_catalog=gaia,
+            )
             gaia_array = self._get_gaia_mask_sources(
-                wcs=stitched_wcs,
-                bbox=stitched_bbox,
-                gaia_catalog=gaia,
+                gaia_table=gaia_table, bbox=stitched_bbox,
             )
             if gaia_array is not None:
                 self.log.info(
@@ -394,16 +432,23 @@ class BuildCellSystematicsTask(PipelineTask):
             outputMask=output_msk,
             outputNoiseCorr=noise_corr_array,
             outputPsf=psf_array,
+            outputGaiaCatalog=gaia_table,
         )
 
-    def _get_gaia_mask_sources(
+    def _build_gaia_table(
         self,
         *,
         wcs,
-        bbox,
         gaia_catalog: Any,
-    ) -> np.ndarray | None:
-        """Build a bright star array from GAIA catalog for masking."""
+    ) -> np.ndarray:
+        """Convert a raw GAIA refCat into a structured numpy array.
+
+        Returns a structured ndarray with fields
+        ``(x_in_tract, y_in_tract, gaia_g_mag)``. Pixel coordinates
+        come from the passed wcs (the patch coadd wcs, which lives on
+        the tract pixel grid), so ``x_in_tract`` / ``y_in_tract`` are
+        tract-pixel values.
+        """
         gaia_astropy = gaia_catalog.asAstropy()
         flux = gaia_astropy["phot_g_mean_flux"]
         mag = (np.asarray(flux) * u.nJy).to_value(u.ABmag)
@@ -412,13 +457,27 @@ class BuildCellSystematicsTask(PipelineTask):
             dec=gaia_astropy["coord_dec"] * 180 / np.pi,
             degrees=True,
         )
-        mask = mag <= 17.0
-        if not np.any(mask):
+        out = np.empty(len(mag), dtype=_GAIA_TABLE_DTYPE)
+        out["x_in_tract"] = np.asarray(x, dtype=np.float64)
+        out["y_in_tract"] = np.asarray(y, dtype=np.float64)
+        out["gaia_g_mag"] = mag
+        return out
+
+    def _get_gaia_mask_sources(
+        self,
+        *,
+        gaia_table: np.ndarray,
+        bbox,
+    ) -> np.ndarray | None:
+        """Build a bright-star (x, y, r) array for the bright star mask."""
+        mag = gaia_table["gaia_g_mag"]
+        keep = mag <= 20.0
+        if not np.any(keep):
             return None
 
-        x = x[mask] - bbox.getBeginX()
-        y = y[mask] - bbox.getBeginY()
-        mag = mag[mask]
+        x = gaia_table["x_in_tract"][keep] - bbox.getBeginX()
+        y = gaia_table["y_in_tract"][keep] - bbox.getBeginY()
+        mag = mag[keep]
         conds = [
             mag <= 11.0,
             (mag > 11.0) & (mag <= 14.0),

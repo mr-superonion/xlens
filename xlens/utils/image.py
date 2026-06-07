@@ -463,7 +463,7 @@ def generate_pure_noise(
 
 def estimate_noise_variance(
     variance_array: NDArray,
-    mask_raw: NDArray,
+    mask,
     mask_array: NDArray | None = None,
 ) -> float:
     """Estimate noise variance from the variance plane.
@@ -472,18 +472,24 @@ def estimate_noise_variance(
     ----------
     variance_array : NDArray
         Variance plane of the image.
-    mask_raw : NDArray
-        Raw mask plane (e.g., from exposure.mask.array).
+    mask : lsst.afw.image.Mask
+        Raw mask object (e.g., ``exposure.mask``). Used both for its
+        pixel array and to look up the DETECTED / DETECTED_NEGATIVE bit
+        positions via the exposure's own mask-plane dict — so we do not
+        hard-code bit indices that may differ across cameras / stack
+        versions.
     mask_array : NDArray or None
         Processed mask (bad pixels, bright stars, etc.).
-        If None, only mask_raw is used for pixel selection.
+        If None, only ``mask`` is used for pixel selection.
 
     Returns
     -------
     float
         Median noise variance over valid pixels.
     """
-    mm = (variance_array < 1e5) & (mask_raw == 0)
+    detect_bits = mask.getPlaneBitMask(["DETECTED", "DETECTED_NEGATIVE"])
+    mask_raw = mask.array
+    mm = (variance_array < 1e5) & ((mask_raw & detect_bits) == 0)
     if mask_array is not None:
         mm &= (mask_array == 0)
     if np.sum(mm) < 10:
@@ -764,7 +770,7 @@ def prepare_data(
     anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
 
     noise_variance = estimate_noise_variance(
-        exposure.variance.array, exposure.mask.array, mask_array,
+        exposure.variance.array, exposure.mask, mask_array,
     )
 
     noise_array = prepare_noise_array(
@@ -858,7 +864,7 @@ def prepare_data_one_cell(
     anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
 
     noise_variance = estimate_noise_variance(
-        outer.variance.array, outer.mask.array, mask_array,
+        outer.variance.array, outer.mask, mask_array,
     )
 
     # Extract noise from cell if available and not provided

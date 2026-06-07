@@ -35,7 +35,7 @@ import numpy as np
 from lsst.meas.base import (
     SkyMapIdGeneratorConfig,
 )
-from lsst.pex.config import ConfigurableField, Field, FieldValidationError
+from lsst.pex.config import ConfigurableField, Field, FieldValidationError, ListField
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -115,6 +115,14 @@ class MeasureCellCoaddsPipeConfig(
             "them into the output catalog."
         ),
         default=False,
+    )
+    bands = ListField[str](
+        doc=(
+            "Bands required to be present in the input cell coadd dict. "
+            "The task raises if the set of bands actually delivered by "
+            "the butler does not match this list (no partial-band runs)."
+        ),
+        default=["g", "r", "i", "z"],
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
@@ -466,6 +474,17 @@ class MeasureCellCoaddsPipe(PipelineTask):
             If provided, per-cell masks are extracted by slicing.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
+
+        expected = set(self.config.bands)
+        provided = set(coadd_handles_dict.keys())
+        if provided != expected:
+            raise RuntimeError(
+                f"band mismatch for tract={tract} patch={patch}: "
+                f"expected {sorted(expected)}, "
+                f"got {sorted(provided)} "
+                f"(missing={sorted(expected - provided)}, "
+                f"extra={sorted(provided - expected)})"
+            )
 
         first_handle = next(iter(coadd_handles_dict.values()))
         idGenerator = self.config.idGenerator.apply(first_handle.dataId)
