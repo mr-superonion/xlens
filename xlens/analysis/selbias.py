@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -168,9 +168,7 @@ class SelBiasMultibandPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, SelBiasMultibandPipeConfig)
 
         self.sname = self.config.shear_name
@@ -198,9 +196,7 @@ class SelBiasMultibandPipe(PipelineTask):
         egn = self.egname
         comp = en[-1]
         if comp not in {"1", "2"}:
-            raise ValueError(
-                f"Ellipticity column {en} must end with '1' or '2'"
-            )
+            raise ValueError(f"Ellipticity column {en} must end with '1' or '2'")
         comp2 = "2" if comp == "1" else "1"
 
         en2 = en[:-1] + comp2
@@ -222,7 +218,7 @@ class SelBiasMultibandPipe(PipelineTask):
 
         # selection
         esq = src[en] ** 2 + src[en2] ** 2
-        msk = (src[fname] > flux_min) & (esq < emax ** 2.0)
+        msk = (src[fname] > flux_min) & (esq < emax**2.0)
         tmp = src[msk]
         ell = np.sum(tmp[en] * tmp[wname])
         res = np.sum(tmp[egn] * tmp[wname] + tmp[en] * tmp[wgname])
@@ -231,27 +227,15 @@ class SelBiasMultibandPipe(PipelineTask):
         if self.config.do_correct_selection_bias:
             dg = 0.02
             # selection
-            esq = (
-                src[en] ** 2 + src[en2] ** 2
-                + 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
-            )
-            msk = (
-                ((src[fname] + dg * src[fgname]) > flux_min) &
-                (esq < emax)
-            )
+            esq = src[en] ** 2 + src[en2] ** 2 + 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
+            msk = ((src[fname] + dg * src[fgname]) > flux_min) & (esq < emax)
             tmp = src[msk]
             ellp = np.sum(tmp[en] * tmp[wname])
             del tmp, esq, msk
 
             # selection
-            esq = (
-                src[en] ** 2 + src[en2] ** 2
-                - 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
-            )
-            msk = (
-                ((src[fname] - dg * src[fgname]) > flux_min) &
-                (esq < emax)
-            )
+            esq = src[en] ** 2 + src[en2] ** 2 - 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
+            msk = ((src[fname] - dg * src[fgname]) > flux_min) & (esq < emax)
             tmp = src[msk]
             ellm = np.sum(tmp[en] * tmp[wname])
             res_sel = (ellp - ellm) / 2.0 / dg
@@ -354,9 +338,7 @@ class SelBiasSummaryMultibandPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, SelBiasSummaryMultibandPipeConfig)
         self.svalue = self.config.shear_value
         return

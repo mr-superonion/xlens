@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -142,9 +142,7 @@ class AnacalDetectPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, AnacalDetectPipeConfig)
         self.makeSubtask("anacal")
         if self.config.do_fpfs:
@@ -157,16 +155,12 @@ class AnacalDetectPipe(PipelineTask):
         tract = int(butlerQC.quantum.dataId["tract"])
         patch = int(butlerQC.quantum.dataId["patch"])
         exposure_handles = inputs["exposure"]
-        exposure_handles_dict = {
-            handle.dataId["band"]: handle for handle in exposure_handles
-        }
+        exposure_handles_dict = {handle.dataId["band"]: handle for handle in exposure_handles}
         correlation_handles = inputs["noise_corr"]
         if len(correlation_handles) == 0:
             correlation_handles_dict = None
         else:
-            correlation_handles_dict = {
-                handle.dataId["band"]: handle for handle in correlation_handles
-            }
+            correlation_handles_dict = {handle.dataId["band"]: handle for handle in correlation_handles}
         skyMap = inputs["skyMap"]
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
@@ -185,9 +179,7 @@ class AnacalDetectPipe(PipelineTask):
         out.append(catalog)
         if self.config.do_fpfs:
             data["detection"] = catalog
-            out.append(
-                self.fpfs.run(**data)
-            )
+            out.append(self.fpfs.run(**data))
         return rfn.merge_arrays(out, flatten=True)
 
     def run(
@@ -213,9 +205,7 @@ class AnacalDetectPipe(PipelineTask):
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
             if noise_corr[ny // 2, nx // 2] != 1:
-                raise RuntimeError(
-                    "noise correlation peak is not at the center pixel"
-                )
+                raise RuntimeError("noise correlation peak is not at the center pixel")
             self.log.debug("With correlation, variance:", variance)
         else:
             noise_corr = None
@@ -238,8 +228,6 @@ class AnacalDetectPipe(PipelineTask):
             # Use skymap's patchInfo for is_primary (not exposure bbox)
             tractInfo = skyMap[tract]
             patchInfo = tractInfo[patch]
-            pixel_scale = float(
-                tractInfo.getWcs().getPixelScale().asArcseconds()
-            )
+            pixel_scale = float(tractInfo.getWcs().getPixelScale().asArcseconds())
             set_isPrimary(catalog, skyMap, tractInfo, patchInfo, pixel_scale)
         return Struct(output_catalog=catalog)

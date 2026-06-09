@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Constant-shear perturbation applied per redshift slice."""
 
 import galsim
@@ -27,13 +48,9 @@ class ShearRedshift(object):
         Constant convergence applied to all bins.
     """
 
-    def __init__(
-        self, z_bounds, mode, g_dist="g1", shear_value=0.02, kappa_value=0.0
-    ):
+    def __init__(self, z_bounds, mode, g_dist="g1", shear_value=0.02, kappa_value=0.0):
         if not isinstance(mode, int):
-            raise TypeError(
-                f"mode must be an integer; got {type(mode).__name__}"
-            )
+            raise TypeError(f"mode must be an integer; got {type(mode).__name__}")
         self.nz_bins = int(len(z_bounds) - 1)
         # nz_bins is the number of redshift bins
         # note that there are three options in each redshift bin
@@ -42,10 +59,9 @@ class ShearRedshift(object):
         # 1.5, 2.0]) if mode = 7 which in ternary is "0021" --- meaning that
         # the shear is (-0.02, -0.02, 0.00, 0.02) in each bin, respectively.
         self.code = _ternary(int(mode), self.nz_bins)
-        if not (0 <= int(mode) < 3 ** self.nz_bins):
+        if not (0 <= int(mode) < 3**self.nz_bins):
             raise ValueError(
-                f"mode={mode} out of range [0, {3 ** self.nz_bins}) "
-                f"for nz_bins={self.nz_bins}"
+                f"mode={mode} out of range [0, {3 ** self.nz_bins}) " f"for nz_bins={self.nz_bins}"
             )
         # maybe we need it to be more flexible in the future
         # but now we keep the linear spacing
@@ -80,10 +96,10 @@ class ShearRedshift(object):
     def get_shear(self, redshift):
         """Return ``(g1, g2, mu, gamma1, gamma2)`` for a given redshift."""
         shear = self._get_zshear(redshift=redshift)
-        if self.g_dist == 'g1':
-            gamma1, gamma2 = (shear, 0.)
-        elif self.g_dist == 'g2':
-            gamma1, gamma2 = (0., shear)
+        if self.g_dist == "g1":
+            gamma1, gamma2 = (shear, 0.0)
+        elif self.g_dist == "g2":
+            gamma1, gamma2 = (0.0, shear)
         else:
             raise ValueError("g_dist must be either 'g1' or 'g2'")
 

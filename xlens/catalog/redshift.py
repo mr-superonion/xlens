@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import os
 from abc import ABC, abstractmethod
 
@@ -36,9 +57,7 @@ def get_point_estimate(p):
     cdf = np.cumsum(p, dtype=float) / total
     zqs = np.interp(PROBS, cdf, Z_GRIDS)
     # minimize risk
-    res = minimize_scalar(
-        lambda zx: risk(zx, p_norm), bounds=(Z_MIN, Z_MAX), method="bounded"
-    )
+    res = minimize_scalar(lambda zx: risk(zx, p_norm), bounds=(Z_MIN, Z_MAX), method="bounded")
     zmode = Z_GRIDS[int(np.argmax(p))]
     z025, z160, z500, z840, z975 = zqs
     zbest = res.x
@@ -70,8 +89,7 @@ def get_point_estimates_from_pdfs(
     z840 = np.full(N, np.nan, dtype=float)
     z975 = np.full(N, np.nan, dtype=float)
     for i, p in enumerate(pdfs):
-        zmode[i], z025[i], z160[i], z500[i], z840[i], z975[i], zbest[i] = \
-            get_point_estimate(p)
+        zmode[i], z025[i], z160[i], z500[i], z840[i], z975[i], zbest[i] = get_point_estimate(p)
     return {
         "zmode": zmode,
         "z025": z025,
@@ -166,6 +184,7 @@ def get_color(
 # Z-Estimator Implementations
 # ------------------------
 
+
 class zEstimator(ABC):
     @abstractmethod
     def get_z(
@@ -183,8 +202,7 @@ class zEstimator(ABC):
         extinction: np.ndarray | None = None,
         **kwargs,
     ) -> dict:
-        """Method to get redshift point estimates
-        """
+        """Method to get redshift point estimates"""
 
     def get_zsel(
         self,
@@ -203,10 +221,17 @@ class zEstimator(ABC):
         **kwargs,
     ):
         zout = self.get_z(
-            src=src, mag_zero=mag_zero, flux_name=flux_name,
-            bands=bands, ref_band=ref_band, comp=comp, dg=dg,
-            flux_name2=flux_name2, flux_name3=flux_name3,
-            extinction=extinction, **kwargs,
+            src=src,
+            mag_zero=mag_zero,
+            flux_name=flux_name,
+            bands=bands,
+            ref_band=ref_band,
+            comp=comp,
+            dg=dg,
+            flux_name2=flux_name2,
+            flux_name3=flux_name3,
+            extinction=extinction,
+            **kwargs,
         )
         zpoint = zout[z_point_name]
         width95 = zout["z975"] - zout["z025"]
@@ -219,7 +244,8 @@ class flexzboostEstimator(zEstimator):
     """
 
     def __init__(
-        self, pz_obj,
+        self,
+        pz_obj,
     ):
         self.pz_obj = pz_obj
         self.pz_obj.model.models.n_jobs = 1
@@ -268,6 +294,7 @@ def load_bpz_templates(
     """Load BPZ template fluxes on Z_GRIDS for provided filter set."""
     filters = [f"{filter_name}_{b}" for b in bands]
     from desc_bpz.useful_py3 import get_data, get_str, match_resol
+
     z = Z_GRIDS
     spectra_file = os.path.join(data_path, "SED", spectra_name)
     spectra = [s[:-4] for s in get_str(spectra_file)]
@@ -284,9 +311,7 @@ def load_bpz_templates(
             model = f"{s}.{f}.AB"
             model_path = os.path.join(data_path, "AB", model)
             if not os.path.isfile(model_path):
-                raise FileNotFoundError(
-                    f"Cannot find template model: {model_path}"
-                )
+                raise FileNotFoundError(f"Cannot find template model: {model_path}")
             zo, f_mod_0 = get_data(model_path, (0, 1))
             flux_templates[:, i, j] = match_resol(zo, f_mod_0, z)
     return flux_templates
@@ -382,12 +407,13 @@ class bpzEstimator(zEstimator):
         merrs = np.array(merrs).T
 
         from desc_bpz.bpz_tools_py3 import e_mag2frac
+
         zp_frac = e_mag2frac(np.array(self.zp_errors))
 
         # Convert to pseudo-fluxes and propagate errors
-        flux = 10.0**(-0.4 * mags)
-        flux_err = flux * (10.0**(0.4 * merrs) - 1.0)
-        add_err = ((zp_frac * flux)**2)
+        flux = 10.0 ** (-0.4 * mags)
+        flux_err = flux * (10.0 ** (0.4 * merrs) - 1.0)
+        add_err = (zp_frac * flux) ** 2
         flux_err = np.sqrt(flux_err**2 + add_err)
 
         m_0_col = bands.index(ref_band)
@@ -398,9 +424,7 @@ class bpzEstimator(zEstimator):
         ng = len(src)
 
         pdfs = np.stack(
-            [self._measure_one_source(
-                flux[i], flux_err[i], mag0[i]
-            ) for i in range(ng)],
+            [self._measure_one_source(flux[i], flux_err[i], mag0[i]) for i in range(ng)],
             dtype=float,
         )
         points = get_point_estimates_from_pdfs(pdfs)

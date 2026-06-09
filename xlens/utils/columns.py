@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Detection-catalog column policy.
 
 The detection step (``anacal.run`` with ``detection=None``) emits 96
@@ -53,7 +74,8 @@ DETECTION_KEEP_COLUMNS: tuple[str, ...] = (
 
 
 def rename_flux_to_photoz_format(
-    per_band_cat: NDArray, band: str,
+    per_band_cat: NDArray,
+    band: str,
 ) -> NDArray:
     """Rename FPFS Gaussian-flux columns to the schema photoZPipe
     consumes via ``flux_name=<kernel>``.
@@ -72,14 +94,10 @@ def rename_flux_to_photoz_format(
     mapping: dict[str, str] = {}
     for kernel in ("fpfs", "fpfs1", "fpfs2"):
         for src, dst in (
-            (f"{band}_{kernel}_flux",
-             f"{band}_flux_{kernel}"),
-            (f"{band}_{kernel}_dflux_dg1",
-             f"{band}_dflux_{kernel}_dg1"),
-            (f"{band}_{kernel}_dflux_dg2",
-             f"{band}_dflux_{kernel}_dg2"),
-            (f"{band}_{kernel}_flux_err",
-             f"{band}_flux_{kernel}_err"),
+            (f"{band}_{kernel}_flux", f"{band}_flux_{kernel}"),
+            (f"{band}_{kernel}_dflux_dg1", f"{band}_dflux_{kernel}_dg1"),
+            (f"{band}_{kernel}_dflux_dg2", f"{band}_dflux_{kernel}_dg2"),
+            (f"{band}_{kernel}_flux_err", f"{band}_flux_{kernel}_err"),
         ):
             if src in names:
                 mapping[src] = dst
@@ -104,14 +122,24 @@ def select_detection_columns(catalog: NDArray) -> NDArray:
 
 
 GAUSS_APERTURE_COLUMNS: tuple[str, ...] = (
-    "flux_gauss0", "dflux_gauss0_dg1", "dflux_gauss0_dg2", "flux_gauss0_err",
-    "flux_gauss2", "dflux_gauss2_dg1", "dflux_gauss2_dg2", "flux_gauss2_err",
-    "flux_gauss4", "dflux_gauss4_dg1", "dflux_gauss4_dg2", "flux_gauss4_err",
+    "flux_gauss0",
+    "dflux_gauss0_dg1",
+    "dflux_gauss0_dg2",
+    "flux_gauss0_err",
+    "flux_gauss2",
+    "dflux_gauss2_dg1",
+    "dflux_gauss2_dg2",
+    "flux_gauss2_err",
+    "flux_gauss4",
+    "dflux_gauss4_dg1",
+    "dflux_gauss4_dg2",
+    "flux_gauss4_err",
 )
 
 
 def select_band_gauss_fluxes(
-    catalog: NDArray, band: str,
+    catalog: NDArray,
+    band: str,
 ) -> NDArray | None:
     """Project an anacal forced-measurement output onto the per-band
     Gaussian aperture flux columns and prefix them with ``{band}_``.

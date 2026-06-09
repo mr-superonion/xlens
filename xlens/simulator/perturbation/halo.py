@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """NFW halo lensing perturbation model using lenstronomy."""
 
 import numpy as np
@@ -75,9 +96,7 @@ class ShearHalo(object):
             z_source=src["redshift"],
             cosmo=self.cosmo,
         )
-        rs_angle, alpha_rs = lens_cosmo.nfw_physical2angle(
-            M=self.mass, c=self.conc
-        )
+        rs_angle, alpha_rs = lens_cosmo.nfw_physical2angle(M=self.mass, c=self.conc)
         kwargs = [{"Rs": rs_angle, "alpha_Rs": alpha_rs}]
 
         lensed_x, lensed_y = self.lens_solver.image_position_from_source(
@@ -95,9 +114,7 @@ class ShearHalo(object):
         else:
             lensed_x, lensed_y = lensed_x[0], lensed_y[0]
 
-        f_xx, f_xy, f_yx, f_yy = self.lens.hessian(
-            lensed_x, lensed_y, kwargs
-        )
+        f_xx, f_xy, f_yx, f_yy = self.lens.hessian(lensed_x, lensed_y, kwargs)
         gamma1 = 1.0 / 2 * (f_xx - f_yy)
         gamma2 = f_xy
         kappa = 0.0 if self.no_kappa else 0.5 * (f_xx + f_yy)

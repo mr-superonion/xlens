@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 from typing import Any
 
 import anacal
@@ -89,9 +110,7 @@ class BuildSystematicsConnections(
         super().__init__(config=config)
 
 
-class BuildSystematicsConfig(
-    PipelineTaskConfig, pipelineConnections=BuildSystematicsConnections
-):
+class BuildSystematicsConfig(PipelineTaskConfig, pipelineConnections=BuildSystematicsConnections):
     """Configuration for :class:`BuildSystematicsTask`."""
 
     npix = Field[int](
@@ -101,8 +120,16 @@ class BuildSystematicsConfig(
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
         default=[
-            "BAD", "SAT", "CR", "NO_DATA", "UNMASKEDNAN", "CROSSTALK", "INTRP",
-            "STREAK", "VIGNETTED", "CLIPPED",
+            "BAD",
+            "SAT",
+            "CR",
+            "NO_DATA",
+            "UNMASKEDNAN",
+            "CROSSTALK",
+            "INTRP",
+            "STREAK",
+            "VIGNETTED",
+            "CLIPPED",
         ],
     )
     gaiaPadding = Field[int](
@@ -131,9 +158,7 @@ class BuildSystematicsConfig(
     def validate(self):
         super().validate()
         if self.npix % 2 == 0:
-            raise FieldValidationError(
-                self.__class__.npix, self, "npix should be odd number"
-            )
+            raise FieldValidationError(self.__class__.npix, self, "npix should be odd number")
 
 
 class BuildSystematicsTask(PipelineTask):
@@ -160,9 +185,7 @@ class BuildSystematicsTask(PipelineTask):
         id_generator = self.config.idGenerator.apply(butlerQC.quantum.dataId)
         seed = id_generator.catalog_id
         exposure_handles = inputs["exposure"]
-        exposure_handles_dict = {
-            handle.dataId["band"]: handle for handle in exposure_handles
-        }
+        exposure_handles_dict = {handle.dataId["band"]: handle for handle in exposure_handles}
 
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
@@ -237,11 +260,7 @@ class BuildSystematicsTask(PipelineTask):
                     if star_array is not None:
                         star_centered_array[i] = star_array
             del exp, band_mask
-        if (
-            template_wcs is not None
-            and template_bbox is not None
-            and gaia_loader is not None
-        ):
+        if template_wcs is not None and template_bbox is not None and gaia_loader is not None:
             gaia = gaia_loader.loadPixelBox(
                 bbox=template_bbox,
                 filterName="phot_g_mean",
@@ -254,16 +273,11 @@ class BuildSystematicsTask(PipelineTask):
                 gaia_catalog=gaia,
             )
             if gaia_array is not None:
-                anacal.mask.add_bright_star_mask(
-                    mask_array=mask_array, star_array=gaia_array
-                )
+                anacal.mask.add_bright_star_mask(mask_array=mask_array, star_array=gaia_array)
         assert mask_array is not None
         h, w = mask_array.shape
         output_msk = MaskX(width=w, height=h)
-        output_msk.getArray()[:, :] = mask_array.astype(
-            output_msk.getArray().dtype,
-            copy=False
-        )
+        output_msk.getArray()[:, :] = mask_array.astype(output_msk.getArray().dtype, copy=False)
 
         # noise correlation
         for band, exp_handle in exposure_handles_dict.items():
@@ -281,7 +295,9 @@ class BuildSystematicsTask(PipelineTask):
         )
 
     def _merge_mask(
-        self, global_mask: np.ndarray | None, band_mask: np.ndarray,
+        self,
+        global_mask: np.ndarray | None,
+        band_mask: np.ndarray,
     ):
         if global_mask is None:
             return band_mask.astype(np.int16)
@@ -310,17 +326,14 @@ class BuildSystematicsTask(PipelineTask):
             dec=gaia_astropy["coord_dec"] * 180 / np.pi,
             degrees=True,
         )
-        mask = (mag <= 17.0)
+        mask = mag <= 17.0
         if not np.any(mask):
             return None
 
         x = x[mask] - bbox.getBeginX()
         y = y[mask] - bbox.getBeginY()
         mag = mag[mask]
-        conds = [
-            mag <= 11.0, (mag > 11.0) & (mag <= 14.0),
-            (mag > 14.0) & (mag <= 17.0)
-        ]
+        conds = [mag <= 11.0, (mag > 11.0) & (mag <= 14.0), (mag > 14.0) & (mag <= 17.0)]
         choices = [450.0, 200.0, 100.0]
         r = np.select(conds, choices, default=100.0)
         dtype = np.dtype([("x", float), ("y", float), ("r", float)])
@@ -337,20 +350,13 @@ class BuildSystematicsTask(PipelineTask):
         # Always check what planes exist in this exposure:
         print(mask.getMaskPlaneDict().keys())
 
-        planes = [
-            "BAD", "CR", "NO_DATA", "SAT", "UNMASKEDNAN",
-            "DETECTED", "DETECTED_NEGATIVE"
-        ]
+        planes = ["BAD", "CR", "NO_DATA", "SAT", "UNMASKEDNAN", "DETECTED", "DETECTED_NEGATIVE"]
         avail = set(mask.getMaskPlaneDict().keys())
         planes = [p for p in planes if p in avail]
 
         bits = mask.getPlaneBitMask(planes)
-        variance_array = exposure.getMaskedImage().variance.array[
-            1000:3000, 1000:3000
-        ]
-        window_array = (
-            ((mask.array & bits) == 0) & (mask_array == 0)
-        ).astype(np.float32)[
+        variance_array = exposure.getMaskedImage().variance.array[1000:3000, 1000:3000]
+        window_array = (((mask.array & bits) == 0) & (mask_array == 0)).astype(np.float32)[
             1000:3000, 1000:3000
         ]
 
@@ -358,18 +364,12 @@ class BuildSystematicsTask(PipelineTask):
             exposure.getMaskedImage().image.array,
             dtype=np.float32,
         )[1000:3000, 1000:3000]
-        window_array = (
-            window_array
-            * (noise_array**2.0 < variance_array * 9)
-            * (~np.isnan(variance_array))
-        )
+        window_array = window_array * (noise_array**2.0 < variance_array * 9) * (~np.isnan(variance_array))
 
         noise_array[~window_array.astype(bool)] = 0.0
         noise_variance = np.average(variance_array[window_array.astype(bool)])
         if noise_variance < 1e-20:
-            raise ValueError(
-                "the estimated image noise variance should be positive."
-            )
+            raise ValueError("the estimated image noise variance should be positive.")
 
         pad_width = ((10, 10), (10, 10))  # ((top, bottom), (left, right))
         window_array = np.pad(
@@ -388,15 +388,11 @@ class BuildSystematicsTask(PipelineTask):
 
         npixl = int(self.config.npix // 2)
         npixr = int(self.config.npix // 2 + 1)
-        noise_corr = np.fft.fftshift(
-            np.fft.ifft2(np.abs(np.fft.fft2(noise_array)) ** 2.0)
-        ).real[
+        noise_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(noise_array)) ** 2.0)).real[
             ny // 2 - npixl : ny // 2 + npixr,
             nx // 2 - npixl : nx // 2 + npixr,
         ]
-        window_corr = np.fft.fftshift(
-            np.fft.ifft2(np.abs(np.fft.fft2(window_array)) ** 2.0)
-        ).real[
+        window_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(window_array)) ** 2.0)).real[
             ny // 2 - npixl : ny // 2 + npixr,
             nx // 2 - npixl : nx // 2 + npixr,
         ]

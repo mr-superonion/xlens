@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Layout class for computing galaxy positions on a coadd patch."""
 
 import math
@@ -12,9 +33,9 @@ from .shifts import (
     get_random_shifts,
 )
 
-GRID_SPACING = 12.0      # arcsec
-HEX_SPACING = 12.0       # arcsec
-RANDOM_DENSITY = 80.0    # per arcmin^2
+GRID_SPACING = 12.0  # arcsec
+HEX_SPACING = 12.0  # arcsec
+RANDOM_DENSITY = 80.0  # per arcmin^2
 
 
 class Layout:
@@ -64,9 +85,7 @@ class Layout:
         extend_ratio: float = 1.08,
     ):
         if not (0.8 < extend_ratio < 1.2):
-            raise ValueError(
-                f"extend_ratio must be in (0.8, 1.2); got {extend_ratio}"
-            )
+            raise ValueError(f"extend_ratio must be in (0.8, 1.2); got {extend_ratio}")
         self.sep = sep_arcsec
         # Pixel scale (arcsec/pixel)
         pixel_scale_arcsec = float(wcs.getPixelScale().asArcseconds())
@@ -92,18 +111,15 @@ class Layout:
             if layout_name == "random":
                 side_arcmin = (self._dim_pixels * self._pixscale_arcsec) / 60.0
                 # ensure tiny positive area for very small boxes
-                self._area_arcmin2 = max(
-                    side_arcmin**2, (2.0 * self._pixscale_arcsec / 60.0) ** 2
-                )
+                self._area_arcmin2 = max(side_arcmin**2, (2.0 * self._pixscale_arcsec / 60.0) ** 2)
             else:
                 radius_arcmin = max(
                     (self._dim_pixels * 0.5 * self._pixscale_arcsec) / 60.0,
-                    (2.0 * self._pixscale_arcsec / 60.0)
+                    (2.0 * self._pixscale_arcsec / 60.0),
                 )
                 self._area_arcmin2 = math.pi * radius_arcmin**2
         else:
             self._area_arcmin2 = 0.0
-
 
     @property
     def pixel_scale_arcsec(self) -> float:
@@ -148,9 +164,7 @@ class Layout:
         """
         sep = self.sep
         if not isinstance(rng, np.random.RandomState):
-            raise TypeError(
-                "rng must be numpy.random.RandomState (old generator)"
-            )
+            raise TypeError("rng must be numpy.random.RandomState (old generator)")
 
         if self._name == "grid":
             spacing = float(sep if sep is not None else GRID_SPACING)

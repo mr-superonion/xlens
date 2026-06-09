@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -151,9 +151,7 @@ class AnacalForcePipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, AnacalForcePipeConfig)
         self.makeSubtask("anacal")
         if self.config.do_fpfs:
@@ -166,16 +164,12 @@ class AnacalForcePipe(PipelineTask):
         tract = int(butlerQC.quantum.dataId["tract"])
         patch = int(butlerQC.quantum.dataId["patch"])
         exposure_handles = inputs["exposure"]
-        exposure_handles_dict = {
-            handle.dataId["band"]: handle for handle in exposure_handles
-        }
+        exposure_handles_dict = {handle.dataId["band"]: handle for handle in exposure_handles}
         correlation_handles = inputs["noise_corr"]
         if len(correlation_handles) == 0:
             correlation_handles_dict = None
         else:
-            correlation_handles_dict = {
-                handle.dataId["band"]: handle for handle in correlation_handles
-            }
+            correlation_handles_dict = {handle.dataId["band"]: handle for handle in correlation_handles}
         skyMap = inputs["skyMap"]
         detection = inputs["input_catalog"].as_array()
         outputs = self.run(
@@ -226,14 +220,10 @@ class AnacalForcePipe(PipelineTask):
             "dflux_gauss4_dg1",
             "dflux_gauss4_dg2",
         ]
-        cat = rfn.repack_fields(
-            self.anacal.run(**data)[colnames]
-        )
+        cat = rfn.repack_fields(self.anacal.run(**data)[colnames])
         out = [cat]
         if self.config.do_fpfs:
-            out.append(
-                self.fpfs.run(**data)
-            )
+            out.append(self.fpfs.run(**data))
         return rfn.merge_arrays(out, flatten=True)
 
     def run(
@@ -261,9 +251,7 @@ class AnacalForcePipe(PipelineTask):
                 noise_corr = noise_corr / variance
                 ny, nx = noise_corr.shape
                 if noise_corr[ny // 2, nx // 2] != 1:
-                    raise RuntimeError(
-                        "noise correlation peak is not at the center pixel"
-                    )
+                    raise RuntimeError("noise correlation peak is not at the center pixel")
                 self.log.debug("With correlation, variance:", variance)
             else:
                 noise_corr = None

@@ -1,4 +1,25 @@
 #!/usr/bin/env python
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #
 # simple example with ring test (rotating intrinsic galaxies)
 # Copyright 20230916 Xiangchong Li.
@@ -93,6 +114,7 @@ class AddNoisePipeConnections(
     },
 ):
     """Butler connections for :class:`AddNoisePipe`."""
+
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
         name="deep_coadd_systematics_noisecorr",
@@ -123,6 +145,7 @@ class AddNoisePipeConfig(
     pipelineConnections=AddNoisePipeConnections,
 ):
     """Configuration for :class:`AddNoisePipe`."""
+
     idGenerator = SkyMapIdGeneratorConfig.make_field()
     survey_name = Field[str](
         doc="Name of the survey",
@@ -144,9 +167,7 @@ class AddNoisePipeConfig(
     def validate(self):
         super().validate()
         if self.noiseId < 0 or self.noiseId >= 10:
-            raise FieldValidationError(
-                self.__class__.noiseId, self, "We require 0 <= noiseId < 10"
-            )
+            raise FieldValidationError(self.__class__.noiseId, self, "We require 0 <= noiseId < 10")
 
     def setDefaults(self):
         super().setDefaults()
@@ -219,9 +240,7 @@ class AddNoisePipe(PipelineTask):
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
             if noise_corr[ny // 2, nx // 2] != 1:
-                raise RuntimeError(
-                    "noise correlation peak is not at the center pixel"
-                )
+                raise RuntimeError("noise correlation peak is not at the center pixel")
             self.log.debug("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
         galaxy_seed = seed * gal_seed_base + self.config.galId

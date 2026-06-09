@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import hashlib
 
 import numpy as np
@@ -7,14 +28,7 @@ num_rot = 2
 gal_seed_base = 10
 
 
-def get_noise_seed(
-    *,
-    galaxy_seed,
-    noiseId=0,
-    rotId=0,
-    band: None | str = "i",
-    is_sim=False
-):
+def get_noise_seed(*, galaxy_seed, noiseId=0, rotId=0, band: None | str = "i", is_sim=False):
     """Generate a stable pseudo-random seed for noise realisations.
 
     The function mixes deterministic galaxy identifiers with optional
@@ -28,7 +42,7 @@ def get_noise_seed(
     galaxy_seed : int
         Base integer identifier that uniquely labels the galaxy.
     noiseId : int, optional
-        Identifier describing the desired noise realisation.  Defaults to ``0``.
+        Identifier describing the desired noise realisation.  Default ``0``.
     rotId : int, optional
         Identifier describing the rotation realisation.  Defaults to ``0``.
     band : str, optional
@@ -44,9 +58,7 @@ def get_noise_seed(
         Unsigned 32-bit integer seed suitable for initialising NumPy random
         generators.
     """
-    mixed_list = [
-        galaxy_seed, noiseId, rotId, band, int(is_sim)
-    ]
+    mixed_list = [galaxy_seed, noiseId, rotId, band, int(is_sim)]
     parts = []
     for item in mixed_list:
         if isinstance(item, int):

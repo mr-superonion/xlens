@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Per-tract merge of FPFS shape catalogs.
 
 This pipeline task takes the per-patch ``*_coadd_anacal_*`` catalogs of a
@@ -77,10 +98,7 @@ class MergePipeConnections(
         minimum=0,
     )
     mergedCatalog = cT.Output(
-        doc=(
-            "Tract-level merged anacal catalog "
-            "(band-combined + WCS-corrected)."
-        ),
+        doc=("Tract-level merged anacal catalog " "(band-combined + WCS-corrected)."),
         name="{inputName}_anacal_merged",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),
@@ -110,10 +128,7 @@ class MergePipeConfig(
         default=8.4,
     )
     mag_zero = Field[float](
-        doc=(
-            "Photometric zeropoint used to scale ``fpfs_c0`` "
-            "(``c0 *= 10**((mag_zero - 30) / 2.5)``)."
-        ),
+        doc=("Photometric zeropoint used to scale ``fpfs_c0`` " "(``c0 *= 10**((mag_zero - 30) / 2.5)``)."),
         default=30.0,
     )
     fpfs_prefix = Field[str](
@@ -144,13 +159,8 @@ class MergePipeConfig(
 
     def validate(self):
         super().validate()
-        if (
-            len(self.band_weights) != 0
-            and len(self.band_weights) != len(self.bands)
-        ):
-            raise ValueError(
-                "band_weights, when set, must have the same length as bands"
-            )
+        if len(self.band_weights) != 0 and len(self.band_weights) != len(self.bands):
+            raise ValueError("band_weights, when set, must have the same length as bands")
 
 
 class MergePipe(PipelineTask):
@@ -170,8 +180,10 @@ class MergePipe(PipelineTask):
         **kwargs: Any,
     ):
         super().__init__(
-            config=config, log=log,
-            initInputs=initInputs, **kwargs,
+            config=config,
+            log=log,
+            initInputs=initInputs,
+            **kwargs,
         )
         assert isinstance(self.config, MergePipeConfig)
 
@@ -182,7 +194,12 @@ class MergePipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
 
     def run(
-        self, *, srcList, skymap, tract: int, pzList=None,
+        self,
+        *,
+        srcList,
+        skymap,
+        tract: int,
+        pzList=None,
     ) -> Struct:
         """Merge the per-patch catalogs for one tract.
 
@@ -226,7 +243,9 @@ class MergePipe(PipelineTask):
         return Struct(mergedCatalog=catalog)
 
     def _finalize_columns(
-        self, catalog: Table, pz_cols: list[str],
+        self,
+        catalog: Table,
+        pz_cols: list[str],
     ) -> Table:
         """Project the catalog onto the published schema and keep only
         ``is_primary`` rows.
@@ -257,44 +276,50 @@ class MergePipe(PipelineTask):
         bands = list(self.config.bands)
         p = self.config.fpfs_prefix
         if "is_primary" not in catalog.colnames:
-            raise RuntimeError(
-                "merge finalize: catalog is missing 'is_primary'"
-            )
+            raise RuntimeError("merge finalize: catalog is missing 'is_primary'")
         if "wsel" not in catalog.colnames:
-            raise RuntimeError(
-                "merge finalize: catalog is missing 'wsel'"
-            )
-        keep_rows = (
-            np.asarray(catalog["is_primary"], dtype=bool)
-            & (np.asarray(catalog["wsel"]) > 1e-5)
-        )
+            raise RuntimeError("merge finalize: catalog is missing 'wsel'")
+        keep_rows = np.asarray(catalog["is_primary"], dtype=bool) & (np.asarray(catalog["wsel"]) > 1e-5)
         catalog = catalog[keep_rows]
         keep: list[str] = [
-            "ra", "dec",
-            "x1", "x2", "x1_det", "x2_det",
-            "wsel", "dwsel_dg1", "dwsel_dg2",
+            "ra",
+            "dec",
+            "x1",
+            "x2",
+            "x1_det",
+            "x2_det",
+            "wsel",
+            "dwsel_dg1",
+            "dwsel_dg2",
             "mask_value",
             "object_id",
-            f"{p}e1", f"{p}e2",
-            f"{p}de1_dg1", f"{p}de1_dg2",
-            f"{p}de2_dg1", f"{p}de2_dg2",
-            f"{p}m00", f"{p}dm00_dg1", f"{p}dm00_dg2",
-            f"{p}m20", f"{p}dm20_dg1", f"{p}dm20_dg2",
+            f"{p}e1",
+            f"{p}e2",
+            f"{p}de1_dg1",
+            f"{p}de1_dg2",
+            f"{p}de2_dg1",
+            f"{p}de2_dg2",
+            f"{p}m00",
+            f"{p}dm00_dg1",
+            f"{p}dm00_dg2",
+            f"{p}m20",
+            f"{p}dm20_dg1",
+            f"{p}dm20_dg2",
         ]
         for b in bands:
-            keep.extend([
-                f"{b}_flux_fpfs1",
-                f"{b}_dflux_fpfs1_dg1",
-                f"{b}_dflux_fpfs1_dg2",
-                f"{b}_flux_fpfs1_err",
-            ])
+            keep.extend(
+                [
+                    f"{b}_flux_fpfs1",
+                    f"{b}_dflux_fpfs1_dg1",
+                    f"{b}_dflux_fpfs1_dg2",
+                    f"{b}_flux_fpfs1_err",
+                ]
+            )
         keep.extend(pz_cols)
 
         missing = [c for c in keep if c not in catalog.colnames]
         if missing:
-            raise RuntimeError(
-                f"merge finalize: missing expected columns: {missing}"
-            )
+            raise RuntimeError(f"merge finalize: missing expected columns: {missing}")
         return catalog[keep]
 
     def _collect_src_tables(self, srcList) -> Table:
@@ -316,17 +341,13 @@ class MergePipe(PipelineTask):
         verified, the photo-z columns are appended row-aligned.
         """
         if "object_id" not in catalog.colnames:
-            raise RuntimeError(
-                "merged anacal catalog is missing the 'object_id' column"
-            )
+            raise RuntimeError("merged anacal catalog is missing the 'object_id' column")
         pz_tables = [h.get() if hasattr(h, "get") else h for h in pzList]
         if not pz_tables:
             return catalog
         pz_cat = vstack(pz_tables, metadata_conflicts="silent")
         if "object_id" not in pz_cat.colnames:
-            raise RuntimeError(
-                "photo-z catalog is missing the 'object_id' column"
-            )
+            raise RuntimeError("photo-z catalog is missing the 'object_id' column")
 
         catalog.sort("object_id")
         pz_cat.sort("object_id")
@@ -356,13 +377,15 @@ class MergePipe(PipelineTask):
                 # Median is finite/positive given valid measurements; if
                 # all values are bad treat the band as unweighted.
                 med = float(np.median(err[np.isfinite(err) & (err > 0)]))
-                w[i] = 1.0 / med ** 2 if med > 0 else 0.0
+                w[i] = 1.0 / med**2 if med > 0 else 0.0
         if w.sum() <= 0.0:
             raise RuntimeError("All band weights are zero or negative.")
         return w / w.sum()
 
     def _combine_band_moments(
-        self, catalog: Table, weights: np.ndarray,
+        self,
+        catalog: Table,
+        weights: np.ndarray,
     ) -> Table:
         bands = list(self.config.bands)
         p = self.config.fpfs_prefix
@@ -393,17 +416,14 @@ class MergePipe(PipelineTask):
             dm22s_dg1 += w * np.asarray(catalog[f"{b}_{p}dm22s_dg1"])
             dm22s_dg2 += w * np.asarray(catalog[f"{b}_{p}dm22s_dg2"])
 
-        c0 = (
-            self.config.fpfs_c0
-            * 10.0 ** ((self.config.mag_zero - 30.0) / 2.5)
-        )
+        c0 = self.config.fpfs_c0 * 10.0 ** ((self.config.mag_zero - 30.0) / 2.5)
         denom = m00 + c0
         e1 = m22c / denom
         e2 = m22s / denom
-        de1_dg1 = dm22c_dg1 / denom - m22c / denom ** 2 * dm00_dg1
-        de1_dg2 = dm22c_dg2 / denom - m22c / denom ** 2 * dm00_dg2
-        de2_dg1 = dm22s_dg1 / denom - m22s / denom ** 2 * dm00_dg1
-        de2_dg2 = dm22s_dg2 / denom - m22s / denom ** 2 * dm00_dg2
+        de1_dg1 = dm22c_dg1 / denom - m22c / denom**2 * dm00_dg1
+        de1_dg2 = dm22c_dg2 / denom - m22c / denom**2 * dm00_dg2
+        de2_dg1 = dm22s_dg1 / denom - m22s / denom**2 * dm00_dg1
+        de2_dg2 = dm22s_dg2 / denom - m22s / denom**2 * dm00_dg2
 
         # ``m22c``, ``m22s`` and their ``dm22*_dg*`` derivatives are
         # consumed locally to derive the ellipticity + shear response,
@@ -426,7 +446,10 @@ class MergePipe(PipelineTask):
         return catalog
 
     def _apply_wcs_correction(
-        self, catalog: Table, wcs, pixel_scale: float,
+        self,
+        catalog: Table,
+        wcs,
+        pixel_scale: float,
     ) -> Table:
         p = self.config.fpfs_prefix
         # Reproject sky positions to tract pixel coordinates so the WCS
@@ -473,7 +496,9 @@ class MergePipe(PipelineTask):
         return catalog
 
     def _apply_flipu(
-        self, catalog: Table, pz_cols: list[str],
+        self,
+        catalog: Table,
+        pz_cols: list[str],
     ) -> Table:
         """Convert from GalSim u=West to LSST u=East convention.
 
@@ -492,8 +517,10 @@ class MergePipe(PipelineTask):
             catalog[f"{p}e2"] = -np.asarray(catalog[f"{p}e2"])
 
         for col in (
-            f"{p}de1_dg2", f"{p}de2_dg1",
-            f"{p}dm00_dg2", f"{p}dm20_dg2",
+            f"{p}de1_dg2",
+            f"{p}de2_dg1",
+            f"{p}dm00_dg2",
+            f"{p}dm20_dg2",
             "dwsel_dg2",
         ):
             if col in catalog.colnames:

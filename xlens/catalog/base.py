@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import numpy as np
 
 # from .model import w_model, w_model_derivs
@@ -15,7 +36,7 @@ def get_esq(
     e = src[f"{sn}e{comp}"]
     de = src[f"{sn}de{comp}_dg{comp}"]
 
-    comp2 = 3 - comp        # 1 to 2; 2 to 1
+    comp2 = 3 - comp  # 1 to 2; 2 to 1
     e2 = src[f"{sn}e{comp2}"]
     de2 = src[f"{sn}de{comp2}_dg{comp}"]
 
@@ -79,7 +100,10 @@ class ShearEstimator(object):
             self.sn = ""
 
     def _measure(
-        self, src, comp: int, sign: float,
+        self,
+        src,
+        comp: int,
+        sign: float,
         extinction: np.ndarray | None = None,
     ):
         """Compute binned <w_sel e> for shear +sign*dg."""
@@ -102,7 +126,7 @@ class ShearEstimator(object):
                 _m[_p] = self.mag_zero - 2.5 * np.log10(_f[_p])
             if extinction is not None:
                 _m = _m - extinction[f"a_{b}"]
-            mask_s &= (_m < self.magx[b])
+            mask_s &= _m < self.magx[b]
         if extinction is None:
             ext = None
         else:
@@ -157,7 +181,9 @@ class ShearEstimator(object):
         return ell_s, response_s, response_det_s, num_s
 
     def get_sel_response(
-        self, src, comp: int,
+        self,
+        src,
+        comp: int,
         extinction: np.ndarray | None = None,
     ) -> np.ndarray:
         """Selection response term for component comp (1 or 2)."""
@@ -171,51 +197,69 @@ class ShearEstimator(object):
         target: str,
         extinction: np.ndarray | None = None,
     ):
-        """
-        Measure shear components in redshift bins, using a supplied z-estimator.
-        """
+        """Measure shear components in redshift bins via a z-estimator."""
         if target == "g1":
             e1, r1, r1_det, num1 = self._measure(
-                src, comp=1, sign=0, extinction=extinction,
+                src,
+                comp=1,
+                sign=0,
+                extinction=extinction,
             )
             r1_sel = self.get_sel_response(
-                src, comp=1, extinction=extinction,
+                src,
+                comp=1,
+                extinction=extinction,
             )
-            return {
-                "e": e1, "r": r1, "r_det": r1_det, "r_sel": r1_sel, "num": num1
-            }
+            return {"e": e1, "r": r1, "r_det": r1_det, "r_sel": r1_sel, "num": num1}
         elif target == "g2":
             e2, r2, r2_det, num2 = self._measure(
-                src, comp=2, sign=0, extinction=extinction,
+                src,
+                comp=2,
+                sign=0,
+                extinction=extinction,
             )
             r2_sel = self.get_sel_response(
-                src, comp=2, extinction=extinction,
+                src,
+                comp=2,
+                extinction=extinction,
             )
-            return {
-                "e": e2, "r": r2, "r_det": r2_det, "r_sel": r2_sel, "num": num2
-            }
+            return {"e": e2, "r": r2, "r_det": r2_det, "r_sel": r2_sel, "num": num2}
         elif target == "g1g2":
             e1, r1, r1_det, num1 = self._measure(
-                src, comp=1, sign=0, extinction=extinction,
+                src,
+                comp=1,
+                sign=0,
+                extinction=extinction,
             )
             e2, r2, r2_det, num2 = self._measure(
-                src, comp=2, sign=0, extinction=extinction,
+                src,
+                comp=2,
+                sign=0,
+                extinction=extinction,
             )
             r1_sel = self.get_sel_response(
-                src, 1, extinction=extinction,
+                src,
+                1,
+                extinction=extinction,
             )
             r2_sel = self.get_sel_response(
-                src, 2, extinction=extinction,
+                src,
+                2,
+                extinction=extinction,
             )
             return {
-                "e1": e1, "r1": r1, "r1_det": r1_det, "r1_sel": r1_sel,
-                "e2": e2, "r2": r2, "r2_det": r2_det, "r2_sel": r2_sel,
-                "num": num1
+                "e1": e1,
+                "r1": r1,
+                "r1_det": r1_det,
+                "r1_sel": r1_sel,
+                "e2": e2,
+                "r2": r2,
+                "r2_det": r2_det,
+                "r2_sel": r2_sel,
+                "num": num1,
             }
         else:
-            raise ValueError(
-                f"target must be 'g1', 'g2', or 'g1g2', got {target!r}"
-            )
+            raise ValueError(f"target must be 'g1', 'g2', or 'g1g2', got {target!r}")
 
 
 def measure_shear(
@@ -268,9 +312,9 @@ def measure_shear(
     # No shear
     mask = np.ones(src.shape[0], dtype=bool)
     for b in bands:
-        mask &= (flux[b] > fm[b])
-    mask &= (esq0 < emax * emax)
-    mask &= (trace0 > trace_min)
+        mask &= flux[b] > fm[b]
+    mask &= esq0 < emax * emax
+    mask &= trace0 > trace_min
     # photo-z + width cut at base shear
     zmode, width95 = z_estimator.get_zsel(
         src[mask],
@@ -301,7 +345,7 @@ def measure_shear(
             mask_side = (esq_side < emax * emax) & (trace_side > trace_min)
             for b in bands:
                 df = src[f"{b}_dflux{fn}_dg{comp}"]
-                mask_side &= (flux[b] + dg_eff * df > fm[b])
+                mask_side &= flux[b] + dg_eff * df > fm[b]
 
             if do_correction:
                 z_side, w_side = z_estimator.get_zsel(
@@ -397,10 +441,12 @@ def measure_shear(
         )
         r2_sel = sel_term(2)
         return {
-            "e1": e1, "r1": r1, "r1_sel": r1_sel,
-            "e2": e2, "r2": r2, "r2_sel": r2_sel,
+            "e1": e1,
+            "r1": r1,
+            "r1_sel": r1_sel,
+            "e2": e2,
+            "r2": r2,
+            "r2_sel": r2_sel,
         }
     else:
-        raise ValueError(
-            f"target must be 'g1', 'g2', or 'g1g2', got {target!r}"
-        )
+        raise ValueError(f"target must be 'g1', 'g2', or 'g1g2', got {target!r}")

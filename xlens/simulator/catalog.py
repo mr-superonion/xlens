@@ -1,5 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #
 # Simple example with ring test (rotating intrinsic galaxies)
 # Copyright 2023-2025 Xiangchong Li.
@@ -50,6 +71,7 @@ class CatalogConnections(
     },
 ):
     """Butler connection definitions for truth catalog generation."""
+
     skymap = cT.Input(
         doc="SkyMap to use in processing",
         name=BaseSkyMap.SKYMAP_DATASET_TYPE_NAME,
@@ -72,6 +94,7 @@ class CatalogConfig(
     pipelineConnections=CatalogConnections,
 ):
     """Configuration options used by :class:`CatalogTask`."""
+
     catsim_dir = Field[str](
         doc="Directory containing input galaxy catalogs.",
         default=os.environ.get("CATSIM_DIR", "."),
@@ -152,14 +175,11 @@ class CatalogConfig(
                 self,
                 f"rotId needs to be smaller than {num_rot}",
             )
-        if self.galaxy_type not in [
-            "catsim2017", "flagship2025", "diffsky"
-        ]:
+        if self.galaxy_type not in ["catsim2017", "flagship2025", "diffsky"]:
             raise FieldValidationError(
                 self.__class__.galaxy_type,
                 self,
-                "We require galaxy_type in "
-                "['catsim2017', 'flagship2025', 'diffsky']",
+                "We require galaxy_type in " "['catsim2017', 'flagship2025', 'diffsky']",
             )
         lists = {
             "select_observable": self.select_observable,
@@ -175,13 +195,10 @@ class CatalogConfig(
                 raise FieldValidationError(
                     self.__class__.select_observable,
                     self,
-                    "select_observable must be provided when selection limits "
-                    "are specified.",
+                    "select_observable must be provided when selection limits " "are specified.",
                 )
 
-            lengths = {
-                len(v) for v in lists.values() if not _is_empty(v)
-            }
+            lengths = {len(v) for v in lists.values() if not _is_empty(v)}
             if len(lengths) > 1:
                 raise FieldValidationError(
                     self.__class__.select_observable,
@@ -206,16 +223,12 @@ class CatalogTask(PipelineTask):
         self.rotate_list = [np.pi / num_rot * i for i in range(num_rot)]
         pass
 
-    def get_perturbation_object(
-        self, tract_info, seed: int, **kwargs: Any
-    ) -> object:
+    def get_perturbation_object(self, tract_info, seed: int, **kwargs: Any) -> object:
         """Return a perturbation object for lensing the catalog.
 
         Must be implemented by subclasses (e.g. shear, halo, log-normal).
         """
-        raise NotImplementedError(
-            "'get_perturbation_object' must be implemented by subclasses."
-        )
+        raise NotImplementedError("'get_perturbation_object' must be implemented by subclasses.")
 
     def prepare_galaxy_catalog(
         self,
@@ -236,19 +249,13 @@ class CatalogTask(PipelineTask):
 
         rng = np.random.RandomState(seed)
         select_observable = (
-            list(self.config.select_observable)
-            if self.config.select_observable is not None
-            else []
+            list(self.config.select_observable) if self.config.select_observable is not None else []
         )
         select_lower_limit = (
-            list(self.config.select_lower_limit)
-            if self.config.select_lower_limit is not None
-            else []
+            list(self.config.select_lower_limit) if self.config.select_lower_limit is not None else []
         )
         select_upper_limit = (
-            list(self.config.select_upper_limit)
-            if self.config.select_upper_limit is not None
-            else []
+            list(self.config.select_upper_limit) if self.config.select_upper_limit is not None else []
         )
 
         galaxy_catalog = GalClass(
@@ -260,24 +267,11 @@ class CatalogTask(PipelineTask):
             extend_ratio=self.config.extend_ratio,
             force_pixel_center=self.config.force_pixel_center,
             catsim_dir=self.config.catsim_dir,
-            select_observable=(
-                select_observable
-                if select_observable
-                else None
-            ),
-            select_lower_limit=(
-                select_lower_limit
-                if select_lower_limit
-                else None
-            ),
-            select_upper_limit=(
-                select_upper_limit
-                if select_upper_limit
-                else None
-            ),
+            select_observable=(select_observable if select_observable else None),
+            select_lower_limit=(select_lower_limit if select_lower_limit else None),
+            select_upper_limit=(select_upper_limit if select_upper_limit else None),
         )
         return galaxy_catalog
-
 
     def run(
         self,
@@ -321,6 +315,7 @@ class CatalogShearTaskConfig(
     pipelineConnections=CatalogConnections,
 ):
     """Configuration for :class:`CatalogShearTask` (constant-shear test)."""
+
     z_bounds = ListField[float](
         doc="boundary list of the redshift",
         default=[-0.01, 20.0],
@@ -348,7 +343,7 @@ class CatalogShearTaskConfig(
     )
     kappa_value = Field[float](
         doc="kappa value to use, 0. means no kappa",
-        default=0.,
+        default=0.0,
     )
 
     def validate(self):
@@ -386,7 +381,6 @@ class CatalogShearTaskConfig(
         super().setDefaults()
 
 
-
 class CatalogShearTask(CatalogTask):
     """Catalog task applying constant shear per redshift bin."""
 
@@ -412,6 +406,7 @@ class CatalogHaloTaskConfig(
     pipelineConnections=CatalogConnections,
 ):
     """Configuration for :class:`CatalogHaloTask` (NFW halo lensing)."""
+
     mass = Field[float](
         doc="halo mass",
         default=5e14,
@@ -500,6 +495,7 @@ class CatalogLogNormalTaskConfig(
     pipelineConnections=CatalogConnections,
 ):
     """Configuration for :class:`CatalogLogNormalTask`."""
+
     z_source = Field[float](
         doc="Fixed redshift for all galaxies.",
         default=1.0,
@@ -547,7 +543,7 @@ class CatalogLogNormalTask(CatalogTask):
         assert isinstance(self.config, CatalogLogNormalTaskConfig)
         wcs = tract_info.getWcs()
         scale = float(wcs.getPixelScale().asDegrees())
-        bbox = tract_info.getBBox()   # lsst.geom.Box2I
+        bbox = tract_info.getBBox()  # lsst.geom.Box2I
         field_size_deg = max(bbox.getHeight(), bbox.getWidth()) * 1.2 * scale
         npix = int(400 * field_size_deg)
         return ShearLogNormalFlat(

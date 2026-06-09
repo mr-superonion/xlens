@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -68,11 +68,7 @@ band_order = "ugrizy"
 class MeasureCoaddsPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
-    defaultTemplates={
-        "inputName": "deep_coadd",
-        "outName": "deep_coadd",
-        "catName": "cat"
-    },
+    defaultTemplates={"inputName": "deep_coadd", "outName": "deep_coadd", "catName": "cat"},
 ):
     skyMap = cT.Input(
         doc="SkyMap to use in processing",
@@ -213,8 +209,10 @@ class MeasureCoaddsPipe(PipelineTask):
         **kwargs: Any,
     ):
         super().__init__(
-            config=config, log=log,
-            initInputs=initInputs, **kwargs,
+            config=config,
+            log=log,
+            initInputs=initInputs,
+            **kwargs,
         )
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
 
@@ -234,18 +232,14 @@ class MeasureCoaddsPipe(PipelineTask):
         if self.config.use_sim:
             truthCatalog = inputs.get("truthCatalog", None)
             if truthCatalog is None:
-                raise RuntimeError(
-                    "use_sim=True requires a truthCatalog input."
-                )
+                raise RuntimeError("use_sim=True requires a truthCatalog input.")
             # ``butlerQC.quantum.dataId`` may not carry dimension records,
             # but every input ref's dataId does. ``psfArray`` is a
             # required ``(skymap, tract, patch)`` input under use_sim, so
             # use it to seed the IdGenerator (matches the patch-level
             # quantum dimensions). The same seed is forwarded to ``run``
             # because ``SimulatedExposureHandle`` carries no dataId.
-            seed = self.config.idGenerator.apply(
-                inputRefs.psfArray.dataId
-            ).catalog_id
+            seed = self.config.idGenerator.apply(inputRefs.psfArray.dataId).catalog_id
             exposure_handles_dict = self._build_simulated_handles(
                 quantum_data_id=butlerQC.quantum.dataId,
                 truthCatalog=truthCatalog,
@@ -260,12 +254,8 @@ class MeasureCoaddsPipe(PipelineTask):
         else:
             exposure_handles = inputs.get("exposure", None)
             if not exposure_handles:
-                raise RuntimeError(
-                    "use_sim=False requires the 'exposure' input."
-                )
-            exposure_handles_dict = {
-                h.dataId["band"]: h for h in exposure_handles
-            }
+                raise RuntimeError("use_sim=False requires the 'exposure' input.")
+            exposure_handles_dict = {h.dataId["band"]: h for h in exposure_handles}
 
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
@@ -294,7 +284,8 @@ class MeasureCoaddsPipe(PipelineTask):
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
         if seed is None:
             band_data_id = DataCoordinate.standardize(
-                quantum_data_id, band="i",
+                quantum_data_id,
+                band="i",
             )
             seed = self.config.idGenerator.apply(band_data_id).catalog_id
 
@@ -316,9 +307,7 @@ class MeasureCoaddsPipe(PipelineTask):
             )
         return handles
 
-    def _load_noise_corr(
-        self, corr_array: np.ndarray | None, band: str
-    ) -> NDArray | None:
+    def _load_noise_corr(self, corr_array: np.ndarray | None, band: str) -> NDArray | None:
         if corr_array is None:
             return None
         if band not in band_order:
@@ -332,12 +321,12 @@ class MeasureCoaddsPipe(PipelineTask):
         noise_corr = noise_corr / variance
         ny, nx = noise_corr.shape
         if not np.isclose(noise_corr[ny // 2, nx // 2], 1.0):
-            raise RuntimeError(
-                "Noise correlation is not normalized to 1 at the center pixel."
-            )
+            raise RuntimeError("Noise correlation is not normalized to 1 at the center pixel.")
 
         self.log.debug(
-            "With correlation (band=%s), variance=%s", band, variance,
+            "With correlation (band=%s), variance=%s",
+            band,
+            variance,
         )
         return noise_corr
 
@@ -355,9 +344,7 @@ class MeasureCoaddsPipe(PipelineTask):
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
         band = "i"
         if band not in exposure_handles_dict:
-            raise KeyError(
-                f"band '{band}' not in {exposure_handles_dict.keys()}"
-            )
+            raise KeyError(f"band '{band}' not in {exposure_handles_dict.keys()}")
 
         handle = exposure_handles_dict[band]
         exposure = handle.get()
@@ -411,11 +398,10 @@ class MeasureCoaddsPipe(PipelineTask):
             cat = rename_flux_to_photoz_format(self.fpfs.run(**data), band)
             if self.config.do_measure_flux_gauss:
                 gauss_cat = select_band_gauss_fluxes(
-                    self.anacal.run(**data), band,
+                    self.anacal.run(**data),
+                    band,
                 )
-                cat = np.asarray(
-                    rfn.merge_arrays([cat, gauss_cat], flatten=True)
-                )
+                cat = np.asarray(rfn.merge_arrays([cat, gauss_cat], flatten=True))
             per_band.append(cat)
 
         return rfn.merge_arrays(per_band, flatten=True)
@@ -489,21 +475,20 @@ class MeasureCoaddsPipe(PipelineTask):
             mask_array=mask_array,
         )
         final = rfn.merge_arrays(
-            [select_detection_columns(det_cat), force_cat], flatten=True,
+            [select_detection_columns(det_cat), force_cat],
+            flatten=True,
         )
-        object_ids = (
-            np.int64(seed) * np.int64(1_000_000)
-            + np.arange(len(final), dtype=np.int64)
-        )
+        object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(final), dtype=np.int64)
         final = rfn.append_fields(
-            final, "object_id", object_ids, usemask=False,
+            final,
+            "object_id",
+            object_ids,
+            usemask=False,
         )
         if skyMap is not None:
             # Use skymap's patchInfo for is_primary (not exposure bbox)
             tractInfo = skyMap[tract]
             patchInfo = tractInfo[patch]
-            pixel_scale = float(
-                tractInfo.getWcs().getPixelScale().asArcseconds()
-            )
+            pixel_scale = float(tractInfo.getWcs().getPixelScale().asArcseconds())
             set_isPrimary(final, skyMap, tractInfo, patchInfo, pixel_scale)
         return Struct(anacalCatalog=final)

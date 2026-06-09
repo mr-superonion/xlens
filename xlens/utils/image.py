@@ -28,7 +28,6 @@ docstrings have been expanded here to clarify how they interact with the
 rest of ``xlens``.
 """
 
-
 from typing import Any, List, Sequence
 
 import anacal
@@ -176,9 +175,7 @@ class LsstPsf(anacal.psf.BasePsf):
 
     def draw(self, x, y):
         """Evaluate the PSF image centered on the requested pixel position."""
-        this_psf = self.psf.computeImage(
-            lsst_geom.Point2D(x + self.x_min, y + self.y_min)
-        ).getArray()
+        this_psf = self.psf.computeImage(lsst_geom.Point2D(x + self.x_min, y + self.y_min)).getArray()
         this_psf = resize_array(this_psf, self.shape)
         return this_psf
 
@@ -276,9 +273,7 @@ def get_psf_array(
             if mask_array is not None and mask_array[yim, xim]:
                 continue
             try:
-                psf_img = lsst_psf.computeImage(
-                    lsst_geom.Point2D(xc, yc)
-                ).getArray()
+                psf_img = lsst_psf.computeImage(lsst_geom.Point2D(xc, yc)).getArray()
                 out += resize_array(psf_img, (npix, npix))
                 ncount += 1
             except Exception:
@@ -293,9 +288,7 @@ def get_psf_array(
     return out
 
 
-def get_blocks(
-    *, lsst_psf, lsst_bbox, pixel_scale, npix, psf_array
-):
+def get_blocks(*, lsst_psf, lsst_bbox, pixel_scale, npix, psf_array):
     min_corner = lsst_bbox.getMin()
     x_min, y_min = min_corner.getX(), min_corner.getY()
     width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
@@ -314,9 +307,7 @@ def get_blocks(
         x0 = int(np.clip(bb.xcen, 0, width - 1))
         y0 = int(np.clip(bb.ycen, 0, height - 1))
         try:
-            this_psf = lsst_psf.computeImage(
-                lsst_geom.Point2D(x_min + x0, y_min + y0)
-            ).getArray()
+            this_psf = lsst_psf.computeImage(lsst_geom.Point2D(x_min + x0, y_min + y0)).getArray()
             bb.psf_array = resize_array(this_psf, (npix, npix))
         except Exception:
             continue
@@ -324,9 +315,7 @@ def get_blocks(
     return new_blocks
 
 
-def stack_psfs_cells(
-    *, cell_coadd, npix
-):
+def stack_psfs_cells(*, cell_coadd, npix):
     psf_array = np.zeros((npix, npix))
     npsf = 0.0
     for cell in cell_coadd.cells.values():
@@ -348,8 +337,7 @@ def combine_sim_exposures(
     exposures: Sequence,
     noises: Sequence[NDArray],
 ):
-    """Combine simulated exposures using inverse-variance weights.
-    """
+    """Combine simulated exposures using inverse-variance weights."""
 
     if len(exposures) != len(noises):
         raise ValueError("exposure and noises should have the same length")
@@ -370,9 +358,7 @@ def combine_sim_exposures(
 
         finite_variance = variance[np.isfinite(variance)]
         if finite_variance.size == 0:
-            raise ValueError(
-                "Variance plane must contain at least one finite value"
-            )
+            raise ValueError("Variance plane must contain at least one finite value")
         variance_value = float(np.nanmean(variance))
         if not np.isfinite(variance_value):
             raise ValueError("Variance mean must be finite")
@@ -406,13 +392,9 @@ def rotate_noise_corr(noise_corr):
     noise_corr = noise_corr / noise_max
     ny2, nx2 = noise_corr.shape
     if ny2 % 2 != 1 or nx2 % 2 != 1:
-        raise ValueError(
-            f"noise correlation must have odd dimensions; got {ny2}x{nx2}"
-        )
+        raise ValueError(f"noise correlation must have odd dimensions; got {ny2}x{nx2}")
     if noise_corr[ny2 // 2, nx2 // 2] != 1:
-        raise RuntimeError(
-            "noise correlation peak is not at the center pixel"
-        )
+        raise RuntimeError("noise correlation peak is not at the center pixel")
     return np.rot90(m=noise_corr, k=-1)
 
 
@@ -429,6 +411,7 @@ def generate_pure_noise(
     rotId: int = 0,
 ):
     from .random import get_noise_seed
+
     noise_std = np.sqrt(noise_variance)
     noise_seed = get_noise_seed(
         galaxy_seed=seed,
@@ -491,7 +474,7 @@ def estimate_noise_variance(
     mask_raw = mask.array
     mm = (variance_array < 1e5) & ((mask_raw & detect_bits) == 0)
     if mask_array is not None:
-        mm &= (mask_array == 0)
+        mm &= mask_array == 0
     if np.sum(mm) < 10:
         raise ValueError("Not enough valid pixels for noise estimation")
     noise_variance = float(np.nanmedian(variance_array[mm]))
@@ -525,7 +508,8 @@ def prepare_psf_array_cell(
     """Compute PSF array from a SingleCellCoadd's psf_image."""
     psf_img = cell.psf_image.array
     psf_array = np.asarray(
-        resize_array(psf_img, (npix, npix)), dtype=np.float64,
+        resize_array(psf_img, (npix, npix)),
+        dtype=np.float64,
     )
     psf_array /= np.sum(psf_array)
     psf_rcut = npix // 2 - 2
@@ -580,15 +564,7 @@ def prepare_mask(
     mask_array_raw = mask_object.array
     new_mask = (
         ((mask_array_raw & bitv) != 0)
-        | (
-            image_array
-            < (
-                -6.0
-                * np.sqrt(
-                    np.where(variance_array < 0, 0, variance_array)
-                )
-            )
-        )
+        | (image_array < (-6.0 * np.sqrt(np.where(variance_array < 0, 0, variance_array))))
     ).astype(np.int16)
     if original_mask_array is None:
         return new_mask
@@ -711,9 +687,7 @@ def prepare_detection(
         detection = detection.copy().as_array()
     elif isinstance(detection, np.ndarray):
         detection = detection.copy()
-    detection = rfn.repack_fields(
-        detection[list(anacal.table.column_names())]
-    )
+    detection = rfn.repack_fields(detection[list(anacal.table.column_names())])
     if blocks is not None:
         for bb in blocks:
             mm = (
@@ -750,9 +724,7 @@ def prepare_data(
 ):
     """Collect metadata and auxiliary arrays from an LSST ExposureF."""
     pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
-    mag_zero = (
-        np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()) / 0.4
-    )
+    mag_zero = np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()) / 0.4
     wcs = exposure.getWcs()
     lsst_bbox = exposure.getBBox()
 
@@ -762,15 +734,19 @@ def prepare_data(
     gal_array = np.asarray(exposure.image.array, dtype=np.float64)
 
     mask_array = prepare_mask(
-        exposure.image.array, exposure.mask,
-        exposure.variance.array, badMaskPlanes,
+        exposure.image.array,
+        exposure.mask,
+        exposure.variance.array,
+        badMaskPlanes,
         original_mask_array=mask_array,
     )
 
     anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
 
     noise_variance = estimate_noise_variance(
-        exposure.variance.array, exposure.mask, mask_array,
+        exposure.variance.array,
+        exposure.mask,
+        mask_array,
     )
 
     noise_array = prepare_noise_array(
@@ -856,15 +832,19 @@ def prepare_data_one_cell(
         psf_array = prepare_psf_array_cell(cell, npix)
 
     mask_array = prepare_mask(
-        outer.image.array, outer.mask,
-        outer.variance.array, badMaskPlanes,
+        outer.image.array,
+        outer.mask,
+        outer.variance.array,
+        badMaskPlanes,
         original_mask_array=mask_array,
     )
 
     anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
 
     noise_variance = estimate_noise_variance(
-        outer.variance.array, outer.mask, mask_array,
+        outer.variance.array,
+        outer.mask,
+        mask_array,
     )
 
     # Extract noise from cell if available and not provided
@@ -872,7 +852,8 @@ def prepare_data_one_cell(
         noise_reals = outer.noise_realizations
         if len(noise_reals) > 0:
             noise_array = np.asarray(
-                noise_reals[0].array, dtype=np.float64,
+                noise_reals[0].array,
+                dtype=np.float64,
             )
 
     noise_array = prepare_noise_array(

@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Stand-in deferred butler handles for examples and tests.
 
 LSST PipelineTask code paths call ``handle.get()`` for the exposure and
@@ -83,19 +104,23 @@ def make_data_id(
         patch_ny_max = DEFAULT_PATCH_NY_MAX
     skymap_element = universe["skymap"]
     skymap_record = skymap_element.RecordClass(
-        name=skymap, hash=b"0" * 32,
+        name=skymap,
+        hash=b"0" * 32,
         tract_max=tract_max,
         patch_nx_max=patch_nx_max,
         patch_ny_max=patch_ny_max,
     )
     fields: dict[str, Any] = {
-        "skymap": skymap, "tract": tract,
-        "patch": patch, "band": band,
+        "skymap": skymap,
+        "tract": tract,
+        "patch": patch,
+        "band": band,
     }
     if instrument is not None:
         fields["instrument"] = instrument
     return DataCoordinate.standardize(
-        fields, universe=universe,
+        fields,
+        universe=universe,
     ).expanded({skymap_element: skymap_record})
 
 
@@ -122,8 +147,12 @@ def make_exposure_handles(
     out: dict[str, ExposureHandle] = {}
     for b, exp in exposures.items():
         data_id = make_data_id(
-            skymap=skymap, tract=tract, patch=patch, band=b,
-            instrument=instrument, universe=universe,
+            skymap=skymap,
+            tract=tract,
+            patch=patch,
+            band=b,
+            instrument=instrument,
+            universe=universe,
             skyMap=skyMap,
         )
         out[b] = ExposureHandle(exp, data_id)

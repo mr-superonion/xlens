@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Mixture-of-Gaussians approximations for galaxy light profiles.
 
 Implements the Hogg & Lang (2012) decomposition of Exponential (Sersic n=1)
@@ -38,7 +59,6 @@ _MOG_COEFFS = {
         (4.74338, 1.08885),
         (1.78684, 1.67302),
     ],
-
     # de Vaucouleurs profile (n=4). Choices: M=6,8,10
     ("dev", 6): [
         (0.01308, 0.00263),
@@ -80,20 +100,18 @@ def _mog_gal(profile: str, M: int, flux: float, hlr: float):
     """
     coeffs = _MOG_COEFFS[(profile, M)]
     sum_a = sum(a for a, _rv in coeffs)  # table's total dimensionless flux
-    scale = flux / sum_a                 # normalize to requested total flux
+    scale = flux / sum_a  # normalize to requested total flux
 
     components = []
     for a, rv in coeffs:
-        sigma = rv * hlr                  # rv= sqrt(v_m) in HLR units
+        sigma = rv * hlr  # rv= sqrt(v_m) in HLR units
         # Flux of each circular Gaussian after normalization:
         comp = galsim.Gaussian(flux=a * scale, sigma=sigma)
         components.append(comp)
     return galsim.Add(components)
 
 
-def Exponential(
-    flux: float, half_light_radius: float, M: int = M_EXP_DEFAULT
-):
+def Exponential(flux: float, half_light_radius: float, M: int = M_EXP_DEFAULT):
     """Build an Exponential profile as a mixture of ``M`` circular Gaussians.
 
     Parameters
@@ -108,9 +126,7 @@ def Exponential(
     return _mog_gal("exp", M, flux, half_light_radius)
 
 
-def DeVaucouleurs(
-    flux: float, half_light_radius: float, M: int = M_DEV_DEFAULT
-):
+def DeVaucouleurs(flux: float, half_light_radius: float, M: int = M_DEV_DEFAULT):
     """Build a de Vaucouleurs profile as a mixture of ``M`` circular Gaussians.
 
     Parameters

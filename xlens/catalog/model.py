@@ -1,22 +1,38 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import numpy as np
 
 s0 = 0.01  # ground for std
 
 
 def evar_model(mag, radius, c0, c1, c2, c3, c4, c5):
-    logAB = c0 + c1 * mag + c2 * radius + (
-        c3 * mag ** 2.0 + c4 * radius ** 2.0
-        + c5 * mag * radius
-    )
+    logAB = c0 + c1 * mag + c2 * radius + (c3 * mag**2.0 + c4 * radius**2.0 + c5 * mag * radius)
     AB = np.exp(logAB)
     return s0**2 + AB**2
 
 
 def estd_model_fit(coords, c0, c1, c2, c3, c4, c5):
     mag, radius = coords
-    return np.sqrt(
-        evar_model(mag, radius, c0, c1, c2, c3, c4, c5)
-    )
+    return np.sqrt(evar_model(mag, radius, c0, c1, c2, c3, c4, c5))
 
 
 def w_model(flux, m0, m2, mag_zero, c0, c1, c2, c3, c4, c5):
@@ -43,24 +59,20 @@ def w_model_derivs(flux, m0, m2, mag_zero, c0, c1, c2, c3, c4, c5):
     trace = m2 / m0
     radius = np.sqrt(trace / 2.0)
 
-    logAB = c0 + c1*mag + c2*radius + (
-        c3*mag**2 + c4*radius**2 + c5*mag*radius
-    )
+    logAB = c0 + c1 * mag + c2 * radius + (c3 * mag**2 + c4 * radius**2 + c5 * mag * radius)
     AB = np.exp(logAB)
     evar = s0**2 + AB**2
 
     # derivatives of logAB
-    dlogAB_dmag = c1 + 2*c3*mag + c5*radius
-    dlogAB_dr = c2 + 2*c4*radius + c5*mag
+    dlogAB_dmag = c1 + 2 * c3 * mag + c5 * radius
+    dlogAB_dr = c2 + 2 * c4 * radius + c5 * mag
 
     # --- dw/dflux ---
     # mag depends on flux; radius does not
-    dw_dflux = 5.0 * AB**2 * dlogAB_dmag / (
-        flux * np.log(10.0) * evar**2
-    )
+    dw_dflux = 5.0 * AB**2 * dlogAB_dmag / (flux * np.log(10.0) * evar**2)
 
     # --- dw/dtrace (used for dm0, dm2) ---
-    dw_dtrace = - AB**2 * dlogAB_dr / (2.0 * radius * evar**2)
+    dw_dtrace = -(AB**2) * dlogAB_dr / (2.0 * radius * evar**2)
 
     # dtrace/dm0 = -trace/m0
     dtrace_dm0 = -trace / m0
@@ -121,10 +133,7 @@ def estimate_mean_in_bins(
     radius_idx = np.digitize(radius, radius_edges) - 1
 
     # mask out anything that fell outside the range
-    valid = (
-        (mag_idx >= 0) & (mag_idx < n_mag_bins) &
-        (radius_idx >= 0) & (radius_idx < n_radius_bins)
-    )
+    valid = (mag_idx >= 0) & (mag_idx < n_mag_bins) & (radius_idx >= 0) & (radius_idx < n_radius_bins)
     mag_idx = mag_idx[valid]
     radius_idx = radius_idx[valid]
     obs = obs[valid]
@@ -198,10 +207,7 @@ def estimate_std_in_bins(
     radius_idx = np.digitize(radius, radius_edges) - 1
 
     # mask out anything that fell outside the range
-    valid = (
-        (mag_idx >= 0) & (mag_idx < n_mag_bins) &
-        (radius_idx >= 0) & (radius_idx < n_radius_bins)
-    )
+    valid = (mag_idx >= 0) & (mag_idx < n_mag_bins) & (radius_idx >= 0) & (radius_idx < n_radius_bins)
     mag_idx = mag_idx[valid]
     radius_idx = radius_idx[valid]
     obs = obs[valid]

@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -152,9 +152,9 @@ class matchPipeConfig(
             "g": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
             "r": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
             "i": "base_SdssCentroid_x, base_SdssCentroid_y, "
-                 "base_GaussianFlux_instFlux, base_GaussianFlux_instFluxErr, "
-                 "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr, "
-                 "base_SdssShape_xx, base_SdssShape_yy, base_SdssShape_xy",
+            "base_GaussianFlux_instFlux, base_GaussianFlux_instFluxErr, "
+            "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr, "
+            "base_SdssShape_xx, base_SdssShape_yy, base_SdssShape_xy",
             "z": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
             "y": "modelfit_CModel_instFlux, modelfit_CModel_instFluxErr",
         },
@@ -179,9 +179,7 @@ class matchPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, matchPipeConfig)
         self._cat_ref: np.ndarray | None = None
         return
@@ -198,9 +196,7 @@ class matchPipe(PipelineTask):
             dm_handles_dict = None
             dm_catalog = None
         else:
-            dm_handles_dict = {
-                handle.dataId["band"]: handle for handle in dm_handles
-            }
+            dm_handles_dict = {handle.dataId["band"]: handle for handle in dm_handles}
             dm_catalog = []
             for band in dm_handles_dict.keys():
                 bs = self.config.band_column_names[band]
@@ -210,13 +206,9 @@ class matchPipe(PipelineTask):
                 cat = handle.get()
                 if self.config.do_select_primary:
                     mask = cat["detect_isPrimary"]
-                    cat = rfn.repack_fields(
-                        cat.asAstropy().as_array()[dm_colnames][mask]
-                    )
+                    cat = rfn.repack_fields(cat.asAstropy().as_array()[dm_colnames][mask])
                 else:
-                    cat = rfn.repack_fields(
-                        cat.asAstropy().as_array()[dm_colnames]
-                    )
+                    cat = rfn.repack_fields(cat.asAstropy().as_array()[dm_colnames])
                 map_dict = {name: f"{band}_" + name for name in dm_colnames}
                 dm_catalog.append(rfn.rename_fields(cat, map_dict))
             dm_catalog = rfn.merge_arrays(dm_catalog, flatten=True)
@@ -225,8 +217,11 @@ class matchPipe(PipelineTask):
         anacal_catalog = inputs["anacal_catalog"].as_array()
         index = np.arange(len(anacal_catalog))
         anacal_catalog = rfn.append_fields(
-            base=anacal_catalog, names="index",
-            data=index, dtypes="i4", usemask=False,
+            base=anacal_catalog,
+            names="index",
+            data=index,
+            dtypes="i4",
+            usemask=False,
         )
 
         outputs = self.run(
@@ -303,9 +298,7 @@ class matchPipe(PipelineTask):
         y_mrc = np.array(mrc["i_base_SdssCentroid_y"])
         # Coordinates
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
-        ana_coords = np.vstack(
-            (src["x1_det"] / pixel_scale, src["x2_det"] / pixel_scale)
-        ).T
+        ana_coords = np.vstack((src["x1_det"] / pixel_scale, src["x2_det"] / pixel_scale)).T
         thres = self.config.match_pix_distance
         src_idx, mrc_idx = self.match(ana_coords, mrc_coords, thres=thres)
         final_src = src[src_idx]
@@ -346,22 +339,15 @@ class matchPipe(PipelineTask):
         )
 
         # Coordinates
-        ana_coords = np.vstack(
-            (src["x1_det"] / pixel_scale, src["x2_det"] / pixel_scale)
-        ).T
+        ana_coords = np.vstack((src["x1_det"] / pixel_scale, src["x2_det"] / pixel_scale)).T
         mrc_coords = np.vstack((x_mrc, y_mrc)).T
 
         thres = self.config.match_pix_distance
         src_idx, mrc_idx = self.match(ana_coords, mrc_coords, thres=thres)
         final_src = src[src_idx]
         final_mrc = mrc[mrc_idx]
-        final_mrc = rfn.repack_fields(
-            final_mrc[["indices", "redshift"]]
-        )
-        final_mrc = rfn.rename_fields(
-            final_mrc,
-            {"indices": "truth_index"}
-        )
+        final_mrc = rfn.repack_fields(final_mrc[["indices", "redshift"]])
+        final_mrc = rfn.rename_fields(final_mrc, {"indices": "truth_index"})
 
         # Combine fields
         combined = rfn.merge_arrays(
@@ -384,9 +370,7 @@ class matchPipe(PipelineTask):
         **kwargs,
     ):
         assert isinstance(self.config, matchPipeConfig)
-        pixel_scale = (
-            skyMap[tract][patch].getWcs().getPixelScale().asDegrees() * 3600
-        )
+        pixel_scale = skyMap[tract][patch].getWcs().getPixelScale().asDegrees() * 3600
 
         if dm_catalog is not None:
             catalog = self.merge_dm(catalog, dm_catalog, pixel_scale)
@@ -394,7 +378,9 @@ class matchPipe(PipelineTask):
         if truth_catalog is not None:
             wcs = skyMap[tract].getWcs()
             catalog = self.merge_truth(
-                catalog, truth_catalog, pixel_scale,
+                catalog,
+                truth_catalog,
+                pixel_scale,
                 catsim_dir=catsim_dir,
                 wcs=wcs,
             )

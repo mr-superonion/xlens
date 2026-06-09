@@ -44,20 +44,42 @@ testpaths = [
 addopts = "--nbval --nbval-lax --nbval-current-env -vv -s"
 
 [tool.black]
-line-length = 80
+line-length = 110
 target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
-line_length = 80
+line_length = 110
+known_third_party = ["lsst"]
 
 [tool.flake8]
+# LSST DM Python Style Guide: https://developer.lsst.io/python/style.html
+# E203, N801 are project-local exceptions:
+#   E203: conflicts with black's slice formatting.
+#   N801: keeps pre-existing lowercase class names (matchPipe, zEstimator, ...).
 ignore = [
-    "N801", "N802", "N803", "N806", "N815", "N816", "W503", "W504",
-    "E133", "E203", "E303", "E731", "E226", "E228", "N812", "N815"
+    "E133", "E203", "E226", "E228",
+    "N801", "N802", "N803", "N806", "N812", "N813", "N815", "N816",
+    "W503",
 ]
 exclude = [".git", "__pycache__", "docs", "build", "dist"]
-max-line-length = 80
+max-line-length = 110
+max-doc-length = 79
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "N", "W"]
+extend-select = ["RUF100"]
+ignore = ["N802", "N803", "N806", "N812", "N813", "N815", "N816", "N999"]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 79
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
 
 [tool.coverage.run]
 source = ["xlens"]

@@ -1,4 +1,25 @@
 #!/usr/bin/env python
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #
 # simple example with ring test (rotating intrinsic galaxies)
 # Copyright 20230916 Xiangchong Li.
@@ -225,14 +246,11 @@ class MultibandSimConfig(
                 self,
                 "We require noiseId >=0 ",
             )
-        if self.galaxy_type not in [
-            "catsim2017", "flagship2025", "diffsky"
-        ]:
+        if self.galaxy_type not in ["catsim2017", "flagship2025", "diffsky"]:
             raise FieldValidationError(
                 self.__class__.galaxy_type,
                 self,
-                "We require galaxy_type in "
-                "['catsim2017', 'flagship2025', 'diffsky']",
+                "We require galaxy_type in " "['catsim2017', 'flagship2025', 'diffsky']",
             )
 
     def setDefaults(self):
@@ -367,15 +385,15 @@ class MultibandSimTask(PipelineTask):
             ix = pix_x[i]
             iy = pix_y[i]
             if (
-                (xmin - SIM_INCLUSION_PADDING) <
-                ix < (xmax + SIM_INCLUSION_PADDING)
-            ) and (
-                (ymin - SIM_INCLUSION_PADDING)
-                < iy < (ymax + SIM_INCLUSION_PADDING)
-            ) and src["has_finite_shear"]:
+                ((xmin - SIM_INCLUSION_PADDING) < ix < (xmax + SIM_INCLUSION_PADDING))
+                and ((ymin - SIM_INCLUSION_PADDING) < iy < (ymax + SIM_INCLUSION_PADDING))
+                and src["has_finite_shear"]
+            ):
                 image_pos = galsim.PositionD(x=ix, y=iy)
                 gal_obj = galaxy_catalog.get_obj(
-                    ind=i, mag_zero=mag_zero, band=band,
+                    ind=i,
+                    mag_zero=mag_zero,
+                    band=band,
                     use_mog=self.config.use_mog,
                     force_isotropic=self.config.force_isotropic,
                     include_point_source=self.config.include_point_source,
@@ -385,14 +403,20 @@ class MultibandSimTask(PipelineTask):
                 if self.config.use_field_distortion:
                     local_wcs = wcs_gs.local(image_pos=image_pos)
                     stamp = convolved_object.drawImage(
-                        center=image_pos, wcs=local_wcs, method=draw_method,
-                        nx=nn_trunc, ny=nn_trunc,
+                        center=image_pos,
+                        wcs=local_wcs,
+                        method=draw_method,
+                        nx=nn_trunc,
+                        ny=nn_trunc,
                     )
                 else:
                     stamp = convolved_object.drawImage(
-                        center=image_pos, wcs=None, method=draw_method,
+                        center=image_pos,
+                        wcs=None,
+                        method=draw_method,
                         scale=galaxy_catalog.pixel_scale,
-                        nx=nn_trunc, ny=nn_trunc,
+                        nx=nn_trunc,
+                        ny=nn_trunc,
                     )
                 b = stamp.bounds & image.bounds
                 if b.isDefined():
@@ -536,7 +560,7 @@ class MultibandSimTask(PipelineTask):
             GalClass = CatSim2017Catalog
         elif self.config.galaxy_type == "flagship2025":
             GalClass = Flagship2025Catalog
-        elif self.config.galaxy_type == 'diffsky':
+        elif self.config.galaxy_type == "diffsky":
             GalClass = DiffskyCatalog
         else:
             raise ValueError("invalid galaxy_type")
@@ -575,9 +599,7 @@ class MultibandSimTask(PipelineTask):
             noise_corr = noise_corr / variance
             ny, nx = noise_corr.shape
             if noise_corr[ny // 2, nx // 2] != 1:
-                raise RuntimeError(
-                    "noise correlation peak is not at the center pixel"
-                )
+                raise RuntimeError("noise correlation peak is not at the center pixel")
             self.log.debug("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
 
@@ -678,9 +700,7 @@ class IASimTask(MultibandSimTask):
         """Render galaxies with intrinsic-alignment distortions via BATSim."""
         assert isinstance(self.config, IASimConfig)
         if self.config.use_field_distortion:
-            raise RuntimeError(
-                "IASimTask does not yet support use_field_distortion=True."
-            )
+            raise RuntimeError("IASimTask does not yet support use_field_distortion=True.")
 
         xmin = bbox_outer.getMinX()
         ymin = bbox_outer.getMinY()
@@ -704,17 +724,15 @@ class IASimTask(MultibandSimTask):
             ix = pix_x[i]
             iy = pix_y[i]
             if (
-                (xmin - SIM_INCLUSION_PADDING)
-                < ix
-                < (xmax + SIM_INCLUSION_PADDING)
-            ) and (
-                (ymin - SIM_INCLUSION_PADDING)
-                < iy
-                < (ymax + SIM_INCLUSION_PADDING)
-            ) and src["has_finite_shear"]:
+                ((xmin - SIM_INCLUSION_PADDING) < ix < (xmax + SIM_INCLUSION_PADDING))
+                and ((ymin - SIM_INCLUSION_PADDING) < iy < (ymax + SIM_INCLUSION_PADDING))
+                and src["has_finite_shear"]
+            ):
                 image_pos = galsim.PositionD(x=ix, y=iy)
                 gal_obj = galaxy_catalog.get_obj(
-                    ind=i, mag_zero=mag_zero, band=band,
+                    ind=i,
+                    mag_zero=mag_zero,
+                    band=band,
                     use_mog=self.config.use_mog,
                     force_isotropic=self.config.force_isotropic,
                     include_point_source=self.config.include_point_source,

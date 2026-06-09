@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Helper functions that return structured arrays of (dx, dy) shifts
 in arcseconds."""
 
@@ -31,7 +52,7 @@ def get_grid_shifts(*, rng, dim, pixel_scale, spacing):
     ntot = n_on_side**2
 
     # ix/iy are really on the sky
-    grid = spacing*(np.arange(n_on_side) - (n_on_side-1)/2)
+    grid = spacing * (np.arange(n_on_side) - (n_on_side - 1) / 2)
 
     shifts = np.zeros(ntot, dtype=[("dx", "f8"), ("dy", "f8")])
 
@@ -45,7 +66,7 @@ def get_grid_shifts(*, rng, dim, pixel_scale, spacing):
             shifts["dy"][i] = dy
             i += 1
 
-    pos_bounds = (-width/2, width/2)
+    pos_bounds = (-width / 2, width / 2)
     msk = (
         (shifts["dx"] >= pos_bounds[0])
         & (shifts["dx"] <= pos_bounds[1])
@@ -99,12 +120,9 @@ def get_hex_shifts(*, rng, dim, pixel_scale, spacing):
     upos += pixel_scale * rng.uniform(low=-0.5, high=0.5, size=upos.shape[0])
     vpos += pixel_scale * rng.uniform(low=-0.5, high=0.5, size=vpos.shape[0])
 
-    pos_bounds = (-width/2, width/2)
+    pos_bounds = (-width / 2, width / 2)
     msk = (
-        (upos >= pos_bounds[0])
-        & (upos <= pos_bounds[1])
-        & (vpos >= pos_bounds[0])
-        & (vpos <= pos_bounds[1])
+        (upos >= pos_bounds[0]) & (upos <= pos_bounds[1]) & (vpos >= pos_bounds[0]) & (vpos <= pos_bounds[1])
     )
     upos = upos[msk]
     vpos = vpos[msk]
@@ -178,13 +196,13 @@ def get_random_disk_shifts(*, rng, dim, pixel_scale, size):
     radius = dim / 2.0 * pixel_scale
     if radius < 0:
         raise ValueError("radius < 0")
-    radius_square = radius**2.
+    radius_square = radius**2.0
 
     # evenly distributed within a radius, min(nx, ny)*rfrac
-    rarray = np.sqrt(radius_square*rng.rand(size))   # radius
-    tarray = rng.uniform(0., 2*np.pi, size)   # theta (0, pi/nrot)
+    rarray = np.sqrt(radius_square * rng.rand(size))  # radius
+    tarray = rng.uniform(0.0, 2 * np.pi, size)  # theta (0, pi/nrot)
 
     shifts = np.zeros(size, dtype=[("dx", "f8"), ("dy", "f8")])
-    shifts["dx"] = rarray*np.cos(tarray)
-    shifts["dy"] = rarray*np.sin(tarray)
+    shifts["dx"] = rarray * np.cos(tarray)
+    shifts["dy"] = rarray * np.sin(tarray)
     return shifts

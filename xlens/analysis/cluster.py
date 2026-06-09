@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Cluster lensing shear profile measurement and multiplicative bias estimation.
+"""Cluster lensing shear profile and multiplicative bias estimation.
 
 Provides :class:`HaloMcBiasMultibandPipe`, a pipeline task that matches
 detected sources to truth catalogs around NFW halos, measures tangential
@@ -218,9 +218,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         )
 
         self.ename = self.config.ename
-        self.egname = lambda x, y: (
-            "fpfs_d" + self.ename + str(x) + "_" + "dg" + str(y)
-        )
+        self.egname = lambda x, y: ("fpfs_d" + self.ename + str(x) + "_" + "dg" + str(y))
 
         self.xname = self.config.xname
         self.yname = self.config.yname
@@ -243,7 +241,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             tractList.append(tract_id)
 
         outputs = self.run(
-            **inputs, tractList=tractList,
+            **inputs,
+            tractList=tractList,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -258,9 +257,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         e2 = np.asarray(e2)
         angle = np.asarray(angle)
 
-        assert (
-            e1.shape == e2.shape == angle.shape
-        ), "e1, e2, and angle must have the same shape"
+        assert e1.shape == e2.shape == angle.shape, "e1, e2, and angle must have the same shape"
 
         # Create an empty output array for the rotated values
         output = np.zeros((2, len(e1)))
@@ -364,7 +361,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             all_true_gT(array):
                 mean of true tan shear of all input objects in each radial bin
             all_true_gX(array):
-                mean of true cross shear of all input objects in each radial bin
+                mean of true cross shear of all input objects in each bin
             kappa_true(array): sum of true convergence in each radial bin
             lensed_shift(array): mean of lensed shift in each radial bin
             radial_lensed_shift(array):
@@ -422,9 +419,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         all_true_gX_list = []
 
         for i_bin in range(n_bins):
-            mask = (dist >= radial_bin_edges[i_bin]) & (
-                dist < radial_bin_edges[i_bin + 1]
-            )
+            mask = (dist >= radial_bin_edges[i_bin]) & (dist < radial_bin_edges[i_bin + 1])
             all_mask = (all_true_dist >= radial_bin_edges[i_bin]) & (
                 all_true_dist < radial_bin_edges[i_bin + 1]
             )
@@ -442,12 +437,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             all_true_gT_list.append(np.mean(all_true_gT[all_mask]))
             all_true_gX_list.append(np.mean(all_true_gX[all_mask]))
             kappa_true_list.append(np.sum(kappa_true[mask]))
-            r_weighted_gT_matched_list.append(
-                np.sum(gT_true_matched[mask] * rT[mask])
-            )
-            r_weighted_gX_matched_list.append(
-                np.sum(gX_true_matched[mask] * rX[mask])
-            )
+            r_weighted_gT_matched_list.append(np.sum(gT_true_matched[mask] * rT[mask]))
+            r_weighted_gX_matched_list.append(np.sum(gX_true_matched[mask] * rX[mask]))
             r_weighted_gT_list.append(np.sum(gT_true[mask] * rT[mask]))
             r_weighted_gX_list.append(np.sum(gX_true[mask] * rX[mask]))
             ngal_in_bin.append(np.sum(mask))
@@ -465,9 +456,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             mean_dist.append(np.mean(dist[mask]))
             median_matched_dist_list.append(np.median(match_dist[mask]))
-            match_failure_rate_list.append(
-                np.sum(match_dist[mask] > 2) / np.sum(mask)
-            )
+            match_failure_rate_list.append(np.sum(match_dist[mask] > 2) / np.sum(mask))
 
             m00_list.append(np.mean(m00[mask]))
             m20_list.append(np.mean(m20[mask]))
@@ -509,9 +498,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         # Query the nearest neighbors in the tree for each point in det_coord
         distance, idx = tree.query(det_coord, distance_upper_bound=1000)
 
-        assert (
-            np.median(distance) <= 1.0
-        ), f"distance is too large, max distance is {np.max(distance)}"
+        assert np.median(distance) <= 1.0, f"distance is too large, max distance is {np.max(distance)}"
 
         return idx, distance
 
@@ -607,8 +594,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             np.pi
             * (
                 (summary_table["angular_bin_right"] / 3600 * np.pi / 180.0) ** 2
-                - (summary_table["angular_bin_left"] / 3600 * np.pi / 180.0)
-                ** 2
+                - (summary_table["angular_bin_left"] / 3600 * np.pi / 180.0) ** 2
             )
             * (60 * 180 / np.pi) ** 2,
             axis=0,
@@ -634,23 +620,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         start = 0
         mean_eX = np.mean(summary_table["eX"], axis=0)
         mean_rX = np.mean(summary_table["rX"], axis=0)
-        sigma_eX = np.std(summary_table["eX"], axis=0) / np.sqrt(
-            len(summary_table)
-        )
-        sigma_rX = np.std(summary_table["rX"], axis=0) / np.sqrt(
-            len(summary_table)
-        )
-        sigma_gX = np.sqrt(
-            (sigma_eX / mean_rX) ** 2 + (mean_eX * sigma_rX / mean_rX**2) ** 2
-        )
+        sigma_eX = np.std(summary_table["eX"], axis=0) / np.sqrt(len(summary_table))
+        sigma_rX = np.std(summary_table["rX"], axis=0) / np.sqrt(len(summary_table))
+        sigma_gX = np.sqrt((sigma_eX / mean_rX) ** 2 + (mean_eX * sigma_rX / mean_rX**2) ** 2)
 
-        true_gX_matched = np.mean(
-            summary_table["r_weighted_gX_matched"], axis=0
-        ) / np.mean(summary_table["rX"], axis=0)
-
-        true_gX = np.mean(summary_table["r_weighted_gX"], axis=0) / np.mean(
+        true_gX_matched = np.mean(summary_table["r_weighted_gX_matched"], axis=0) / np.mean(
             summary_table["rX"], axis=0
         )
+
+        true_gX = np.mean(summary_table["r_weighted_gX"], axis=0) / np.mean(summary_table["rX"], axis=0)
 
         axes[0, 0].errorbar(
             angular_bin_mid[start:],
@@ -687,21 +665,13 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
         mean_eT = np.mean(summary_table["eT"], axis=0)
         mean_rT = np.mean(summary_table["rT"], axis=0)
-        sigma_eT = np.std(summary_table["eT"], axis=0) / np.sqrt(
-            len(summary_table)
-        )
-        sigma_rT = np.std(summary_table["rT"], axis=0) / np.sqrt(
-            len(summary_table)
-        )
-        sigma_gT = np.sqrt(
-            (sigma_eT / mean_rT) ** 2 + (mean_eT * sigma_rT / mean_rT**2) ** 2
-        )
-        true_gT_matched = np.mean(
-            summary_table["r_weighted_gT_matched"], axis=0
-        ) / np.mean(summary_table["rT"], axis=0)
-        true_gT = np.mean(summary_table["r_weighted_gT"], axis=0) / np.mean(
+        sigma_eT = np.std(summary_table["eT"], axis=0) / np.sqrt(len(summary_table))
+        sigma_rT = np.std(summary_table["rT"], axis=0) / np.sqrt(len(summary_table))
+        sigma_gT = np.sqrt((sigma_eT / mean_rT) ** 2 + (mean_eT * sigma_rT / mean_rT**2) ** 2)
+        true_gT_matched = np.mean(summary_table["r_weighted_gT_matched"], axis=0) / np.mean(
             summary_table["rT"], axis=0
         )
+        true_gT = np.mean(summary_table["r_weighted_gT"], axis=0) / np.mean(summary_table["rT"], axis=0)
 
         axes[0, 1].errorbar(
             angular_bin_mid[start:],
@@ -1007,10 +977,14 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             wcs = skymap[tract_id].getWcs()
             true_x_00, true_y_00 = wcs.skyToPixelArray(
-                truth_00_res["ra"], truth_00_res["dec"], degrees=True,
+                truth_00_res["ra"],
+                truth_00_res["dec"],
+                degrees=True,
             )
             true_x_01, true_y_01 = wcs.skyToPixelArray(
-                truth_01_res["ra"], truth_01_res["dec"], degrees=True,
+                truth_01_res["ra"],
+                truth_01_res["dec"],
+                degrees=True,
             )
 
             idx_00, match_dist_00 = self._match_input_to_det(
@@ -1144,24 +1118,16 @@ class HaloMcBiasMultibandPipe(PipelineTask):
                 ]
             )
             lensed_x, lensed_y = wcs.skyToPixelArray(
-                lensed_ra, lensed_dec, degrees=True,
+                lensed_ra,
+                lensed_dec,
+                degrees=True,
             )
 
-            all_true_ra = np.concatenate(
-                [truth_00_res["ra"], truth_01_res["ra"]]
-            )
-            all_true_dec = np.concatenate(
-                [truth_00_res["dec"], truth_01_res["dec"]]
-            )
-            all_true_gamma1 = np.concatenate(
-                [truth_00_res["gamma1"], truth_01_res["gamma1"]]
-            )
-            all_true_gamma2 = np.concatenate(
-                [truth_00_res["gamma2"], truth_01_res["gamma2"]]
-            )
-            all_true_kappa = np.concatenate(
-                [truth_00_res["kappa"], truth_01_res["kappa"]]
-            )
+            all_true_ra = np.concatenate([truth_00_res["ra"], truth_01_res["ra"]])
+            all_true_dec = np.concatenate([truth_00_res["dec"], truth_01_res["dec"]])
+            all_true_gamma1 = np.concatenate([truth_00_res["gamma1"], truth_01_res["gamma1"]])
+            all_true_gamma2 = np.concatenate([truth_00_res["gamma2"], truth_01_res["gamma2"]])
+            all_true_kappa = np.concatenate([truth_00_res["kappa"], truth_01_res["kappa"]])
             all_true_g1 = all_true_gamma1 / (1 - all_true_kappa)
             all_true_g2 = all_true_gamma2 / (1 - all_true_kappa)
 
@@ -1171,25 +1137,15 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ind_lensed_y_list.append(lensed_y)
 
             pix_origin = wcs.getPixelOrigin()
-            lensed_shift = (
-                np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
-            )
-            radial_dist_lensed = np.sqrt(
-                (lensed_x - pix_origin.x) ** 2 + (lensed_y - pix_origin.y) ** 2
-            )
-            radial_dist = np.sqrt(
-                (x - pix_origin.x) ** 2 + (y - pix_origin.y) ** 2
-            )
-            radial_lensed_shift = (
-                radial_dist_lensed - radial_dist
-            ) * pixel_scale
+            lensed_shift = np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
+            radial_dist_lensed = np.sqrt((lensed_x - pix_origin.x) ** 2 + (lensed_y - pix_origin.y) ** 2)
+            radial_dist = np.sqrt((x - pix_origin.x) ** 2 + (y - pix_origin.y) ** 2)
+            radial_lensed_shift = (radial_dist_lensed - radial_dist) * pixel_scale
 
             sky_origin = wcs.getSkyOrigin()
             sky_ra = sky_origin.getRa().asDegrees()
             sky_dec = sky_origin.getDec().asDegrees()
-            angle = self.position_angle_ccw_from_east(
-                sky_ra, sky_dec, det_ra, det_dec
-            ).rad
+            angle = self.position_angle_ccw_from_east(sky_ra, sky_dec, det_ra, det_dec).rad
             all_true_angle = self.position_angle_ccw_from_east(
                 sky_ra,
                 sky_dec,
@@ -1199,12 +1155,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             # negative since we are rotating axes
             eT, eX = self._rotate_spin_2_vec(e1, e2, angle)
-            gT_true_matched, gX_true_matched = self._rotate_spin_2_vec(
-                g1_true, g2_true, angle
-            )
-            all_true_gT, all_true_gX = self._rotate_spin_2_vec(
-                all_true_g1, all_true_g2, all_true_angle
-            )
+            gT_true_matched, gX_true_matched = self._rotate_spin_2_vec(g1_true, g2_true, angle)
+            all_true_gT, all_true_gX = self._rotate_spin_2_vec(all_true_g1, all_true_g2, all_true_angle)
 
             ind_gT_true_list.append(gT_true_matched)
 
@@ -1218,12 +1170,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             gT_sorted = all_true_gT[dist_sort_idx]
             gX_sorted = all_true_gX[dist_sort_idx]
 
-            gT_interp = interp1d(
-                dist_sorted, gT_sorted, bounds_error=False, fill_value=np.nan
-            )
-            gX_interp = interp1d(
-                dist_sorted, gX_sorted, bounds_error=False, fill_value=np.nan
-            )
+            gT_interp = interp1d(dist_sorted, gT_sorted, bounds_error=False, fill_value=np.nan)
+            gX_interp = interp1d(dist_sorted, gX_sorted, bounds_error=False, fill_value=np.nan)
 
             gT_true = gT_interp(dist)
             gX_true = gX_interp(dist)
@@ -1345,58 +1293,30 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             angular_bin_edges[1:],
             (n_realization, 1),
         )
-        summary_stats["ngal_in_bin"] = (
-            ngal_in_bin_ensemble  # Shape (n_halos, n_bins)
-        )
+        summary_stats["ngal_in_bin"] = ngal_in_bin_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eT"] = eT_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eT_std"] = eT_std_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eX"] = eX_ensemble  # Shape (n_halos, n_bins)
         summary_stats["eX_std"] = eX_std_ensemble  # Shape (n_halos, n_bins)
         summary_stats["rT"] = rT_ensemble  # Shape (n_halos, n_bins)
         summary_stats["rX"] = rX_ensemble  # Shape (n_halos, n_bins)
-        summary_stats["gT_true_matched"] = (
-            gT_true_matched_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["gX_true_matched"] = (
-            gX_true_matched_ensemble  # Shape (n_halos, n_bins)
-        )
+        summary_stats["gT_true_matched"] = gT_true_matched_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["gX_true_matched"] = gX_true_matched_ensemble  # Shape (n_halos, n_bins)
         summary_stats["gT_true"] = gT_true_ensemble  # Shape (n_halos, n_bins)
         summary_stats["gX_true"] = gX_true_ensemble  # Shape (n_halos, n_bins)
-        summary_stats["all_true_gT"] = (
-            all_true_gT_ensemble  # Shape (n_halos, n_bins)
-        )
+        summary_stats["all_true_gT"] = all_true_gT_ensemble  # Shape (n_halos, n_bins)
         summary_stats["all_true_gX"] = all_true_gX_ensemble  # Shape
-        summary_stats["kappa_true"] = (
-            kappa_true_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["lensed_shift"] = (
-            lensed_shift_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["radial_lensed_shift"] = (
-            radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["r_weighted_gT_matched"] = (
-            r_weighted_gT_matched_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["r_weighted_gX_matched"] = (
-            r_weighted_gX_matched_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["r_weighted_gT"] = (
-            r_weighted_gT_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["r_weighted_gX"] = (
-            r_weighted_gX_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["radial_lensed_shift"] = (
-            radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
-        )
+        summary_stats["kappa_true"] = kappa_true_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["lensed_shift"] = lensed_shift_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["radial_lensed_shift"] = radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["r_weighted_gT_matched"] = r_weighted_gT_matched_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["r_weighted_gX_matched"] = r_weighted_gX_matched_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["r_weighted_gT"] = r_weighted_gT_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["r_weighted_gX"] = r_weighted_gX_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["radial_lensed_shift"] = radial_lensed_shift_ensemble  # Shape (n_halos, n_bins)
         summary_stats["mean_dist"] = mean_dist_ensemble
-        summary_stats["median_match_dist"] = (
-            median_match_dist_ensemble  # Shape (n_halos, n_bins)
-        )
-        summary_stats["match_failure_rate"] = (
-            match_failure_rate_ensemble  # Shape (n_halos, n_bins)
-        )
+        summary_stats["median_match_dist"] = median_match_dist_ensemble  # Shape (n_halos, n_bins)
+        summary_stats["match_failure_rate"] = match_failure_rate_ensemble  # Shape (n_halos, n_bins)
 
         summary_stats["mean_m00"] = m00_ensemble
         summary_stats["mean_m20"] = m20_ensemble

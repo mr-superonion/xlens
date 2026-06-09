@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -159,9 +159,7 @@ class SelBiasRfMultibandPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, SelBiasRfMultibandPipeConfig)
 
         self.sname = self.config.shear_name
@@ -180,12 +178,7 @@ class SelBiasRfMultibandPipe(PipelineTask):
         phot = []
         for band in "grizy":
             phot.append(
-                mag_zero
-                - np.log10(
-                    src[f"{band}_fpfs1_m00"]
-                    + dg * src[f"{band}_fpfs1_dm00_dg1"]
-                )
-                * 2.5
+                mag_zero - np.log10(src[f"{band}_fpfs1_m00"] + dg * src[f"{band}_fpfs1_dm00_dg1"]) * 2.5
             )
 
         phot = np.vstack(phot).T
@@ -347,9 +340,7 @@ class SelBiasRfSummaryMultibandPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, SelBiasRfSummaryMultibandPipeConfig)
         self.ename = self.config.shape_name
         self.sname = self.config.shear_name

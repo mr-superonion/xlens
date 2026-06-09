@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Galaxy catalog classes for building GalSim objects from input truth tables.
 
 Provides an abstract :class:`BaseGalaxyCatalog` and concrete implementations
@@ -41,7 +62,11 @@ def get_catalog(fname):
     cat = fitsio.read(fname)
     idx = np.arange(len(cat), dtype=np.int32)
     cat = rfn.append_fields(
-        cat, "indices", idx, dtypes=[np.int32], usemask=False,
+        cat,
+        "indices",
+        idx,
+        dtypes=[np.int32],
+        usemask=False,
     )
     return cat
 
@@ -120,18 +145,12 @@ class BaseGalaxyCatalog(ABC):
         # density drives how many objects the layout will place
         density = self._compute_density(input_catalog)
         # positions to place galaxies
-        shifts_array = layout.get_shifts(
-            rng=rng, density=density
-        )
+        shifts_array = layout.get_shifts(rng=rng, density=density)
 
         if force_pixel_center:
             inv_pixel_scale = 1.0 / ps
-            shifts_array["dx"] = (
-                (np.round(shifts_array["dx"] * inv_pixel_scale) + 0.5) * ps
-            )
-            shifts_array["dy"] = (
-                (np.round(shifts_array["dy"] * inv_pixel_scale) + 0.5) * ps
-            )
+            shifts_array["dx"] = (np.round(shifts_array["dx"] * inv_pixel_scale) + 0.5) * ps
+            shifts_array["dy"] = (np.round(shifts_array["dy"] * inv_pixel_scale) + 0.5) * ps
 
         # choose which catalog rows populate those positions
         num = len(shifts_array)
@@ -145,13 +164,11 @@ class BaseGalaxyCatalog(ABC):
             indice_max = min(indice_min + num, catalog_size)
             if indice_min >= catalog_size:
                 raise ValueError("indice_min too large")
-            idx = (
-                np.arange(indice_min, indice_max, dtype=int) % catalog_size
-            )
+            idx = np.arange(indice_min, indice_max, dtype=int) % catalog_size
             num = indice_max - indice_min
             shifts_array = shifts_array[0:num]
         # random orientation for each placed galaxy
-        angles = rng.uniform(low=0.0, high=2.0*np.pi, size=num)
+        angles = rng.uniform(low=0.0, high=2.0 * np.pi, size=num)
         # rows of the input galaxy catalog that populate the placed objects
         selected = input_catalog[idx]
 
@@ -159,10 +176,15 @@ class BaseGalaxyCatalog(ABC):
             ("indices", "i8"),
             ("redshift", "f8"),
             ("angles", "f8"),
-            ("gamma1", "f8"), ("gamma2", "f8"), ("kappa", "f8"),
-            ("dx", "f8"), ("dy", "f8"),
-            ("ra", "f8"), ("dec", "f8"),       # post-lensed ra, dec
-            ("prelensed_ra", "f8"), ("prelensed_dec", "f8"),
+            ("gamma1", "f8"),
+            ("gamma2", "f8"),
+            ("kappa", "f8"),
+            ("dx", "f8"),
+            ("dy", "f8"),
+            ("ra", "f8"),
+            ("dec", "f8"),  # post-lensed ra, dec
+            ("prelensed_ra", "f8"),
+            ("prelensed_dec", "f8"),
             ("has_finite_shear", "bool"),
             ("hlr", "f8"),
         ]
@@ -174,7 +196,9 @@ class BaseGalaxyCatalog(ABC):
         image_y = self.y_center + placement["dy"] / ps
         wcs = tract_info.getWcs()
         ra, dec = wcs.pixelToSkyArray(
-            x=image_x, y=image_y, degrees=True,
+            x=image_x,
+            y=image_y,
+            degrees=True,
         )
         placement["ra"] = ra
         placement["dec"] = dec
@@ -191,13 +215,12 @@ class BaseGalaxyCatalog(ABC):
         # galaxy catalog from disk.  ``selected[extra]`` is a multi-field
         # view (no copy); ``merge_arrays`` does a single allocation.
         # Placement columns win over identically named input columns.
-        extra = [
-            name for name in selected.dtype.names
-            if name not in placement.dtype.names
-        ]
+        extra = [name for name in selected.dtype.names if name not in placement.dtype.names]
         self.data = np.asarray(
             rfn.merge_arrays(
-                [placement, selected[extra]], flatten=True, usemask=False,
+                [placement, selected[extra]],
+                flatten=True,
+                usemask=False,
             )
         )
         self.dtype = self.data.dtype
@@ -212,7 +235,7 @@ class BaseGalaxyCatalog(ABC):
     def prepare_tract_info(self, tract_info):
         """Store tract info and compute the pixel-centre coordinates."""
         self.tract_info = tract_info
-        bbox = tract_info.getBBox()   # lsst.geom.Box2I
+        bbox = tract_info.getBBox()  # lsst.geom.Box2I
         center_pix = bbox.getCenter()
         self.x_center = center_pix.getX()
         self.y_center = center_pix.getY()
@@ -249,9 +272,7 @@ class BaseGalaxyCatalog(ABC):
             return cat
         select_observable = np.atleast_1d(select_observable)
         if not set(select_observable) < set(cat.dtype.names):
-            raise ValueError(
-                "Selection observables not in the catalog columns"
-            )
+            raise ValueError("Selection observables not in the catalog columns")
         mask = np.ones(len(cat), dtype=bool)
         if select_lower_limit is not None:
             select_lower_limit = np.atleast_1d(select_lower_limit)
@@ -320,7 +341,6 @@ class BaseGalaxyCatalog(ABC):
         hlr = self._half_light_radius(catalog)
         return np.asarray(hlr, dtype=float)
 
-
     def _probabilities_for_sampling(self, cat: Any) -> np.ndarray | None:
         """Optional per-row sampling probabilities. Default: None (uniform)."""
         return None
@@ -340,7 +360,8 @@ class BaseGalaxyCatalog(ABC):
         Build a catalog directly from a truth-catalog structured array.
 
         ``truthCatalog`` is the self-contained array produced by
-        :class:`~xlens.simulator.catalog.CatalogTask` (``galaxy_catalog.data``).
+        :class:`~xlens.simulator.catalog.CatalogTask`
+        (``galaxy_catalog.data``).
         It carries the galaxy placement and shear columns together with the
         input galaxy-property columns merged in by ``__init__``, so the input
         galaxy catalog never has to be re-read from disk here.
@@ -360,9 +381,7 @@ class BaseGalaxyCatalog(ABC):
             directly from ``truthCatalog``.
         """
         if truthCatalog.dtype.names is None:
-            raise TypeError(
-                "truthCatalog must be a structured array with named fields"
-            )
+            raise TypeError("truthCatalog must be a structured array with named fields")
         # Create instance without running __init__
         self = cls.__new__(cls)
         self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
@@ -373,9 +392,7 @@ class BaseGalaxyCatalog(ABC):
         # Validate required placement columns
         for col in ["dx", "dy", "indices", "angles"]:
             if col not in list(truthCatalog.dtype.names):
-                raise ValueError(
-                    f"Missing required column '{col}' in truthCatalog array"
-                )
+                raise ValueError(f"Missing required column '{col}' in truthCatalog array")
         # The truth catalog is self-contained (placement + shear + galaxy
         # property columns), so use it directly instead of re-reading the
         # input galaxy catalog from disk.
@@ -435,7 +452,9 @@ class BaseGalaxyCatalog(ABC):
         image_y = self.y_center + self.data["dy"] / ps
         wcs = self.tract_info.getWcs()
         ra, dec = wcs.pixelToSkyArray(
-            x=image_x, y=image_y, degrees=True,
+            x=image_x,
+            y=image_y,
+            degrees=True,
         )
         self.data["ra"] = ra
         self.data["dec"] = dec
@@ -462,14 +481,21 @@ class BaseGalaxyCatalog(ABC):
         prelensed_y = self.y_center + self.data["dy"] / ps
         wcs = self.tract_info.getWcs()
         pre_ra, pre_dec = wcs.pixelToSkyArray(
-            x=prelensed_x, y=prelensed_y, degrees=True,
+            x=prelensed_x,
+            y=prelensed_y,
+            degrees=True,
         )
         self.data["prelensed_ra"] = pre_ra
         self.data["prelensed_dec"] = pre_dec
         for row in self.data:
             res = shear_obj.distort_galaxy(row)
             for key in (
-                "dx", "dy", "gamma1", "gamma2", "kappa", "has_finite_shear",
+                "dx",
+                "dy",
+                "gamma1",
+                "gamma2",
+                "kappa",
+                "has_finite_shear",
             ):
                 row[key] = res[key]
         if apply_position_shifts:
@@ -480,7 +506,9 @@ class BaseGalaxyCatalog(ABC):
             image_y = prelensed_y
 
         ra, dec = wcs.pixelToSkyArray(
-            x=image_x, y=image_y, degrees=True,
+            x=image_x,
+            y=image_y,
+            degrees=True,
         )
         self.data["ra"] = ra
         self.data["dec"] = dec
@@ -488,8 +516,11 @@ class BaseGalaxyCatalog(ABC):
         return
 
     def get_obj(
-        self, *,
-        ind, mag_zero: float, band: str,
+        self,
+        *,
+        ind,
+        mag_zero: float,
+        band: str,
         use_mog: bool = False,
         force_isotropic: bool = False,
         include_point_source: bool = True,
@@ -523,14 +554,15 @@ class BaseGalaxyCatalog(ABC):
         # ``data`` carries the merged input-catalog property columns, so the
         # galaxy is rendered directly from it without an input-catalog lookup.
         gal = self._generate_galaxy(
-            entry=src, mag_zero=mag_zero, band=band, use_mog=use_mog,
+            entry=src,
+            mag_zero=mag_zero,
+            band=band,
+            use_mog=use_mog,
             include_point_source=include_point_source,
             force_isotropic=force_isotropic,
             survey_name=survey_name,
         )
-        gal = gal.rotate(
-            src["angles"] * galsim.radians
-        )
+        gal = gal.rotate(src["angles"] * galsim.radians)
         gamma1, gamma2, kappa = src["gamma1"], src["gamma2"], src["kappa"]
         g1 = gamma1 / (1 - kappa)
         g2 = gamma2 / (1 - kappa)
@@ -565,12 +597,15 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         return None
 
     def _half_light_radius(self, catalog) -> np.ndarray:
-        return np.sqrt(
-            np.maximum(catalog["a_d"], 1e-9) * np.maximum(catalog["b_d"], 1e-9)
-        )
+        return np.sqrt(np.maximum(catalog["a_d"], 1e-9) * np.maximum(catalog["b_d"], 1e-9))
 
     def _generate_galaxy(
-        self, *, entry, mag_zero, band, use_mog=False,
+        self,
+        *,
+        entry,
+        mag_zero,
+        band,
+        use_mog=False,
         include_point_source=True,
         force_isotropic=False,
         **kwargs,
@@ -587,10 +622,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         total_flux = 10 ** ((mag_zero - ab_magnitude) / 2.5)
 
         # split flux among components
-        total_fluxnorm = (
-            dd["fluxnorm_disk"] + dd["fluxnorm_bulge"]
-            + dd["fluxnorm_agn"]
-        )
+        total_fluxnorm = dd["fluxnorm_disk"] + dd["fluxnorm_bulge"] + dd["fluxnorm_agn"]
         # guard against zero to avoid NaNs
         if total_fluxnorm <= 0:
             return galsim.Gaussian(flux=total_flux, sigma=1e-4)
@@ -610,9 +642,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             else:
                 q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(dd["pa_disk"])
-            disk = _simulator.Exponential(
-                flux=disk_flux, half_light_radius=hlr_d
-            ).shear(
+            disk = _simulator.Exponential(flux=disk_flux, half_light_radius=hlr_d).shear(
                 q=q_d, beta=beta_d * galsim.radians
             )
             components.append(disk)
@@ -626,9 +656,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             else:
                 q_b = (b_b / a_b) if a_b > 0 else 1.0
             beta_b = np.radians(dd["pa_bulge"])
-            bulge = _simulator.DeVaucouleurs(
-                flux=bulge_flux, half_light_radius=hlr_b
-            ).shear(q=q_b, beta=beta_b * galsim.radians)
+            bulge = _simulator.DeVaucouleurs(flux=bulge_flux, half_light_radius=hlr_b).shear(
+                q=q_b, beta=beta_b * galsim.radians
+            )
             components.append(bulge)
 
         # AGN (nearly point-like)
@@ -657,7 +687,7 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
     catalog_filename = "flagship_cosmos.fits"
 
     def _compute_density(self, cat) -> float:
-        """Return density in objects/arcmin^2 from the catalog sky footprint."""
+        """Return density (objects/arcmin^2) from the sky footprint."""
         ra = cat["ra_gal"]
         dec = cat["dec_gal"]
         ra_range = ra.max() - ra.min()
@@ -671,16 +701,19 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         return catalog["disk_r50"]
 
     def _generate_galaxy(
-        self, *, entry, mag_zero, band, survey_name,
+        self,
+        *,
+        entry,
+        mag_zero,
+        band,
+        survey_name,
         use_mog=False,
         force_isotropic=False,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Flagship 2025 catalog row."""
         if use_mog:
-            raise NotImplementedError(
-                "Flagship2025Catalog does not support the MoG renderer"
-            )
+            raise NotImplementedError("Flagship2025Catalog does not support the MoG renderer")
         sname = survey_name
         if sname == "hsc":
             sname = "lsst"
@@ -707,7 +740,8 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
                 # axis ratio is minor/major; clamp to valid range
                 q_d = min(max(q_d, 0.00), 1.0)
             disk = galsim.Exponential(
-                flux=disk_flux, half_light_radius=disk_hlr,
+                flux=disk_flux,
+                half_light_radius=disk_hlr,
             ).shear(q=q_d, beta=pa)
             components.append(disk)
 
@@ -722,7 +756,9 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
                 q_b = float(entry["bulge_axis_ratio"])
                 q_b = min(max(q_b, 0.00), 1.0)
             bulge = galsim.Sersic(
-                n=bulge_n, flux=bulge_flux, half_light_radius=bulge_hlr,
+                n=bulge_n,
+                flux=bulge_flux,
+                half_light_radius=bulge_hlr,
             ).shear(q=q_b, beta=pa)
             components.append(bulge)
 
@@ -751,17 +787,19 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a cone with a 1 deg radius"""
-        area_tot_arcmin = (
-            2 * np.pi * (1 - np.cos(np.radians(1)))
-            * (180 * 60 / np.pi) ** 2
-        )
+        area_tot_arcmin = 2 * np.pi * (1 - np.cos(np.radians(1))) * (180 * 60 / np.pi) ** 2
         return len(cat) / area_tot_arcmin
 
     def _half_light_radius(self, catalog) -> np.ndarray:
         return catalog["r50_disk_as"]
 
     def _generate_galaxy(
-        self, *, entry, mag_zero, band, survey_name,
+        self,
+        *,
+        entry,
+        mag_zero,
+        band,
+        survey_name,
         use_mog=False,
         force_isotropic=False,
         **kwargs,
@@ -785,31 +823,26 @@ class DiffskyCatalog(BaseGalaxyCatalog):
             bulge_e1, bulge_e2 = 0.0, 0.0
         else:
             # ellipticity = 1 - q in diffsky catalog
-            disk_e = (
-                entry['ellipticity_disk']
-                / (2 - entry['ellipticity_disk'])
-            )
-            disk_e1 = disk_e * np.cos(2 * entry['psi_disk'])
-            disk_e2 = disk_e * np.sin(2 * entry['psi_disk'])
+            disk_e = entry["ellipticity_disk"] / (2 - entry["ellipticity_disk"])
+            disk_e1 = disk_e * np.cos(2 * entry["psi_disk"])
+            disk_e2 = disk_e * np.sin(2 * entry["psi_disk"])
 
-            bulge_e = (
-                entry['ellipticity_bulge']
-                / (2 - entry['ellipticity_bulge'])
-            )
-            bulge_e1 = bulge_e * np.cos(2 * entry['psi_bulge'])
-            bulge_e2 = bulge_e * np.sin(2 * entry['psi_bulge'])
+            bulge_e = entry["ellipticity_bulge"] / (2 - entry["ellipticity_bulge"])
+            bulge_e1 = bulge_e * np.cos(2 * entry["psi_bulge"])
+            bulge_e2 = bulge_e * np.sin(2 * entry["psi_bulge"])
 
         disk_mag = entry[f"{sname}_{band}_disk"]
         disk_flux = 10 ** ((mag_zero - disk_mag) / 2.5)
         disk = _simulator.Exponential(
-            flux=disk_flux, half_light_radius=disk_hlr,
+            flux=disk_flux,
+            half_light_radius=disk_hlr,
         ).shear(g1=disk_e1, g2=disk_e2)
 
         bulge_mag = entry[f"{sname}_{band}_bulge"]
         bulge_flux = 10 ** ((mag_zero - bulge_mag) / 2.5)
-        bulge = _simulator.DeVaucouleurs(
-            flux=bulge_flux, half_light_radius=bulge_hlr
-        ).shear(g1=bulge_e1, g2=bulge_e2)
+        bulge = _simulator.DeVaucouleurs(flux=bulge_flux, half_light_radius=bulge_hlr).shear(
+            g1=bulge_e1, g2=bulge_e2
+        )
 
         gal = (bulge + disk).withFlux(disk_flux + bulge_flux)
         return gal

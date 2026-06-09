@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -125,9 +146,7 @@ class FpfsForcePipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, FpfsForcePipeConfig)
         self.makeSubtask("fpfs")
         return
@@ -136,16 +155,12 @@ class FpfsForcePipe(PipelineTask):
         assert isinstance(self.config, FpfsForcePipeConfig)
         inputs = butlerQC.get(inputRefs)
         exposure_handles = inputs["exposure"]
-        exposure_handles_dict = {
-            handle.dataId["band"]: handle for handle in exposure_handles
-        }
+        exposure_handles_dict = {handle.dataId["band"]: handle for handle in exposure_handles}
         correlation_handles = inputs["noise_corr"]
         if len(correlation_handles) == 0:
             correlation_handles_dict = None
         else:
-            correlation_handles_dict = {
-                handle.dataId["band"]: handle for handle in correlation_handles
-            }
+            correlation_handles_dict = {handle.dataId["band"]: handle for handle in correlation_handles}
 
         outputs = self.run(
             detection=inputs["input_catalog"].as_array(),
@@ -167,13 +182,16 @@ class FpfsForcePipe(PipelineTask):
 
         if detection is not None:
             anacal_colnames = [
-                "x1", "x2",
-                "flux", "dflux_dg1", "dflux_dg2",
-                "wsel", "dwsel_dg1", "dwsel_dg2",
+                "x1",
+                "x2",
+                "flux",
+                "dflux_dg1",
+                "dflux_dg2",
+                "wsel",
+                "dwsel_dg1",
+                "dwsel_dg2",
             ]
-            cat = rfn.repack_fields(
-                detection[anacal_colnames]
-            )
+            cat = rfn.repack_fields(detection[anacal_colnames])
             catalog = [cat]
         else:
             catalog = []
@@ -187,9 +205,7 @@ class FpfsForcePipe(PipelineTask):
                 noise_corr = noise_corr / variance
                 ny, nx = noise_corr.shape
                 if noise_corr[ny // 2, nx // 2] != 1:
-                    raise RuntimeError(
-                        "noise correlation peak is not at the center pixel"
-                    )
+                    raise RuntimeError("noise correlation peak is not at the center pixel")
                 self.log.debug("With correlation, variance:", variance)
             else:
                 noise_corr = None

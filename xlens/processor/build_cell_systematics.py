@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Build systematics products from cell-based coadds.
 
 Estimates noise correlation functions per band from stitched cell coadd
@@ -35,11 +56,13 @@ from xlens.utils.image import stack_psfs_cells
 
 band_order = "ugrizy"
 
-_GAIA_TABLE_DTYPE = np.dtype([
-    ("x_in_tract", np.float64),
-    ("y_in_tract", np.float64),
-    ("gaia_g_mag", np.float64),
-])
+_GAIA_TABLE_DTYPE = np.dtype(
+    [
+        ("x_in_tract", np.float64),
+        ("y_in_tract", np.float64),
+        ("gaia_g_mag", np.float64),
+    ]
+)
 
 
 class BuildCellSystematicsConnections(
@@ -114,8 +137,16 @@ class BuildCellSystematicsConfig(
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
         default=[
-            "BAD", "SAT", "CR", "NO_DATA", "UNMASKEDNAN", "CROSSTALK", "INTRP",
-            "STREAK", "VIGNETTED", "CLIPPED",
+            "BAD",
+            "SAT",
+            "CR",
+            "NO_DATA",
+            "UNMASKEDNAN",
+            "CROSSTALK",
+            "INTRP",
+            "STREAK",
+            "VIGNETTED",
+            "CLIPPED",
         ],
     )
     gaiaPadding = Field[int](
@@ -169,9 +200,7 @@ class BuildCellSystematicsTask(PipelineTask):
         patch = int(butlerQC.quantum.dataId["patch"])
 
         cell_handles = inputs["cellCoadd"]
-        cell_handles_dict = {
-            h.dataId["band"]: h for h in cell_handles
-        }
+        cell_handles_dict = {h.dataId["band"]: h for h in cell_handles}
         if len(inputs["gaia"]) > 0:
             gaia_loader = ReferenceObjectLoader(
                 dataIds=[ref.datasetRef.dataId for ref in inputRefs.gaia],
@@ -186,7 +215,8 @@ class BuildCellSystematicsTask(PipelineTask):
                 "Bright star masking will be skipped. "
                 "Ensure refcats/DM-39298/gaia_dr3_20230707 is in input "
                 "collections.",
-                tract, patch,
+                tract,
+                patch,
             )
         outputs = self.run(
             cell_handles_dict=cell_handles_dict,
@@ -241,14 +271,10 @@ class BuildCellSystematicsTask(PipelineTask):
 
         noise_array = image_array[y0:y1, x0:x1].copy()
         variance_sub = variance_array[y0:y1, x0:x1]
-        window_array = (
-            ((mask.array[y0:y1, x0:x1] & bits) == 0)
-            & (mask_array[y0:y1, x0:x1] == 0)
-        ).astype(np.float32)
-        window_array *= (
-            (noise_array ** 2.0 < variance_sub * 9)
-            & (~np.isnan(variance_sub))
+        window_array = (((mask.array[y0:y1, x0:x1] & bits) == 0) & (mask_array[y0:y1, x0:x1] == 0)).astype(
+            np.float32
         )
+        window_array *= (noise_array**2.0 < variance_sub * 9) & (~np.isnan(variance_sub))
 
         # Mean-subtract over the kept pixels before zeroing the masked ones.
         # A nonzero DC offset would otherwise spread to a flat μ² pedestal
@@ -261,29 +287,29 @@ class BuildCellSystematicsTask(PipelineTask):
         # Pad to avoid FFT wrap-around
         pad_width = ((10, 10), (10, 10))
         window_array = np.pad(
-            window_array, pad_width=pad_width,
-            mode="constant", constant_values=0.0,
+            window_array,
+            pad_width=pad_width,
+            mode="constant",
+            constant_values=0.0,
         )
         noise_array = np.pad(
-            noise_array, pad_width=pad_width,
-            mode="constant", constant_values=0.0,
+            noise_array,
+            pad_width=pad_width,
+            mode="constant",
+            constant_values=0.0,
         )
         pny, pnx = window_array.shape
 
         npixl = npix // 2
         npixr = npix // 2 + 1
 
-        noise_corr = np.fft.fftshift(
-            np.fft.ifft2(np.abs(np.fft.fft2(noise_array)) ** 2.0)
-        ).real[
-            pny // 2 - npixl: pny // 2 + npixr,
-            pnx // 2 - npixl: pnx // 2 + npixr,
+        noise_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(noise_array)) ** 2.0)).real[
+            pny // 2 - npixl : pny // 2 + npixr,
+            pnx // 2 - npixl : pnx // 2 + npixr,
         ]
-        window_corr = np.fft.fftshift(
-            np.fft.ifft2(np.abs(np.fft.fft2(window_array)) ** 2.0)
-        ).real[
-            pny // 2 - npixl: pny // 2 + npixr,
-            pnx // 2 - npixl: pnx // 2 + npixr,
+        window_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(window_array)) ** 2.0)).real[
+            pny // 2 - npixl : pny // 2 + npixr,
+            pnx // 2 - npixl : pnx // 2 + npixr,
         ]
 
         good = window_corr > 0
@@ -352,14 +378,18 @@ class BuildCellSystematicsTask(PipelineTask):
                 continue
             i = band_order.index(band)
             self.log.info(
-                "Processing band %s for tract=%d patch=%d", band, tract, patch,
+                "Processing band %s for tract=%d patch=%d",
+                band,
+                tract,
+                patch,
             )
 
             cell_coadd = handle.get()
 
             # PSF: stack from individual cell PSF images
             psf_array[i] = stack_psfs_cells(
-                cell_coadd=cell_coadd, npix=npix,
+                cell_coadd=cell_coadd,
+                npix=npix,
             )
 
             # Stitch for mask and noise correlation
@@ -383,11 +413,7 @@ class BuildCellSystematicsTask(PipelineTask):
         # Add bright star mask from GAIA
         assert mask_array is not None
         gaia_table = np.empty(0, dtype=_GAIA_TABLE_DTYPE)
-        if (
-            gaia_loader is not None
-            and stitched_wcs is not None
-            and stitched_bbox is not None
-        ):
+        if gaia_loader is not None and stitched_wcs is not None and stitched_bbox is not None:
             gaia = gaia_loader.loadPixelBox(
                 bbox=stitched_bbox,
                 filterName="phot_g_mean",
@@ -395,10 +421,12 @@ class BuildCellSystematicsTask(PipelineTask):
                 bboxToSpherePadding=self.config.gaiaPadding,
             ).refCat
             gaia_table = self._build_gaia_table(
-                wcs=stitched_wcs, gaia_catalog=gaia,
+                wcs=stitched_wcs,
+                gaia_catalog=gaia,
             )
             gaia_array = self._get_gaia_mask_sources(
-                gaia_table=gaia_table, bbox=stitched_bbox,
+                gaia_table=gaia_table,
+                bbox=stitched_bbox,
             )
             if gaia_array is not None:
                 self.log.info(
@@ -406,7 +434,8 @@ class BuildCellSystematicsTask(PipelineTask):
                     len(gaia_array),
                 )
                 anacal.mask.add_bright_star_mask(
-                    mask_array=mask_array, star_array=gaia_array,
+                    mask_array=mask_array,
+                    star_array=gaia_array,
                 )
 
         # Noise correlation: use the augmented mask (bad pixels OR'd across
@@ -415,7 +444,9 @@ class BuildCellSystematicsTask(PipelineTask):
         for band, stitched in stitched_by_band.items():
             i = band_order.index(band)
             noise_corr_array[i] = self.get_noise_corr(
-                stitched, mask_array, self.config.badMaskPlanes,
+                stitched,
+                mask_array,
+                self.config.badMaskPlanes,
             )
         stitched_by_band.clear()
 
@@ -423,7 +454,8 @@ class BuildCellSystematicsTask(PipelineTask):
         h, w = mask_array.shape
         output_msk = MaskX(width=w, height=h)
         output_msk.getArray()[:, :] = mask_array.astype(
-            output_msk.getArray().dtype, copy=False,
+            output_msk.getArray().dtype,
+            copy=False,
         )
         if stitched_bbox is not None:
             output_msk.setXY0(stitched_bbox.getMin())

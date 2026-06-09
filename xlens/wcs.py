@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """WCS conversion utilities between LSST and GalSim coordinate systems.
 
 Coordinate conventions
@@ -172,8 +193,10 @@ def make_jwcs(pixel_scale, g1, g2, rho):
     """
     jac = jacobian_reconstruction(pixel_scale, g1, g2, rho)
     return galsim.JacobianWCS(
-        dudx=jac[0, 0], dudy=jac[0, 1],
-        dvdx=jac[1, 0], dvdy=jac[1, 1],
+        dudx=jac[0, 0],
+        dudy=jac[0, 1],
+        dvdx=jac[1, 0],
+        dvdy=jac[1, 1],
     )
 
 
@@ -223,10 +246,12 @@ def extract_perturbation_galsim_wcs(wcs_gs, pixel_point, pixel_scale):
         Convergence (dimensionless).
     """
     local_wcs = wcs_gs.local(image_pos=pixel_point)
-    jac = np.array([
-        [local_wcs.dudx, local_wcs.dudy],
-        [local_wcs.dvdx, local_wcs.dvdy],
-    ])
+    jac = np.array(
+        [
+            [local_wcs.dudx, local_wcs.dudy],
+            [local_wcs.dvdx, local_wcs.dvdy],
+        ]
+    )
     return jacobian_decomposition(jac, pixel_scale)
 
 
@@ -283,16 +308,20 @@ def extract_perturbation_dm_wcs(wcs_dm, pixel_point, pixel_scale):
 
     local_transform = wcs_dm.linearizePixelToSky(pixel_point, lgeom.radians)
     linear = local_transform.getLinear()
-    cd_local = np.array([
-        [linear[0, 0], linear[0, 1]],
-        [linear[1, 0], linear[1, 1]],
-    ])
+    cd_local = np.array(
+        [
+            [linear[0, 0], linear[0, 1]],
+            [linear[1, 0], linear[1, 1]],
+        ]
+    )
     # Convert radians to arcsec, negate first row (u' East -> u West)
     rad_to_arcsec = (180.0 / np.pi) * 3600.0
-    jac_arcsec = np.array([
-        [-cd_local[0, 0] * rad_to_arcsec, -cd_local[0, 1] * rad_to_arcsec],
-        [cd_local[1, 0] * rad_to_arcsec, cd_local[1, 1] * rad_to_arcsec],
-    ])
+    jac_arcsec = np.array(
+        [
+            [-cd_local[0, 0] * rad_to_arcsec, -cd_local[0, 1] * rad_to_arcsec],
+            [cd_local[1, 0] * rad_to_arcsec, cd_local[1, 1] * rad_to_arcsec],
+        ]
+    )
     return jacobian_decomposition(jac_arcsec, pixel_scale)
 
 
@@ -318,8 +347,10 @@ def tanwcs_dm2galsim(wcs):
     y0 = pix_center.getY()
     J_arcsec = wcs.getCdMatrix() * 3600
     aff = galsim.AffineTransform(
-        dudx=-J_arcsec[0, 0], dudy=-J_arcsec[0, 1],
-        dvdx=J_arcsec[1, 0], dvdy=J_arcsec[1, 1],
+        dudx=-J_arcsec[0, 0],
+        dudy=-J_arcsec[0, 1],
+        dvdx=J_arcsec[1, 0],
+        dvdy=J_arcsec[1, 1],
         origin=galsim.PositionD(x0, y0),
     )
     world_origin = galsim.CelestialCoord(
@@ -327,9 +358,7 @@ def tanwcs_dm2galsim(wcs):
         sky_center.getDec().asRadians() * galsim.radians,
     )
 
-    wcs_galsim = galsim.TanWCS(
-        affine=aff, world_origin=world_origin, units=galsim.arcsec
-    )
+    wcs_galsim = galsim.TanWCS(affine=aff, world_origin=world_origin, units=galsim.arcsec)
     return wcs_galsim
 
 
@@ -351,7 +380,7 @@ def tanwcs_galsim2dm(wcs_gs):
     lsst.afw.geom.SkyWcs
     """
 
-    if wcs_gs.wcs_type == 'TAN':
+    if wcs_gs.wcs_type == "TAN":
         crpix = wcs_gs.crpix
         stack_crpix = geom.Point2D(crpix[0], crpix[1])
         cd_matrix = wcs_gs.cd
@@ -367,15 +396,12 @@ def tanwcs_galsim2dm(wcs_gs):
             cdMatrix=cd_matrix,
         )
     else:
-        raise RuntimeError(
-            "Does not support wcs_gs type: %s" % wcs_gs.wcs_type
-        )
+        raise RuntimeError("Does not support wcs_gs type: %s" % wcs_gs.wcs_type)
 
     return wcs_dm
 
 
-def make_tanwcs_galsim(pixel_scale, g1, g2, rho, ra_deg, dec_deg,
-                       x_pix, y_pix):
+def make_tanwcs_galsim(pixel_scale, g1, g2, rho, ra_deg, dec_deg, x_pix, y_pix):
     """Build a GalSim TanWCS with shear (g1, g2) and rotation (rho).
 
     Parameters
@@ -399,21 +425,24 @@ def make_tanwcs_galsim(pixel_scale, g1, g2, rho, ra_deg, dec_deg,
     """
     jac = jacobian_reconstruction(pixel_scale, g1, g2, rho)
     affine = galsim.AffineTransform(
-        dudx=jac[0, 0], dudy=jac[0, 1],
-        dvdx=jac[1, 0], dvdy=jac[1, 1],
+        dudx=jac[0, 0],
+        dudy=jac[0, 1],
+        dvdx=jac[1, 0],
+        dvdy=jac[1, 1],
         origin=galsim.PositionD(x_pix, y_pix),
     )
     world_origin = galsim.CelestialCoord(
-        ra_deg * galsim.degrees, dec_deg * galsim.degrees,
+        ra_deg * galsim.degrees,
+        dec_deg * galsim.degrees,
     )
     return galsim.TanWCS(
-        affine=affine, world_origin=world_origin,
+        affine=affine,
+        world_origin=world_origin,
         units=galsim.arcsec,
     )
 
 
-def make_tanwcs_dm(pixel_scale, g1, g2, rho, ra_deg, dec_deg,
-                   x_pix, y_pix):
+def make_tanwcs_dm(pixel_scale, g1, g2, rho, ra_deg, dec_deg, x_pix, y_pix):
     """Build an LSST SkyWcs with shear (g1, g2) and rotation (rho).
 
     Constructs a GalSim TanWCS via make_tanwcs_galsim and converts
@@ -439,7 +468,14 @@ def make_tanwcs_dm(pixel_scale, g1, g2, rho, ra_deg, dec_deg,
     lsst.afw.geom.SkyWcs
     """
     wcs_gs = make_tanwcs_galsim(
-        pixel_scale, g1, g2, rho, ra_deg, dec_deg, x_pix, y_pix,
+        pixel_scale,
+        g1,
+        g2,
+        rho,
+        ra_deg,
+        dec_deg,
+        x_pix,
+        y_pix,
     )
     return tanwcs_galsim2dm(wcs_gs)
 

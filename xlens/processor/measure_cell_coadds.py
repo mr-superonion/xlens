@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -170,8 +170,10 @@ class MeasureCellCoaddsPipe(PipelineTask):
         **kwargs: Any,
     ):
         super().__init__(
-            config=config, log=log,
-            initInputs=initInputs, **kwargs,
+            config=config,
+            log=log,
+            initInputs=initInputs,
+            **kwargs,
         )
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
 
@@ -212,15 +214,18 @@ class MeasureCellCoaddsPipe(PipelineTask):
         pixel_scale = float(cell.wcs.getPixelScale().asArcseconds())
         pad = 50
         bb = anacal.geometry.block(
-            int(width // 2),   # xcen
+            int(width // 2),  # xcen
             int(height // 2),  # ycen
-            0, 0,              # xmin, ymin
-            width, height,     # xmax, ymax
-            pad, pad,          # xmin_in, ymin_in
-            width - pad,       # xmax_in
-            height - pad,      # ymax_in
+            0,
+            0,  # xmin, ymin
+            width,
+            height,  # xmax, ymax
+            pad,
+            pad,  # xmin_in, ymin_in
+            width - pad,  # xmax_in
+            height - pad,  # ymax_in
             pixel_scale,
-            0,                 # index
+            0,  # index
         )
         bb.xmsk = [True] * width
         bb.ymsk = [True] * height
@@ -248,8 +253,8 @@ class MeasureCellCoaddsPipe(PipelineTask):
         sx = cell_bbox.getMinX() - x0
         sy = cell_bbox.getMinY() - y0
         return mask_array[
-            sy: sy + cell_bbox.getHeight(),
-            sx: sx + cell_bbox.getWidth(),
+            sy : sy + cell_bbox.getHeight(),
+            sx : sx + cell_bbox.getWidth(),
         ].copy()
 
     def _prepare_cell(
@@ -297,7 +302,9 @@ class MeasureCellCoaddsPipe(PipelineTask):
         if stitched_mask_array is None:
             return None
         return self._extract_cell_mask(
-            stitched_mask_array, mask_origin, cell.outer.bbox,
+            stitched_mask_array,
+            mask_origin,
+            cell.outer.bbox,
         )
 
     def _detect(
@@ -322,9 +329,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         band = "i"
         if band not in coadd_handles_dict:
-            raise KeyError(
-                f"band '{band}' not in {coadd_handles_dict.keys()}"
-            )
+            raise KeyError(f"band '{band}' not in {coadd_handles_dict.keys()}")
 
         det_coadd = coadd_handles_dict[band].get()
         mag_zero = self._coadd_mag_zero(det_coadd)
@@ -333,7 +338,9 @@ class MeasureCellCoaddsPipe(PipelineTask):
         det_cats: dict = {}
         for cell_id, det_cell in det_cells.items():
             cell_mask = self._cell_mask(
-                stitched_mask_array, mask_origin, det_cell,
+                stitched_mask_array,
+                mask_origin,
+                det_cell,
             )
             try:
                 data = self._prepare_cell(
@@ -354,7 +361,11 @@ class MeasureCellCoaddsPipe(PipelineTask):
                 ix, iy = int(cell_id.x), int(cell_id.y)
                 self.log.error(
                     "Detection failed tract=%d patch=%d cell=(%d, %d): %s",
-                    tract, patch, ix, iy, e,
+                    tract,
+                    patch,
+                    ix,
+                    iy,
+                    e,
                 )
         del det_coadd, det_cells
 
@@ -365,9 +376,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
     def _coadd_mag_zero(self, mca) -> float:
         """Photometric zeropoint of a ``MultipleCellCoadd``."""
         photoCalib = mca.stitch().asExposure().getPhotoCalib()
-        return float(
-            np.log10(photoCalib.getInstFluxAtZeroMagnitude()) / 0.4
-        )
+        return float(np.log10(photoCalib.getInstFluxAtZeroMagnitude()) / 0.4)
 
     def _force(
         self,
@@ -388,9 +397,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         active_cell_ids = list(detection_dict.keys())
-        cell_force_parts: dict[Any, list] = {
-            cid: [] for cid in active_cell_ids
-        }
+        cell_force_parts: dict[Any, list] = {cid: [] for cid in active_cell_ids}
         bands = list(coadd_handles_dict.keys())
 
         for band in bands:
@@ -400,7 +407,9 @@ class MeasureCellCoaddsPipe(PipelineTask):
             for cell_id in active_cell_ids:
                 cell = band_coadd.cells[cell_id]
                 cell_mask = self._cell_mask(
-                    stitched_mask_array, mask_origin, cell,
+                    stitched_mask_array,
+                    mask_origin,
+                    cell,
                 )
                 try:
                     data = self._prepare_cell(
@@ -415,24 +424,31 @@ class MeasureCellCoaddsPipe(PipelineTask):
                         mask_array=cell_mask,
                     )
                     cat = rename_flux_to_photoz_format(
-                        self.fpfs.run(**data), band,
+                        self.fpfs.run(**data),
+                        band,
                     )
                     if self.config.do_measure_flux_gauss:
                         gauss_cat = select_band_gauss_fluxes(
-                            self.anacal.run(**data), band,
+                            self.anacal.run(**data),
+                            band,
                         )
                         cat = np.asarray(
                             rfn.merge_arrays(
-                                [cat, gauss_cat], flatten=True,
+                                [cat, gauss_cat],
+                                flatten=True,
                             )
                         )
                     cell_force_parts[cell_id].append(cat)
                 except Exception as e:
                     ix, iy = int(cell_id.x), int(cell_id.y)
                     self.log.error(
-                        "Measurement failed tract=%d patch=%d "
-                        "cell=(%d, %d) band=%s: %s",
-                        tract, patch, ix, iy, band, e,
+                        "Measurement failed tract=%d patch=%d " "cell=(%d, %d) band=%s: %s",
+                        tract,
+                        patch,
+                        ix,
+                        iy,
+                        band,
+                        e,
                     )
             del band_coadd
 
@@ -532,12 +548,12 @@ class MeasureCellCoaddsPipe(PipelineTask):
         output = np.concatenate(cell_results)
         # Stable per-object IDs derived from the patch-level seed. Used
         # downstream by ``photoZPipe`` and any object-level joiners.
-        object_ids = (
-            np.int64(seed) * np.int64(1_000_000)
-            + np.arange(len(output), dtype=np.int64)
-        )
+        object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(output), dtype=np.int64)
         output = rfn.append_fields(
-            output, "object_id", object_ids, usemask=False,
+            output,
+            "object_id",
+            object_ids,
+            usemask=False,
         )
         if skyMap is not None:
             # Use skymap's patchInfo (not MultipleCellCoadd.inner_bbox)
@@ -546,8 +562,6 @@ class MeasureCellCoaddsPipe(PipelineTask):
             # MultipleCellCoadd.inner_bbox equals the patch outer bbox.
             tractInfo = skyMap[tract]
             patchInfo = tractInfo[patch]
-            pixel_scale = float(
-                tractInfo.getWcs().getPixelScale().asArcseconds()
-            )
+            pixel_scale = float(tractInfo.getWcs().getPixelScale().asArcseconds())
             set_isPrimary(output, skyMap, tractInfo, patchInfo, pixel_scale)
         return Struct(anacalCatalog=output)

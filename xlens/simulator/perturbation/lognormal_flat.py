@@ -1,3 +1,24 @@
+# This file is part of xlens.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """Log-normal convergence and shear field on a flat sky."""
 
 import galsim
@@ -6,7 +27,6 @@ import scipy.interpolate
 
 
 class ShearLogNormalFlat:
-
     """Flat-sky log-normal shear field generated from a CCL weak-lensing
     power spectrum.
 
@@ -27,16 +47,24 @@ class ShearLogNormalFlat:
     """
 
     def __init__(
-        self, z_source, field_size_deg=5.0, npix=2048, seed=None,
+        self,
+        z_source,
+        field_size_deg=5.0,
+        npix=2048,
+        seed=None,
     ):
         import pyccl as ccl
 
         # Default to use planck 2018 Cosmology
         h, Obh2, Och2 = 0.6736, 0.02237, 0.1200
         self.cosmo = ccl.Cosmology(
-            Omega_b=Obh2/h**2, Omega_c=Och2/h**2, h=h,
-            n_s=0.9649, A_s=2.100549e-9,  # k=0.05 Mpc^-1
-            Neff=3.046, m_nu=0.06,
+            Omega_b=Obh2 / h**2,
+            Omega_c=Och2 / h**2,
+            h=h,
+            n_s=0.9649,
+            A_s=2.100549e-9,  # k=0.05 Mpc^-1
+            Neff=3.046,
+            m_nu=0.06,
         )
         self.z_source = z_source
         self.field_size_deg = field_size_deg
@@ -47,7 +75,7 @@ class ShearLogNormalFlat:
         # 1. Get Power Spectrum
         # Create a narrow redshift distribution for the WeakLensingTracer
         z_arr = np.linspace(0, 2 * self.z_source, 100)
-        dndz_arr = np.exp(-(z_arr - self.z_source)**2 / (2 * 0.01**2))
+        dndz_arr = np.exp(-((z_arr - self.z_source) ** 2) / (2 * 0.01**2))
         _trapz = getattr(np, "trapezoid", None) or getattr(np, "trapz")
         dndz_arr /= _trapz(dndz_arr, z_arr)
 
@@ -83,10 +111,14 @@ class ShearLogNormalFlat:
         # Generate Gaussian random field in Fourier space
         # The 1/sqrt(2) is for the complex random numbers, which have variance
         # 1 in real and imag parts.
-        gaussian_field_fourier = np.sqrt(pk_2d_scaled) * (
-            np.random.normal(size=(self.npix, self.npix))
-            + 1j * np.random.normal(size=(self.npix, self.npix))
-        ) / np.sqrt(2.0)
+        gaussian_field_fourier = (
+            np.sqrt(pk_2d_scaled)
+            * (
+                np.random.normal(size=(self.npix, self.npix))
+                + 1j * np.random.normal(size=(self.npix, self.npix))
+            )
+            / np.sqrt(2.0)
+        )
 
         # 3. Transform to Real Space
         kappa_G = np.fft.ifft2(gaussian_field_fourier).real
@@ -104,7 +136,7 @@ class ShearLogNormalFlat:
         k_abs[k_abs == 0] = 1e-10
 
         gamma1_fourier = ((kx**2 - ky**2) / k_abs**2) * kappa_LN_fourier
-        gamma2_fourier = - ((2 * kx * ky) / k_abs**2) * kappa_LN_fourier
+        gamma2_fourier = -((2 * kx * ky) / k_abs**2) * kappa_LN_fourier
 
         # 6. Transform Shear to Real Space
         self.gamma1_map = np.fft.ifft2(gamma1_fourier).real
@@ -113,21 +145,19 @@ class ShearLogNormalFlat:
 
         # 7. Create Interpolators
         x_coords = np.linspace(
-            -self.field_size_deg / 2, self.field_size_deg / 2, self.npix,
+            -self.field_size_deg / 2,
+            self.field_size_deg / 2,
+            self.npix,
         )
         y_coords = np.linspace(
-            -self.field_size_deg / 2, self.field_size_deg / 2, self.npix,
+            -self.field_size_deg / 2,
+            self.field_size_deg / 2,
+            self.npix,
         )
 
-        self.kappa_interp = scipy.interpolate.RectBivariateSpline(
-            x_coords, y_coords, self.kappa_map
-        )
-        self.gamma1_interp = scipy.interpolate.RectBivariateSpline(
-            x_coords, y_coords, self.gamma1_map
-        )
-        self.gamma2_interp = scipy.interpolate.RectBivariateSpline(
-            x_coords, y_coords, self.gamma2_map
-        )
+        self.kappa_interp = scipy.interpolate.RectBivariateSpline(x_coords, y_coords, self.kappa_map)
+        self.gamma1_interp = scipy.interpolate.RectBivariateSpline(x_coords, y_coords, self.gamma1_map)
+        self.gamma2_interp = scipy.interpolate.RectBivariateSpline(x_coords, y_coords, self.gamma2_map)
 
     def distort_galaxy(self, src):
         """Return lensing distortions interpolated at the galaxy position.
@@ -143,6 +173,7 @@ class ShearLogNormalFlat:
             Standard shear result dict (see :func:`_get_shear_res_dict`).
         """
         from .utils import _get_shear_res_dict
+
         dx_deg = src["dx"] / 3600.0
         dy_deg = src["dy"] / 3600.0
         kappa = self.kappa_interp(dx_deg, dy_deg)[0, 0]
@@ -163,5 +194,5 @@ class ShearLogNormalFlat:
             gamma1=gamma1,
             gamma2=gamma2,
             kappa=kappa,
-            has_finite_shear=True
+            has_finite_shear=True,
         )

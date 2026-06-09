@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -20,6 +20,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Selection-bias measurements aggregated in photometric-redshift bins."""
+
 from __future__ import annotations
 
 import logging
@@ -46,8 +47,7 @@ from xlens.catalog.redshift import (
     load_bpz_templates,
 )
 
-DEFAULT_BPZ_DATA_PATH = \
-    "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/2025-10-15/rail/bpz"
+DEFAULT_BPZ_DATA_PATH = "/gpfs/mnt/gpfs02/astro/workarea/xli6/work/2025-10-15/rail/bpz"
 
 __all__ = [
     "SelBiasRedshiftPipeConnections",
@@ -268,9 +268,7 @@ class SelBiasRedshiftPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, SelBiasRedshiftPipeConfig)
         self._zbounds = list(self.config.zbounds)
         self._ncut = len(self._zbounds) + 1
@@ -289,14 +287,11 @@ class SelBiasRedshiftPipe(PipelineTask):
             model_path = os.environ.get(env_name, "")
         if not model_path:
             raise RuntimeError(
-                "model_path is not configured and the corresponding environment"
-                "variable is not set"
+                "model_path is not configured and the corresponding environment" "variable is not set"
             )
 
         if config.redshift_estimator == "bpz":
-            data_path = config.bpz_data_path or os.environ.get(
-                "BPZ_DATA_PATH", ""
-            )
+            data_path = config.bpz_data_path or os.environ.get("BPZ_DATA_PATH", "")
             if not data_path:
                 data_path = DEFAULT_BPZ_DATA_PATH
         else:
@@ -338,9 +333,7 @@ class SelBiasRedshiftPipe(PipelineTask):
         resp_sel = np.asarray(out["r_sel"], dtype=np.float64)
         return ell, resp + resp_sel
 
-    def _accumulate_pair(
-        self, catalogs: Iterable[np.ndarray | None]
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _accumulate_pair(self, catalogs: Iterable[np.ndarray | None]) -> tuple[np.ndarray, np.ndarray]:
         e_total = np.zeros(self._ncut, dtype=np.float64)
         r_total = np.zeros(self._ncut, dtype=np.float64)
         for src in catalogs:
@@ -441,9 +434,7 @@ class SelBiasRedshiftSummaryPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, SelBiasRedshiftSummaryPipeConfig)
         self._ncut = len(self.config.zbounds) + 1
 
@@ -478,9 +469,7 @@ class SelBiasRedshiftSummaryPipe(PipelineTask):
         all_r_neg = self._stack(arrays_r_neg, ncut)
 
         if all_e_pos.size == 0 or all_e_neg.size == 0:
-            raise RuntimeError(
-                "No valid (+g/-g) pairs found in the summary inputs."
-            )
+            raise RuntimeError("No valid (+g/-g) pairs found in the summary inputs.")
 
         num = np.sum(all_e_pos - all_e_neg, axis=0)
         denom = np.sum(all_r_pos + all_r_neg, axis=0)
@@ -488,14 +477,9 @@ class SelBiasRedshiftSummaryPipe(PipelineTask):
 
         c = np.sum(all_e_pos + all_e_neg, axis=0) / denom
 
-        area_arcmin2 = (
-            self.config.stamp_dim * self.config.stamp_dim
-            * (self.config.pixel_scale / 60.0) ** 2
-        )
+        area_arcmin2 = self.config.stamp_dim * self.config.stamp_dim * (self.config.pixel_scale / 60.0) ** 2
 
-        _, _, clipped_std = sigma_clipped_stats(
-            all_e_pos / np.average(all_r_pos, axis=0), sigma=5.0, axis=0
-        )
+        _, _, clipped_std = sigma_clipped_stats(all_e_pos / np.average(all_r_pos, axis=0), sigma=5.0, axis=0)
         neff = (0.26 / clipped_std) ** 2.0 / area_arcmin2
 
         rng = np.random.default_rng(0)

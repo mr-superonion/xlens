@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -172,9 +172,7 @@ class photoZPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, photoZPipeConfig)
         with open(self.config.model_path, "rb") as f:
             pz_obj = pickle.load(f)
@@ -209,8 +207,7 @@ class photoZPipe(PipelineTask):
 
         if extinction is not None and len(extinction) != len(catalog):
             raise ValueError(
-                f"extinction length ({len(extinction)}) does not match "
-                f"catalog length ({len(catalog)})"
+                f"extinction length ({len(extinction)}) does not match " f"catalog length ({len(catalog)})"
             )
 
         distortions = DISTORTIONS if cfg.do_distortions else DISTORTIONS[:1]
@@ -227,24 +224,23 @@ class photoZPipe(PipelineTask):
         )
 
         dtype: list = [("object_id", catalog.dtype["object_id"])]
-        dtype += [
-            (f"{key}_{suf}", "f4")
-            for suf, _, _ in distortions
-            for key in POINT_KEYS
-        ]
+        dtype += [(f"{key}_{suf}", "f4") for suf, _, _ in distortions for key in POINT_KEYS]
         points = np.empty(n, dtype=dtype)
         points["object_id"] = catalog["object_id"]
 
         pdfs: NDArray | None = None
         if cfg.output_pdfs:
             pdfs = np.empty(
-                (n, len(distortions), NUM_Z_GRIDS), dtype=np.float32,
+                (n, len(distortions), NUM_Z_GRIDS),
+                dtype=np.float32,
             )
 
         for i, (suf, comp, dg) in enumerate(distortions):
             self.log.info(
                 "FlexZBoost distortion suf=%s comp=%d dg=%+0.2f",
-                suf, comp, dg,
+                suf,
+                comp,
+                dg,
             )
             res = self.zobj.get_z(
                 src=catalog,

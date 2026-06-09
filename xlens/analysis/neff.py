@@ -1,4 +1,4 @@
-# This file is part of pipe_tasks.
+# This file is part of xlens.
 #
 # Developed for the LSST Data Management System.
 # This product includes software developed by the LSST Project
@@ -157,9 +157,7 @@ class NeffMultibandPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, NeffMultibandPipeConfig)
 
         self.sname = self.config.shear_name
@@ -219,12 +217,11 @@ class NeffMultibandPipe(PipelineTask):
     def run(self, src, patch_info):
         assert isinstance(self.config, NeffMultibandPipeConfig)
         bbox = patch_info.getOuterBBox()
-        pixel_scale = (
-            patch_info.getWcs().getPixelScale().asDegrees() * 60  # arcmin
-        )
+        pixel_scale = patch_info.getWcs().getPixelScale().asDegrees() * 60  # arcmin
         area = (
-            (bbox.getHeight() - 2.0 * self.config.bound) *
-            (bbox.getWidth() - 2.0 * self.config.bound) * pixel_scale**2.0
+            (bbox.getHeight() - 2.0 * self.config.bound)
+            * (bbox.getWidth() - 2.0 * self.config.bound)
+            * pixel_scale**2.0
         )  # arcmin
 
         ncuts = len(self.config.flux_cuts)
@@ -289,9 +286,7 @@ class NeffSummaryMultibandPipe(PipelineTask):
         initInputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
-        super().__init__(
-            config=config, log=log, initInputs=initInputs, **kwargs
-        )
+        super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, NeffSummaryMultibandPipeConfig)
         return
 
