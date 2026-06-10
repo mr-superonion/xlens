@@ -63,6 +63,102 @@ def _bin_count(*, idx, weights=None, minlength=0):
     return np.bincount(idx, weights=weights, minlength=minlength)[1:-1]
 
 
+def build_selection_mask(
+    src,
+    *,
+    comp: int = 1,
+    dg: float = 0.0,
+    bands: str = "grizy",
+    mag_max: float | dict = 40.0,
+    mag_zero: float = 30.0,
+    flux_name: str = "fpfs1",
+    shape_name: str = "fpfs",
+    emax: float = 0.3,
+    trace_min: float = 0.05,
+    extinction: np.ndarray | None = None,
+    z_estimator=None,
+    z_width95_max: float = 2.75,
+    ref_band: str = "i",
+    z_point_name: str = "zmode",
+    include_mag_err: bool = False,
+):
+    """Build a selection mask at first order in shear g_comp = dg.
+
+    Combines, in order:
+      1. shape ``|e|^2 < emax^2``  (``get_esq``, evaluated at ``dg``)
+      2. size  ``trace > trace_min`` (``get_trace``, evaluated at ``dg``)
+      3. per-band mag cut: ``mag_b < mag_max[b]`` with
+         ``flux_b = src[{b}_flux{fn}] + dg * src[{b}_dflux{fn}_dg{comp}]``
+         and ``mag_b = mag_zero - 2.5*log10(flux_b)``
+         (optionally minus the per-band extinction ``extinction[f'a_{b}']``).
+      4. optional photo-z width cut via ``z_estimator.get_zsel``.
+
+    Parameters
+    ----------
+    src : structured ndarray
+        AnaCal catalog rows; must carry the columns referenced above.
+    comp : {1, 2}
+        Shear component for the dg perturbation.
+    dg : float
+        Shear value at which to evaluate the cut (``0.0`` for the
+        unperturbed selection; ``+self.dg`` / ``-self.dg`` for the
+        selection-response terms).
+    bands, mag_max, mag_zero, flux_name, shape_name, emax, trace_min, ...
+        Same meaning as on ``ShearEstimator``; ``mag_max`` may be a scalar
+        (broadcast across bands) or a ``{band: value}`` dict.
+    z_estimator : optional
+        If given, the photo-z estimator is queried at the dg-perturbed
+        magnitudes and rows with ``w_s >= z_width95_max`` are dropped.
+
+    Returns
+    -------
+    mask : ndarray of bool, shape (N,)
+        Source selection. Length matches ``len(src)``.
+    z_s : ndarray or None
+        Photo-z point estimate for the rows kept by the mask, or
+        ``None`` when no ``z_estimator`` is supplied. Caller can use
+        this for downstream redshift binning without recomputing it.
+    """
+    fn = _resolve_cut_name(flux_name)
+    magx = _resolve_cut(mag_max, bands=bands)
+    sn = shape_name + "_" if (shape_name and not shape_name.endswith("_")) else (shape_name or "")
+    emax2 = emax * emax
+
+    esq_s = get_esq(src, comp=comp, dg=dg, sn=sn)
+    trace_s = get_trace(src, comp=comp, dg=dg, sn=sn)
+    mask = (esq_s < emax2) & (trace_s > trace_min)
+    for b in bands:
+        flux_b = src[f"{b}_flux{fn}"] + dg * src[f"{b}_dflux{fn}_dg{comp}"]
+        mag_b = np.full(len(src), 40.0, dtype=np.float64)
+        pos = flux_b > 0
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mag_b[pos] = mag_zero - 2.5 * np.log10(flux_b[pos])
+        if extinction is not None:
+            mag_b = mag_b - extinction[f"a_{b}"]
+        mask &= mag_b < magx[b]
+
+    z_s = None
+    if z_estimator is not None:
+        ext = None if extinction is None else extinction[mask]
+        z_s, w_s = z_estimator.get_zsel(
+            src[mask],
+            mag_zero=mag_zero,
+            flux_name=flux_name,
+            bands=bands,
+            ref_band=ref_band,
+            comp=comp,
+            dg=dg,
+            include_mag_err=include_mag_err,
+            z_point_name=z_point_name,
+            extinction=ext,
+        )
+        keep_z = w_s < z_width95_max
+        mask[mask] &= keep_z
+        z_s = z_s[keep_z]
+
+    return mask, z_s
+
+
 class ShearEstimator(object):
     def __init__(
         self,
@@ -107,7 +203,6 @@ class ShearEstimator(object):
         extinction: np.ndarray | None = None,
     ):
         """Compute binned <w_sel e> for shear +sign*dg."""
-        fn = self.fn
         e_comp = src[f"{self.sn}e{comp}"]
         de_dg = src[f"{self.sn}de{comp}_dg{comp}"]
 
@@ -115,40 +210,25 @@ class ShearEstimator(object):
         dw_dg = src[f"dwsel_dg{comp}"]
 
         dg_eff = sign * self.dg
-        esq_s = get_esq(src, comp=comp, dg=dg_eff, sn=self.sn)
-        trace_s = get_trace(src, comp=comp, dg=dg_eff, sn=self.sn)
-        mask_s = (esq_s < self.emax2) & (trace_s > self.trace_min)
-        for b in self.bands:
-            _f = src[f"{b}_flux{fn}"] + dg_eff * src[f"{b}_dflux{fn}_dg{comp}"]
-            _m = np.full(len(src), 40.0, dtype=np.float64)
-            _p = _f > 0
-            with np.errstate(divide="ignore", invalid="ignore"):
-                _m[_p] = self.mag_zero - 2.5 * np.log10(_f[_p])
-            if extinction is not None:
-                _m = _m - extinction[f"a_{b}"]
-            mask_s &= _m < self.magx[b]
-        if extinction is None:
-            ext = None
-        else:
-            ext = extinction[mask_s]
-
-        if self.z_estimator is not None:
-            z_s, w_s = self.z_estimator.get_zsel(
-                src[mask_s],
-                mag_zero=self.mag_zero,
-                flux_name=self.flux_name,
-                bands=self.bands,
-                ref_band=self.ref_band,
-                comp=comp,
-                dg=dg_eff,
-                include_mag_err=False,
-                z_point_name=self.z_point_name,
-                extinction=ext,
-            )
-            mtmp_local = w_s < self.z_width95_max
-            mask_s[mask_s] &= mtmp_local
-            z_s = z_s[mtmp_local]
-            del mtmp_local, w_s
+        mask_s, z_s = build_selection_mask(
+            src,
+            comp=comp,
+            dg=dg_eff,
+            bands=self.bands,
+            mag_max=self.magx,
+            mag_zero=self.mag_zero,
+            flux_name=self.flux_name,
+            shape_name=self.sn,
+            emax=np.sqrt(self.emax2),
+            trace_min=self.trace_min,
+            extinction=extinction,
+            z_estimator=self.z_estimator,
+            z_width95_max=self.z_width95_max,
+            ref_band=self.ref_band,
+            z_point_name=self.z_point_name,
+            include_mag_err=False,
+        )
+        if z_s is not None:
             idx_s = np.digitize(z_s, self.zbounds, right=False)
             minlen = len(self.zbounds) + 1
         else:

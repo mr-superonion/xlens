@@ -61,6 +61,9 @@ _GAIA_TABLE_DTYPE = np.dtype(
         ("x_in_tract", np.float64),
         ("y_in_tract", np.float64),
         ("gaia_g_mag", np.float64),
+        ("gaia_source_id", np.int64),
+        ("ra", np.float64),
+        ("dec", np.float64),
     ]
 )
 
@@ -113,9 +116,10 @@ class BuildCellSystematicsConnections(
     )
     outputGaiaCatalog = cT.Output(
         doc=(
-            "GAIA sources covering this patch, with tract-pixel coordinates "
-            "and Gaia g-band magnitude (columns x_in_tract, y_in_tract, "
-            "gaia_g_mag). Empty when no GAIA refcat is in the inputs."
+            "GAIA sources covering this patch. Columns: x_in_tract, "
+            "y_in_tract (tract-pixel coordinates), gaia_g_mag, "
+            "gaia_source_id (Gaia DR3 source_id, int64), ra, dec (deg). "
+            "Empty when no GAIA refcat is in the inputs."
         ),
         name="deep_coadd_cell_systematics_gaia",
         storageClass="ArrowAstropy",
@@ -476,23 +480,26 @@ class BuildCellSystematicsTask(PipelineTask):
         """Convert a raw GAIA refCat into a structured numpy array.
 
         Returns a structured ndarray with fields
-        ``(x_in_tract, y_in_tract, gaia_g_mag)``. Pixel coordinates
-        come from the passed wcs (the patch coadd wcs, which lives on
-        the tract pixel grid), so ``x_in_tract`` / ``y_in_tract`` are
-        tract-pixel values.
+        ``(x_in_tract, y_in_tract, gaia_g_mag, gaia_source_id, ra, dec)``.
+        Pixel coordinates come from the passed wcs (the patch coadd wcs,
+        which lives on the tract pixel grid), so ``x_in_tract`` /
+        ``y_in_tract`` are tract-pixel values. ``ra`` and ``dec`` are
+        in DEGREES (refcat ``coord_ra``/``coord_dec`` are stored as
+        Angle/radians, so we convert).
         """
         gaia_astropy = gaia_catalog.asAstropy()
         flux = gaia_astropy["phot_g_mean_flux"]
         mag = (np.asarray(flux) * u.nJy).to_value(u.ABmag)
-        x, y = wcs.skyToPixelArray(
-            ra=gaia_astropy["coord_ra"] * 180 / np.pi,
-            dec=gaia_astropy["coord_dec"] * 180 / np.pi,
-            degrees=True,
-        )
+        ra_deg = np.asarray(gaia_astropy["coord_ra"], dtype=np.float64) * (180.0 / np.pi)
+        dec_deg = np.asarray(gaia_astropy["coord_dec"], dtype=np.float64) * (180.0 / np.pi)
+        x, y = wcs.skyToPixelArray(ra=ra_deg, dec=dec_deg, degrees=True)
         out = np.empty(len(mag), dtype=_GAIA_TABLE_DTYPE)
         out["x_in_tract"] = np.asarray(x, dtype=np.float64)
         out["y_in_tract"] = np.asarray(y, dtype=np.float64)
         out["gaia_g_mag"] = mag
+        out["gaia_source_id"] = np.asarray(gaia_astropy["id"], dtype=np.int64)
+        out["ra"] = ra_deg
+        out["dec"] = dec_deg
         return out
 
     def _get_gaia_mask_sources(
