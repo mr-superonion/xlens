@@ -19,6 +19,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from . import catalog, columns, handle, image, random
+from . import catalog, columns, handle, image, massmap, match, nxg, random
 
-__all__ = ["catalog", "columns", "handle", "image", "random"]
+__all__ = [
+    "catalog", "columns", "handle", "image", "massmap", "match", "nxg",
+    "random",
+]
