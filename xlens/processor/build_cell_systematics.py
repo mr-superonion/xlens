@@ -34,7 +34,7 @@ __all__ = [
 from typing import Any
 
 import anacal
-import astropy.units as u
+import astropy.units as au
 import numpy as np
 from lsst.afw.image import MaskX
 from lsst.meas.algorithms import (
@@ -373,30 +373,24 @@ class BuildCellSystematicsTask(PipelineTask):
         mask_array: np.ndarray | None = None
         stitched_bbox = None
         stitched_wcs = None
-        # Cache stitched coadds for the second (noise-corr) pass so the
-        # augmented mask_array (incl. GAIA) is in hand before correlating.
-        stitched_by_band: dict[str, Any] = {}
 
+        # Pass 1: stitch each band ONE AT A TIME, accumulate the
+        # combined bad-pixel mask + per-band PSF stack, then drop the
+        # stitched coadd. Caching all bands' stitched coadds in memory
+        # was costing ~6 * ~400 MB per quantum for the 6-band pipeline,
+        # which OOMs the slurm worker block at 256-way concurrency.
         for band, handle in cell_handles_dict.items():
             if band not in band_order:
                 continue
             i = band_order.index(band)
             self.log.info(
-                "Processing band %s for tract=%d patch=%d",
-                band,
-                tract,
-                patch,
+                "Pass 1 (mask + PSF), band %s for tract=%d patch=%d",
+                band, tract, patch,
             )
 
             cell_coadd = handle.get()
+            psf_array[i] = stack_psfs_cells(cell_coadd=cell_coadd, npix=npix)
 
-            # PSF: stack from individual cell PSF images
-            psf_array[i] = stack_psfs_cells(
-                cell_coadd=cell_coadd,
-                npix=npix,
-            )
-
-            # Stitch for mask and noise correlation
             stitched = cell_coadd.stitch()
             exp = stitched.asExposure()
 
@@ -404,17 +398,18 @@ class BuildCellSystematicsTask(PipelineTask):
                 stitched_bbox = exp.getBBox()
                 stitched_wcs = exp.getWcs()
 
-            # Mask: merge across bands
             band_mask = self._build_mask_band(exp)
             if mask_array is None:
                 mask_array = band_mask.astype(np.int16)
             else:
                 mask_array = (mask_array | band_mask).astype(np.int16)
 
-            stitched_by_band[band] = stitched
-            del cell_coadd, exp
+            # Critical: drop the heavy stitched coadd before the next band.
+            del cell_coadd, exp, stitched, band_mask
 
-        # Add bright star mask from GAIA
+        # Add GAIA bright-star wings to the combined mask BEFORE the
+        # noise-correlation pass, so the bright-star halos don't leak
+        # correlated power into the per-band estimate.
         assert mask_array is not None
         gaia_table = np.empty(0, dtype=_GAIA_TABLE_DTYPE)
         if gaia_loader is not None and stitched_wcs is not None and stitched_bbox is not None:
@@ -442,17 +437,26 @@ class BuildCellSystematicsTask(PipelineTask):
                     star_array=gaia_array,
                 )
 
-        # Noise correlation: use the augmented mask (bad pixels OR'd across
-        # bands AND GAIA bright-star halos) so bright-star wings don't leak
-        # correlated power into the per-band estimate.
-        for band, stitched in stitched_by_band.items():
+        # Pass 2: re-stitch ONE BAND AT A TIME and compute its noise
+        # correlation against the augmented mask. Doubles the stitching
+        # work vs. caching, but keeps peak memory at ~1 stitched coadd
+        # instead of nbands.
+        for band, handle in cell_handles_dict.items():
+            if band not in band_order:
+                continue
             i = band_order.index(band)
+            self.log.info(
+                "Pass 2 (noise corr), band %s for tract=%d patch=%d",
+                band, tract, patch,
+            )
+            cell_coadd = handle.get()
+            stitched = cell_coadd.stitch()
             noise_corr_array[i] = self.get_noise_corr(
                 stitched,
                 mask_array,
                 self.config.badMaskPlanes,
             )
-        stitched_by_band.clear()
+            del cell_coadd, stitched
 
         # Convert mask to MaskX
         h, w = mask_array.shape
@@ -489,7 +493,7 @@ class BuildCellSystematicsTask(PipelineTask):
         """
         gaia_astropy = gaia_catalog.asAstropy()
         flux = gaia_astropy["phot_g_mean_flux"]
-        mag = (np.asarray(flux) * u.nJy).to_value(u.ABmag)
+        mag = (np.asarray(flux) * au.nJy).to_value(au.ABmag)
         ra_deg = np.asarray(gaia_astropy["coord_ra"], dtype=np.float64) * (180.0 / np.pi)
         dec_deg = np.asarray(gaia_astropy["coord_dec"], dtype=np.float64) * (180.0 / np.pi)
         x, y = wcs.skyToPixelArray(ra=ra_deg, dec=dec_deg, degrees=True)

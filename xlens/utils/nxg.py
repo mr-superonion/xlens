@@ -34,13 +34,14 @@ anacal_get_tang_cross(cluster, sky_dist, bins, R, ci_level=0.95,
 """
 import numpy as np
 
-# Default FPFS band weights (matched to the AnaCal griz combination used
-# across the DP1 notebooks).
+# Default FPFS band weights — kept in sync with the BNL DP1 recipe so
+# step3's recomputed band combine matches what mergePatches writes
+# (band_weights in configs/measure_pipeline_*bands.yaml).
 _DEFAULT_FPFS_WEIGHTS = {
-    "g": 0.10110928,
-    "r": 0.290752,
-    "i": 0.51740466,
-    "z": 0.09073406,
+    "g": 0.5287963721184084,
+    "r": 0.33049707056512084,
+    "i": 0.1362332926465851,
+    "z": 0.004473264669885652,
 }
 
 

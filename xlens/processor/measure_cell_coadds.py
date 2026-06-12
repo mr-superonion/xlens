@@ -37,6 +37,7 @@ from lsst.meas.base import (
 )
 from lsst.pex.config import ConfigurableField, Field, FieldValidationError, ListField
 from lsst.pipe.base import (
+    NoWorkFound,
     PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
@@ -370,7 +371,16 @@ class MeasureCellCoaddsPipe(PipelineTask):
         del det_coadd, det_cells
 
         if not det_cats:
-            raise RuntimeError("No objects found in any cell")
+            # Edge-of-tract patches whose every cell fails noise estimation
+            # end up with zero detections. Raise NoWorkFound so bps marks
+            # this quantum as SKIPPED rather than FAILED; downstream
+            # photoZ is auto-pruned by the missing-input rule and the
+            # tract-level mergePatches still runs on the surviving
+            # sibling patches via its srcList multiple-input connection.
+            raise NoWorkFound(
+                f"No objects detected in any cell "
+                f"(tract={tract}, patch={patch}); skipping this patch."
+            )
         return det_cats
 
     def _coadd_mag_zero(self, mca) -> float:
@@ -543,7 +553,12 @@ class MeasureCellCoaddsPipe(PipelineTask):
             cell_results.append(final)
 
         if not cell_results:
-            raise RuntimeError("No objects found in any cell")
+            # Same edge-of-tract path as in `_detect` above, but here
+            # forced measurement is what produced the empty result.
+            raise NoWorkFound(
+                f"No measurements produced in any cell "
+                f"(tract={tract}, patch={patch}); skipping this patch."
+            )
 
         output = np.concatenate(cell_results)
         # Stable per-object IDs derived from the patch-level seed. Used

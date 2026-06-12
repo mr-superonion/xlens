@@ -49,6 +49,7 @@ import numpy as np
 from astropy.table import Table, vstack
 from lsst.pex.config import Field, ListField
 from lsst.pipe.base import (
+    NoWorkFound,
     PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
@@ -240,6 +241,17 @@ class MergePipe(PipelineTask):
             catalog = self._apply_flipu(catalog, pz_cols)
 
         catalog = self._finalize_columns(catalog, pz_cols)
+        if len(catalog) == 0:
+            # All surviving per-patch rows were dropped by the wsel /
+            # is_primary / quality filters in `_finalize_columns`.
+            # Don't write a zero-row tract product to disk; raise
+            # NoWorkFound so bps marks this quantum as SKIPPED and
+            # downstream consumers see no merged catalog for the tract
+            # (same semantics as an upstream task with no detections).
+            raise NoWorkFound(
+                f"merged tract catalog is empty after filtering "
+                f"(tract={tract}); skipping output."
+            )
         return Struct(mergedCatalog=catalog)
 
     def _finalize_columns(
