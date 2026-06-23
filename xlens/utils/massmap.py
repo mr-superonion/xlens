@@ -102,6 +102,124 @@ def compute_mass_map(x_grid, y_grid, x, y, g1, g2, weights, q_filter,
     return Map_E, Map_B, Map_V
 
 
+def compute_mass_map_healpix(*, ra_center, dec_center, radius_deg,
+                             src_ra, src_dec, g1, g2, weights,
+                             q_filter, filter_kwargs=None,
+                             nside, nest=True, verbose=False):
+    """Curved-sky Schirmer aperture-mass on a HEALPix grid.
+
+    Same Q-filter-weighted average as :func:`compute_mass_map`, but
+    every source-to-pixel distance is the great-circle arc length on
+    the sphere and the spin-2 rotation uses the spherical position
+    angle. Avoids the gnomonic-projection inaccuracy that grows with
+    sky offset.
+
+    Parameters
+    ----------
+    ra_center, dec_center : float
+        Cone centre in degrees. The function returns values for every
+        HEALPix pixel within ``radius_deg`` of this point.
+    radius_deg : float
+        Cone radius in degrees.
+    src_ra, src_dec : ndarray (deg)
+        Source positions on the sphere.
+    g1, g2 : ndarray
+        Source shears (calibrated; same convention as
+        :func:`compute_mass_map`).
+    weights : ndarray
+        Per-source weights.
+    q_filter : callable
+        Radial filter ``q(radius_deg, **filter_kwargs)``.
+    filter_kwargs : dict, optional
+        Passed to ``q_filter``. Must include ``aperture_size`` (deg).
+    nside : int
+        HEALPix resolution.
+    nest : bool
+        HEALPix scheme; True = NESTED (default; matches HealSparse).
+    verbose : bool
+        If True, print a progress dot every 10 % of pixels.
+
+    Returns
+    -------
+    ipix : ndarray of int
+        HEALPix pixel ids covered (length N_pix).
+    Map_E, Map_B, Map_V : ndarray (length N_pix)
+        E-mode, B-mode and variance aperture masses at each pixel.
+    """
+    import healpy as hp
+
+    if filter_kwargs is None:
+        filter_kwargs = {}
+    if "aperture_size" not in filter_kwargs:
+        filter_area = np.pi * 0.55 ** 2
+    else:
+        filter_area = np.pi * filter_kwargs["aperture_size"] ** 2
+
+    # 1. HEALPix pixels inside the disc.
+    vec = hp.ang2vec(ra_center, dec_center, lonlat=True)
+    ipix = hp.query_disc(nside, vec, np.radians(radius_deg),
+                         inclusive=True, nest=nest)
+    pix_ra, pix_dec = hp.pix2ang(nside, ipix, lonlat=True, nest=nest)
+    n_pix = len(ipix)
+    Map_E = np.zeros(n_pix)
+    Map_B = np.zeros(n_pix)
+    Map_V = np.zeros(n_pix)
+
+    # 2. Precompute source quantities (radians).
+    src_ra_rad = np.radians(src_ra)
+    src_dec_rad = np.radians(src_dec)
+    cos_src_dec = np.cos(src_dec_rad)
+    sin_src_dec = np.sin(src_dec_rad)
+    comp_shear = g1 + 1j * g2
+    g_mag = np.mean(g1 ** 2 + g2 ** 2) * np.ones_like(g1)
+    weight_sum = np.sum(weights)
+
+    pix_ra_rad = np.radians(pix_ra)
+    pix_dec_rad = np.radians(pix_dec)
+    cos_pix_dec = np.cos(pix_dec_rad)
+    sin_pix_dec = np.sin(pix_dec_rad)
+
+    # 3. Per-pixel: vectorize over sources.
+    progress_step = max(1, n_pix // 10)
+    for k in range(n_pix):
+        # Great-circle distance via haversine.
+        dra = src_ra_rad - pix_ra_rad[k]
+        sin_dd_half = np.sin((src_dec_rad - pix_dec_rad[k]) / 2.0)
+        sin_dra_half = np.sin(dra / 2.0)
+        a = (sin_dd_half ** 2
+             + cos_pix_dec[k] * cos_src_dec * sin_dra_half ** 2)
+        np.clip(a, 0.0, 1.0, out=a)
+        d_rad = 2.0 * np.arcsin(np.sqrt(a))
+        d_deg = np.degrees(d_rad)
+
+        # Position angle at pixel pointing to source (E from N).
+        sin_dra = np.sin(dra)
+        cos_dra = np.cos(dra)
+        num = sin_dra * cos_src_dec
+        denom = (cos_pix_dec[k] * sin_src_dec
+                 - sin_pix_dec[k] * cos_src_dec * cos_dra)
+        pa = np.arctan2(num, denom)
+
+        # Spin-2 rotation. Convention matches `compute_mass_map`:
+        # using its (x=west, y=north) tangent axes, `theta = pa + pi/2`
+        # and `-shear * exp(-2i*theta) = shear * exp(-2i*pa)`.
+        rotated = comp_shear * np.exp(-2j * pa)
+        g_T = rotated.real
+        g_X = rotated.imag
+        qv = q_filter(d_deg, **filter_kwargs)
+
+        Map_E[k] = np.sum(qv * g_T * weights) * filter_area / weight_sum
+        Map_B[k] = np.sum(qv * g_X * weights) * filter_area / weight_sum
+        Map_V[k] = (np.sum((qv ** 2) * g_mag * (weights ** 2))
+                    * (filter_area ** 2) / (2.0 * weight_sum ** 2))
+
+        if verbose and (k % progress_step == 0):
+            import sys
+            print(f"#   curved-sky map: {k}/{n_pix}", file=sys.stderr)
+
+    return ipix, Map_E, Map_B, Map_V
+
+
 def build_flat_wcs_grid(ra_bcg, dec_bcg, ra, dec,
                         n=161, half_extent_deg=0.16):
     """Project sources to flat-sky degrees relative to (ra_bcg, dec_bcg) and

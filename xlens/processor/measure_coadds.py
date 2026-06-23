@@ -28,11 +28,13 @@ __all__ = [
 import logging
 from typing import Any
 
+import lsst.afw.table as afwTable
+import lsst.daf.base as dafBase
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.afw.image import MaskX
 from lsst.daf.butler import DataCoordinate
-from lsst.meas.base import SkyMapIdGeneratorConfig
+from lsst.meas.base import SingleFrameMeasurementTask, SkyMapIdGeneratorConfig
 from lsst.pex.config import (
     ConfigurableField,
     Field,
@@ -59,6 +61,12 @@ from ..utils.columns import (
     select_detection_columns,
 )
 from ..utils.handle import SimulatedExposureHandle
+from ..utils.image import (
+    broadcast_psf_hsm_moments,
+    build_psf_hsm_context,
+    default_psf_hsm_plugin_config,
+    measure_psf_hsm_moments,
+)
 from .anacal import AnacalTask
 from .fpfs import FpfsMeasurementTask
 
@@ -173,6 +181,27 @@ class MeasureCoaddsPipeConfig(
         default=100,
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
+    doPsfHsmMoments = Field[bool](
+        doc=(
+            "If True, run lsst.meas.extensions.shapeHSM.HsmPsfMomentsPlugin "
+            "+ HigherOrderMomentsPSFPlugin once per (exposure, band) at "
+            "the exposure bbox centre (PSF model sampled on the pixel "
+            "grid via computeKernelImage — no subpixel offset) and "
+            "broadcast those PSF moments to every source. Adds "
+            "{band}_ext_shapeHSM_HsmPsfMoments_{xx,yy,xy,flag,...} and "
+            "{band}_ext_shapeHSM_HigherOrderMomentsPSF_{pq,flag} columns "
+            "to the per-source anacal catalog."
+        ),
+        default=False,
+    )
+    psfHsmMeasurement = ConfigurableField(
+        target=SingleFrameMeasurementTask,
+        doc=(
+            "DRP-style single-frame measurement subtask used to evaluate "
+            "the per-band PSF model HSM moments at the exposure centre. "
+            "Only used when doPsfHsmMoments is True."
+        ),
+    )
 
     def validate(self):
         super().validate()
@@ -194,6 +223,10 @@ class MeasureCoaddsPipeConfig(
         self.anacal.force_size = True
         self.anacal.force_center = True
         self.fpfs.do_compute_detect_weight = False
+        # Shared DRP-equivalent plugin wiring; same setup as
+        # MeasureCellCoaddsPipe so column names match across both
+        # flavours.
+        default_psf_hsm_plugin_config(self.psfHsmMeasurement)
 
 
 class MeasureCoaddsPipe(PipelineTask):
@@ -220,6 +253,16 @@ class MeasureCoaddsPipe(PipelineTask):
         self.makeSubtask("fpfs")
         if self.config.use_sim:
             self.makeSubtask("simulator")
+        if self.config.doPsfHsmMoments:
+            schema = afwTable.SourceTable.makeMinimalSchema()
+            self.makeSubtask(
+                "psfHsmMeasurement",
+                schema=schema,
+                algMetadata=dafBase.PropertyList(),
+            )
+            self._psfHsmCtx = build_psf_hsm_context(
+                schema, self.config.psfHsmMeasurement,
+            )
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
@@ -402,6 +445,18 @@ class MeasureCoaddsPipe(PipelineTask):
                     band,
                 )
                 cat = np.asarray(rfn.merge_arrays([cat, gauss_cat], flatten=True))
+            if self.config.doPsfHsmMoments:
+                # One PSF model HSM measurement per (exposure, band) at
+                # the exposure bbox centre; broadcast across all
+                # sources in this band. HsmPsfMomentsPlugin uses
+                # computeKernelImage (no subpixel offset) by default.
+                psf_moments = measure_psf_hsm_moments(
+                    self._psfHsmCtx, self.psfHsmMeasurement, exposure,
+                )
+                psf_block = broadcast_psf_hsm_moments(
+                    psf_moments, band, n=len(cat),
+                )
+                cat = np.asarray(rfn.merge_arrays([cat, psf_block], flatten=True))
             per_band.append(cat)
 
         return rfn.merge_arrays(per_band, flatten=True)

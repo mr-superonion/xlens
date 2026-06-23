@@ -29,10 +29,12 @@ import logging
 from typing import Any
 
 import anacal
-import lsst.meas.extensions.shapeHSM  # noqa: F401  (registers HSM plugins)
+import lsst.afw.table as afwTable
+import lsst.daf.base as dafBase
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.meas.base import (
+    SingleFrameMeasurementTask,
     SkyMapIdGeneratorConfig,
 )
 from lsst.pex.config import ConfigurableField, Field, FieldValidationError, ListField
@@ -54,7 +56,14 @@ from ..utils.columns import (
     select_band_gauss_fluxes,
     select_detection_columns,
 )
-from ..utils.image import prepare_data_one_cell
+from ..utils.image import (
+    broadcast_psf_hsm_moments,
+    build_psf_hsm_context,
+    default_psf_hsm_plugin_config,
+    make_psf_stamp_exposure,
+    measure_psf_hsm_moments,
+    prepare_data_one_cell,
+)
 from .anacal import AnacalTask
 from .fpfs import FpfsMeasurementTask
 
@@ -126,6 +135,26 @@ class MeasureCellCoaddsPipeConfig(
         default=["g", "r", "i", "z"],
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
+    doPsfHsmMoments = Field[bool](
+        doc=(
+            "If True, run lsst.meas.extensions.shapeHSM.HsmPsfMomentsPlugin "
+            "+ HigherOrderMomentsPSFPlugin (the same plugins DRP uses) once "
+            "per (cell, band) on the cell PSF stamp, and broadcast the "
+            "resulting per-cell PSF moments to every source in that cell. "
+            "Adds {band}_ext_shapeHSM_HsmPsfMoments_{xx,yy,xy,flag,...} and "
+            "{band}_ext_shapeHSM_HigherOrderMomentsPSF_{pq,flag} columns to "
+            "the per-source anacal catalog."
+        ),
+        default=False,
+    )
+    psfHsmMeasurement = ConfigurableField(
+        target=SingleFrameMeasurementTask,
+        doc=(
+            "DRP-style single-frame measurement subtask used to evaluate "
+            "the PSF moments on each cell PSF stamp. Only used when "
+            "doPsfHsmMoments is True."
+        ),
+    )
 
     def validate(self):
         super().validate()
@@ -142,6 +171,13 @@ class MeasureCellCoaddsPipeConfig(
         self.anacal.force_center = True
         self.anacal.bound = 5
         self.fpfs.do_compute_detect_weight = False
+        # Shared DRP-equivalent plugin wiring for the per-cell PSF
+        # measurement; lives in xlens.utils.image so measure_coadds
+        # uses the exact same setup. HigherOrderMomentsPSF defaults
+        # to (min_order=3, max_order=4); to widen, set
+        # cfg.psfHsmMeasurement.plugins[
+        #     "ext_shapeHSM_HigherOrderMomentsPSF"].max_order = N.
+        default_psf_hsm_plugin_config(self.psfHsmMeasurement)
 
 
 class MeasureCellCoaddsPipe(PipelineTask):
@@ -180,6 +216,19 @@ class MeasureCellCoaddsPipe(PipelineTask):
 
         self.makeSubtask("anacal")
         self.makeSubtask("fpfs")
+
+        if self.config.doPsfHsmMoments:
+            # Schema is shared across every per-cell measurement; the
+            # plugins register their fields on construction.
+            schema = afwTable.SourceTable.makeMinimalSchema()
+            self.makeSubtask(
+                "psfHsmMeasurement",
+                schema=schema,
+                algMetadata=dafBase.PropertyList(),
+            )
+            self._psfHsmCtx = build_psf_hsm_context(
+                schema, self.config.psfHsmMeasurement,
+            )
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
@@ -445,6 +494,27 @@ class MeasureCellCoaddsPipe(PipelineTask):
                         cat = np.asarray(
                             rfn.merge_arrays(
                                 [cat, gauss_cat],
+                                flatten=True,
+                            )
+                        )
+                    if self.config.doPsfHsmMoments:
+                        # One HSM measurement per (cell, band) —
+                        # broadcast to every source in this cell. The
+                        # synthetic ExposureF + temporaries built by
+                        # make_psf_stamp_exposure / measure_psf_hsm_moments
+                        # are released as soon as this iteration exits.
+                        stamp_exp = make_psf_stamp_exposure(cell.psf_image)
+                        psf_moments = measure_psf_hsm_moments(
+                            self._psfHsmCtx,
+                            self.psfHsmMeasurement,
+                            stamp_exp,
+                        )
+                        psf_block = broadcast_psf_hsm_moments(
+                            psf_moments, band, n=len(cat),
+                        )
+                        cat = np.asarray(
+                            rfn.merge_arrays(
+                                [cat, psf_block],
                                 flatten=True,
                             )
                         )
