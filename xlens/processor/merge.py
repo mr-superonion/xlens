@@ -153,7 +153,11 @@ class MergePipeConfig(
             "derivative (``dwsel_dg2``, ``fpfs1_de1_dg2``, "
             "``fpfs1_de2_dg1``, ``fpfs1_dm00_dg2``, "
             "``fpfs1_dm20_dg2``, per-band ``{b}_dflux_fpfs1_dg2``) and "
-            "swap the photo-z ``_2p`` and ``_2m`` distortion columns."
+            "swap the photo-z ``_2p`` and ``_2m`` distortion columns. "
+            "PSF HSM columns are also flipped where appropriate "
+            "(``{b}_ext_shapeHSM_HsmPsfMoments_xy`` and any "
+            "``{b}_ext_shapeHSM_HigherOrderMomentsPSF_<pq>`` whose "
+            "leading x-power ``p`` is odd, e.g. ``_12, _30, _13, _31``)."
         ),
         default=False,
     )
@@ -327,6 +331,15 @@ class MergePipe(PipelineTask):
                     f"{b}_flux_fpfs1_err",
                 ]
             )
+            # Pass-through DRP-style PSF HSM moment columns when present
+            # (written by measureCellCoadds when doPsfHsmMoments=True):
+            # {b}_ext_shapeHSM_HsmPsfMoments_{xx,yy,xy,flag,...} and
+            # {b}_ext_shapeHSM_HigherOrderMomentsPSF_{pq,flag}. Raw
+            # pixel-frame values are carried through unchanged — they are
+            # the same for every source in a cell (per-cell measurement
+            # broadcast at the measurement stage).
+            prefix = f"{b}_ext_shapeHSM_"
+            keep.extend(c for c in catalog.colnames if c.startswith(prefix))
         keep.extend(pz_cols)
 
         missing = [c for c in keep if c not in catalog.colnames]
@@ -542,6 +555,25 @@ class MergePipe(PipelineTask):
             col = f"{b}_dflux_fpfs1_dg2"
             if col in catalog.colnames:
                 catalog[col] = -np.asarray(catalog[col])
+
+            # PSF HSM moments: under x → -x the 2nd-order spin-2 cross
+            # component (Ixy) and every higher-order M_{pq} with p odd
+            # (e.g. M_12, M_30, M_13, M_31) flip sign. Reflection
+            # symmetry doesn't touch the full WCS shear / kappa /
+            # rotation — that intentionally stays out of this step.
+            ixy_col = f"{b}_ext_shapeHSM_HsmPsfMoments_xy"
+            if ixy_col in catalog.colnames:
+                catalog[ixy_col] = -np.asarray(catalog[ixy_col])
+            ho_prefix = f"{b}_ext_shapeHSM_HigherOrderMomentsPSF_"
+            for col in list(catalog.colnames):
+                if not col.startswith(ho_prefix):
+                    continue
+                suffix = col[len(ho_prefix):]
+                if len(suffix) != 2 or not suffix.isdigit():
+                    continue  # skip _flag etc.
+                p = int(suffix[0])
+                if p % 2 == 1:
+                    catalog[col] = -np.asarray(catalog[col])
 
         for col_2p in [c for c in pz_cols if c.endswith("_2p")]:
             col_2m = col_2p[:-3] + "_2m"
