@@ -96,8 +96,22 @@ def calibrate_shapes(table, c0=50.0, weights=None, normalize=True):
     return e1, e2, res
 
 
-def fast_bootstrap_mean(data, ci_level=0.95):
-    """SciPy-bootstrap CI of the sample mean."""
+def fast_bootstrap_mean(data, ci_level=0.95, random_state=0):
+    """SciPy-bootstrap CI of the sample mean.
+
+    Parameters
+    ----------
+    data : 1-D array_like
+    ci_level : float
+        Two-sided confidence-interval level (default 0.95).
+    random_state : int or numpy Generator/RandomState, optional
+        Forwarded to ``scipy.stats.bootstrap``. Default ``0`` makes the
+        bootstrap reproducible across runs (the underlying scipy call
+        is otherwise nondeterministic, which shows up as ~1% per-bin
+        CI scatter when callers — e.g. ``anacal_get_tang_cross`` —
+        feed those CIs into a chi^2 calculation). Pass ``None`` to
+        reproduce the pre-seed behaviour (scipy default RNG).
+    """
     from scipy.stats import bootstrap
 
     data = np.asarray(data)
@@ -105,6 +119,7 @@ def fast_bootstrap_mean(data, ci_level=0.95):
         raise ValueError("Input data must be 1D")
     res = bootstrap(
         (data,), np.mean, confidence_level=ci_level,
+        random_state=random_state,
     )
     return np.array(
         [res.confidence_interval.low, res.confidence_interval.high]

@@ -34,7 +34,6 @@ __all__ = [
 from typing import Any
 
 import anacal
-import astropy.units as au
 import numpy as np
 from lsst.afw.image import MaskX
 from lsst.meas.algorithms import (
@@ -42,7 +41,13 @@ from lsst.meas.algorithms import (
     ReferenceObjectLoader,
 )
 from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import ConfigField, Field, FieldValidationError, ListField
+from lsst.pex.config import (
+    ChoiceField,
+    ConfigField,
+    Field,
+    FieldValidationError,
+    ListField,
+)
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -53,19 +58,14 @@ from lsst.pipe.base import connectionTypes as cT
 from lsst.skymap import BaseSkyMap
 
 from xlens.utils.image import stack_psfs_cells
+from xlens.utils.mask import (
+    GAIA_TABLE_DTYPE,
+    STAR_MASK_RADIUS_FUNCS,
+    build_gaia_xyr,
+    get_gaia_table,
+)
 
 band_order = "ugrizy"
-
-_GAIA_TABLE_DTYPE = np.dtype(
-    [
-        ("x_in_tract", np.float64),
-        ("y_in_tract", np.float64),
-        ("gaia_g_mag", np.float64),
-        ("gaia_source_id", np.int64),
-        ("ra", np.float64),
-        ("dec", np.float64),
-    ]
-)
 
 
 class BuildCellSystematicsConnections(
@@ -168,6 +168,16 @@ class BuildCellSystematicsConfig(
     gaiaLoader = ConfigField(
         dtype=LoadReferenceObjectsConfig,
         doc="Reference catalog loader for GAIA",
+    )
+    starMaskType = ChoiceField[str](
+        doc=(
+            "Name of the GAIA halo-radius model in "
+            "xlens.utils.mask.STAR_MASK_RADIUS_FUNCS. 'default' = "
+            "450/200/100 px step for mag <= 11/14/20; 'no_mask' = "
+            "flat 10 px for every GAIA star with mag <= 20."
+        ),
+        allowed={k: k for k in STAR_MASK_RADIUS_FUNCS},
+        default="default",
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
@@ -411,7 +421,7 @@ class BuildCellSystematicsTask(PipelineTask):
         # noise-correlation pass, so the bright-star halos don't leak
         # correlated power into the per-band estimate.
         assert mask_array is not None
-        gaia_table = np.empty(0, dtype=_GAIA_TABLE_DTYPE)
+        gaia_table = np.empty(0, dtype=GAIA_TABLE_DTYPE)
         if gaia_loader is not None and stitched_wcs is not None and stitched_bbox is not None:
             gaia = gaia_loader.loadPixelBox(
                 bbox=stitched_bbox,
@@ -419,18 +429,16 @@ class BuildCellSystematicsTask(PipelineTask):
                 wcs=stitched_wcs,
                 bboxToSpherePadding=self.config.gaiaPadding,
             ).refCat
-            gaia_table = self._build_gaia_table(
-                wcs=stitched_wcs,
-                gaia_catalog=gaia,
-            )
-            gaia_array = self._get_gaia_mask_sources(
-                gaia_table=gaia_table,
+            gaia_table = get_gaia_table(gaia_catalog=gaia, wcs=stitched_wcs)
+            gaia_array = build_gaia_xyr(
+                gaia_table,
                 bbox=stitched_bbox,
+                star_mask_type=self.config.starMaskType,
             )
             if gaia_array is not None:
                 self.log.info(
-                    "Adding bright star mask for %d GAIA sources",
-                    len(gaia_array),
+                    "Adding bright star mask for %d GAIA sources (starMaskType=%s)",
+                    len(gaia_array), self.config.starMaskType,
                 )
                 anacal.mask.add_bright_star_mask(
                     mask_array=mask_array,
@@ -474,66 +482,6 @@ class BuildCellSystematicsTask(PipelineTask):
             outputPsf=psf_array,
             outputGaiaCatalog=gaia_table,
         )
-
-    def _build_gaia_table(
-        self,
-        *,
-        wcs,
-        gaia_catalog: Any,
-    ) -> np.ndarray:
-        """Convert a raw GAIA refCat into a structured numpy array.
-
-        Returns a structured ndarray with fields
-        ``(x_in_tract, y_in_tract, gaia_g_mag, gaia_source_id, ra, dec)``.
-        Pixel coordinates come from the passed wcs (the patch coadd wcs,
-        which lives on the tract pixel grid), so ``x_in_tract`` /
-        ``y_in_tract`` are tract-pixel values. ``ra`` and ``dec`` are
-        in DEGREES (refcat ``coord_ra``/``coord_dec`` are stored as
-        Angle/radians, so we convert).
-        """
-        gaia_astropy = gaia_catalog.asAstropy()
-        flux = gaia_astropy["phot_g_mean_flux"]
-        mag = (np.asarray(flux) * au.nJy).to_value(au.ABmag)
-        ra_deg = np.asarray(gaia_astropy["coord_ra"], dtype=np.float64) * (180.0 / np.pi)
-        dec_deg = np.asarray(gaia_astropy["coord_dec"], dtype=np.float64) * (180.0 / np.pi)
-        x, y = wcs.skyToPixelArray(ra=ra_deg, dec=dec_deg, degrees=True)
-        out = np.empty(len(mag), dtype=_GAIA_TABLE_DTYPE)
-        out["x_in_tract"] = np.asarray(x, dtype=np.float64)
-        out["y_in_tract"] = np.asarray(y, dtype=np.float64)
-        out["gaia_g_mag"] = mag
-        out["gaia_source_id"] = np.asarray(gaia_astropy["id"], dtype=np.int64)
-        out["ra"] = ra_deg
-        out["dec"] = dec_deg
-        return out
-
-    def _get_gaia_mask_sources(
-        self,
-        *,
-        gaia_table: np.ndarray,
-        bbox,
-    ) -> np.ndarray | None:
-        """Build a bright-star (x, y, r) array for the bright star mask."""
-        mag = gaia_table["gaia_g_mag"]
-        keep = mag <= 20.0
-        if not np.any(keep):
-            return None
-
-        x = gaia_table["x_in_tract"][keep] - bbox.getBeginX()
-        y = gaia_table["y_in_tract"][keep] - bbox.getBeginY()
-        mag = mag[keep]
-        conds = [
-            mag <= 11.0,
-            (mag > 11.0) & (mag <= 14.0),
-            (mag > 14.0) & (mag <= 17.0),
-        ]
-        choices = [450.0, 200.0, 100.0]
-        r = np.select(conds, choices, default=100.0)
-        dtype = np.dtype([("x", float), ("y", float), ("r", float)])
-        xy_r = np.zeros(len(x), dtype=dtype)
-        xy_r["x"] = x
-        xy_r["y"] = y
-        xy_r["r"] = r
-        return xy_r
 
     def _build_mask_band(self, exposure) -> np.ndarray:
         """Build a bad-pixel mask for one band from a stitched exposure."""

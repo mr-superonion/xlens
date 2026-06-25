@@ -966,8 +966,6 @@ class PsfHsmContext:
     key_iyy: Any
     key_ixy: Any
     key_flag: Any
-    key_flag_no_psf: Any
-    key_flag_galsim: Any
     higher_order_keys: list[Any] = field(default_factory=list)
     higher_order_flag_key: Any = None
 
@@ -1013,8 +1011,6 @@ def build_psf_hsm_context(schema, measurement_config) -> PsfHsmContext:
         key_iyy=schema["ext_shapeHSM_HsmPsfMoments_yy"].asKey(),
         key_ixy=schema["ext_shapeHSM_HsmPsfMoments_xy"].asKey(),
         key_flag=schema["ext_shapeHSM_HsmPsfMoments_flag"].asKey(),
-        key_flag_no_psf=schema["ext_shapeHSM_HsmPsfMoments_flag_no_psf"].asKey(),
-        key_flag_galsim=schema["ext_shapeHSM_HsmPsfMoments_flag_galsim"].asKey(),
         higher_order_keys=[
             schema[f"ext_shapeHSM_HigherOrderMomentsPSF_{p}{q}"].asKey()
             for (p, q) in pq
@@ -1102,8 +1098,6 @@ def measure_psf_hsm_moments(
         "ext_shapeHSM_HsmPsfMoments_yy": float(rec.get(ctx.key_iyy)),
         "ext_shapeHSM_HsmPsfMoments_xy": float(rec.get(ctx.key_ixy)),
         "ext_shapeHSM_HsmPsfMoments_flag": flag,
-        "ext_shapeHSM_HsmPsfMoments_flag_no_psf": bool(rec.get(ctx.key_flag_no_psf)),
-        "ext_shapeHSM_HsmPsfMoments_flag_galsim": bool(rec.get(ctx.key_flag_galsim)),
         "ext_shapeHSM_HigherOrderMomentsPSF_flag": ho_flag,
     }
     for (p, q), k in zip(ctx.higher_order_pq, ctx.higher_order_keys):

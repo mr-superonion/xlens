@@ -321,6 +321,22 @@ class MergePipe(PipelineTask):
             f"{p}m20",
             f"{p}dm20_dg1",
             f"{p}dm20_dg2",
+            # Detection-band raw FPFS shape/size moments. Carried
+            # through so downstream selection (xlens.catalog.base.
+            # build_selection_mask with shape_name="fpfs") can run
+            # directly on the merged catalog.
+            "fpfs_e1",
+            "fpfs_e2",
+            "fpfs_de1_dg1",
+            "fpfs_de1_dg2",
+            "fpfs_de2_dg1",
+            "fpfs_de2_dg2",
+            "fpfs_m0",
+            "fpfs_m2",
+            "fpfs_dm0_dg1",
+            "fpfs_dm0_dg2",
+            "fpfs_dm2_dg1",
+            "fpfs_dm2_dg2",
         ]
         for b in bands:
             keep.extend(
@@ -331,15 +347,35 @@ class MergePipe(PipelineTask):
                     f"{b}_flux_fpfs1_err",
                 ]
             )
-            # Pass-through DRP-style PSF HSM moment columns when present
-            # (written by measureCellCoadds when doPsfHsmMoments=True):
-            # {b}_ext_shapeHSM_HsmPsfMoments_{xx,yy,xy,flag,...} and
-            # {b}_ext_shapeHSM_HigherOrderMomentsPSF_{pq,flag}. Raw
-            # pixel-frame values are carried through unchanged — they are
-            # the same for every source in a cell (per-cell measurement
-            # broadcast at the measurement stage).
-            prefix = f"{b}_ext_shapeHSM_"
-            keep.extend(c for c in catalog.colnames if c.startswith(prefix))
+            # Per-band gauss2 fluxes (only present when
+            # measureCellCoadds was run with do_measure_flux_gauss=True).
+            for col in (
+                f"{b}_flux_gauss2",
+                f"{b}_flux_gauss2_err",
+                f"{b}_dflux_gauss2_dg1",
+                f"{b}_dflux_gauss2_dg2",
+            ):
+                if col in catalog.colnames:
+                    keep.append(col)
+            # DRP-style PSF HSM moment columns (written by
+            # measureCellCoadds when doPsfHsmMoments=True). Raw
+            # pixel-frame values carried through unchanged — identical
+            # for every source in a cell (per-cell broadcast). We keep
+            # the canonical 4 second-order fields (xx, yy, xy, flag)
+            # and every present higher-order column; older catalogs
+            # that still carry `_flag_no_psf` / `_flag_galsim` are
+            # filtered out here so the merged schema stays clean.
+            psf_2nd = [
+                f"{b}_ext_shapeHSM_HsmPsfMoments_xx",
+                f"{b}_ext_shapeHSM_HsmPsfMoments_yy",
+                f"{b}_ext_shapeHSM_HsmPsfMoments_xy",
+                f"{b}_ext_shapeHSM_HsmPsfMoments_flag",
+            ]
+            for col in psf_2nd:
+                if col in catalog.colnames:
+                    keep.append(col)
+            ho_prefix = f"{b}_ext_shapeHSM_HigherOrderMomentsPSF_"
+            keep.extend(c for c in catalog.colnames if c.startswith(ho_prefix))
         keep.extend(pz_cols)
 
         missing = [c for c in keep if c not in catalog.colnames]

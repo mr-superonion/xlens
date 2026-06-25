@@ -22,7 +22,6 @@
 from typing import Any
 
 import anacal
-import astropy.units as u
 import numpy as np
 from lsst.afw.image import ExposureF, MaskX
 from lsst.geom import Box2I, Extent2I, Point2D, Point2I
@@ -32,6 +31,7 @@ from lsst.meas.algorithms import (
 )
 from lsst.meas.base import SkyMapIdGeneratorConfig
 from lsst.pex.config import (
+    ChoiceField,
     ConfigField,
     Field,
     FieldValidationError,
@@ -46,6 +46,11 @@ from lsst.pipe.base import (
 from lsst.pipe.base import connectionTypes as cT
 
 from xlens.utils.image import resize_array, subpixel_shift
+from xlens.utils.mask import (
+    STAR_MASK_RADIUS_FUNCS,
+    build_gaia_xyr,
+    get_gaia_table,
+)
 
 band_order = "ugrizy"
 
@@ -148,6 +153,16 @@ class BuildSystematicsConfig(PipelineTaskConfig, pipelineConnections=BuildSystem
     gaiaLoader = ConfigField(
         dtype=LoadReferenceObjectsConfig,
         doc="Reference catalog loader",
+    )
+    starMaskType = ChoiceField[str](
+        doc=(
+            "Name of the GAIA halo-radius model in "
+            "xlens.utils.mask.STAR_MASK_RADIUS_FUNCS. 'default' = "
+            "450/200/100 px step for mag <= 11/14/20; 'no_mask' = "
+            "flat 10 px for every GAIA star with mag <= 20."
+        ),
+        allowed={k: k for k in STAR_MASK_RADIUS_FUNCS},
+        default="default",
     )
 
     def setDefaults(self):
@@ -267,10 +282,11 @@ class BuildSystematicsTask(PipelineTask):
                 wcs=template_wcs,
                 bboxToSpherePadding=self.config.gaiaPadding,
             ).refCat
-            gaia_array = self._get_gaia_mask_sources(
-                wcs=template_wcs,
+            gaia_table = get_gaia_table(gaia_catalog=gaia, wcs=template_wcs)
+            gaia_array = build_gaia_xyr(
+                gaia_table,
                 bbox=template_bbox,
-                gaia_catalog=gaia,
+                star_mask_type=self.config.starMaskType,
             )
             if gaia_array is not None:
                 anacal.mask.add_bright_star_mask(mask_array=mask_array, star_array=gaia_array)
@@ -308,40 +324,6 @@ class BuildSystematicsTask(PipelineTask):
         bitv = exposure.mask.getPlaneBitMask(self.config.badMaskPlanes)
         mask_band = ((exposure.mask.array & bitv) != 0).astype(np.int16)
         return mask_band
-
-    def _get_gaia_mask_sources(
-        self,
-        *,
-        wcs,
-        bbox,
-        gaia_catalog: Any,
-    ) -> np.ndarray | None:
-        assert isinstance(self.config, BuildSystematicsConfig)
-
-        gaia_astropy = gaia_catalog.asAstropy()
-        flux = gaia_astropy["phot_g_mean_flux"]
-        mag = (np.asarray(flux) * u.nJy).to_value(u.ABmag)
-        x, y = wcs.skyToPixelArray(
-            ra=gaia_astropy["coord_ra"] * 180 / np.pi,
-            dec=gaia_astropy["coord_dec"] * 180 / np.pi,
-            degrees=True,
-        )
-        mask = mag <= 17.0
-        if not np.any(mask):
-            return None
-
-        x = x[mask] - bbox.getBeginX()
-        y = y[mask] - bbox.getBeginY()
-        mag = mag[mask]
-        conds = [mag <= 11.0, (mag > 11.0) & (mag <= 14.0), (mag > 14.0) & (mag <= 17.0)]
-        choices = [450.0, 200.0, 100.0]
-        r = np.select(conds, choices, default=100.0)
-        dtype = np.dtype([("x", float), ("y", float), ("r", float)])
-        xy_r = np.zeros(len(x), dtype=dtype)
-        xy_r["x"] = x
-        xy_r["y"] = y
-        xy_r["r"] = r
-        return xy_r
 
     def get_noise_corr(self, exposure, mask_array):
         assert isinstance(self.config, BuildSystematicsConfig)
