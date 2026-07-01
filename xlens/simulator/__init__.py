@@ -36,6 +36,7 @@ from . import (
     noise,
     perturbation,
     sim,
+    seds,
 )
 
 __all__ = [
@@ -48,4 +49,5 @@ __all__ = [
     "noise",
     "perturbation",
     "sim",
+    "seds",
 ]
