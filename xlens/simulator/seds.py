@@ -95,17 +95,17 @@ _REF_BAND = "sdss_r01"
 # weaker doublet companion at the atomic-physics ratio of 1:3
 # ([OIII] 4959 = (1/3)·[OIII] 5007; [NII] 6548 = (1/3)·[NII] 6584).
 _LINES = (
-    ("logf_o2_model3_ext",     3727.4, 1.0),
+    ("logf_o2_model3_ext", 3727.4, 1.0),
     ("logf_hdelta_model3_ext", 4101.7, 1.0),
     ("logf_hgamma_model3_ext", 4340.5, 1.0),
-    ("logf_hbeta_model3_ext",  4861.3, 1.0),
-    ("logf_o3_model3_ext",     4958.9, 1.0 / 3.0),   # [OIII] 4959
-    ("logf_o3_model3_ext",     5006.8, 1.0),
+    ("logf_hbeta_model3_ext", 4861.3, 1.0),
+    ("logf_o3_model3_ext", 4958.9, 1.0 / 3.0),  # [OIII] 4959
+    ("logf_o3_model3_ext", 5006.8, 1.0),
     ("logf_halpha_model3_ext", 6562.8, 1.0),
-    ("logf_n2_model3_ext",     6548.0, 1.0 / 3.0),   # [NII] 6548
-    ("logf_n2_model3_ext",     6583.5, 1.0),
-    ("logf_s2_model3_ext",     6723.5, 1.0),
-    ("logf_s3_model3_ext",     9300.0, 1.0),
+    ("logf_n2_model3_ext", 6548.0, 1.0 / 3.0),  # [NII] 6548
+    ("logf_n2_model3_ext", 6583.5, 1.0),
+    ("logf_s2_model3_ext", 6723.5, 1.0),
+    ("logf_s3_model3_ext", 9300.0, 1.0),
 )
 
 

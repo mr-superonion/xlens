@@ -935,7 +935,8 @@ def prepare_data_one_cell(
 #   schema = afwTable.SourceTable.makeMinimalSchema()
 #   self.makeSubtask("psfHsmMeasurement", schema=schema,
 #                    algMetadata=dafBase.PropertyList())
-#   self._psfHsmCtx = build_psf_hsm_context(schema, self.config.psfHsmMeasurement)
+#   self._psfHsmCtx = build_psf_hsm_context(
+#       schema, self.config.psfHsmMeasurement)
 #
 #   # in the per-cell / per-exposure loop:
 #   moments = measure_psf_hsm_moments(
@@ -1049,7 +1050,8 @@ def measure_psf_hsm_moments(
     """Run ``HsmPsfMoments + HigherOrderMomentsPSF`` once on
     ``exposure`` at ``center`` (default: ``exposure.getBBox().getCenter()``).
 
-    The ``HsmPsfMomentsPlugin`` evaluates ``exposure.getPsf().computeKernelImage(center)``
+    The ``HsmPsfMomentsPlugin`` evaluates
+    ``exposure.getPsf().computeKernelImage(center)``
     by default (``useSourceCentroidOffset=False``), so the PSF is sampled
     on the pixel grid with no subpixel shift — one exposure, one PSF.
 

@@ -19,16 +19,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Default survey parameters for LSST and HSC simulations.
-
-Module-level dictionaries provide magnitude zero-points, PSF FWHM values,
-and per-band noise variances keyed by survey name.
-"""
-
 mag_zero_defaults = {
     "lsst": 30.0,
     "hsc": 27.0,
+    "euclid": 30.0,
 }
+
+# Native Euclid MER ``MAGZERO`` for each Euclid band (informational; the
+# simulation
+# renders at the common mag_zero_defaults["euclid"] = 30.0 instead).
+# euclid_mag_zero_native = {
+#     "vis": 24.6,
+#     "nisp_y": 29.8,
+#     "nisp_j": 30.0,
+#     "nisp_h": 29.9,
+# }
 
 psf_fwhm_defaults = {
     "u": {
@@ -53,6 +58,18 @@ psf_fwhm_defaults = {
     "y": {
         "lsst": 0.8,
         "hsc": 0.688,
+    },
+    "vis": {
+        "euclid": 0.203,
+    },
+    "nisp_y": {
+        "euclid": 0.478,
+    },
+    "nisp_j": {
+        "euclid": 0.506,
+    },
+    "nisp_h": {
+        "euclid": 0.545,
     },
 }
 
@@ -81,5 +98,19 @@ noise_variance_defaults = {
     "y": {
         "lsst": 1.41,
         "hsc": 85e-3,
+    },
+    # Euclid bands: 3-sigma-clipped per-pixel sky variance,
+    # rescaled to the common ZP=30 (see module docstring).
+    "vis": {
+        "euclid": 0.135,
+    },
+    "nisp_y": {
+        "euclid": 0.374,
+    },
+    "nisp_j": {
+        "euclid": 0.293,
+    },
+    "nisp_h": {
+        "euclid": 0.314,
     },
 }

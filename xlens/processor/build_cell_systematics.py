@@ -31,8 +31,6 @@ __all__ = [
     "BuildCellSystematicsConnections",
 ]
 
-from typing import Any
-
 import anacal
 import numpy as np
 from lsst.afw.image import MaskX

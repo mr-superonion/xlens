@@ -87,7 +87,14 @@ from .noise import get_noise_array
 
 SIM_INCLUSION_PADDING = 200  # pixels
 DEFAULT_BAT_STAMP_SIZE = 64
-band_order = "ugrizy"
+# Band ordering used to index stacked (per-band) PSF / noise-correlation
+# arrays. Ground-based surveys use the 6-band optical order; Euclid uses
+# its own bands.
+band_order_by_survey = {
+    "lsst": ["u", "g", "r", "i", "z", "y"],
+    "hsc": ["u", "g", "r", "i", "z", "y"],
+    "euclid": ["vis", "nisp_y", "nisp_j", "nisp_h"],
+}
 
 
 class MultibandSimConnections(
@@ -251,6 +258,22 @@ class MultibandSimConfig(
                 self.__class__.galaxy_type,
                 self,
                 "We require galaxy_type in " "['catsim2017', 'flagship2025', 'diffsky']",
+            )
+        if self.survey_name not in ["lsst", "hsc", "euclid"]:
+            raise FieldValidationError(
+                self.__class__.survey_name,
+                self,
+                "survey_name must be one of ['lsst', 'hsc', 'euclid']",
+            )
+        # Only the Flagship catalog carries the euclid_* magnitude columns,
+        # so Euclid simulations must use it (see Flagship2025Catalog, which
+        # reads ``entry[f"{survey_name}_{band}"]``).
+        if self.survey_name == "euclid" and self.galaxy_type != "flagship2025":
+            raise FieldValidationError(
+                self.__class__.galaxy_type,
+                self,
+                "Euclid simulations require galaxy_type='flagship2025' "
+                "(only Flagship provides euclid_* magnitudes)",
             )
 
     def setDefaults(self):
@@ -520,7 +543,7 @@ class MultibandSimTask(PipelineTask):
             self.log.debug("Do not use the real pixel mask")
             mask_array = 0.0
 
-        isys = band_order.index(band)
+        isys = band_order_by_survey[survey_name].index(band)
         # Obtain PSF object for Galsim
         if psfArray is not None and self.config.use_real_psf:
             draw_method = "no_pixel"
