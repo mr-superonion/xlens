@@ -13,21 +13,26 @@ import xlens
 from xlens.wcs import (
     correct_ellipticity_wcs,
     correct_fpfs_spin2_wcs,
+    dm_wcs_to_header,
     extract_perturbation_dm_wcs,
     extract_perturbation_galsim_wcs,
     extract_perturbation_jwcs,
+    header_to_dm_wcs,
     jacobian_decomposition,
     jacobian_reconstruction,
     make_jwcs,
     make_tanwcs_dm,
     make_tanwcs_galsim,
+    pixel_scale_arcsec,
+    pixel_to_sky,
+    sky_to_pixel,
     tanwcs_galsim2dm,
+    update_x1x2_from_sky,
 )
 
 # ---------------------------------------------------------------------------
 # Helpers for FPFS shape measurement tests
 # ---------------------------------------------------------------------------
-
 
 
 def _draw_images(gal_obj, psf_obj, wcs, stamp_size, center):
@@ -79,7 +84,8 @@ def simulate_and_measure(
 def simulate_and_measure_linear(
     gal_obj, psf_obj, wcs, stamp_size, center, pixel_scale, sigma_shapelets,
 ):
-    """Draw galaxy+PSF with given WCS and return raw linear shapelet moments."""
+    """Draw galaxy+PSF with given WCS and return raw linear shapelet
+    moments."""
     gal_image, psf_image = _draw_images(
         gal_obj, psf_obj, wcs, stamp_size, center,
     )
@@ -549,3 +555,121 @@ def test_cdmatrix_roundtrip(g1, g2, rho, kappa):
     np.testing.assert_allclose(g2_out, g2, atol=1e-9)
     np.testing.assert_allclose(rho_out, rho, atol=1e-9)
     np.testing.assert_allclose(kappa_out, kappa, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Test: pixel_to_sky / sky_to_pixel backend-agnostic converters
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "ra_deg, dec_deg",
+    [(59.5, 0.0), (180.0, 30.0), (59.5, -49.0), (10.0, -60.0)],
+)
+def test_header_to_dm_wcs_matches_dm(ra_deg, dec_deg):
+    """A SkyWcs rebuilt from a DM SkyWcs's FITS header reproduces the original
+    pixel<->sky mapping (header_to_dm_wcs round-trips the header)."""
+    pixel_scale = 0.2
+    center = 1000.0
+    wcs_dm = make_tanwcs_dm(
+        pixel_scale, 0.01, -0.02, 0.05, ra_deg, dec_deg, center, center,
+    )
+    wcs_hdr = header_to_dm_wcs(dm_wcs_to_header(wcs_dm))
+
+    rng = np.random.default_rng(1)
+    x = center + rng.uniform(-500, 500, size=64)
+    y = center + rng.uniform(-500, 500, size=64)
+
+    ra_dm, dec_dm = pixel_to_sky(wcs_dm, x, y)
+    ra_h, dec_h = pixel_to_sky(wcs_hdr, x, y)
+    np.testing.assert_allclose(ra_dm, ra_h, atol=1e-9)
+    np.testing.assert_allclose(dec_dm, dec_h, atol=1e-9)
+
+    x_dm, y_dm = sky_to_pixel(wcs_dm, ra_dm, dec_dm)
+    x_h, y_h = sky_to_pixel(wcs_hdr, ra_h, dec_h)
+    np.testing.assert_allclose(x_dm, x_h, atol=1e-6)
+    np.testing.assert_allclose(y_dm, y_h, atol=1e-6)
+
+
+@pytest.mark.parametrize("wcs_kind", ["dm", "header"])
+def test_pixel_sky_roundtrip(wcs_kind):
+    """pixel -> sky -> pixel recovers the original pixels."""
+    pixel_scale = 0.2
+    center = 1000.0
+    wcs_dm = make_tanwcs_dm(
+        pixel_scale, -0.03, 0.04, -0.1, 59.5, -49.0, center, center,
+    )
+    wcs = wcs_dm if wcs_kind == "dm" else header_to_dm_wcs(dm_wcs_to_header(wcs_dm))
+
+    rng = np.random.default_rng(2)
+    x = center + rng.uniform(-500, 500, size=64)
+    y = center + rng.uniform(-500, 500, size=64)
+
+    ra, dec = pixel_to_sky(wcs, x, y)
+    xr, yr = sky_to_pixel(wcs, ra, dec)
+    np.testing.assert_allclose(xr, x, atol=1e-6)
+    np.testing.assert_allclose(yr, y, atol=1e-6)
+
+
+def test_pixel_sky_bad_type():
+    """Unsupported WCS types (including astropy WCS) raise TypeError."""
+    import astropy.wcs
+
+    with pytest.raises(TypeError):
+        pixel_to_sky(object(), 1.0, 2.0)
+    with pytest.raises(TypeError):
+        sky_to_pixel(object(), 1.0, 2.0)
+    # astropy WCS is no longer supported by the converters
+    ap = astropy.wcs.WCS(naxis=2)
+    ap.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    with pytest.raises(TypeError):
+        pixel_to_sky(ap, 1.0, 2.0)
+    with pytest.raises(TypeError):
+        sky_to_pixel(ap, 1.0, 2.0)
+
+
+@pytest.mark.parametrize("wcs_kind", ["dm", "header"])
+def test_update_x1x2_from_sky(wcs_kind):
+    """update_x1x2_from_sky inverts the AnaCal pixel->sky step."""
+    pixel_scale = 0.2
+    center = 1000.0
+    wcs_dm = make_tanwcs_dm(
+        pixel_scale, 0.01, -0.02, 0.05, 59.5, -49.0, center, center,
+    )
+    wcs = wcs_dm if wcs_kind == "dm" else header_to_dm_wcs(dm_wcs_to_header(wcs_dm))
+
+    # A SkyWcs rebuilt from the header agrees on the scalar pixel scale (a
+    # sheared WCS has a geometric-mean scale slightly below pixel_scale).
+    scale = pixel_scale_arcsec(wcs)
+    np.testing.assert_allclose(
+        pixel_scale_arcsec(wcs_dm),
+        pixel_scale_arcsec(header_to_dm_wcs(dm_wcs_to_header(wcs_dm))),
+        rtol=1e-9,
+    )
+
+    rng = np.random.default_rng(3)
+    gx = center + rng.uniform(-400, 400, size=32)      # global pixels
+    gy = center + rng.uniform(-400, 400, size=32)
+
+    cat = np.zeros(
+        32, dtype=[("ra", "f8"), ("dec", "f8"), ("x1", "f8"), ("x2", "f8")]
+    )
+    # global-frame x1/x2 (arcsec) and the ra/dec they imply
+    cat["x1"] = gx * scale
+    cat["x2"] = gy * scale
+    cat["ra"], cat["dec"] = pixel_to_sky(
+        wcs, cat["x1"] / scale, cat["x2"] / scale
+    )
+
+    # wipe and recompute from ra/dec -> global frame (x0=y0=0)
+    cat["x1"] = 0.0
+    cat["x2"] = 0.0
+    update_x1x2_from_sky(cat, wcs)
+    np.testing.assert_allclose(cat["x1"], gx * scale, atol=1e-6)
+    np.testing.assert_allclose(cat["x2"], gy * scale, atol=1e-6)
+
+    # sub-image-local frame via (x0, y0)
+    x0, y0 = 300.0, 700.0
+    update_x1x2_from_sky(cat, wcs, x0=x0, y0=y0)
+    np.testing.assert_allclose(cat["x1"], (gx - x0) * scale, atol=1e-6)
+    np.testing.assert_allclose(cat["x2"], (gy - y0) * scale, atol=1e-6)

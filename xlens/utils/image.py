@@ -188,6 +188,53 @@ class LsstPsf(anacal.psf.BasePsf):
         return this_psf
 
 
+class GridPsf(anacal.psf.BasePsf):
+    """Spatially varying PSF defined on a regular grid of postage stamps.
+
+    A survey-agnostic ``anacal`` PSF adapter.  The spatial variation is
+    captured by a coarse grid of pre-computed PSF stamps; :meth:`draw` returns
+    the stamp of the cell containing the requested pixel (nearest-cell lookup,
+    no interpolation).  It complements :class:`LsstPsf` for cases where the PSF
+    is only available as sampled stamps rather than as a callable model -- for
+    example a Euclid MER catalogue PSF, or an LSST ``CoaddPsf`` pre-sampled on a
+    grid so that a single object works across surveys.
+
+    Parameters
+    ----------
+    model : numpy.ndarray
+        Grid of PSF stamps with shape ``(ny, nx, npix, npix)``.  Cell
+        ``(i, j)`` holds the (unit-sum) PSF for the pixel region
+        ``x in [j*dx, (j+1)*dx)`` and ``y in [i*dy, (i+1)*dy)`` in the image's
+        own pixel frame.
+    dx, dy : int
+        Cell size in pixels along the x and y axes.
+    """
+
+    def __init__(self, model: NDArray, dx: int, dy: int):
+        super().__init__()
+        self.model = np.ascontiguousarray(model)
+        if self.model.ndim != 4:
+            raise ValueError("model must have shape (ny, nx, npix, npix)")
+        self.dx = int(dx)
+        self.dy = int(dy)
+
+    def draw(self, x: float, y: float) -> NDArray:
+        """Return the PSF stamp of the grid cell containing pixel ``(x, y)``.
+
+        Positions outside the grid are clamped to the nearest edge cell.
+        """
+        ny, nx = self.model.shape[:2]
+        j = int(np.clip(x // self.dx, 0, nx - 1))
+        i = int(np.clip(y // self.dy, 0, ny - 1))
+        return np.ascontiguousarray(self.model[i, j])
+
+    @property
+    def average(self) -> NDArray:
+        """Grid-averaged, unit-sum PSF stamp (used as the exposure-average PSF)."""
+        avg = np.ascontiguousarray(self.model.mean(axis=(0, 1)))
+        return avg / avg.sum()
+
+
 def truncate_square(arr: NDArray, rcut: int) -> None:
     """Zero out pixels outside a centred square support region.
 

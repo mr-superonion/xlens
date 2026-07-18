@@ -47,6 +47,8 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial import KDTree
 from scipy.spatial.distance import cdist
 
+from ..wcs import sky_to_pixel
+
 # dm_colnames = [
 #     "base_SdssCentroid_x",
 #     "base_SdssCentroid_y",
@@ -332,10 +334,10 @@ class matchPipe(PipelineTask):
         mag_mrc = self._cat_ref[mrc["indices"]]["i_ab"]
         mrc = mrc[mag_mrc < self.config.mag_max_truth]
         assert wcs is not None, "wcs is required for merge_truth"
-        x_mrc, y_mrc = wcs.skyToPixelArray(
+        x_mrc, y_mrc = sky_to_pixel(
+            wcs,
             np.array(mrc["ra"]),
             np.array(mrc["dec"]),
-            degrees=True,
         )
 
         # Coordinates

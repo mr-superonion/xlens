@@ -58,7 +58,7 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
-from ..wcs import extract_perturbation_dm_wcs
+from ..wcs import extract_perturbation_dm_wcs, sky_to_pixel
 
 
 class MergePipeConnections(
@@ -515,10 +515,10 @@ class MergePipe(PipelineTask):
         p = self.config.fpfs_prefix
         # Reproject sky positions to tract pixel coordinates so the WCS
         # linearization is evaluated at exactly the object's ra/dec.
-        x_pix, y_pix = wcs.skyToPixelArray(
+        x_pix, y_pix = sky_to_pixel(
+            wcs,
             np.asarray(catalog["ra"]),
             np.asarray(catalog["dec"]),
-            degrees=True,
         )
 
         n = len(catalog)

@@ -59,12 +59,144 @@ To go from GalSim to LSST:
     Use TanWCS.cd (already in FITS convention), pass directly to makeSkyWcs.
 """
 
+import astropy.wcs
 import galsim
 import lsst.geom as geom
 import numpy as np
-from lsst.afw.geom import makeSkyWcs
+from lsst.afw.geom import SkyWcs, makeSkyWcs
 
 RAD2ASEC = 206264.80624709636
+
+
+def pixel_to_sky(wcs, x, y):
+    """Convert global pixel coordinates to sky ``(ra, dec)`` in degrees.
+
+    The inputs ``x, y`` are **global** pixel coordinates in the WCS's own
+    frame -- i.e. DM *parent* pixels for a ``SkyWcs`` (which already include
+    the exposure ``XY0``). Any local-cutout -> global lift is the caller's
+    responsibility; this function applies no offset.
+
+    A FITS-header WCS (e.g. a Euclid mosaic) must first be converted to a
+    ``SkyWcs`` with :func:`header_to_dm_wcs`; astropy WCS is no longer
+    accepted here.
+
+    Parameters
+    ----------
+    wcs : lsst.afw.geom.SkyWcs
+        The world coordinate system.
+    x, y : array_like
+        Global pixel coordinates, 0-based, with ``x`` = column, ``y`` = row.
+
+    Returns
+    -------
+    ra, dec : np.ndarray
+        Sky coordinates in degrees.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if isinstance(wcs, SkyWcs):
+        return wcs.pixelToSkyArray(x, y, degrees=True)
+    raise TypeError(f"unsupported WCS type: {type(wcs)}")
+
+
+def sky_to_pixel(wcs, ra, dec):
+    """Convert sky ``(ra, dec)`` in degrees to global pixel coordinates.
+
+    Inverse of :func:`pixel_to_sky`. Returns **global** pixel coordinates in
+    the WCS's own frame (DM parent pixels); no offset is applied. A FITS-header
+    WCS (e.g. a Euclid mosaic) must first be converted with
+    :func:`header_to_dm_wcs`; astropy WCS is no longer accepted here.
+
+    Parameters
+    ----------
+    wcs : lsst.afw.geom.SkyWcs
+        The world coordinate system.
+    ra, dec : array_like
+        Sky coordinates in degrees.
+
+    Returns
+    -------
+    x, y : np.ndarray
+        Global pixel coordinates, 0-based, with ``x`` = column, ``y`` = row.
+    """
+    ra = np.asarray(ra, dtype=float)
+    dec = np.asarray(dec, dtype=float)
+    if isinstance(wcs, SkyWcs):
+        return wcs.skyToPixelArray(ra, dec, degrees=True)
+    raise TypeError(f"unsupported WCS type: {type(wcs)}")
+
+
+def pixel_scale_arcsec(wcs):
+    """Return the WCS pixel scale in arcsec/pixel (geometric mean).
+
+    Works for an LSST ``SkyWcs`` (``getPixelScale``) or an ``astropy.wcs.WCS``
+    (``sqrt|det(CD)|``), matching the scalar ``pixel_scale`` AnaCal uses.
+
+    Parameters
+    ----------
+    wcs : lsst.afw.geom.SkyWcs or astropy.wcs.WCS
+
+    Returns
+    -------
+    float
+        Pixel scale in arcsec/pixel.
+    """
+    if isinstance(wcs, SkyWcs):
+        return float(wcs.getPixelScale().asArcseconds())
+    if isinstance(wcs, astropy.wcs.WCS):
+        cd = wcs.pixel_scale_matrix  # degrees/pixel
+        return float(np.sqrt(np.abs(np.linalg.det(cd))) * 3600.0)
+    raise TypeError(f"unsupported WCS type: {type(wcs)}")
+
+
+def update_x1x2_from_sky(
+    catalog,
+    wcs,
+    x0=0.0,
+    y0=0.0,
+    ra_col="ra",
+    dec_col="dec",
+    x1_col="x1",
+    x2_col="x2",
+):
+    """Set the ``(x1, x2)`` position columns from the ``(ra, dec)`` columns.
+
+    Inverse of the pixel->sky step in ``AnacalTask``: maps each object's
+    ``(ra, dec)`` to global pixels through ``wcs`` (:func:`sky_to_pixel`),
+    subtracts the exposure origin ``(x0, y0)``, and scales to arcsec with the
+    WCS pixel scale. ``x1_col`` / ``x2_col`` are overwritten in place.
+
+    ``x1`` / ``x2`` follow AnaCal's convention ``arcsec = pixel * scale``. With
+    the default ``x0 = y0 = 0`` they are in the WCS's global (parent) frame --
+    matching the final AnaCal catalog. Pass ``(x0, y0) = exposure.getXY0()``
+    to express them in a sub-image-local frame.
+
+    Parameters
+    ----------
+    catalog : structured np.ndarray or astropy.table.Table
+        Catalog holding ``ra_col`` / ``dec_col``; ``x1_col`` / ``x2_col`` are
+        written in place.
+    wcs : lsst.afw.geom.SkyWcs or astropy.wcs.WCS
+        World coordinate system.
+    x0, y0 : float, optional
+        Pixel origin subtracted from the global pixel position (default 0, 0).
+    ra_col, dec_col, x1_col, x2_col : str, optional
+        Column names. ``ra_col`` / ``dec_col`` are in degrees.
+
+    Returns
+    -------
+    catalog
+        The same object, with ``x1_col`` / ``x2_col`` updated (for chaining).
+    """
+    pixel_scale = pixel_scale_arcsec(wcs)
+    x, y = sky_to_pixel(
+        wcs,
+        np.asarray(catalog[ra_col]),
+        np.asarray(catalog[dec_col]),
+    )
+    catalog[x1_col] = (x - x0) * pixel_scale
+    catalog[x2_col] = (y - y0) * pixel_scale
+    return catalog
 
 
 def jacobian_reconstruction(pixel_scale, g1, g2, rho, kappa=0.0):
@@ -323,6 +455,78 @@ def extract_perturbation_dm_wcs(wcs_dm, pixel_point, pixel_scale):
         ]
     )
     return jacobian_decomposition(jac_arcsec, pixel_scale)
+
+
+def header_to_dm_wcs(header):
+    """Build an LSST ``SkyWcs`` from a FITS WCS header.
+
+    Lets an externally-produced mosaic (e.g. a Euclid MER tile, whose WCS is
+    normally read with astropy) be carried through the same DM-WCS code paths
+    as an LSST coadd -- ``sky_to_pixel``, ``extract_perturbation_dm_wcs``, and
+    the ``mergeTask`` field-distortion correction -- instead of maintaining a
+    parallel astropy branch.  Standard FITS conventions (1-based ``CRPIX``,
+    ``CD`` or ``PC``+``CDELT``) are handled by ``makeSkyWcs``; pixels in the
+    returned WCS are 0-based, matching ``astropy.wcs.WCS`` evaluated with
+    ``origin=0`` (so ``sky_to_pixel`` agrees between the two backends).
+
+    Parameters
+    ----------
+    header : astropy.io.fits.Header, fitsio.FITSHDR, mapping, or PropertyList
+        FITS header carrying the WCS keywords.
+
+    Returns
+    -------
+    lsst.afw.geom.SkyWcs
+    """
+    import lsst.daf.base as dafBase
+    from lsst.afw.geom import makeSkyWcs
+
+    if isinstance(header, dafBase.PropertyList):
+        return makeSkyWcs(header)
+
+    if hasattr(header, "cards"):  # astropy.io.fits.Header
+        pairs = ((c.keyword, c.value) for c in header.cards)
+    elif hasattr(header, "records"):  # fitsio.FITSHDR
+        pairs = ((r["name"], r["value"]) for r in header.records())
+    else:  # plain mapping
+        pairs = header.items()
+
+    ps = dafBase.PropertyList()
+    for key, value in pairs:
+        if not key or key in ("HISTORY", "COMMENT", "CONTINUE", "END"):
+            continue
+        if hasattr(value, "item"):  # numpy scalar -> python scalar
+            value = value.item()
+        try:
+            ps.set(key, value)
+        except Exception:
+            pass
+    return makeSkyWcs(ps)
+
+
+def dm_wcs_to_header(wcs):
+    """Serialize an LSST ``SkyWcs`` to a FITS WCS header (astropy ``Header``).
+
+    Inverse companion of :func:`header_to_dm_wcs`: emits standard FITS WCS
+    keywords so a DM ``SkyWcs`` can be written to disk, handed to astropy (e.g.
+    for a WCSAxes plot), or round-tripped back through ``header_to_dm_wcs``.
+
+    Parameters
+    ----------
+    wcs : lsst.afw.geom.SkyWcs
+        The world coordinate system to serialize.
+
+    Returns
+    -------
+    astropy.io.fits.Header
+    """
+    from astropy.io import fits
+
+    md = wcs.getFitsMetadata()
+    header = fits.Header()
+    for name in md.names():
+        header[name] = md.getScalar(name)
+    return header
 
 
 def tanwcs_dm2galsim(wcs):

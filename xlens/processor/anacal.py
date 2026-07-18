@@ -32,6 +32,7 @@ from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
+from ..wcs import pixel_to_sky
 
 
 class AnacalConfig(Config):
@@ -228,10 +229,12 @@ class AnacalTask(Task):
             catalog = catalog[indexes]
 
         if wcs is not None:
-            ra, dec = wcs.pixelToSkyArray(
+            # catalog x1/x2 are already global (parent) pixels here, since
+            # begin_x/begin_y were added back above -> no XY0 offset needed.
+            ra, dec = pixel_to_sky(
+                wcs,
                 catalog["x1"] / pixel_scale,
                 catalog["x2"] / pixel_scale,
-                degrees=True,
             )
             catalog["ra"] = ra
             catalog["dec"] = dec
