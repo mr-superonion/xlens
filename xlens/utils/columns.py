@@ -73,39 +73,6 @@ DETECTION_KEEP_COLUMNS: tuple[str, ...] = (
 )
 
 
-def rename_flux_to_photoz_format(
-    per_band_cat: NDArray,
-    band: str,
-) -> NDArray:
-    """Rename FPFS Gaussian-flux columns to the schema photoZPipe
-    consumes via ``flux_name=<kernel>``.
-
-    For any kernel in ``("fpfs", "fpfs1", "fpfs2")`` present on the
-    per-band measurement, swaps the kernel and 'flux' tokens:
-
-      ``{band}_{kernel}_flux``        -> ``{band}_flux_{kernel}``
-      ``{band}_{kernel}_dflux_dg1``   -> ``{band}_dflux_{kernel}_dg1``
-      ``{band}_{kernel}_dflux_dg2``   -> ``{band}_dflux_{kernel}_dg2``
-      ``{band}_{kernel}_flux_err``    -> ``{band}_flux_{kernel}_err``
-    """
-    if per_band_cat.dtype.names is None:
-        return per_band_cat
-    names = set(per_band_cat.dtype.names)
-    mapping: dict[str, str] = {}
-    for kernel in ("fpfs", "fpfs1", "fpfs2"):
-        for src, dst in (
-            (f"{band}_{kernel}_flux", f"{band}_flux_{kernel}"),
-            (f"{band}_{kernel}_dflux_dg1", f"{band}_dflux_{kernel}_dg1"),
-            (f"{band}_{kernel}_dflux_dg2", f"{band}_dflux_{kernel}_dg2"),
-            (f"{band}_{kernel}_flux_err", f"{band}_flux_{kernel}_err"),
-        ):
-            if src in names:
-                mapping[src] = dst
-    if not mapping:
-        return per_band_cat
-    return np.asarray(rfn.rename_fields(per_band_cat, mapping))
-
-
 def select_detection_columns(catalog: NDArray) -> NDArray:
     """Project ``catalog`` onto :data:`DETECTION_KEEP_COLUMNS`.
 

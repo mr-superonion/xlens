@@ -26,6 +26,7 @@ import numpy as np
 from scipy.integrate import simpson
 from scipy.optimize import minimize_scalar
 
+from ..utils.constants import MAG_ZERO_AB
 from .utils import _resolve_cut_name
 
 NUM_Z_GRIDS = 501
@@ -106,7 +107,7 @@ def get_color(
     *,
     bands: str = "grizy",
     ref_band: str = "i",
-    mag_zero: float = 30.0,
+    mag_zero: float = MAG_ZERO_AB,
     comp: int = 1,
     dg: float = 0.0,
     flux_name: str = "gauss2",
@@ -191,7 +192,7 @@ class zEstimator(ABC):
         self,
         src: np.ndarray,
         *,
-        mag_zero: float = 30.0,
+        mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
         bands: str = "grizy",
         ref_band: str = "i",
@@ -208,7 +209,7 @@ class zEstimator(ABC):
         self,
         src: np.ndarray,
         *,
-        mag_zero: float = 30.0,
+        mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
         bands: str = "grizy",
         ref_band: str = "i",
@@ -254,7 +255,7 @@ class flexzboostEstimator(zEstimator):
         self,
         src: np.ndarray,
         *,
-        mag_zero: float = 30.0,
+        mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
         bands: str = "grizy",
         ref_band: str = "i",
@@ -360,7 +361,7 @@ class bpzEstimator(zEstimator):
         self,
         src: np.ndarray,
         *,
-        mag_zero: float = 30.0,
+        mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
         bands: str = "grizy",
         ref_band: str = "i",

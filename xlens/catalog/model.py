@@ -21,6 +21,8 @@
 
 import numpy as np
 
+from ..utils.constants import MAG_ZERO_AB
+
 s0 = 0.01  # ground for std
 
 
@@ -35,14 +37,14 @@ def estd_model_fit(coords, c0, c1, c2, c3, c4, c5):
     return np.sqrt(evar_model(mag, radius, c0, c1, c2, c3, c4, c5))
 
 
-def w_model(flux, m0, m2, mag_zero, c0, c1, c2, c3, c4, c5):
-    mag = mag_zero - 2.5 * np.log10(flux)
+def w_model(flux, m0, m2, c0, c1, c2, c3, c4, c5):
+    mag = MAG_ZERO_AB - 2.5 * np.log10(flux)
     trace = m2 / m0
     radius = np.sqrt(trace / 2.0)
     return 1.0 / evar_model(mag, radius, c0, c1, c2, c3, c4, c5)
 
 
-def w_model_derivs(flux, m0, m2, mag_zero, c0, c1, c2, c3, c4, c5):
+def w_model_derivs(flux, m0, m2, c0, c1, c2, c3, c4, c5):
     """
     Compute derivatives of w = 1 / evar_model(mag, radius)
     with respect to flux, m0, and m2.
@@ -55,7 +57,7 @@ def w_model_derivs(flux, m0, m2, mag_zero, c0, c1, c2, c3, c4, c5):
       - "dw_dm2"
     """
     # shared pieces
-    mag = mag_zero - 2.5 * np.log10(flux)
+    mag = MAG_ZERO_AB - 2.5 * np.log10(flux)
     trace = m2 / m0
     radius = np.sqrt(trace / 2.0)
 

@@ -42,6 +42,8 @@ from lsst.pipe.base import (
 )
 from lsst.utils.logging import LsstLogAdapter
 
+from ..utils.constants import MAG_ZERO_AB
+
 
 class SelBiasRfMultibandPipeConnections(
     PipelineTaskConnections,
@@ -114,10 +116,6 @@ class SelBiasRfMultibandPipeConfig(
         doc="upper limit of score",
         default=[0.04, 0.08, 0.12, 0.16, 0.20],
     )
-    mag_zero = Field[float](
-        doc="calibration magnitude zero point",
-        default=30.0,
-    )
     model_name = Field[str](
         doc="random forest modle pickle file name",
         default="simple_sim_RF.pkl",
@@ -174,11 +172,11 @@ class SelBiasRfMultibandPipe(PipelineTask):
         return
 
     @staticmethod
-    def measure_distorted_photomoetry(*, src, dg, mag_zero):
+    def measure_distorted_photomoetry(*, src, dg):
         phot = []
         for band in "grizy":
             phot.append(
-                mag_zero - np.log10(src[f"{band}_fpfs1_m00"] + dg * src[f"{band}_fpfs1_dm00_dg1"]) * 2.5
+                MAG_ZERO_AB - np.log10(src[f"{band}_fpfs1_m00"] + dg * src[f"{band}_fpfs1_dm00_dg1"]) * 2.5
             )
 
         phot = np.vstack(phot).T
@@ -193,7 +191,6 @@ class SelBiasRfMultibandPipe(PipelineTask):
         phot = self.measure_distorted_photomoetry(
             src=src,
             dg=dg,
-            mag_zero=self.config.mag_zero,
         )
         scores = self.clf.predict_proba(phot)[:, 1]
         mask = scores < threshold

@@ -180,7 +180,7 @@ def cat_read(base_dir: str, sim_id: int, mode: int) -> np.ndarray:
 
 
 def _get_score(src, comp: int = 1, dg: float = 0.0):
-    mag_zero = 30.0
+    mag_zero = 31.4
     rr = -2.5 / np.log(10)
     phot = []
     for band in "gri":

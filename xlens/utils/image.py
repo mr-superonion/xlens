@@ -46,6 +46,8 @@ from lsst.meas.algorithms import KernelPsf
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
+from .constants import MAG_ZERO_AB
+
 badMaskDefault = [
     "BAD",
     "SAT",
@@ -836,9 +838,17 @@ def prepare_data(
         blocks=blocks,
     )
 
+    # Normalize the image onto the fixed AB zeropoint so the measured
+    # moments/fluxes are independent of the coadd's native mag_zero. Both FPFS
+    # paths (detection Task + fpfs.process_image) then receive this 31.4 image
+    # with mag_zero=MAG_ZERO_AB. No-op (no allocation) for a native-31.4 coadd.
+    gal_array, noise_array, noise_variance = anacal.utils.rescale_image_to_zeropoint(
+        gal_array, noise_array, noise_variance, mag_zero, MAG_ZERO_AB,
+    )
+
     return {
         "pixel_scale": pixel_scale,
-        "mag_zero": mag_zero,
+        "mag_zero": MAG_ZERO_AB,
         "noise_variance": noise_variance,
         "gal_array": gal_array,
         "psf_array": psf_array,
@@ -940,9 +950,16 @@ def prepare_data_one_cell(
         blocks=blocks,
     )
 
+    # Normalize the image onto the fixed AB zeropoint; the measurement then runs
+    # at mag_zero=MAG_ZERO_AB independent of the cell's native mag_zero. No-op
+    # (no allocation) for a native-31.4 coadd.
+    gal_array, noise_array, noise_variance = anacal.utils.rescale_image_to_zeropoint(
+        gal_array, noise_array, noise_variance, mag_zero, MAG_ZERO_AB,
+    )
+
     return {
         "pixel_scale": pixel_scale,
-        "mag_zero": mag_zero,
+        "mag_zero": MAG_ZERO_AB,
         "noise_variance": noise_variance,
         "gal_array": gal_array,
         "psf_array": psf_array,

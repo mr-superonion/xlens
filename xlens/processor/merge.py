@@ -58,6 +58,7 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
+from ..utils.constants import MAG_ZERO_AB
 from ..wcs import extract_perturbation_dm_wcs, sky_to_pixel
 
 
@@ -127,10 +128,6 @@ class MergePipeConfig(
     fpfs_c0 = Field[float](
         doc="C0 normalisation in ``e = m22c / (m00 + c0)``.",
         default=8.4,
-    )
-    mag_zero = Field[float](
-        doc=("Photometric zeropoint used to scale ``fpfs_c0`` " "(``c0 *= 10**((mag_zero - 30) / 2.5)``)."),
-        default=30.0,
     )
     fpfs_prefix = Field[str](
         doc="Per-band moment column prefix.",
@@ -279,7 +276,9 @@ class MergePipe(PipelineTask):
           ``fpfs1_m20``, ``fpfs1_dm20_dg1``, ``fpfs1_dm20_dg2``.
         - Per-band fluxes: for each band ``b`` in ``self.config.bands``
           we keep ``{b}_flux_fpfs1``, ``{b}_dflux_fpfs1_dg1``,
-          ``{b}_dflux_fpfs1_dg2``, ``{b}_flux_fpfs1_err``.
+          ``{b}_dflux_fpfs1_dg2``, ``{b}_flux_fpfs1_err``, and the flux
+          S/N ``{b}_s2n_fpfs1``, ``{b}_ds2n_fpfs1_dg1``,
+          ``{b}_ds2n_fpfs1_dg2``.
         - Photo-z columns appended by ``_join_photoz`` (when present).
 
         Per-band shapes/moments, the detection-band raw FPFS columns
@@ -345,6 +344,11 @@ class MergePipe(PipelineTask):
                     f"{b}_dflux_fpfs1_dg1",
                     f"{b}_dflux_fpfs1_dg2",
                     f"{b}_flux_fpfs1_err",
+                    # Per-band flux S/N + shear response (s2n = flux/flux_err;
+                    # spin-0, carried per-band like the flux itself).
+                    f"{b}_s2n_fpfs1",
+                    f"{b}_ds2n_fpfs1_dg1",
+                    f"{b}_ds2n_fpfs1_dg2",
                 ]
             )
             # Per-band gauss2 fluxes (only present when
@@ -477,7 +481,7 @@ class MergePipe(PipelineTask):
             dm22s_dg1 += w * np.asarray(catalog[f"{b}_{p}dm22s_dg1"])
             dm22s_dg2 += w * np.asarray(catalog[f"{b}_{p}dm22s_dg2"])
 
-        c0 = self.config.fpfs_c0 * 10.0 ** ((self.config.mag_zero - 30.0) / 2.5)
+        c0 = self.config.fpfs_c0 * 10.0 ** ((MAG_ZERO_AB - 30.0) / 2.5)
         denom = m00 + c0
         e1 = m22c / denom
         e2 = m22s / denom

@@ -123,20 +123,22 @@ def test_sim_measure_photoz():
 
     catalog = _measure(skymap, exposures)
     assert len(catalog) > 0, "no objects detected in 200x200 patch"
-    # MeasureCoaddsPipe now emits the photoZPipe-compatible schema
-    # (``{b}_flux_fpfs1`` etc.) directly via rename_flux_to_photoz_format
-    # in xlens.processor.measure_coadds._force.
+    # MeasureCoaddsPipe emits the photoZPipe-compatible schema
+    # (``{b}_flux_fpfs1`` etc.) directly: AnaCal's process_image now names the
+    # flux family in photoz token order, so no post-hoc rename is needed.
     for b in BANDS:
         assert f"{b}_flux_fpfs1" in catalog.dtype.names, b
         assert f"{b}_flux_fpfs1_err" in catalog.dtype.names, b
         assert f"{b}_dflux_fpfs1_dg1" in catalog.dtype.names, b
         assert f"{b}_dflux_fpfs1_dg2" in catalog.dtype.names, b
+        assert f"{b}_s2n_fpfs1" in catalog.dtype.names, b
 
     catalog = _ensure_object_id(catalog)
 
     pz_cfg = photoZPipeConfig()
     pz_cfg.model_path = os.fspath(FZB_MODEL)
-    pz_cfg.mag_zero = MAG_ZERO
+    # No mag_zero: the measurement output is on the fixed AB zeropoint (31.4),
+    # which the photo-z estimator now uses by default.
     pz_cfg.flux_name = "fpfs1"
     pz_cfg.bands = BANDS
     pz_cfg.ref_band = "i"

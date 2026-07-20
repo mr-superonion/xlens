@@ -196,10 +196,6 @@ class SelBiasRedshiftPipeConfig(
         doc="Maximum allowed 95% width of the redshift PDF.",
         default=2.75,
     )
-    mag_zero = Field[float](
-        doc="Zero-point magnitude used by the redshift estimator.",
-        default=30.0,
-    )
     flux_name = Field[str](
         doc="Flux column suffix used for the selection cut.",
         default="gauss2",
@@ -323,7 +319,6 @@ class SelBiasRedshiftPipe(PipelineTask):
             dg=config.dg,
             target=config.target,
             do_correction=config.do_correct_selection_bias,
-            mag_zero=config.mag_zero,
             flux_name=config.flux_name,
             bands=config.bands,
             ref_band=config.ref_band,

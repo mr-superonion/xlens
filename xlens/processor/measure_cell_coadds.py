@@ -52,7 +52,6 @@ from numpy.typing import NDArray
 
 from ..utils.catalog import set_isPrimary
 from ..utils.columns import (
-    rename_flux_to_photoz_format,
     select_band_gauss_fluxes,
     select_detection_columns,
 )
@@ -482,10 +481,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
                         detection=detection_dict[cell_id],
                         mask_array=cell_mask,
                     )
-                    cat = rename_flux_to_photoz_format(
-                        self.fpfs.run(**data),
-                        band,
-                    )
+                    cat = self.fpfs.run(**data)
                     if self.config.do_measure_flux_gauss:
                         gauss_cat = select_band_gauss_fluxes(
                             self.anacal.run(**data),

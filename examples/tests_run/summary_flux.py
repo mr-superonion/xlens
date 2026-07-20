@@ -129,7 +129,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mag-zero",
         type=float,
-        default=30.0,
+        default=31.4,
         help="magnitude zero point",
     )
     # Bootstrap

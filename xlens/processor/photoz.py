@@ -109,10 +109,6 @@ class photoZPipeConfig(
         doc="Path to the pickled FlexZBoost photo-z model.",
         default="",
     )
-    mag_zero = Field[float](
-        doc="Magnitude zero point of the input fluxes.",
-        default=27.0,
-    )
     flux_name = Field[str](
         doc="Flux column suffix (e.g. gauss2 -> {band}_fluxgauss2).",
         default="gauss2",
@@ -214,7 +210,6 @@ class photoZPipe(PipelineTask):
         n = catalog.shape[0]
 
         common_kwargs = dict(
-            mag_zero=cfg.mag_zero,
             flux_name=cfg.flux_name,
             bands=cfg.bands,
             ref_band=cfg.ref_band,

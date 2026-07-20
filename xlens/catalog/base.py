@@ -22,6 +22,7 @@
 import numpy as np
 
 # from .model import w_model, w_model_derivs
+from ..utils.constants import MAG_ZERO_AB
 from .utils import _resolve_cut, _resolve_cut_name
 
 
@@ -70,7 +71,7 @@ def build_selection_mask(
     dg: float = 0.0,
     bands: str = "grizy",
     mag_max: float | dict = 40.0,
-    mag_zero: float = 30.0,
+    mag_zero: float = MAG_ZERO_AB,
     flux_name: str = "fpfs1",
     shape_name: str = "fpfs",
     emax: float = 0.3,
@@ -166,7 +167,7 @@ class ShearEstimator(object):
         mag_max: float | dict = 40.0,
         emax: float = 0.3,
         trace_min: float = 0.05,
-        mag_zero: float = 30.0,
+        mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
         shape_name: str = "fpfs",
         bands: str = "grizy",
@@ -354,7 +355,7 @@ def measure_shear(
     dg: float = 0.02,
     target: str = "g1",
     do_correction: bool = True,
-    mag_zero: float = 30.0,
+    mag_zero: float = MAG_ZERO_AB,
     flux_name: str = "gauss2",
     bands: str = "grizy",
     ref_band: str = "i",

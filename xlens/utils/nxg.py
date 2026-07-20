@@ -48,6 +48,10 @@ _DEFAULT_FPFS_WEIGHTS = {
 def calibrate_shapes(table, c0=50.0, weights=None, normalize=True):
     """4-band FPFS combination -> (e1, e2, response).
 
+    Note: the default ``c0=50.0`` is an absolute m00-scale constant tied to the
+    fixed AB zeropoint (``MAG_ZERO_AB``) that the measurement stage normalizes
+    every ``{band}_fpfs1_m00`` onto; it does not need per-coadd rescaling.
+
     Parameters
     ----------
     table : astropy.table.Table-like

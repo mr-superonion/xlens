@@ -168,7 +168,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mag-zero",
         type=float,
-        default=30.0,
+        default=31.4,
         help="magnitude zero point",
     )
     # Bootstrap
@@ -234,7 +234,7 @@ def per_rank_work(
     zobj,
     do_correction: bool = True,
     z_width95_max: float = 2.75,
-    mag_zero: float = 30.0,
+    mag_zero: float = 31.4,
     bands: str = "ugrizy",
 ):
     e_pos_rows = []

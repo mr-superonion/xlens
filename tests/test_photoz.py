@@ -17,6 +17,13 @@ import pytest
 from numpy.lib import recfunctions as rfn
 
 from xlens.processor.photoz import photoZPipe, photoZPipeConfig
+from xlens.utils.constants import MAG_ZERO_AB
+
+# The bundled fixture was measured at the legacy mag_zero=30. The pipeline now
+# fixes the output zeropoint at MAG_ZERO_AB (31.4), so bring the fixture's flux
+# family onto 31.4; the recovered AB magnitudes (and thus the z estimates) are
+# then invariant vs. the reference values, which were computed at 30.
+_FIXTURE_MAG_ZERO = 30.0
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 FZB_MODEL = DATA_DIR / "model_inform_fzboost.pkl"
@@ -30,6 +37,11 @@ ZMODE_REF = np.array([0.34, 0.73, 1.53])
 
 def _load_photoz_catalog() -> np.ndarray:
     catalog = fitsio.read(os.fspath(PHOTOZ_CATALOG))
+    r = 10.0 ** ((MAG_ZERO_AB - _FIXTURE_MAG_ZERO) / 2.5)
+    if r != 1.0:
+        for name in catalog.dtype.names:
+            if "flux_gauss" in name:  # flux / dflux / flux_err (not mag_*)
+                catalog[name] = catalog[name] * r
     if "object_id" not in catalog.dtype.names:
         catalog = rfn.append_fields(
             catalog, "object_id",
@@ -42,7 +54,6 @@ def _load_photoz_catalog() -> np.ndarray:
 def _make_config(*, output_pdfs: bool) -> photoZPipeConfig:
     cfg = photoZPipeConfig()
     cfg.model_path = os.fspath(FZB_MODEL)
-    cfg.mag_zero = 30.0
     cfg.flux_name = "gauss2"
     cfg.bands = "ugrizy"
     cfg.ref_band = "i"

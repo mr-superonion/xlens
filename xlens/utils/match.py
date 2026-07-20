@@ -39,7 +39,7 @@ from astropy.coordinates import SkyCoord
 
 # Basic golden selection: per-band mag cuts (mag_zero = 31.4) + trace > 0.1
 # + spec-z confidence > 0.82.
-MAG_ZERO = 31.4
+from .constants import MAG_ZERO_AB as MAG_ZERO
 MAG_CUTS = {
     "u": 27.5, "g": 26.5, "r": 26.0, "i": 25.0, "z": 25.0, "y": 25.0,
 }
