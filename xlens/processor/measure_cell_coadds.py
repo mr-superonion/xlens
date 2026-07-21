@@ -50,11 +50,13 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
+from ..catalog.utils import add_magnitude_columns
 from ..utils.catalog import set_isPrimary
 from ..utils.columns import (
     select_band_gauss_fluxes,
     select_detection_columns,
 )
+from ..utils.constants import MAG_ZERO_AB
 from ..utils.image import (
     broadcast_psf_hsm_moments,
     build_psf_hsm_context,
@@ -637,6 +639,9 @@ class MeasureCellCoaddsPipe(PipelineTask):
             )
 
         output = np.concatenate(cell_results)
+        # Per-band AB magnitude + shear response for each published flux
+        # family (fluxes are on the fixed MAG_ZERO_AB zeropoint here).
+        output = add_magnitude_columns(output, MAG_ZERO_AB)
         # Stable per-object IDs derived from the patch-level seed. Used
         # downstream by ``photoZPipe`` and any object-level joiners.
         object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(output), dtype=np.int64)

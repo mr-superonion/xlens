@@ -349,6 +349,14 @@ class MergePipe(PipelineTask):
                     f"{b}_s2n_fpfs1",
                     f"{b}_ds2n_fpfs1_dg1",
                     f"{b}_ds2n_fpfs1_dg2",
+                    # Per-band AB magnitude + shear response (add_magnitude_columns;
+                    # smooth-truncated flux_to_mag on the fixed MAG_ZERO_AB scale).
+                    f"{b}_mag_fpfs1",
+                    f"{b}_dmag_fpfs1_dg1",
+                    f"{b}_dmag_fpfs1_dg2",
+                    f"{b}_sigma_mag_fpfs1",
+                    f"{b}_dsigma_mag_fpfs1_dg1",
+                    f"{b}_dsigma_mag_fpfs1_dg2",
                 ]
             )
             # Per-band gauss2 fluxes (only present when
@@ -358,6 +366,14 @@ class MergePipe(PipelineTask):
                 f"{b}_flux_gauss2_err",
                 f"{b}_dflux_gauss2_dg1",
                 f"{b}_dflux_gauss2_dg2",
+                # AB magnitude + shear response for the gauss2 flux family
+                # (added by add_magnitude_columns when gauss2 is present).
+                f"{b}_mag_gauss2",
+                f"{b}_dmag_gauss2_dg1",
+                f"{b}_dmag_gauss2_dg2",
+                f"{b}_sigma_mag_gauss2",
+                f"{b}_dsigma_mag_gauss2_dg1",
+                f"{b}_dsigma_mag_gauss2_dg2",
             ):
                 if col in catalog.colnames:
                     keep.append(col)

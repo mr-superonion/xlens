@@ -53,12 +53,14 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
+from ..catalog.utils import add_magnitude_columns
 from ..simulator.sim import MultibandSimTask
 from ..utils.catalog import set_isPrimary
 from ..utils.columns import (
     select_band_gauss_fluxes,
     select_detection_columns,
 )
+from ..utils.constants import MAG_ZERO_AB
 from ..utils.handle import SimulatedExposureHandle
 from ..utils.image import (
     broadcast_psf_hsm_moments,
@@ -543,6 +545,9 @@ class MeasureCoaddsPipe(PipelineTask):
             [select_detection_columns(det_cat), force_cat],
             flatten=True,
         )
+        # Per-band AB magnitude + shear response for each published flux
+        # family (fluxes are on the fixed MAG_ZERO_AB zeropoint here).
+        final = np.asarray(add_magnitude_columns(final, MAG_ZERO_AB))
         object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(final), dtype=np.int64)
         final = rfn.append_fields(
             final,

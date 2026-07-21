@@ -20,6 +20,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import numpy as np
+from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
 # Smooth magnitude truncation. The standard magnitude holds for sources brighter
@@ -76,6 +77,158 @@ def flux_to_mag(
     flux_eff = 10.0 ** ((mag_zero - mag) / 2.5)
     mag_err = MAG_ERR_FAC * flux_err / flux_eff
     return mag, mag_err
+
+
+def dmag_dflux(
+    flux: NDArray,
+    mag_zero: float,
+    a_ext: NDArray | None = None,
+    m_knee: float = MAG_KNEE,
+    m_cap: float = MAG_CAP,
+) -> NDArray:
+    """Analytic d(mag)/d(flux) of the smooth-truncated ``flux_to_mag``.
+
+    Differentiates the smoothstep-truncated magnitude (not the plain log). With
+    ``m_raw = mag_zero - 2.5*log10(flux) - a_ext`` and the smoothstep blend
+    ``s(t)``, ``t = clip((m_raw - m_knee)/(m_cap - m_knee), 0, 1)``, the chain
+    rule gives::
+
+        dmag_dflux = (dm_raw/dflux) * [(1 - s) + (m_cap - m_raw) * 6t(1-t)/W]
+
+    with ``W = m_cap - m_knee`` and ``dm_raw/dflux = -MAG_ERR_FAC/flux``. Brighter
+    than ``m_knee`` (``t=0``) the bracket is 1 -> the standard ``-MAG_ERR_FAC/flux``;
+    in the saturated band (``t=1``) and for ``flux <= 0`` (mag pinned at ``m_cap``)
+    the derivative is exactly 0. Continuous everywhere (the smoothstep has
+    ``s'(0)=s'(1)=0``).
+    """
+    n = len(flux)
+    m_raw = np.full(n, m_cap + 1.0, dtype=np.float64)
+    dmraw_dflux = np.zeros(n, dtype=np.float64)
+    pos = flux > 0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        m_raw[pos] = mag_zero - 2.5 * np.log10(flux[pos])
+        if a_ext is not None:
+            m_raw[pos] = m_raw[pos] - a_ext[pos]
+        dmraw_dflux[pos] = -MAG_ERR_FAC / flux[pos]
+    w = m_cap - m_knee
+    t = np.clip((m_raw - m_knee) / w, 0.0, 1.0)
+    s = t * t * (3.0 - 2.0 * t)  # smoothstep (C1)
+    # Bracket: (1 - s) + (m_cap - m_raw) * s'(t)/W, with s'(t) = 6 t (1 - t).
+    # s'(t) is exactly 0 in both clipped regions, so this holds for all flux>0;
+    # flux<=0 entries carry dmraw_dflux = 0 (m_raw is the finite sentinel).
+    bracket = (1.0 - s) + (m_cap - m_raw) * (6.0 * t * (1.0 - t)) / w
+    return dmraw_dflux * bracket
+
+
+def mag_shear_response(
+    flux: NDArray,
+    dflux_dg1: NDArray,
+    dflux_dg2: NDArray,
+    mag_zero: float,
+    flux_err: NDArray | None = None,
+    a_ext: NDArray | None = None,
+    m_knee: float = MAG_KNEE,
+    m_cap: float = MAG_CAP,
+) -> tuple[
+    NDArray,
+    NDArray | None,
+    NDArray,
+    NDArray,
+    NDArray | None,
+    NDArray | None,
+]:
+    """Smooth-truncated magnitude and its shear response.
+
+    Returns ``(mag, sigma_m, dmag_dg1, dmag_dg2, dsigma_m_dg1, dsigma_m_dg2)``.
+
+    ``mag`` and ``sigma_m`` (the magnitude error) come from ``flux_to_mag``. The
+    magnitude shear response chains the analytic ``dmag_dflux`` with the per-object
+    flux response::
+
+        dmag_dg{c} = dmag_dflux * dflux_dg{c}
+
+    and the magnitude-error response follows from ``sigma_m = MAG_ERR_FAC *
+    flux_err / flux_eff`` (with ``flux_err`` shear-independent)::
+
+        dsigma_m_dg{c} = (ln10 / 2.5) * sigma_m * dmag_dg{c}
+                       = sigma_m * dmag_dg{c} / MAG_ERR_FAC
+
+    ``sigma_m``, ``dsigma_m_dg1`` and ``dsigma_m_dg2`` are ``None`` when
+    ``flux_err`` is ``None``.
+    """
+    mag, sigma_m = flux_to_mag(
+        flux, mag_zero, flux_err=flux_err, a_ext=a_ext, m_knee=m_knee, m_cap=m_cap
+    )
+    dm_df = dmag_dflux(flux, mag_zero, a_ext=a_ext, m_knee=m_knee, m_cap=m_cap)
+    dmag_dg1 = dm_df * dflux_dg1
+    dmag_dg2 = dm_df * dflux_dg2
+    if sigma_m is None:
+        return mag, None, dmag_dg1, dmag_dg2, None, None
+    dsigma_m_dg1 = sigma_m * dmag_dg1 / MAG_ERR_FAC
+    dsigma_m_dg2 = sigma_m * dmag_dg2 / MAG_ERR_FAC
+    return mag, sigma_m, dmag_dg1, dmag_dg2, dsigma_m_dg1, dsigma_m_dg2
+
+
+def add_magnitude_columns(
+    catalog: NDArray,
+    mag_zero: float,
+    families: tuple[str, ...] = ("fpfs1", "gauss2"),
+) -> NDArray:
+    """Append per-band AB magnitude + shear response for each flux family.
+
+    For every band ``b`` and family ``fam`` in ``families`` for which the
+    catalog carries a flux ``{b}_flux_{fam}`` and its shear response
+    ``{b}_dflux_{fam}_dg1`` / ``{b}_dflux_{fam}_dg2``, append (on the fixed
+    ``mag_zero`` zeropoint, via the smooth-truncated :func:`flux_to_mag`)::
+
+        {b}_mag_{fam}         {b}_dmag_{fam}_dg1        {b}_dmag_{fam}_dg2
+        {b}_sigma_mag_{fam}   {b}_dsigma_mag_{fam}_dg1  {b}_dsigma_mag_{fam}_dg2
+
+    where ``dmag_{fam}_dg{c} = dmag_dflux * dflux_{fam}_dg{c}`` and
+    ``dsigma_mag_{fam}_dg{c} = (ln10/2.5) * sigma_mag * dmag_{fam}_dg{c}``.
+
+    The three ``sigma_mag`` columns are added only when ``{b}_flux_{fam}_err``
+    is present. No extinction is applied here (extinction is a downstream,
+    photo-z-time correction). Bands are discovered from the column names, so
+    this works on the survey-prefixed schema (``lsst_i_flux_fpfs1`` ->
+    ``lsst_i_mag_fpfs1``).
+    """
+    names = catalog.dtype.names
+    if names is None:
+        return catalog
+    nameset = set(names)
+    new_names: list[str] = []
+    new_cols: list[NDArray] = []
+    for fam in families:
+        suffix = f"_flux_{fam}"
+        for col in names:
+            if not col.endswith(suffix):
+                continue
+            b = col[: -len(suffix)]
+            d1 = f"{b}_dflux_{fam}_dg1"
+            d2 = f"{b}_dflux_{fam}_dg2"
+            if d1 not in nameset or d2 not in nameset:
+                continue
+            flux = np.asarray(catalog[col], dtype=np.float64)
+            dflux_dg1 = np.asarray(catalog[d1], dtype=np.float64)
+            dflux_dg2 = np.asarray(catalog[d2], dtype=np.float64)
+            ecol = f"{b}_flux_{fam}_err"
+            flux_err = np.asarray(catalog[ecol], dtype=np.float64) if ecol in nameset else None
+            mag, sigma_mag, dmag_dg1, dmag_dg2, dsig_dg1, dsig_dg2 = mag_shear_response(
+                flux, dflux_dg1, dflux_dg2, mag_zero, flux_err=flux_err
+            )
+            new_names += [f"{b}_mag_{fam}", f"{b}_dmag_{fam}_dg1", f"{b}_dmag_{fam}_dg2"]
+            new_cols += [mag, dmag_dg1, dmag_dg2]
+            if sigma_mag is not None:
+                new_names += [
+                    f"{b}_sigma_mag_{fam}",
+                    f"{b}_dsigma_mag_{fam}_dg1",
+                    f"{b}_dsigma_mag_{fam}_dg2",
+                ]
+                new_cols += [sigma_mag, dsig_dg1, dsig_dg2]
+    if not new_names:
+        return catalog
+    return np.asarray(rfn.append_fields(catalog, new_names, new_cols, usemask=False))
 
 
 def _linear_modes_to_derivs(xx: dict[str, NDArray]) -> dict[str, NDArray]:
