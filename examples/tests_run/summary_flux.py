@@ -28,13 +28,13 @@ colnames = [
     "fpfs_m2",
     "fpfs_dm2_dg1",
     "fpfs_dm2_dg2",
-    "i_flux_fpfs1",
-    "i_dflux_fpfs1_dg1",
-    "i_dflux_fpfs1_dg2",
-    "i_fpfs1_e1",
-    "i_fpfs1_de1_dg1",
-    "i_fpfs1_e2",
-    "i_fpfs1_de2_dg2",
+    "lsst_i_flux_fpfs1",
+    "lsst_i_dflux_fpfs1_dg1",
+    "lsst_i_dflux_fpfs1_dg2",
+    "lsst_i_fpfs1_e1",
+    "lsst_i_fpfs1_de1_dg1",
+    "lsst_i_fpfs1_e2",
+    "lsst_i_fpfs1_de2_dg2",
 ]
 
 
@@ -168,9 +168,9 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
     Returns: e1, R11, e2, R22, N  (scalars for this flux_min)
     """
     esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
-    m0 = (src["i_flux_fpfs1"] > flux_min) & (esq0 < emax * emax)
+    m0 = (src["lsst_i_flux_fpfs1"] > flux_min) & (esq0 < emax * emax)
     w0 = src["wsel"][m0]
-    ename = "i_fpfs1"
+    ename = "lsst_i_fpfs1"
     e1 = np.sum(w0 * src[f"{ename}_e1"][m0])
     e2 = np.sum(w0 * src[f"{ename}_e2"][m0])
 
@@ -189,18 +189,18 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
         de = src[f"fpfs_de{comp}_dg{comp}"]
         en = src[f"fpfs_e{comp2}"]
         den = src[f"fpfs_de{comp2}_dg{comp}"]
-        df = src[f"i_dflux_fpfs1_dg{comp}"]
+        df = src[f"lsst_i_dflux_fpfs1_dg{comp}"]
 
         esq_p = esq0 + 2.0 * dg * (e * de + en * den)
         m_p = (
-            ((src["i_flux_fpfs1"] + dg * df) > flux_min)
+            ((src["lsst_i_flux_fpfs1"] + dg * df) > flux_min)
             & (esq_p < emax * emax)
         )
         ellp = np.sum(src["wsel"][m_p] * src[f"{ename}_e{comp}"][m_p])
 
         esq_m = esq0 - 2.0 * dg * (e * de + en * den)
         m_m = (
-            ((src["i_flux_fpfs1"] - dg * df) > flux_min)
+            ((src["lsst_i_flux_fpfs1"] - dg * df) > flux_min)
             & (esq_m < emax * emax)
         )
         ellm = np.sum(src["wsel"][m_m] * src[f"{ename}_e{comp}"][m_m])

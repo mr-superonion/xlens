@@ -41,9 +41,11 @@ from astropy.coordinates import SkyCoord
 # + spec-z confidence > 0.82.
 from .constants import MAG_ZERO_AB as MAG_ZERO
 MAG_CUTS = {
-    "u": 27.5, "g": 26.5, "r": 26.0, "i": 25.0, "z": 25.0, "y": 25.0,
+    "lsst_u": 27.5, "lsst_g": 26.5, "lsst_r": 26.0,
+    "lsst_i": 25.0, "lsst_z": 25.0, "lsst_y": 25.0,
 }
-TRACE_MIN = 0.1  # (i_fpfs1_m00 + i_fpfs1_m20) / i_fpfs1_m00 > TRACE_MIN
+REF_BAND = "lsst_i"  # detection/reference band for the trace cut
+TRACE_MIN = 0.1  # (lsst_i_fpfs1_m00 + lsst_i_fpfs1_m20) / lsst_i_fpfs1_m00 > TRACE_MIN
 CONF_MIN = 0.82
 
 
@@ -78,8 +80,8 @@ def spec_selection(meas, sepcheck) -> np.ndarray:
             sel &= (
                 MAG_ZERO - 2.5 * np.log10(np.asarray(meas[f"{b}_flux_gauss2"]))
             ) < cut
-        m00 = np.asarray(meas["i_fpfs1_m00"])
-        m20 = np.asarray(meas["i_fpfs1_m20"])
+        m00 = np.asarray(meas[f"{REF_BAND}_fpfs1_m00"])
+        m20 = np.asarray(meas[f"{REF_BAND}_fpfs1_m20"])
         sel &= ((m00 + m20) / m00) > TRACE_MIN
     sel &= np.asarray(meas["confidence"]) > CONF_MIN
     return sel

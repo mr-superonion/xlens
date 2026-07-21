@@ -31,7 +31,7 @@ from typing import Any, Iterable, List
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from astropy.stats import sigma_clipped_stats
-from lsst.pex.config import Field, FieldValidationError, ListField
+from lsst.pex.config import DictField, Field, FieldValidationError, ListField
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -88,9 +88,9 @@ def _bootstrap_m(
 def _build_redshift_estimator(
     *,
     redshift: str,
-    bands: str,
+    bands: list[str],
     model_path: str,
-    filter_name: str,
+    bpz_filtersets: dict[str, str],
     bpz_data_path: str,
 ):
     if redshift == "flexzboost":
@@ -103,7 +103,7 @@ def _build_redshift_estimator(
         flux_templates = load_bpz_templates(
             data_path=bpz_data_path,
             bands=bands,
-            filter_name=filter_name,
+            filtersets=bpz_filtersets,
         )
         zp_errors = [0.02] * len(bands)
         return bpzEstimator(flux_templates, model, zp_errors)
@@ -200,13 +200,13 @@ class SelBiasRedshiftPipeConfig(
         doc="Flux column suffix used for the selection cut.",
         default="gauss2",
     )
-    bands = Field[str](
-        doc="Ordered list of bands used for flux cuts.",
-        default="grizy",
+    bands = ListField[str](
+        doc="Ordered survey-prefixed bands used for flux cuts.",
+        default=["lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"],
     )
     ref_band = Field[str](
-        doc="Reference band for color features.",
-        default="i",
+        doc="Reference (survey-prefixed) band for color features.",
+        default="lsst_i",
     )
     redshift_estimator = Field[str](
         doc="Photometric redshift estimator to use (flexzboost/bpz).",
@@ -220,9 +220,10 @@ class SelBiasRedshiftPipeConfig(
         doc="Directory with BPZ flux templates.",
         default=DEFAULT_BPZ_DATA_PATH,
     )
-    filter_name = Field[str](
-        doc="Observation filter name",
-        default="DC2LSST",
+    bpz_filtersets = DictField[str, str](
+        doc="Survey -> BPZ filter-set map for template filenames "
+        "(e.g. lsst_g -> comcam_g, euclid_vis -> euclid_vis).",
+        default={"lsst": "comcam", "euclid": "euclid"},
     )
 
     def validate(self):
@@ -296,8 +297,8 @@ class SelBiasRedshiftPipe(PipelineTask):
         return _build_redshift_estimator(
             redshift=config.redshift_estimator,
             model_path=model_path,
-            bands=self.config.bands,
-            filter_name=self.config.filter_name,
+            bands=list(self.config.bands),
+            bpz_filtersets=dict(self.config.bpz_filtersets),
             bpz_data_path=data_path,
         )
 
@@ -320,7 +321,7 @@ class SelBiasRedshiftPipe(PipelineTask):
             target=config.target,
             do_correction=config.do_correct_selection_bias,
             flux_name=config.flux_name,
-            bands=config.bands,
+            bands=list(config.bands),
             ref_band=config.ref_band,
         )
         ell = np.asarray(out["e"], dtype=np.float64)

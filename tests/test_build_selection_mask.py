@@ -26,12 +26,12 @@ from xlens.catalog.utils import _resolve_cut, _resolve_cut_name
 
 SN = "fpfs_"
 SHAPE = "fpfs"
-BANDS = "griz"
+BANDS = ["lsst_g", "lsst_r", "lsst_i", "lsst_z"]
 FLUX = "fpfs1"
 MAG_ZERO = 31.4
 EMAX = 0.3
 TRACE_MIN = 0.05
-MAG_MAX = {"g": 25.5, "r": 25.0, "i": 23.5, "z": 24.5}
+MAG_MAX = {"lsst_g": 25.5, "lsst_r": 25.0, "lsst_i": 23.5, "lsst_z": 24.5}
 
 
 def _inline_mask(src, *, comp, dg, extinction=None,

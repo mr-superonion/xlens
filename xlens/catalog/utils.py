@@ -22,6 +22,61 @@
 import numpy as np
 from numpy.typing import NDArray
 
+# Smooth magnitude truncation. The standard magnitude holds for sources brighter
+# than MAG_KNEE; fainter than that it smoothly rolls off to the ceiling MAG_CAP,
+# reaching MAG_CAP for zero/negative flux. Real detections (depth ~27 << 30) are
+# unaffected; only non-detections are smoothed. Zeropoint-independent constants.
+MAG_KNEE = 30.0
+MAG_CAP = 40.0
+# d(mag)/d(ln flux) = 2.5/ln(10) ~= 1.0857: magnitudes per fractional flux error
+# (sigma_mag ~= MAG_ERR_FAC * sigma_f / f).
+MAG_ERR_FAC = 2.5 / np.log(10.0)
+
+
+def flux_to_mag(
+    flux: NDArray,
+    mag_zero: float,
+    flux_err: NDArray | None = None,
+    a_ext: NDArray | None = None,
+    m_knee: float = MAG_KNEE,
+    m_cap: float = MAG_CAP,
+) -> tuple[NDArray, NDArray | None]:
+    """Per-band flux -> (mag, mag_err), smoothly truncated at the faint end.
+
+    For a source brighter than ``m_knee`` the standard magnitude
+    ``mag = mag_zero - 2.5*log10(flux)`` (minus per-band extinction ``a_ext``
+    when given) is returned unchanged. Fainter than ``m_knee`` the magnitude is
+    blended by a C1 smoothstep toward the ceiling ``m_cap``, reaching ``m_cap``
+    exactly for ``flux <= flux(m_cap)`` -- including zero and negative flux (no
+    ``log10`` of non-positive flux, no discontinuity at ``flux = 0``).
+
+    When ``flux_err`` is given, the error is propagated from the smoothly
+    truncated magnitude: ``mag_err = MAG_ERR_FAC * flux_err / flux_eff`` with
+    ``flux_eff = 10**((mag_zero - mag)/2.5)`` the flux implied by the truncated
+    ``mag``. For bright sources ``flux_eff == flux`` so this is the standard
+    ``MAG_ERR_FAC * flux_err / flux``; as ``mag`` saturates, ``flux_eff`` -> the
+    fixed ``m_cap`` floor flux, so the error inflates smoothly and stays bounded
+    and well-defined for ``flux <= 0``. Returns ``mag_err = None`` when
+    ``flux_err`` is ``None``.
+    """
+    n = len(flux)
+    # standard magnitude where flux>0; a finite sentinel above the cap elsewhere
+    # so the smoothstep blend saturates to m_cap for zero/negative flux.
+    m_raw = np.full(n, m_cap + 1.0, dtype=np.float64)
+    pos = flux > 0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        m_raw[pos] = mag_zero - 2.5 * np.log10(flux[pos])
+        if a_ext is not None:
+            m_raw[pos] = m_raw[pos] - a_ext[pos]
+    t = np.clip((m_raw - m_knee) / (m_cap - m_knee), 0.0, 1.0)
+    s = t * t * (3.0 - 2.0 * t)  # smoothstep (C1)
+    mag = (1.0 - s) * m_raw + s * m_cap
+    if flux_err is None:
+        return mag, None
+    flux_eff = 10.0 ** ((mag_zero - mag) / 2.5)
+    mag_err = MAG_ERR_FAC * flux_err / flux_eff
+    return mag, mag_err
+
 
 def _linear_modes_to_derivs(xx: dict[str, NDArray]) -> dict[str, NDArray]:
     d: dict[str, NDArray] = {}
@@ -351,7 +406,7 @@ def multiband_shapelets2ell(
 
 def _resolve_cut(
     flux_min: float | dict,
-    bands: str,
+    bands: tuple[str, ...] | list[str],
 ) -> dict[str, float]:
     """Return per-band flux_min as dict{band: value}."""
     if isinstance(flux_min, dict):

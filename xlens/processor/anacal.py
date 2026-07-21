@@ -249,6 +249,7 @@ class AnacalTask(Task):
         exposure: ExposureF,
         seed: int,
         band: str | None,
+        survey: str | None = None,
         noise_corr: NDArray | None = None,
         skyMap=None,
         tract: int = 0,
@@ -300,6 +301,7 @@ class AnacalTask(Task):
             noise_array=noise_array,
             detection=detection,
             band=band,
+            survey=survey,
             blocks=blocks,
         )
         if self.config.validate_psf:
@@ -308,6 +310,8 @@ class AnacalTask(Task):
             data["lsst_psf"] = None
         if band is None:
             data["base_column_name"] = None
+        elif survey is not None:
+            data["base_column_name"] = f"{survey}_{band}_"
         else:
             data["base_column_name"] = band + "_"
         if self.config.psf_model_type == "object":

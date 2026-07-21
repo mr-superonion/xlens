@@ -466,6 +466,7 @@ def generate_pure_noise(
     noise_corr=None,
     noiseId: int = 0,
     rotId: int = 0,
+    survey: str | None = None,
 ):
     from .random import get_noise_seed
 
@@ -475,6 +476,7 @@ def generate_pure_noise(
         noiseId=noiseId,
         rotId=rotId,
         band=band,
+        survey=survey,
         is_sim=False,
     )
     if noise_corr is None:
@@ -642,6 +644,7 @@ def prepare_noise_array(
     rotId: int = 0,
     mask_array: NDArray | None = None,
     star_cat: NDArray | None = None,
+    survey: str | None = None,
 ) -> NDArray | None:
     """Prepare the noise array for noise bias correction.
 
@@ -695,6 +698,7 @@ def prepare_noise_array(
             noise_corr=noise_corr,
             noiseId=noiseId,
             rotId=rotId,
+            survey=survey,
         )
     else:
         # Rotate noise image by 90 degrees CCW to remove anisotropy
@@ -777,9 +781,14 @@ def prepare_data(
     noise_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
     blocks: List | None = None,
+    survey: str | None = None,
     **kwargs,
 ):
-    """Collect metadata and auxiliary arrays from an LSST ExposureF."""
+    """Collect metadata and auxiliary arrays from an LSST ExposureF.
+
+    ``survey`` (when given) makes the noise-realisation seed survey-aware and is
+    used by callers to build the ``{survey}_{band}_`` output-column prefix.
+    """
     pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
     mag_zero = np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()) / 0.4
     wcs = exposure.getWcs()
@@ -819,6 +828,7 @@ def prepare_data(
         rotId=rotId,
         mask_array=mask_array,
         star_cat=star_cat,
+        survey=survey,
     )
 
     if skyMap is not None:
@@ -883,9 +893,14 @@ def prepare_data_one_cell(
     noise_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
     blocks: List | None = None,
+    survey: str | None = None,
     **kwargs,
 ):
-    """Collect metadata and auxiliary arrays from a SingleCellCoadd."""
+    """Collect metadata and auxiliary arrays from a SingleCellCoadd.
+
+    ``survey`` (when given) makes the noise seed survey-aware and sets the
+    ``{survey}_{band}_`` output-column prefix.
+    """
     outer = cell.outer
     wcs = cell.wcs
     pixel_scale = float(wcs.getPixelScale().asArcseconds())
@@ -931,6 +946,7 @@ def prepare_data_one_cell(
         noise_variance=noise_variance,
         mask_array=mask_array,
         star_cat=star_cat,
+        survey=survey,
     )
 
     if skyMap is not None:
@@ -975,7 +991,10 @@ def prepare_data_one_cell(
         "blocks": blocks,
         "psf_object": None,
         "lsst_psf": None,
-        "base_column_name": (band + "_") if band is not None else None,
+        "base_column_name": (
+            None if band is None
+            else (f"{survey}_{band}_" if survey is not None else band + "_")
+        ),
     }
 
 
@@ -1177,15 +1196,18 @@ def broadcast_psf_hsm_moments(
     moments: dict[str, float | bool],
     band: str,
     n: int,
+    survey: str | None = None,
 ) -> NDArray:
     """Replicate one PSF-moment dict into an ``n``-row structured
-    array with DRP-style column names ``{band}_<raw key>``, ready for
+    array with DRP-style column names ``{prefix}_<raw key>`` (``prefix`` =
+    ``{survey}_{band}`` when ``survey`` is given, else ``{band}``), ready for
     ``rfn.merge_arrays`` into a per-band source catalog."""
+    prefix = f"{survey}_{band}" if survey is not None else band
     dtype_fields: list[tuple[str, Any]] = []
     for k, v in moments.items():
         dt = np.bool_ if isinstance(v, (bool, np.bool_)) else np.float64
-        dtype_fields.append((f"{band}_{k}", dt))
+        dtype_fields.append((f"{prefix}_{k}", dt))
     out = np.empty(n, dtype=np.dtype(dtype_fields))
     for k, v in moments.items():
-        out[f"{band}_{k}"] = v
+        out[f"{prefix}_{k}"] = v
     return out

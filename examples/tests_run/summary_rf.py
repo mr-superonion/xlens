@@ -208,7 +208,7 @@ def measure_shear_with_cut(src, flux_min, emax=0.3, smax=1.0, dg=0.02):
     m_0 = (
         (src["g_flux_gauss2"] > flux_min)
         & (src["r_flux_gauss2"] > flux_min)
-        & (src["i_flux_gauss2"] > flux_min)
+        & (src["lsst_i_flux_gauss2"] > flux_min)
         & (esq0 < emax * emax)
         & (score < smax)
     )
@@ -234,7 +234,7 @@ def measure_shear_with_cut(src, flux_min, emax=0.3, smax=1.0, dg=0.02):
         score_p = _get_score(src, comp=comp, dg=dg)
         gflux_p = src["g_flux_gauss2"] + dg * src[f"g_dflux_gauss2_dg{comp}"]
         rflux_p = src["r_flux_gauss2"] + dg * src[f"r_dflux_gauss2_dg{comp}"]
-        iflux_p = src["i_flux_gauss2"] + dg * src[f"i_dflux_gauss2_dg{comp}"]
+        iflux_p = src["lsst_i_flux_gauss2"] + dg * src[f"lsst_i_dflux_gauss2_dg{comp}"]
         m_p = (
             (gflux_p > flux_min)
             & (rflux_p > flux_min)
@@ -248,7 +248,7 @@ def measure_shear_with_cut(src, flux_min, emax=0.3, smax=1.0, dg=0.02):
         score_m = _get_score(src, comp=comp, dg=-dg)
         gflux_m = src["g_flux_gauss2"] - dg * src[f"g_dflux_gauss2_dg{comp}"]
         rflux_m = src["r_flux_gauss2"] - dg * src[f"r_dflux_gauss2_dg{comp}"]
-        iflux_m = src["i_flux_gauss2"] - dg * src[f"i_dflux_gauss2_dg{comp}"]
+        iflux_m = src["lsst_i_flux_gauss2"] - dg * src[f"lsst_i_dflux_gauss2_dg{comp}"]
         m_m = (
             (gflux_m > flux_min)
             & (rflux_m > flux_min)

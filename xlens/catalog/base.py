@@ -23,7 +23,7 @@ import numpy as np
 
 # from .model import w_model, w_model_derivs
 from ..utils.constants import MAG_ZERO_AB
-from .utils import _resolve_cut, _resolve_cut_name
+from .utils import _resolve_cut, _resolve_cut_name, flux_to_mag
 
 
 def get_esq(
@@ -69,7 +69,7 @@ def build_selection_mask(
     *,
     comp: int = 1,
     dg: float = 0.0,
-    bands: str = "grizy",
+    bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
     mag_max: float | dict = 40.0,
     mag_zero: float = MAG_ZERO_AB,
     flux_name: str = "fpfs1",
@@ -79,7 +79,7 @@ def build_selection_mask(
     extinction: np.ndarray | None = None,
     z_estimator=None,
     z_width95_max: float = 2.75,
-    ref_band: str = "i",
+    ref_band: str = "lsst_i",
     z_point_name: str = "zmode",
     include_mag_err: bool = False,
 ):
@@ -130,12 +130,8 @@ def build_selection_mask(
     mask = (esq_s < emax2) & (trace_s > trace_min)
     for b in bands:
         flux_b = src[f"{b}_flux{fn}"] + dg * src[f"{b}_dflux{fn}_dg{comp}"]
-        mag_b = np.full(len(src), 40.0, dtype=np.float64)
-        pos = flux_b > 0
-        with np.errstate(divide="ignore", invalid="ignore"):
-            mag_b[pos] = mag_zero - 2.5 * np.log10(flux_b[pos])
-        if extinction is not None:
-            mag_b = mag_b - extinction[f"a_{b}"]
+        a_ext = None if extinction is None else extinction[f"a_{b}"]
+        mag_b, _ = flux_to_mag(flux_b, mag_zero, a_ext=a_ext)
         mask &= mag_b < magx[b]
 
     z_s = None
@@ -170,8 +166,8 @@ class ShearEstimator(object):
         mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
         shape_name: str = "fpfs",
-        bands: str = "grizy",
-        ref_band: str = "i",
+        bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
+        ref_band: str = "lsst_i",
         z_estimator=None,
         zbounds: list[float] = [0.0, 100.0],
         z_width95_max: float = 2.75,
@@ -357,8 +353,8 @@ def measure_shear(
     do_correction: bool = True,
     mag_zero: float = MAG_ZERO_AB,
     flux_name: str = "gauss2",
-    bands: str = "grizy",
-    ref_band: str = "i",
+    bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
+    ref_band: str = "lsst_i",
     z_point_name: str = "zmode",
 ):
     """

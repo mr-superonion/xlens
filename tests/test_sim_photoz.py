@@ -36,7 +36,11 @@ PHOTOZ_CATALOG = DATA_DIR / "catalog.fits"
 PIXEL_SCALE = 0.2
 PATCH_DIM = 200
 MAG_ZERO = 30.0
+# physical bands rendered by the sim (butler ``band`` dimension), and the
+# survey-prefixed names the measurement writes into the catalog.
 BANDS = "ugrizy"
+SURVEY = "lsst"
+PREFIXED_BANDS = [f"{SURVEY}_{b}" for b in BANDS]
 TRACT_ID = 0
 PATCH_ID = 0
 
@@ -126,7 +130,7 @@ def test_sim_measure_photoz():
     # MeasureCoaddsPipe emits the photoZPipe-compatible schema
     # (``{b}_flux_fpfs1`` etc.) directly: AnaCal's process_image now names the
     # flux family in photoz token order, so no post-hoc rename is needed.
-    for b in BANDS:
+    for b in PREFIXED_BANDS:
         assert f"{b}_flux_fpfs1" in catalog.dtype.names, b
         assert f"{b}_flux_fpfs1_err" in catalog.dtype.names, b
         assert f"{b}_dflux_fpfs1_dg1" in catalog.dtype.names, b
@@ -140,8 +144,8 @@ def test_sim_measure_photoz():
     # No mag_zero: the measurement output is on the fixed AB zeropoint (31.4),
     # which the photo-z estimator now uses by default.
     pz_cfg.flux_name = "fpfs1"
-    pz_cfg.bands = BANDS
-    pz_cfg.ref_band = "i"
+    pz_cfg.bands = PREFIXED_BANDS
+    pz_cfg.ref_band = "lsst_i"
     pz_cfg.do_distortions = False
     pz_cfg.output_pdfs = False
 

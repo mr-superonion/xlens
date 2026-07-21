@@ -33,7 +33,7 @@ from typing import Any
 import astropy.table
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.pex.config import Field, FieldValidationError
+from lsst.pex.config import Field, FieldValidationError, ListField
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -113,13 +113,13 @@ class photoZPipeConfig(
         doc="Flux column suffix (e.g. gauss2 -> {band}_fluxgauss2).",
         default="gauss2",
     )
-    bands = Field[str](
-        doc="String of band names used as color features, in order.",
-        default="grizy",
+    bands = ListField[str](
+        doc="Survey-prefixed band names used as color features, in order.",
+        default=["lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"],
     )
     ref_band = Field[str](
-        doc="Reference band for the reference magnitude feature.",
-        default="i",
+        doc="Reference (survey-prefixed) band for the reference magnitude feature.",
+        default="lsst_i",
     )
     do_distortions = Field[bool](
         doc=(
@@ -211,7 +211,7 @@ class photoZPipe(PipelineTask):
 
         common_kwargs = dict(
             flux_name=cfg.flux_name,
-            bands=cfg.bands,
+            bands=list(cfg.bands),
             ref_band=cfg.ref_band,
             extinction=extinction,
             include_mag_err=cfg.include_mag_err,

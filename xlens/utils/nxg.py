@@ -38,10 +38,10 @@ import numpy as np
 # block in `configs/measure_pipeline_*bands.yaml` so step3's recomputed
 # combine matches what mergePatches writes to the merged catalog).
 _DEFAULT_FPFS_WEIGHTS = {
-    "g": 0.5287963721184084,
-    "r": 0.33049707056512084,
-    "i": 0.1362332926465851,
-    "z": 0.004473264669885652,
+    "lsst_g": 0.5287963721184084,
+    "lsst_r": 0.33049707056512084,
+    "lsst_i": 0.1362332926465851,
+    "lsst_z": 0.004473264669885652,
 }
 
 

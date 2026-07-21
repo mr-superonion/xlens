@@ -107,16 +107,18 @@ GAUSS_APERTURE_COLUMNS: tuple[str, ...] = (
 def select_band_gauss_fluxes(
     catalog: NDArray,
     band: str,
+    survey: str | None = None,
 ) -> NDArray | None:
     """Project an anacal forced-measurement output onto the per-band
-    Gaussian aperture flux columns and prefix them with ``{band}_``.
+    Gaussian aperture flux columns and prefix them.
 
     Unlike the FPFS task, the anacal C++ task does not honour the
     ``base_column_name`` data dict entry for the gauss flux columns —
     it always emits them as plain ``flux_gauss{0,2,4}`` (and their
     ``dflux_*_dg1/2`` and ``*_err`` siblings).  So we look up the
-    unprefixed names here and rename to ``{band}_flux_gauss{0,2,4}``
-    on the way out.
+    unprefixed names here and rename to ``{prefix}_flux_gauss{0,2,4}`` on the
+    way out, where ``prefix`` is ``{survey}_{band}`` when ``survey`` is given
+    (else ``{band}``).
 
     Returns ``None`` if no gauss columns are present.
     """
@@ -126,6 +128,7 @@ def select_band_gauss_fluxes(
     keep = [c for c in GAUSS_APERTURE_COLUMNS if c in names]
     if not keep:
         return None
+    prefix = f"{survey}_{band}" if survey is not None else band
     projected = np.asarray(rfn.repack_fields(catalog[keep]))
-    mapping = {c: f"{band}_{c}" for c in keep}
+    mapping = {c: f"{prefix}_{c}" for c in keep}
     return np.asarray(rfn.rename_fields(projected, mapping))

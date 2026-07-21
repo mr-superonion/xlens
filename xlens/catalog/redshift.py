@@ -26,8 +26,9 @@ import numpy as np
 from scipy.integrate import simpson
 from scipy.optimize import minimize_scalar
 
+from ..utils.bands import physical_band, survey_of
 from ..utils.constants import MAG_ZERO_AB
-from .utils import _resolve_cut_name
+from .utils import _resolve_cut_name, flux_to_mag
 
 NUM_Z_GRIDS = 501
 Z_MIN = 0.0
@@ -105,8 +106,8 @@ def get_point_estimates_from_pdfs(
 def get_color(
     src: np.ndarray,
     *,
-    bands: str = "grizy",
-    ref_band: str = "i",
+    bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
+    ref_band: str = "lsst_i",
     mag_zero: float = MAG_ZERO_AB,
     comp: int = 1,
     dg: float = 0.0,
@@ -124,7 +125,6 @@ def get_color(
           [ref_mag, (b0-b1), err01, (b1-b2), err12, ...]
     """
     fn = _resolve_cut_name(flux_name)
-    A = 2.5 / np.log(10.0)
     n = src.shape[0]
 
     mags: list[np.ndarray] = []
@@ -132,29 +132,12 @@ def get_color(
     # Compute mag (and optionally mag_err) per band, in the same order as
     # `bands`
     for b in bands:
-        flux_col = f"{b}_flux{fn}"
-        dflux_col = f"{b}_dflux{fn}_dg{comp}"
-        err_col = f"{flux_col}_err"
-
-        flux_base = src[flux_col]
-        dflux = src[dflux_col]
-        ferr = src[err_col]
-
-        flux = flux_base + dg * dflux
-        mag = np.full(n, 40.0, dtype=np.float64)  # default to faint mag=40.0
-        pos = flux > 0
-        if extinction is None:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                mag[pos] = mag_zero - 2.5 * np.log10(flux[pos])
-        else:
-            a_ext = extinction[f"a_{b}"]
-            with np.errstate(divide="ignore", invalid="ignore"):
-                mag[pos] = mag_zero - 2.5 * np.log10(flux[pos]) - a_ext[pos]
+        flux = src[f"{b}_flux{fn}"] + dg * src[f"{b}_dflux{fn}_dg{comp}"]
+        ferr = src[f"{b}_flux{fn}_err"] if merrs is not None else None
+        a_ext = None if extinction is None else extinction[f"a_{b}"]
+        mag, mag_err = flux_to_mag(flux, mag_zero, flux_err=ferr, a_ext=a_ext)
         mags.append(mag)
         if merrs is not None:
-            mag_err = np.full(n, 1.0, dtype=np.float64)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                mag_err[pos] = A * (ferr[pos] / flux[pos])
             merrs.append(mag_err)
 
     nb = len(bands) - 1
@@ -194,8 +177,8 @@ class zEstimator(ABC):
         *,
         mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
-        bands: str = "grizy",
-        ref_band: str = "i",
+        bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
+        ref_band: str = "lsst_i",
         comp: int = 1,
         dg: float = 0.0,
         flux_name2: str | None = None,
@@ -211,8 +194,8 @@ class zEstimator(ABC):
         *,
         mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
-        bands: str = "grizy",
-        ref_band: str = "i",
+        bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
+        ref_band: str = "lsst_i",
         comp: int = 1,
         dg: float = 0.0,
         z_point_name: str = "zmode",
@@ -257,8 +240,8 @@ class flexzboostEstimator(zEstimator):
         *,
         mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
-        bands: str = "grizy",
-        ref_band: str = "i",
+        bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
+        ref_band: str = "lsst_i",
         comp: int = 1,
         dg: float = 0.0,
         flux_name2: str | None = None,
@@ -288,12 +271,24 @@ class flexzboostEstimator(zEstimator):
 
 def load_bpz_templates(
     data_path: str,
-    bands: str,
-    filter_name: str = "DC2LSST",
+    bands: tuple[str, ...] | list[str],
+    filtersets: dict[str, str] | None = None,
     spectra_name: str = "cosmossedswdust136.list",
 ):
-    """Load BPZ template fluxes on Z_GRIDS for provided filter set."""
-    filters = [f"{filter_name}_{b}" for b in bands]
+    """Load BPZ template fluxes on Z_GRIDS for the given survey-prefixed bands.
+
+    ``filtersets`` maps a survey to its on-disk BPZ filter set (default
+    ``{"lsst":"comcam","euclid":"euclid"}``). The AB template files are named
+    ``{SED}.{filterset}_{physical_band}.AB`` (e.g. ``El_B2004a.comcam_g.AB``,
+    ``El_B2004a.euclid_vis.AB``), so a survey-prefixed band ``lsst_g`` resolves
+    to filter id ``comcam_g`` and ``euclid_vis`` to ``euclid_vis``. This handles
+    single- and mixed-survey band lists.
+    """
+    if filtersets is None:
+        filtersets = {"lsst": "comcam", "euclid": "euclid"}
+    filters = [
+        f"{filtersets[survey_of(b)]}_{physical_band(b)}" for b in bands
+    ]
     from desc_bpz.useful_py3 import get_data, get_str, match_resol
 
     z = Z_GRIDS
@@ -363,8 +358,8 @@ class bpzEstimator(zEstimator):
         *,
         mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
-        bands: str = "grizy",
-        ref_band: str = "i",
+        bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
+        ref_band: str = "lsst_i",
         comp: int = 1,
         dg: float = 0.0,
         return_pdfs: bool = False,
@@ -373,34 +368,16 @@ class bpzEstimator(zEstimator):
     ) -> dict:
 
         fn = _resolve_cut_name(flux_name)
-        A = 2.5 / np.log(10.0)
-        n = src.shape[0]
+        # Per-band magnitudes from the SAME smooth ``flux_to_mag`` used for the
+        # FlexZBoost features, so the flux -> mag -> pseudo-flux path is identical
+        # between training and measurement.
         mags = []
         merrs = []
         for b in bands:
-            flux_col = f"{b}_flux{fn}"
-            dflux_col = f"{b}_dflux{fn}_dg{comp}"
-            err_col = f"{flux_col}_err"
-
-            flux_base = src[flux_col]
-            dflux = src[dflux_col]
-            ferr = src[err_col]
-
-            flux = flux_base + dg * dflux
-
-            mag = np.full(n, 40.0, dtype=np.float64)  # default to faint gal
-            mag_err = np.full(n, 1.0, dtype=np.float64)
-
-            pos = flux > 0
-            with np.errstate(divide="ignore", invalid="ignore"):
-                mag_err[pos] = A * (ferr[pos] / flux[pos])
-            if extinction is None:
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    mag[pos] = mag_zero - 2.5 * np.log10(flux[pos])
-            else:
-                a_ext = extinction[f"a_{b}"]
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    mag[pos] = mag_zero - 2.5 * np.log10(flux[pos]) - a_ext[pos]
+            flux = src[f"{b}_flux{fn}"] + dg * src[f"{b}_dflux{fn}_dg{comp}"]
+            ferr = src[f"{b}_flux{fn}_err"]
+            a_ext = None if extinction is None else extinction[f"a_{b}"]
+            mag, mag_err = flux_to_mag(flux, mag_zero, flux_err=ferr, a_ext=a_ext)
             mags.append(mag)
             merrs.append(mag_err)
 
@@ -411,15 +388,17 @@ class bpzEstimator(zEstimator):
 
         zp_frac = e_mag2frac(np.array(self.zp_errors))
 
-        # Convert to pseudo-fluxes and propagate errors
+        # Derive the AB pseudo-flux (zeropoint 0, where the templates live) and
+        # its error from the magnitude, the standard BPZ conversion. mag_err is
+        # clipped at 70 before e_mag2frac (10**(0.4*70)=1e28) so a smoothly
+        # truncated non-detection (huge mag_err) gives a huge but finite error
+        # (>>1) -> the band is dropped by ``p_c_z_t``, without float overflow.
         flux = 10.0 ** (-0.4 * mags)
-        flux_err = flux * (10.0 ** (0.4 * merrs) - 1.0)
+        flux_err = flux * e_mag2frac(np.minimum(merrs, 70.0))
         add_err = (zp_frac * flux) ** 2
         flux_err = np.sqrt(flux_err**2 + add_err)
 
-        m_0_col = bands.index(ref_band)
-        mag0 = mags[:, m_0_col]
-        # Free some memory
+        mag0 = mags[:, bands.index(ref_band)]
         del mags, merrs
 
         ng = len(src)

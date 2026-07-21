@@ -19,10 +19,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from . import catalog, columns, constants, handle, image, massmap, match, nxg, random
+from . import bands, catalog, columns, constants, handle, image, massmap, match, nxg, random
+from .bands import physical_band, prefixed, survey_of
 from .constants import MAG_ZERO_AB
 
 __all__ = [
-    "catalog", "columns", "constants", "handle", "image", "massmap", "match",
-    "nxg", "random", "MAG_ZERO_AB",
+    "bands", "catalog", "columns", "constants", "handle", "image", "massmap",
+    "match", "nxg", "random", "MAG_ZERO_AB",
+    "physical_band", "prefixed", "survey_of",
 ]

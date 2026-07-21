@@ -42,6 +42,16 @@ def _load_photoz_catalog() -> np.ndarray:
         for name in catalog.dtype.names:
             if "flux_gauss" in name:  # flux / dflux / flux_err (not mag_*)
                 catalog[name] = catalog[name] * r
+    # The bundled fixture has single-letter per-band columns (``u_flux_gauss2``);
+    # the pipeline now uses survey-prefixed band names, so re-key the per-band
+    # columns to ``lsst_<band>_...`` to match ``bands=["lsst_u", ...]``.
+    band_rename = {
+        n: f"lsst_{n}"
+        for n in catalog.dtype.names
+        if len(n) >= 2 and n[0] in "ugrizy" and n[1] == "_"
+    }
+    if band_rename:
+        catalog = np.asarray(rfn.rename_fields(catalog, band_rename))
     if "object_id" not in catalog.dtype.names:
         catalog = rfn.append_fields(
             catalog, "object_id",
@@ -55,8 +65,8 @@ def _make_config(*, output_pdfs: bool) -> photoZPipeConfig:
     cfg = photoZPipeConfig()
     cfg.model_path = os.fspath(FZB_MODEL)
     cfg.flux_name = "gauss2"
-    cfg.bands = "ugrizy"
-    cfg.ref_band = "i"
+    cfg.bands = [f"lsst_{b}" for b in "ugrizy"]
+    cfg.ref_band = "lsst_i"
     cfg.do_distortions = False  # one undistorted call is enough
     cfg.output_pdfs = output_pdfs
     return cfg

@@ -262,6 +262,7 @@ class FpfsMeasurementTask(Task):
         exposure: ExposureF,
         seed: int,
         band: str | None,
+        survey: str | None = None,
         noise_corr: NDArray | None = None,
         mask_array: NDArray | None = None,
         noise_array: NDArray | None = None,
@@ -273,6 +274,9 @@ class FpfsMeasurementTask(Task):
         Args:
         exposure (ExposureF):   LSST exposure
         seed (int):  random seed
+        band (str | None):  physical band label (butler ``band`` dimension)
+        survey (str | None):  survey name; sets the ``{survey}_{band}_`` output
+            column prefix and makes the noise seed survey-aware
         noise_corr (NDArray):  image noise correlation function (None)
         detection (NDArray | None):  external detection catalog (None)
 
@@ -284,6 +288,7 @@ class FpfsMeasurementTask(Task):
 
         data = utils.image.prepare_data(
             band=band,
+            survey=survey,
             exposure=exposure,
             seed=seed,
             noiseId=self.config.noiseId,

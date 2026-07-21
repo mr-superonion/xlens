@@ -4,9 +4,25 @@ from pathlib import Path
 
 import fitsio
 import numpy as np
+from numpy.lib import recfunctions as rfn
 
 import xlens
 from xlens.catalog import ShearEstimator, measure_shear
+
+# Survey-prefixed bands the pipeline now uses; the bundled ``catalog.fits`` has
+# single-letter per-band columns, so re-key them to ``lsst_<band>_...`` on load.
+PREFIXED_BANDS = [f"lsst_{b}" for b in "ugrizy"]
+REF_BAND = "lsst_i"
+
+
+def _read_prefixed(fname):
+    catalog = fitsio.read(fname)
+    rename = {
+        n: f"lsst_{n}"
+        for n in catalog.dtype.names
+        if len(n) >= 2 and n[0] in "ugrizy" and n[1] == "_"
+    }
+    return np.asarray(rfn.rename_fields(catalog, rename)) if rename else catalog
 
 
 def test_pz_point_estimates():
@@ -34,7 +50,7 @@ def test_pz():
     # Set up the configuration
     DATA_DIR = Path(__file__).parent / "data"
     fname = os.path.join(DATA_DIR, "catalog.fits")
-    catalog = fitsio.read(fname)
+    catalog = _read_prefixed(fname)
     model_fname = os.path.join(DATA_DIR, "model_inform_fzboost.pkl")
     with open(model_fname, "rb") as f:
         pz_obj = pickle.load(f)
@@ -43,8 +59,8 @@ def test_pz():
         catalog,
         mag_zero=30.0,
         flux_name="gauss2",
-        bands="ugrizy",
-        ref_band="i",
+        bands=PREFIXED_BANDS,
+        ref_band=REF_BAND,
     )
     key_target = ['zmode', 'z025', 'z160', 'z500', 'z840', 'z975', 'zbest']
     assert list(out.keys()) == key_target
@@ -64,7 +80,7 @@ def test_pz():
 def test_measure_shear_consistency():
     DATA_DIR = Path(__file__).parent / "data"
     fname = os.path.join(DATA_DIR, "catalog.fits")
-    catalog = fitsio.read(fname)
+    catalog = _read_prefixed(fname)
     model_fname = os.path.join(DATA_DIR, "model_inform_fzboost.pkl")
     with open(model_fname, "rb") as f:
         pz_obj = pickle.load(f)
@@ -77,8 +93,8 @@ def test_measure_shear_consistency():
     do_correction = True
     z_width95_max = 2.75
     mag_zero = 30.0
-    bands = "ugrizy"
-    ref_band = "i"
+    bands = PREFIXED_BANDS
+    ref_band = REF_BAND
     trace_min = 0.05
 
     mag_max_list = [27.5, 27.0, 26.0, 24.6, 25.0, 25.5]

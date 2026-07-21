@@ -114,8 +114,8 @@ class MergePipeConfig(
     """Configuration for :class:`MergePipe`."""
 
     bands = ListField[str](
-        doc="Bands whose ``{band}_fpfs1_*`` moments are combined.",
-        default=["g", "r", "i", "z"],
+        doc="Survey-prefixed bands whose ``{band}_fpfs1_*`` moments are combined.",
+        default=["lsst_g", "lsst_r", "lsst_i", "lsst_z"],
     )
     band_weights = ListField[float](
         doc=(

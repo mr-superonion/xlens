@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bands",
         type=str,
-        default="ugrizy",
+        default="lsst_u,lsst_g,lsst_r,lsst_i,lsst_z,lsst_y",
         help="bands that are used for photo-z estimation",
     )
     parser.add_argument(
@@ -235,7 +235,7 @@ def per_rank_work(
     do_correction: bool = True,
     z_width95_max: float = 2.75,
     mag_zero: float = 31.4,
-    bands: str = "ugrizy",
+    bands=("lsst_u", "lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
 ):
     e_pos_rows = []
     e_neg_rows = []
@@ -251,7 +251,7 @@ def per_rank_work(
         "mag_zero": mag_zero,
         "flux_name": "fpfs1",
         "bands": bands,
-        "ref_band": "i",
+        "ref_band": "lsst_i",
     }
 
     shear_obj = ShearEstimator(
@@ -393,7 +393,7 @@ def build_redshift_estimator(
         flux_templates = load_bpz_templates(
             data_path=bpz_data_path,
             bands=bands,
-            filter_name="DC2LSST",
+            filtersets={"lsst": "DC2LSST", "euclid": "euclid"},
         )
         zp_errors = [0.02] * len(bands)
         return bpzEstimator(flux_templates, mm, zp_errors)
@@ -424,7 +424,7 @@ def main():
             f"--model-path not provided and {env} is not set in the environment"
         )
 
-    bands = args.bands
+    bands = [b.strip() for b in args.bands.split(",") if b.strip()]
     mag_max_list = parse_float_list(args.mag_max)
     # Broadcast or validate length
     if len(mag_max_list) == 1:

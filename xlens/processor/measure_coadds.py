@@ -172,8 +172,15 @@ class MeasureCoaddsPipeConfig(
         default=False,
     )
     sim_bands = ListField[str](
-        doc="Bands to simulate when ``use_sim`` is True.",
+        doc="PHYSICAL bands to simulate when ``use_sim`` is True.",
         default=["u", "g", "r", "i", "z", "y"],
+    )
+    survey = Field[str](
+        doc=(
+            "Survey name for the survey-prefixed output columns "
+            "``{survey}_{band}_...`` and the survey-aware noise seed."
+        ),
+        default="lsst",
     )
     psfCache = Field[int](
         doc="Size of PSF cache",
@@ -395,6 +402,7 @@ class MeasureCoaddsPipe(PipelineTask):
         data = self.anacal.prepare_data(
             exposure=exposure,
             band=band,
+            survey=self.config.survey,
             seed=seed,
             noise_corr=noise_corr,
             detection=None,
@@ -432,6 +440,7 @@ class MeasureCoaddsPipe(PipelineTask):
                 noise_corr=noise_corr,
                 detection=detection,
                 band=band,
+                survey=self.config.survey,
                 skyMap=skyMap,
                 tract=tract,
                 patch=patch,
@@ -442,6 +451,7 @@ class MeasureCoaddsPipe(PipelineTask):
                 gauss_cat = select_band_gauss_fluxes(
                     self.anacal.run(**data),
                     band,
+                    survey=self.config.survey,
                 )
                 cat = np.asarray(rfn.merge_arrays([cat, gauss_cat], flatten=True))
             if self.config.doPsfHsmMoments:
@@ -454,6 +464,7 @@ class MeasureCoaddsPipe(PipelineTask):
                 )
                 psf_block = broadcast_psf_hsm_moments(
                     psf_moments, band, n=len(cat),
+                    survey=self.config.survey,
                 )
                 cat = np.asarray(rfn.merge_arrays([cat, psf_block], flatten=True))
             per_band.append(cat)

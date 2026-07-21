@@ -171,10 +171,15 @@ class SelBiasRfMultibandPipe(PipelineTask):
             self.clf = pickle.load(f)
         return
 
+    # Survey-prefixed bands in the order the pickled RF model was trained on
+    # (griz-y). The rename only changes the column NAMES read, not the feature
+    # values/order, so the serialized model stays valid.
+    _RF_BANDS = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y")
+
     @staticmethod
     def measure_distorted_photomoetry(*, src, dg):
         phot = []
-        for band in "grizy":
+        for band in SelBiasRfMultibandPipe._RF_BANDS:
             phot.append(
                 MAG_ZERO_AB - np.log10(src[f"{band}_fpfs1_m00"] + dg * src[f"{band}_fpfs1_dm00_dg1"]) * 2.5
             )

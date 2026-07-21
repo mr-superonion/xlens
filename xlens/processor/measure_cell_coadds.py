@@ -127,11 +127,18 @@ class MeasureCellCoaddsPipeConfig(
     )
     bands = ListField[str](
         doc=(
-            "Bands required to be present in the input cell coadd dict. "
-            "The task raises if the set of bands actually delivered by "
-            "the butler does not match this list (no partial-band runs)."
+            "PHYSICAL bands (butler ``band`` dimension) required in the input "
+            "cell coadd dict. The task raises if the set of bands actually "
+            "delivered by the butler does not match this list."
         ),
         default=["g", "r", "i", "z"],
+    )
+    survey = Field[str](
+        doc=(
+            "Survey name used to build the survey-prefixed output column names "
+            "``{survey}_{band}_...`` and to make the noise seed survey-aware."
+        ),
+        default="lsst",
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
     doPsfHsmMoments = Field[bool](
@@ -327,6 +334,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
         data = prepare_data_one_cell(
             cell=cell,
             band=band,
+            survey=self.config.survey,
             seed=seed,
             mag_zero=mag_zero,
             npix=npix,
@@ -486,6 +494,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
                         gauss_cat = select_band_gauss_fluxes(
                             self.anacal.run(**data),
                             band,
+                            survey=self.config.survey,
                         )
                         cat = np.asarray(
                             rfn.merge_arrays(
@@ -507,6 +516,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
                         )
                         psf_block = broadcast_psf_hsm_moments(
                             psf_moments, band, n=len(cat),
+                            survey=self.config.survey,
                         )
                         cat = np.asarray(
                             rfn.merge_arrays(

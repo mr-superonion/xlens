@@ -166,7 +166,7 @@ def test_sim_detect_isotropic_shear_recovery(measured):
     atol = 5e-3
 
     g1_det, g2_det = _shear(measured.catalog, "fpfs_e1", "fpfs_e2")
-    g1_k1, g2_k1 = _shear(measured.catalog, "i_fpfs1_e1", "i_fpfs1_e2")
+    g1_k1, g2_k1 = _shear(measured.catalog, "lsst_i_fpfs1_e1", "lsst_i_fpfs1_e2")
 
     np.testing.assert_allclose(
         g1_det, INPUT_G1, atol=atol, err_msg="Det kernel g1"
@@ -208,7 +208,8 @@ def test_psf_hsm_moments_isotropic_zero_spin2(measured):
     to every source in the per-source catalog (one HSM measurement
     per band shared across all rows)."""
     catalog = measured.catalog
-    band = measured.band
+    # measurement writes survey-prefixed columns (survey default "lsst")
+    band = f"lsst_{measured.band}"
 
     ixx_col = f"{band}_ext_shapeHSM_HsmPsfMoments_xx"
     iyy_col = f"{band}_ext_shapeHSM_HsmPsfMoments_yy"
