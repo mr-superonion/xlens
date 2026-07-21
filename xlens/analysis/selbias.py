@@ -225,7 +225,7 @@ class SelBiasMultibandPipe(PipelineTask):
         del msk, tmp, esq
 
         if self.config.do_correct_selection_bias:
-            dg = 0.02
+            dg = 0.01
             # selection
             esq = src[en] ** 2 + src[en2] ** 2 + 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
             msk = ((src[fname] + dg * src[fgname]) > flux_min) & (esq < emax)
