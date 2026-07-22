@@ -271,6 +271,11 @@ class MergePipe(PipelineTask):
         - Band-combined ellipticity and full shear response (already
           WCS-corrected): ``fpfs1_e1``, ``fpfs1_e2``, ``fpfs1_de1_dg1``,
           ``fpfs1_de1_dg2``, ``fpfs1_de2_dg1``, ``fpfs1_de2_dg2``.
+        - Band-combined shape magnitude ``esq = e1**2 + e2**2`` and its
+          first-order shear response ``desq_dg{1,2} = 2*(e1*de1_dg{c} +
+          e2*de2_dg{c})``, derived from the WCS-corrected fpfs1
+          ellipticities above. Enables downstream ``|e|^2 < emax**2``
+          cuts with the ±γ variant built from ``desq_dg{c}``.
         - Band-combined shapelet moments and full shear responses:
           ``fpfs1_m00``, ``fpfs1_dm00_dg1``, ``fpfs1_dm00_dg2``,
           ``fpfs1_m20``, ``fpfs1_dm20_dg1``, ``fpfs1_dm20_dg2``.
@@ -296,6 +301,37 @@ class MergePipe(PipelineTask):
             raise RuntimeError("merge finalize: catalog is missing 'wsel'")
         keep_rows = np.asarray(catalog["is_primary"], dtype=bool) & (np.asarray(catalog["wsel"]) > 1e-5)
         catalog = catalog[keep_rows]
+        # Back-compat shim: rename legacy sigma_mag / dsigma_mag columns
+        # (per-patch catalogs measured before add_magnitude_columns was
+        # updated) so the current keep list finds them under the new
+        # ``mag_err`` / ``dmag_err`` names.  Check ``dsigma_mag`` first
+        # since ``sigma_mag`` is a substring of it.
+        for c in list(catalog.colnames):
+            new = c
+            if "_dsigma_mag_" in c:
+                new = c.replace("_dsigma_mag_", "_dmag_")
+                if new.endswith("_dg1"):
+                    new = new[:-4] + "_err_dg1"
+                elif new.endswith("_dg2"):
+                    new = new[:-4] + "_err_dg2"
+            elif "_sigma_mag_" in c:
+                new = c.replace("_sigma_mag_", "_mag_") + "_err"
+            if new != c:
+                catalog.rename_column(c, new)
+        # Band-combined shape magnitude and its first-order shear
+        # response. Computed on the already-WCS-corrected (and
+        # flipu-corrected, when enabled) fpfs1 shape so downstream
+        # cuts (TXPipe / step3) can apply |e|^2 < emax**2 in one
+        # column read.
+        e1 = np.asarray(catalog[f"{p}e1"], dtype=np.float64)
+        e2 = np.asarray(catalog[f"{p}e2"], dtype=np.float64)
+        de1_dg1 = np.asarray(catalog[f"{p}de1_dg1"], dtype=np.float64)
+        de1_dg2 = np.asarray(catalog[f"{p}de1_dg2"], dtype=np.float64)
+        de2_dg1 = np.asarray(catalog[f"{p}de2_dg1"], dtype=np.float64)
+        de2_dg2 = np.asarray(catalog[f"{p}de2_dg2"], dtype=np.float64)
+        catalog["esq"] = e1 * e1 + e2 * e2
+        catalog["desq_dg1"] = 2.0 * (e1 * de1_dg1 + e2 * de2_dg1)
+        catalog["desq_dg2"] = 2.0 * (e1 * de1_dg2 + e2 * de2_dg2)
         keep: list[str] = [
             "ra",
             "dec",
@@ -314,28 +350,15 @@ class MergePipe(PipelineTask):
             f"{p}de1_dg2",
             f"{p}de2_dg1",
             f"{p}de2_dg2",
+            "esq",
+            "desq_dg1",
+            "desq_dg2",
             f"{p}m00",
             f"{p}dm00_dg1",
             f"{p}dm00_dg2",
             f"{p}m20",
             f"{p}dm20_dg1",
             f"{p}dm20_dg2",
-            # Detection-band raw FPFS shape/size moments. Carried
-            # through so downstream selection (xlens.catalog.base.
-            # build_selection_mask with shape_name="fpfs") can run
-            # directly on the merged catalog.
-            "fpfs_e1",
-            "fpfs_e2",
-            "fpfs_de1_dg1",
-            "fpfs_de1_dg2",
-            "fpfs_de2_dg1",
-            "fpfs_de2_dg2",
-            "fpfs_m0",
-            "fpfs_m2",
-            "fpfs_dm0_dg1",
-            "fpfs_dm0_dg2",
-            "fpfs_dm2_dg1",
-            "fpfs_dm2_dg2",
         ]
         for b in bands:
             keep.extend(
@@ -349,14 +372,15 @@ class MergePipe(PipelineTask):
                     f"{b}_s2n_fpfs1",
                     f"{b}_ds2n_fpfs1_dg1",
                     f"{b}_ds2n_fpfs1_dg2",
-                    # Per-band AB magnitude + shear response (add_magnitude_columns;
-                    # smooth-truncated flux_to_mag on the fixed MAG_ZERO_AB scale).
+                    # Per-band AB magnitude + shear response
+                    # (add_magnitude_columns; smooth-truncated
+                    # flux_to_mag on the fixed MAG_ZERO_AB scale).
                     f"{b}_mag_fpfs1",
                     f"{b}_dmag_fpfs1_dg1",
                     f"{b}_dmag_fpfs1_dg2",
-                    f"{b}_sigma_mag_fpfs1",
-                    f"{b}_dsigma_mag_fpfs1_dg1",
-                    f"{b}_dsigma_mag_fpfs1_dg2",
+                    f"{b}_mag_fpfs1_err",
+                    f"{b}_dmag_fpfs1_err_dg1",
+                    f"{b}_dmag_fpfs1_err_dg2",
                 ]
             )
             # Per-band gauss2 fluxes (only present when
@@ -371,9 +395,9 @@ class MergePipe(PipelineTask):
                 f"{b}_mag_gauss2",
                 f"{b}_dmag_gauss2_dg1",
                 f"{b}_dmag_gauss2_dg2",
-                f"{b}_sigma_mag_gauss2",
-                f"{b}_dsigma_mag_gauss2_dg1",
-                f"{b}_dsigma_mag_gauss2_dg2",
+                f"{b}_mag_gauss2_err",
+                f"{b}_dmag_gauss2_err_dg1",
+                f"{b}_dmag_gauss2_err_dg2",
             ):
                 if col in catalog.colnames:
                     keep.append(col)

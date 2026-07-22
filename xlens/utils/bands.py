@@ -32,7 +32,9 @@ survey ``euclid``, band ``nisp_j``).
 
 
 def prefixed(survey: str, band: str) -> str:
-    """Compose a survey-prefixed band name, e.g. ``('lsst','g') -> 'lsst_g'``."""
+    """Compose a survey-prefixed band name, e.g.
+    ``('lsst','g') -> 'lsst_g'``.
+    """
     return f"{survey}_{band}"
 
 

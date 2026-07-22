@@ -22,9 +22,11 @@
 """Shared numeric constants for xlens."""
 
 # AB magnitude zeropoint for fluxes measured in nanojansky:
-#   m_AB = MAG_ZERO_AB - 2.5 * log10(F_nJy),   F_nJy = 10**((MAG_ZERO_AB - m)/2.5)
-# The measurement stage (xlens.utils.image.prepare_data*) rescales every FPFS
-# moment/flux onto this fixed zeropoint, so the output catalog is independent of
-# each coadd's native photometric zeropoint and downstream consumers convert
-# flux->mag with this single constant (no per-catalog mag_zero needed).
+#   m_AB = MAG_ZERO_AB - 2.5 * log10(F_nJy)
+#   F_nJy = 10**((MAG_ZERO_AB - m)/2.5)
+# The measurement stage (xlens.utils.image.prepare_data*) rescales every
+# FPFS moment/flux onto this fixed zeropoint, so the output catalog is
+# independent of each coadd's native photometric zeropoint and
+# downstream consumers convert flux->mag with this single constant
+# (no per-catalog mag_zero needed).
 MAG_ZERO_AB = 31.4

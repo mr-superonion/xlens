@@ -175,9 +175,10 @@ class AnacalTask(Task):
     ):
         assert isinstance(self.config, AnacalConfig)
 
-        # Base thresholds are at the AnaCal reference zeropoint (30); the Task
-        # owns the mag_zero threshold scaling. The image is already normalized to
-        # MAG_ZERO_AB upstream (prepare_data), so ``mag_zero`` here is MAG_ZERO_AB.
+        # Base thresholds are at the AnaCal reference zeropoint (30);
+        # the Task owns the mag_zero threshold scaling. The image is
+        # already normalized to MAG_ZERO_AB upstream (prepare_data), so
+        # ``mag_zero`` here is MAG_ZERO_AB.
         task = anacal.task.Task(
             scale=pixel_scale,
             omega_f=0.06,
