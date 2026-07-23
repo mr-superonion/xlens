@@ -278,11 +278,12 @@ def load_bpz_templates(
     """Load BPZ template fluxes on Z_GRIDS for the given survey-prefixed bands.
 
     ``filtersets`` maps a survey to its on-disk BPZ filter set (default
-    ``{"lsst":"comcam","euclid":"euclid"}``). The AB template files are named
-    ``{SED}.{filterset}_{physical_band}.AB`` (e.g. ``El_B2004a.comcam_g.AB``,
-    ``El_B2004a.euclid_vis.AB``), so a survey-prefixed band ``lsst_g`` resolves
-    to filter id ``comcam_g`` and ``euclid_vis`` to ``euclid_vis``. This handles
-    single- and mixed-survey band lists.
+    ``{"lsst":"comcam","euclid":"euclid"}``). The AB template files are
+    named ``{SED}.{filterset}_{physical_band}.AB`` (e.g.
+    ``El_B2004a.comcam_g.AB``, ``El_B2004a.euclid_vis.AB``), so a
+    survey-prefixed band ``lsst_g`` resolves to filter id ``comcam_g``
+    and ``euclid_vis`` to ``euclid_vis``. This handles single- and
+    mixed-survey band lists.
     """
     if filtersets is None:
         filtersets = {"lsst": "comcam", "euclid": "euclid"}
@@ -368,9 +369,9 @@ class bpzEstimator(zEstimator):
     ) -> dict:
 
         fn = _resolve_cut_name(flux_name)
-        # Per-band magnitudes from the SAME smooth ``flux_to_mag`` used for the
-        # FlexZBoost features, so the flux -> mag -> pseudo-flux path is identical
-        # between training and measurement.
+        # Per-band magnitudes from the SAME smooth ``flux_to_mag`` used
+        # for the FlexZBoost features, so the flux -> mag -> pseudo-flux
+        # path is identical between training and measurement.
         mags = []
         merrs = []
         for b in bands:

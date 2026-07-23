@@ -28,7 +28,15 @@ num_rot = 2
 gal_seed_base = 10
 
 
-def get_noise_seed(*, galaxy_seed, noiseId=0, rotId=0, band: None | str = "i", survey: None | str = None, is_sim=False):
+def get_noise_seed(
+    *,
+    galaxy_seed,
+    noiseId=0,
+    rotId=0,
+    band: None | str = "i",
+    survey: None | str = None,
+    is_sim=False,
+):
     """Generate a stable pseudo-random seed for noise realisations.
 
     The function mixes deterministic galaxy identifiers with optional
@@ -49,9 +57,10 @@ def get_noise_seed(*, galaxy_seed, noiseId=0, rotId=0, band: None | str = "i", s
         Physical photometric band label (``"g"``, ``"r"``, ``"i"``, ``"z"``,
         ``"y"``).  Defaults to ``"i"``.
     survey : str, optional
-        Survey name (``"lsst"``, ``"hsc"``, ``"euclid"``).  Mixed into the seed
-        so the same physical band in different surveys (``lsst_g`` vs ``hsc_g``)
-        draws INDEPENDENT noise.  ``None`` reproduces the pre-survey seed.
+        Survey name (``"lsst"``, ``"hsc"``, ``"euclid"``).  Mixed into
+        the seed so the same physical band in different surveys
+        (``lsst_g`` vs ``hsc_g``) draws INDEPENDENT noise.  ``None``
+        reproduces the pre-survey seed.
     is_sim : bool, optional
         Flag that indicates whether the galaxy originates from a simulation
         (``True``) or observations (``False``).  Defaults to ``False``.
@@ -62,9 +71,10 @@ def get_noise_seed(*, galaxy_seed, noiseId=0, rotId=0, band: None | str = "i", s
         Unsigned 32-bit integer seed suitable for initialising NumPy random
         generators.
     """
-    # ``survey`` is included only when given, so passing None reproduces the
-    # historical (survey-agnostic) seed; galaxy_seed itself is never survey/band
-    # dependent (it labels the galaxy, identical across bands/surveys).
+    # ``survey`` is included only when given, so passing None
+    # reproduces the historical (survey-agnostic) seed; galaxy_seed
+    # itself is never survey/band dependent (it labels the galaxy,
+    # identical across bands/surveys).
     mixed_list = [galaxy_seed, noiseId, rotId, band, int(is_sim)]
     if survey is not None:
         mixed_list.append(survey)

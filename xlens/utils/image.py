@@ -194,11 +194,12 @@ class GridPsf(anacal.psf.BasePsf):
     """Spatially varying PSF defined on a regular grid of postage stamps.
 
     A survey-agnostic ``anacal`` PSF adapter.  The spatial variation is
-    captured by a coarse grid of pre-computed PSF stamps; :meth:`draw` returns
-    the stamp of the cell containing the requested pixel (nearest-cell lookup,
-    no interpolation).  It complements :class:`LsstPsf` for cases where the PSF
-    is only available as sampled stamps rather than as a callable model -- for
-    example a Euclid MER catalogue PSF, or an LSST ``CoaddPsf`` pre-sampled on a
+    captured by a coarse grid of pre-computed PSF stamps; :meth:`draw`
+    returns the stamp of the cell containing the requested pixel
+    (nearest-cell lookup, no interpolation).  It complements
+    :class:`LsstPsf` for cases where the PSF is only available as
+    sampled stamps rather than as a callable model -- for example a
+    Euclid MER catalogue PSF, or an LSST ``CoaddPsf`` pre-sampled on a
     grid so that a single object works across surveys.
 
     Parameters
@@ -232,7 +233,7 @@ class GridPsf(anacal.psf.BasePsf):
 
     @property
     def average(self) -> NDArray:
-        """Grid-averaged, unit-sum PSF stamp (used as the exposure-average PSF)."""
+        """Grid-averaged, unit-sum PSF stamp (the exposure-average PSF)."""
         avg = np.ascontiguousarray(self.model.mean(axis=(0, 1)))
         return avg / avg.sum()
 
@@ -786,8 +787,9 @@ def prepare_data(
 ):
     """Collect metadata and auxiliary arrays from an LSST ExposureF.
 
-    ``survey`` (when given) makes the noise-realisation seed survey-aware and is
-    used by callers to build the ``{survey}_{band}_`` output-column prefix.
+    ``survey`` (when given) makes the noise-realisation seed
+    survey-aware and is used by callers to build the
+    ``{survey}_{band}_`` output-column prefix.
     """
     pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
     mag_zero = np.log10(exposure.getPhotoCalib().getInstFluxAtZeroMagnitude()) / 0.4
@@ -966,9 +968,9 @@ def prepare_data_one_cell(
         blocks=blocks,
     )
 
-    # Normalize the image onto the fixed AB zeropoint; the measurement then runs
-    # at mag_zero=MAG_ZERO_AB independent of the cell's native mag_zero. No-op
-    # (no allocation) for a native-31.4 coadd.
+    # Normalize the image onto the fixed AB zeropoint; the measurement
+    # then runs at mag_zero=MAG_ZERO_AB independent of the cell's native
+    # mag_zero. No-op (no allocation) for a native-31.4 coadd.
     gal_array, noise_array, noise_variance = anacal.utils.rescale_image_to_zeropoint(
         gal_array, noise_array, noise_variance, mag_zero, MAG_ZERO_AB,
     )

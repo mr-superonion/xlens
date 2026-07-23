@@ -23,14 +23,15 @@ import numpy as np
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-# Smooth magnitude truncation. The standard magnitude holds for sources brighter
-# than MAG_KNEE; fainter than that it smoothly rolls off to the ceiling MAG_CAP,
-# reaching MAG_CAP for zero/negative flux. Real detections (depth ~27 << 30) are
-# unaffected; only non-detections are smoothed. Zeropoint-independent constants.
+# Smooth magnitude truncation. The standard magnitude holds for sources
+# brighter than MAG_KNEE; fainter than that it smoothly rolls off to the
+# ceiling MAG_CAP, reaching MAG_CAP for zero/negative flux. Real detections
+# (depth ~27 << 30) are unaffected; only non-detections are smoothed.
+# Zeropoint-independent constants.
 MAG_KNEE = 30.0
 MAG_CAP = 40.0
-# d(mag)/d(ln flux) = 2.5/ln(10) ~= 1.0857: magnitudes per fractional flux error
-# (sigma_mag ~= MAG_ERR_FAC * sigma_f / f).
+# d(mag)/d(ln flux) = 2.5/ln(10) ~= 1.0857: magnitudes per fractional flux
+# error (sigma_mag ~= MAG_ERR_FAC * sigma_f / f).
 MAG_ERR_FAC = 2.5 / np.log(10.0)
 
 
@@ -45,24 +46,27 @@ def flux_to_mag(
     """Per-band flux -> (mag, mag_err), smoothly truncated at the faint end.
 
     For a source brighter than ``m_knee`` the standard magnitude
-    ``mag = mag_zero - 2.5*log10(flux)`` (minus per-band extinction ``a_ext``
-    when given) is returned unchanged. Fainter than ``m_knee`` the magnitude is
-    blended by a C1 smoothstep toward the ceiling ``m_cap``, reaching ``m_cap``
-    exactly for ``flux <= flux(m_cap)`` -- including zero and negative flux (no
-    ``log10`` of non-positive flux, no discontinuity at ``flux = 0``).
+    ``mag = mag_zero - 2.5*log10(flux)`` (minus per-band extinction
+    ``a_ext`` when given) is returned unchanged. Fainter than ``m_knee``
+    the magnitude is blended by a C1 smoothstep toward the ceiling
+    ``m_cap``, reaching ``m_cap`` exactly for ``flux <= flux(m_cap)``
+    -- including zero and negative flux (no ``log10`` of non-positive
+    flux, no discontinuity at ``flux = 0``).
 
     When ``flux_err`` is given, the error is propagated from the smoothly
-    truncated magnitude: ``mag_err = MAG_ERR_FAC * flux_err / flux_eff`` with
-    ``flux_eff = 10**((mag_zero - mag)/2.5)`` the flux implied by the truncated
-    ``mag``. For bright sources ``flux_eff == flux`` so this is the standard
-    ``MAG_ERR_FAC * flux_err / flux``; as ``mag`` saturates, ``flux_eff`` -> the
-    fixed ``m_cap`` floor flux, so the error inflates smoothly and stays bounded
-    and well-defined for ``flux <= 0``. Returns ``mag_err = None`` when
-    ``flux_err`` is ``None``.
+    truncated magnitude: ``mag_err = MAG_ERR_FAC * flux_err / flux_eff``
+    with ``flux_eff = 10**((mag_zero - mag)/2.5)`` the flux implied by
+    the truncated ``mag``. For bright sources ``flux_eff == flux`` so
+    this is the standard ``MAG_ERR_FAC * flux_err / flux``; as ``mag``
+    saturates, ``flux_eff`` -> the fixed ``m_cap`` floor flux, so the
+    error inflates smoothly and stays bounded and well-defined for
+    ``flux <= 0``. Returns ``mag_err = None`` when ``flux_err`` is
+    ``None``.
     """
     n = len(flux)
-    # standard magnitude where flux>0; a finite sentinel above the cap elsewhere
-    # so the smoothstep blend saturates to m_cap for zero/negative flux.
+    # standard magnitude where flux>0; a finite sentinel above the cap
+    # elsewhere so the smoothstep blend saturates to m_cap for
+    # zero/negative flux.
     m_raw = np.full(n, m_cap + 1.0, dtype=np.float64)
     pos = flux > 0
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -88,18 +92,20 @@ def dmag_dflux(
 ) -> NDArray:
     """Analytic d(mag)/d(flux) of the smooth-truncated ``flux_to_mag``.
 
-    Differentiates the smoothstep-truncated magnitude (not the plain log). With
-    ``m_raw = mag_zero - 2.5*log10(flux) - a_ext`` and the smoothstep blend
-    ``s(t)``, ``t = clip((m_raw - m_knee)/(m_cap - m_knee), 0, 1)``, the chain
+    Differentiates the smoothstep-truncated magnitude (not the plain
+    log). With ``m_raw = mag_zero - 2.5*log10(flux) - a_ext`` and the
+    smoothstep blend ``s(t)``,
+    ``t = clip((m_raw - m_knee)/(m_cap - m_knee), 0, 1)``, the chain
     rule gives::
 
         dmag_dflux = (dm_raw/dflux) * [(1 - s) + (m_cap - m_raw) * 6t(1-t)/W]
 
-    with ``W = m_cap - m_knee`` and ``dm_raw/dflux = -MAG_ERR_FAC/flux``. Brighter
-    than ``m_knee`` (``t=0``) the bracket is 1 -> the standard ``-MAG_ERR_FAC/flux``;
-    in the saturated band (``t=1``) and for ``flux <= 0`` (mag pinned at ``m_cap``)
-    the derivative is exactly 0. Continuous everywhere (the smoothstep has
-    ``s'(0)=s'(1)=0``).
+    with ``W = m_cap - m_knee`` and
+    ``dm_raw/dflux = -MAG_ERR_FAC/flux``. Brighter than ``m_knee``
+    (``t=0``) the bracket is 1 -> the standard
+    ``-MAG_ERR_FAC/flux``; in the saturated band (``t=1``) and for
+    ``flux <= 0`` (mag pinned at ``m_cap``) the derivative is exactly
+    0. Continuous everywhere (the smoothstep has ``s'(0)=s'(1)=0``).
     """
     n = len(flux)
     m_raw = np.full(n, m_cap + 1.0, dtype=np.float64)
@@ -141,9 +147,9 @@ def mag_shear_response(
 
     Returns ``(mag, sigma_m, dmag_dg1, dmag_dg2, dsigma_m_dg1, dsigma_m_dg2)``.
 
-    ``mag`` and ``sigma_m`` (the magnitude error) come from ``flux_to_mag``. The
-    magnitude shear response chains the analytic ``dmag_dflux`` with the per-object
-    flux response::
+    ``mag`` and ``sigma_m`` (the magnitude error) come from
+    ``flux_to_mag``. The magnitude shear response chains the analytic
+    ``dmag_dflux`` with the per-object flux response::
 
         dmag_dg{c} = dmag_dflux * dflux_dg{c}
 
@@ -181,17 +187,18 @@ def add_magnitude_columns(
     ``{b}_dflux_{fam}_dg1`` / ``{b}_dflux_{fam}_dg2``, append (on the fixed
     ``mag_zero`` zeropoint, via the smooth-truncated :func:`flux_to_mag`)::
 
-        {b}_mag_{fam}         {b}_dmag_{fam}_dg1        {b}_dmag_{fam}_dg2
-        {b}_sigma_mag_{fam}   {b}_dsigma_mag_{fam}_dg1  {b}_dsigma_mag_{fam}_dg2
+        {b}_mag_{fam}          {b}_dmag_{fam}_dg1        {b}_dmag_{fam}_dg2
+        {b}_mag_{fam}_err      {b}_dmag_{fam}_err_dg1    {b}_dmag_{fam}_err_dg2
 
     where ``dmag_{fam}_dg{c} = dmag_dflux * dflux_{fam}_dg{c}`` and
-    ``dsigma_mag_{fam}_dg{c} = (ln10/2.5) * sigma_mag * dmag_{fam}_dg{c}``.
+    ``dmag_{fam}_err_dg{c} = (ln10/2.5) * mag_err * dmag_{fam}_dg{c}``.
 
-    The three ``sigma_mag`` columns are added only when ``{b}_flux_{fam}_err``
-    is present. No extinction is applied here (extinction is a downstream,
-    photo-z-time correction). Bands are discovered from the column names, so
-    this works on the survey-prefixed schema (``lsst_i_flux_fpfs1`` ->
-    ``lsst_i_mag_fpfs1``).
+    The three ``mag_err`` columns are added only when ``{b}_flux_{fam}_err``
+    is present. The ``_err`` suffix mirrors the flux convention
+    (``{b}_flux_{fam}_err``). No extinction is applied here (extinction is
+    a downstream, photo-z-time correction). Bands are discovered from the
+    column names, so this works on the survey-prefixed schema
+    (``lsst_i_flux_fpfs1`` -> ``lsst_i_mag_fpfs1``).
     """
     names = catalog.dtype.names
     if names is None:
@@ -221,9 +228,9 @@ def add_magnitude_columns(
             new_cols += [mag, dmag_dg1, dmag_dg2]
             if sigma_mag is not None:
                 new_names += [
-                    f"{b}_sigma_mag_{fam}",
-                    f"{b}_dsigma_mag_{fam}_dg1",
-                    f"{b}_dsigma_mag_{fam}_dg2",
+                    f"{b}_mag_{fam}_err",
+                    f"{b}_dmag_{fam}_err_dg1",
+                    f"{b}_dmag_{fam}_err_dg2",
                 ]
                 new_cols += [sigma_mag, dsig_dg1, dsig_dg2]
     if not new_names:
