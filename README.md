@@ -39,9 +39,9 @@ conda install -c conda-forge xlens
 ### Input Galaxy Catalog
 Download and set up the DESC DC1 (2017) galaxy catalog:
 ```shell
-wget https://www.cosmo.bnl.gov/www/xiangchong/data/catsim.tar.xz
+wget https://www.cosmo.bnl.gov/www/xiangchong/data/catsim_test.tar.xz
 tar xvfJ catsim.tar.xz
-export CATSIM_DIR=$(realpath catsim)
+export CATSIM_DIR=$(realpath catsim_test)
 ```
 
 ## Examples
