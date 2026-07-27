@@ -389,8 +389,11 @@ class BaseGalaxyCatalog(ABC):
         wcs = tract_info.getWcs()
         self.pixel_scale = float(wcs.getPixelScale().asArcseconds())
 
-        # Validate required placement columns
-        for col in ["dx", "dy", "indices", "angles"]:
+        # Validate required placement columns. Draw time uses only
+        # (ra, dec) via wcs.skyToPixel (see sim.py:400-405), so dx/dy
+        # are not required on reload; angles and indices are still
+        # consumed by get_obj / _generate_galaxy.
+        for col in ["ra", "dec", "indices", "angles"]:
             if col not in list(truthCatalog.dtype.names):
                 raise ValueError(f"Missing required column '{col}' in truthCatalog array")
         # The truth catalog is self-contained (placement + shear + galaxy
@@ -480,13 +483,13 @@ class BaseGalaxyCatalog(ABC):
         prelensed_x = self.x_center + self.data["dx"] / ps
         prelensed_y = self.y_center + self.data["dy"] / ps
         wcs = self.tract_info.getWcs()
-        pre_ra, pre_dec = wcs.pixelToSkyArray(
-            x=prelensed_x,
-            y=prelensed_y,
-            degrees=True,
-        )
-        self.data["prelensed_ra"] = pre_ra
-        self.data["prelensed_dec"] = pre_dec
+
+        # Snapshot pre-lens tangent-plane positions so we can restore
+        # them if the caller opts out of position shifts, keeping
+        # dx/dy consistent with the ra/dec we write below.
+        dx0 = self.data["dx"].copy()
+        dy0 = self.data["dy"].copy()
+
         for row in self.data:
             res = shear_obj.distort_galaxy(row)
             for key in (
@@ -502,6 +505,8 @@ class BaseGalaxyCatalog(ABC):
             image_x = self.x_center + self.data["dx"] / ps
             image_y = self.y_center + self.data["dy"] / ps
         else:
+            self.data["dx"] = dx0
+            self.data["dy"] = dy0
             image_x = prelensed_x
             image_y = prelensed_y
 

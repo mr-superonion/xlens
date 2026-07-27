@@ -75,13 +75,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Resolve relative --script paths against the current working directory
+# so HTCondor workers (which start in a different CWD) can find the file.
+if [[ "$SCRIPT_PATH" != /* ]]; then
+  SCRIPT_PATH="${PWD}/${SCRIPT_PATH}"
+fi
+
 # -------------------------------
 # Sanity checks
 # -------------------------------
-if [[ -z "${PSCRATCH:-}" ]]; then
-  echo "Error: PSCRATCH environment variable is not set." >&2
-  exit 1
-fi
 if [[ -z "$PYTHON_EXE_PATH" ]]; then
   echo "Error: python3 not found in PATH." >&2
   exit 1
