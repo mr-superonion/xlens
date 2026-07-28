@@ -58,7 +58,7 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
-from ..utils.constants import MAG_ZERO_AB
+from ..utils.constants import FPFS_C0
 from ..wcs import extract_perturbation_dm_wcs, sky_to_pixel
 
 
@@ -126,8 +126,12 @@ class MergePipeConfig(
         default=[],
     )
     fpfs_c0 = Field[float](
-        doc="C0 normalisation in ``e = m22c / (m00 + c0)``.",
-        default=8.4,
+        doc=(
+            "C0 normalisation in ``e = m22c / (m00 + c0)``, on the fixed AB "
+            "nanojansky zeropoint (MAG_ZERO_AB) the measurement normalizes "
+            "onto -- used as-is, no rescaling."
+        ),
+        default=FPFS_C0,
     )
     fpfs_prefix = Field[str](
         doc="Per-band moment column prefix.",
@@ -521,7 +525,8 @@ class MergePipe(PipelineTask):
             dm22s_dg1 += w * np.asarray(catalog[f"{b}_{p}dm22s_dg1"])
             dm22s_dg2 += w * np.asarray(catalog[f"{b}_{p}dm22s_dg2"])
 
-        c0 = self.config.fpfs_c0 * 10.0 ** ((MAG_ZERO_AB - 30.0) / 2.5)
+        # fpfs_c0 is already on the MAG_ZERO_AB scale, matching the moments.
+        c0 = self.config.fpfs_c0
         denom = m00 + c0
         e1 = m22c / denom
         e2 = m22s / denom
@@ -584,11 +589,16 @@ class MergePipe(PipelineTask):
         e1 = np.asarray(catalog[f"{p}e1"])
         e2 = np.asarray(catalog[f"{p}e2"])
         de1_dg1 = np.asarray(catalog[f"{p}de1_dg1"])
+        de1_dg2 = np.asarray(catalog[f"{p}de1_dg2"])
+        de2_dg1 = np.asarray(catalog[f"{p}de2_dg1"])
         de2_dg2 = np.asarray(catalog[f"{p}de2_dg2"])
 
-        # Step 1: undo WCS shear via the diagonal response.
-        e1_s = e1 - g1_w * de1_dg1
-        e2_s = e2 - g2_w * de2_dg2
+        # Step 1: undo the WCS shear to first order.  This is the FULL 2x2
+        # contraction R_ij * g_j -- the off-diagonal response is not zero for
+        # FPFS (de1_dg2 carries the -sqrt(3)*m44s term), so dropping the cross
+        # terms would leave a residual proportional to the local WCS shear.
+        e1_s = e1 - g1_w * de1_dg1 - g2_w * de1_dg2
+        e2_s = e2 - g1_w * de2_dg1 - g2_w * de2_dg2
 
         # Step 2: undo WCS rotation by -2*rho on the spin-2 ellipticity.
         cos2 = np.cos(2.0 * rho_w)
@@ -598,6 +608,13 @@ class MergePipe(PipelineTask):
 
         catalog[f"{p}e1"] = e1_c
         catalog[f"{p}e2"] = e2_c
+
+        # NOTE: the shear response (de*_dg*) and the spin-0 quantities (m00,
+        # m20, fluxes) are deliberately NOT transformed by the WCS field
+        # distortion.  Galaxies are randomly oriented, so the distortion does
+        # not change their expectation; only the spin-2 ellipticity, which
+        # carries the coherent signal, needs correcting.  ``kappa_w`` is
+        # extracted above for the same reason it is unused here.
         return catalog
 
     def _apply_flipu(
@@ -632,9 +649,22 @@ class MergePipe(PipelineTask):
                 catalog[col] = -np.asarray(catalog[col])
 
         for b in bands:
-            col = f"{b}_dflux_fpfs1_dg2"
-            if col in catalog.colnames:
-                catalog[col] = -np.asarray(catalog[col])
+            # Every per-band g2 response flips, not just the flux: s2n and
+            # the magnitudes are built from dflux_dg2 (s2n = flux/flux_err,
+            # dmag = dmag_dflux * dflux_dg2), so they must flip with it or
+            # they end up with the opposite sign to the flux they derive
+            # from.  Gaussian-aperture fluxes flip for the same reason.
+            for col in (
+                f"{b}_dflux_fpfs1_dg2",
+                f"{b}_ds2n_fpfs1_dg2",
+                f"{b}_dmag_fpfs1_dg2",
+                f"{b}_dmag_fpfs1_err_dg2",
+                f"{b}_dflux_gauss2_dg2",
+                f"{b}_dmag_gauss2_dg2",
+                f"{b}_dmag_gauss2_err_dg2",
+            ):
+                if col in catalog.colnames:
+                    catalog[col] = -np.asarray(catalog[col])
 
             # PSF HSM moments: under x → -x the 2nd-order spin-2 cross
             # component (Ixy) and every higher-order M_{pq} with p odd

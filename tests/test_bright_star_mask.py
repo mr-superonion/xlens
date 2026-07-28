@@ -100,7 +100,8 @@ def test_get_gaia_table_dtype_and_columns():
     # AB magnitudes come back to within 1 mmag of our injected values.
     np.testing.assert_allclose(table["gaia_g_mag"], mag, atol=1e-3)
 
-    # x_in_tract / y_in_tract should match an independent call to wcs.skyToPixelArray.
+    # x_in_tract / y_in_tract should match an independent call to
+    # wcs.skyToPixelArray.
     x_ref, y_ref = wcs.skyToPixelArray(ra=ra_deg, dec=dec_deg, degrees=True)
     np.testing.assert_allclose(table["x_in_tract"], x_ref, atol=1e-10)
     np.testing.assert_allclose(table["y_in_tract"], y_ref, atol=1e-10)

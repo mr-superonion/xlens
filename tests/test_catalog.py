@@ -9,8 +9,9 @@ from numpy.lib import recfunctions as rfn
 import xlens
 from xlens.catalog import ShearEstimator, measure_shear
 
-# Survey-prefixed bands the pipeline now uses; the bundled ``catalog.fits`` has
-# single-letter per-band columns, so re-key them to ``lsst_<band>_...`` on load.
+# Survey-prefixed bands the pipeline now uses; the bundled
+# ``catalog.fits`` has single-letter per-band columns, so re-key them to
+# ``lsst_<band>_...`` on load.
 PREFIXED_BANDS = [f"lsst_{b}" for b in "ugrizy"]
 REF_BAND = "lsst_i"
 

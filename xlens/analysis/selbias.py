@@ -228,14 +228,14 @@ class SelBiasMultibandPipe(PipelineTask):
             dg = 0.01
             # selection
             esq = src[en] ** 2 + src[en2] ** 2 + 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
-            msk = ((src[fname] + dg * src[fgname]) > flux_min) & (esq < emax)
+            msk = ((src[fname] + dg * src[fgname]) > flux_min) & (esq < emax**2.0)
             tmp = src[msk]
             ellp = np.sum(tmp[en] * tmp[wname])
             del tmp, esq, msk
 
             # selection
             esq = src[en] ** 2 + src[en2] ** 2 - 2.0 * dg * (src[en] * src[egn] + src[en2] * src[egn2])
-            msk = ((src[fname] - dg * src[fgname]) > flux_min) & (esq < emax)
+            msk = ((src[fname] - dg * src[fgname]) > flux_min) & (esq < emax**2.0)
             tmp = src[msk]
             ellm = np.sum(tmp[en] * tmp[wname])
             res_sel = (ellp - ellm) / 2.0 / dg

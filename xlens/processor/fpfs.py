@@ -36,6 +36,7 @@ from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
+from ..utils.constants import FPFS_C0
 from ..utils.random import num_rot
 
 
@@ -48,7 +49,7 @@ class FpfsMeasurementConfig(Config):
     )
     bound = Field[int](
         doc="Sources to be removed if too close to boundary [pixel]",
-        default=32,
+        default=35,
     )
     sigma_shapelets = Field[float](
         doc="Shapelet's Gaussian kernel size for detection [arcsec]",
@@ -65,14 +66,26 @@ class FpfsMeasurementConfig(Config):
         default=-1,
     )
     snr_min = Field[float](
-        doc="Shapelet's Gaussian kernel for the second measurement",
+        doc="Minimum signal-to-noise ratio for the flux selection.",
         optional=True,
         default=12.0,
     )
     r2_min = Field[float](
-        doc="Shapelet's Gaussian kernel for the second measurement",
+        doc=(
+            "Minimum of the size ratio (m00 + m20) / m00. Matches the same "
+            "cut in the ngmix/Task path (``fpfs_m2 - 0.05 * fpfs_m0``) and "
+            "``trace_min`` in ``xlens.catalog.base``."
+        ),
         optional=True,
-        default=0.1,
+        default=0.05,
+    )
+    c0 = Field[float](
+        doc=(
+            "C0 normalisation in ``e = m22c / (m00 + c0)``, on the fixed AB "
+            "nanojansky flux scale (MAG_ZERO_AB). Defaults to AnaCal's own "
+            "``FpfsConfig.c0`` via ``xlens.utils.constants.FPFS_C0``."
+        ),
+        default=FPFS_C0,
     )
     pthres = Field[float](
         doc="peak detection threshold",
@@ -172,6 +185,7 @@ class FpfsMeasurementTask(Task):
             bound=self.config.bound,
             snr_min=self.config.snr_min,
             r2_min=self.config.r2_min,
+            c0=self.config.c0,
         )
         return
 

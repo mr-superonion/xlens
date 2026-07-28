@@ -242,8 +242,8 @@ def _linear_modes_to_derivs(xx: dict[str, NDArray]) -> dict[str, NDArray]:
     d: dict[str, NDArray] = {}
     d["dm00_dg1"] = -np.sqrt(2.0) * xx["m22c"]
     d["dm00_dg2"] = -np.sqrt(2.0) * xx["m22s"]
-    d["dm20_dg1"] = -np.sqrt(6.0) / 2.0 * xx["m42c"]
-    d["dm20_dg2"] = -np.sqrt(6.0) / 2.0 * xx["m42s"]
+    d["dm20_dg1"] = -np.sqrt(6.0) * xx["m42c"]
+    d["dm20_dg2"] = -np.sqrt(6.0) * xx["m42s"]
     d["dm22c_dg1"] = (1.0 / np.sqrt(2.0)) * (xx["m00"] - xx["m40"]) - np.sqrt(3.0) * xx["m44c"]
     d["dm22c_dg2"] = -np.sqrt(3.0) * xx["m44s"]
     d["dm22s_dg1"] = -np.sqrt(3.0) * xx["m44s"]

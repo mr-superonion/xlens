@@ -21,10 +21,10 @@
 
 from . import bands, catalog, columns, constants, handle, image, massmap, match, nxg, random
 from .bands import physical_band, prefixed, survey_of
-from .constants import MAG_ZERO_AB
+from .constants import FPFS_C0, MAG_ZERO_AB
 
 __all__ = [
     "bands", "catalog", "columns", "constants", "handle", "image", "massmap",
-    "match", "nxg", "random", "MAG_ZERO_AB",
+    "match", "nxg", "random", "MAG_ZERO_AB", "FPFS_C0",
     "physical_band", "prefixed", "survey_of",
 ]

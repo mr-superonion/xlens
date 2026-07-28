@@ -32,6 +32,7 @@ from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
+from ..utils.constants import FPFS_C0
 from ..wcs import pixel_to_sky
 
 
@@ -41,8 +42,8 @@ class AnacalConfig(Config):
         default=64,
     )
     bound = Field[int](
-        doc="Sources to be removed if too close to boundary",
-        default=40,
+        doc="Sources to be removed if too close to boundary [pixel]",
+        default=35,
     )
     sigma_arcsec = Field[float](
         doc="Kernel size for re-smoothing",
@@ -67,14 +68,6 @@ class AnacalConfig(Config):
     validate_psf = Field[bool](
         doc="Whether validating PSF",
         default=False,
-    )
-    p_min = Field[float](
-        doc="peak detection threshold",
-        default=0.12,
-    )
-    omega_p = Field[float](
-        doc="peak detection threshold",
-        default=0.05,
     )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
@@ -139,8 +132,6 @@ class AnacalTask(Task):
         prior.set_sigma_a(anacal.math.qnumber(0.05))
         prior.set_sigma_x(anacal.math.qnumber(0.05))
         self.config_kwargs = {
-            "p_min": self.config.p_min,
-            "omega_p": self.config.omega_p,
             "sigma_arcsec": self.config.sigma_arcsec,
             "snr_peak_min": self.config.snr_min,
             "stamp_size": self.config.npix,
@@ -175,16 +166,22 @@ class AnacalTask(Task):
     ):
         assert isinstance(self.config, AnacalConfig)
 
-        # Base thresholds are at the AnaCal reference zeropoint (30);
-        # the Task owns the mag_zero threshold scaling. The image is
+        # These flux-scale thresholds are defined at AnaCal's
+        # THRESHOLD_REF_MAG_ZERO, which equals MAG_ZERO_AB. The image is
         # already normalized to MAG_ZERO_AB upstream (prepare_data), so
-        # ``mag_zero`` here is MAG_ZERO_AB.
+        # ``mag_zero`` here is MAG_ZERO_AB and the Task's threshold scaling
+        # is exactly 1.0 -- the values below are the ones actually used.
+        #
+        # ``omega_v`` is the single neighbour-difference parameter (AnaCal
+        # uses it as both centre and width, so the smooth step vanishes
+        # exactly at v = 0, the strict-local-maximum boundary).  This value is
+        # the "v.003" configuration, which gave the best selection-response
+        # conditioning in the blended-simulation scan.
         task = anacal.task.Task(
             scale=pixel_scale,
-            omega_f=0.06,
-            v_min=0.013,
-            omega_v=0.025,
-            fpfs_c0=8.4,
+            omega_f=0.2178468328620605,
+            omega_v=0.010892341643103026,
+            fpfs_c0=FPFS_C0,
             mag_zero=mag_zero,
             **self.config_kwargs,
         )

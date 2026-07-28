@@ -390,7 +390,6 @@ def test_iasim():
     return
 
 
-
 def test_reproducible():
     from pathlib import Path
 
@@ -402,7 +401,6 @@ def test_reproducible():
 
     catfname = os.path.join(DATA_DIR, "cat_seed_test.fits")
     imgfname = os.path.join(DATA_DIR, "img_seed_test.fits")
-
 
     def _make_discrete_skymap():
         from lsst.skymap.discreteSkyMap import (

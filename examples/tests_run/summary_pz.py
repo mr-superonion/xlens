@@ -217,7 +217,6 @@ def base_path(pscratch, layout, target, shear):
     )
 
 
-
 def cat_read(base_dir: str, sim_id: int, mode: int, bands: str) -> np.ndarray:
     main_path = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}.fits")
     return fitsio.read(main_path)

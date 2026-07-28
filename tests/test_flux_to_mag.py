@@ -70,7 +70,8 @@ def test_dmag_dflux_matches_finite_difference():
 
 
 def test_bright_end_is_plain_log():
-    """Brighter than the knee, dmag/dflux is the plain-log -MAG_ERR_FAC/flux."""
+    """Brighter than the knee, dmag/dflux is the plain-log
+    -MAG_ERR_FAC/flux."""
     f_knee = 10.0 ** ((MAG_ZERO - MAG_KNEE) / 2.5)
     flux = f_knee * np.array([2.0, 10.0, 1e3, 1e5])  # all brighter than the knee
     ana = dmag_dflux(flux, MAG_ZERO)
@@ -81,7 +82,8 @@ def test_dmag_dflux_extinction_offset_invariant():
     """A constant per-band extinction shifts mag but not dmag/dflux."""
     flux = _flux_grid()
     a_ext = np.full_like(flux, 0.3)
-    # away from the truncation the derivative is extinction-independent; compare
+    # away from the truncation the derivative is extinction-independent;
+    # compare
     # on the bright branch where both are the plain-log form
     ok = flux > 10.0 ** ((MAG_ZERO - (MAG_KNEE - 1.0)) / 2.5)
     d0 = dmag_dflux(flux, MAG_ZERO)
@@ -90,7 +92,8 @@ def test_dmag_dflux_extinction_offset_invariant():
 
 
 def test_mag_shear_response():
-    """dmag_dg / dsigma_m_dg identities and a flux-direction finite difference."""
+    """dmag_dg / dsigma_m_dg identities and a flux-direction finite
+    difference."""
     rng = np.random.RandomState(42)
     flux = _flux_grid()
     n = len(flux)
@@ -118,7 +121,8 @@ def test_mag_shear_response():
     np.testing.assert_allclose(dsig_dg1, sigma_m * dmag_dg1 / MAG_ERR_FAC, rtol=1e-12, atol=0)
 
     # dmag_dg1 == central FD of flux_to_mag along the dflux_dg1 direction.
-    # Use a flux-relative step and skip the deep truncation tail (flux < mag 38),
+    # Use a flux-relative step and skip the deep truncation tail
+    # (flux < mag 38),
     # where the smoothstep curvature makes any fixed-step FD unreliable.
     eps = 1e-6
     m_plus, _ = flux_to_mag(flux + eps * dflux_dg1, MAG_ZERO, a_ext=a_ext)
@@ -130,7 +134,8 @@ def test_mag_shear_response():
 
 
 def test_mag_shear_response_no_flux_err():
-    """flux_err=None -> sigma_m and its responses are None; dmag_dg still returned."""
+    """flux_err=None -> sigma_m and its responses are None; dmag_dg is
+    still returned."""
     flux = _flux_grid()
     n = len(flux)
     out = mag_shear_response(flux, np.ones(n), np.ones(n), MAG_ZERO)

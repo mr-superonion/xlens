@@ -42,7 +42,8 @@ def _load_photoz_catalog() -> np.ndarray:
         for name in catalog.dtype.names:
             if "flux_gauss" in name:  # flux / dflux / flux_err (not mag_*)
                 catalog[name] = catalog[name] * r
-    # The bundled fixture has single-letter per-band columns (``u_flux_gauss2``);
+    # The bundled fixture has single-letter per-band columns
+    # (``u_flux_gauss2``);
     # the pipeline now uses survey-prefixed band names, so re-key the per-band
     # columns to ``lsst_<band>_...`` to match ``bands=["lsst_u", ...]``.
     band_rename = {

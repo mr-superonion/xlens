@@ -23,7 +23,7 @@
 
 Functions
 ---------
-calibrate_shapes(table, c0=50.0, weights=None, normalize=True)
+calibrate_shapes(table, c0=FPFS_C0, weights=None, normalize=True)
     Combine FPFS moments across `griz` -> (e1, e2, response).
 fast_bootstrap_mean(data, ci_level=0.95)
     SciPy-bootstrap confidence interval of the mean.
@@ -33,6 +33,8 @@ anacal_get_tang_cross(cluster, sky_dist, bins, R, ci_level=0.95,
     response-corrected means + bootstrap CIs.
 """
 import numpy as np
+
+from .constants import FPFS_C0
 
 # Default FPFS band weights (kept in sync with the griz `band_weights`
 # block in `configs/measure_pipeline_*bands.yaml` so step3's recomputed
@@ -45,12 +47,15 @@ _DEFAULT_FPFS_WEIGHTS = {
 }
 
 
-def calibrate_shapes(table, c0=50.0, weights=None, normalize=True):
+def calibrate_shapes(table, c0=FPFS_C0, weights=None, normalize=True):
     """4-band FPFS combination -> (e1, e2, response).
 
-    Note: the default ``c0=50.0`` is an absolute m00-scale constant tied to the
-    fixed AB zeropoint (``MAG_ZERO_AB``) that the measurement stage normalizes
-    every ``{band}_fpfs1_m00`` onto; it does not need per-coadd rescaling.
+    Note: the default ``c0`` is :data:`xlens.utils.constants.FPFS_C0`, an
+    absolute m00-scale constant on the fixed AB zeropoint (``MAG_ZERO_AB``)
+    that the measurement stage normalizes every ``{band}_fpfs1_m00`` onto, so
+    it needs no per-coadd rescaling.  It is the SAME constant used by
+    :class:`xlens.processor.merge.MergePipe`, so this function reproduces the
+    ellipticity that mergePatches writes.
 
     Parameters
     ----------
