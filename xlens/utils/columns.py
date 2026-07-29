@@ -68,7 +68,6 @@ DETECTION_KEEP_COLUMNS: tuple[str, ...] = (
     "fpfs_dm2_dg2",
     # Flags.
     "mask_value",
-    "is_peak",
     "is_primary",
 )
 

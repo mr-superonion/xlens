@@ -291,8 +291,8 @@ class MergePipe(PipelineTask):
         - Photo-z columns appended by ``_join_photoz`` (when present).
 
         Per-band shapes/moments, the detection-band raw FPFS columns
-        (``fpfs_e*``, ``fpfs_m*``), the intermediate band-combined
-        moments (``fpfs1_m00`` etc.) and ``is_peak`` are dropped.
+        (``fpfs_e*``, ``fpfs_m*``) and the intermediate band-combined
+        moments (``fpfs1_m00`` etc.) are dropped.
 
         Rows are filtered by ``is_primary`` and ``wsel > 1e-5`` so that
         downstream consumers do not need to repeat those cuts.
