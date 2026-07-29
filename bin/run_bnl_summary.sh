@@ -21,6 +21,7 @@ Z_BOUNDS="0.3,0.6,0.9,1.2,1.5,1.8"   # --z-bounds STR
 PIXEL_SCALE="0.2"           # --pixel-scale F
 BANDS="ugrizy"              # --bands STR
 REDSHIFT="flexzboost"       # --redshift STR
+VERSION=""                  # --version N (optional; empty = unversioned outputs)
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="summary.py"
@@ -46,6 +47,8 @@ Options:
   --pixel-scale F       pixel scale (arcsec/pixel, default: ${PIXEL_SCALE})
   --bands STR           bands used for photo-z estimation (default: ${BANDS})
   --redshift STR        photo-z estimator name (default: ${REDSHIFT})
+  --version N           optional integer tag; injects --version N into the
+                        python arguments (default: none)
   --no-correction       add --no-correction to summary_seeds.py arguments
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
@@ -78,6 +81,7 @@ while [[ $# -gt 0 ]]; do
     --pixel-scale)   PIXEL_SCALE="$2"; shift 2 ;;
     --bands)         BANDS="$2"; shift 2 ;;
     --redshift)      REDSHIFT="$2"; shift 2 ;;
+    --version)       VERSION="$2"; shift 2 ;;
     --no-correction) NO_CORR=true; shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     -h|--help)       usage; exit 0 ;;
@@ -142,6 +146,7 @@ arguments       = ${SCRIPT_PATH} \\
                   --pixel-scale ${PIXEL_SCALE} \\
                   --bands ${BANDS} \\
                   --redshift ${REDSHIFT} \\
+                  ${VERSION:+--version ${VERSION}} \\
                   ${NO_CORR_ARG} \\
                   --min-id \$(start) --max-id \$(end)
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out

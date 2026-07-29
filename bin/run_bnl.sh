@@ -18,6 +18,7 @@ KAPPA="0.0"                 # --kappa F
 ROT="0"                     # --rot N
 LAYOUT="random"             # --layout STR
 BAND="u,g,r,i,z,y"          # --band STR
+VERSION=""                  # --version N (optional; empty = unversioned outputs)
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="sim.py"
@@ -39,6 +40,8 @@ Options:
   --kappa F             kappa (default: ${KAPPA})
   --rot N               rotation (default: ${ROT})
   --band STR            band (default: ${BAND})
+  --version N           optional integer tag; injects --version N into the
+                        python arguments (default: none)
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
   --modes "M1,M2,..."   replace default modes (e.g. "0,40")
@@ -69,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --rot)          ROT="$2"; shift 2 ;;
     --layout)       LAYOUT="$2"; shift 2 ;;
     --band)         BAND="$2"; shift 2 ;;
+    --version)      VERSION="$2"; shift 2 ;;
     --dry-run)      DRY_RUN=true; shift ;;
     -h|--help)      usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
@@ -115,7 +119,7 @@ request_memory  = 1228
 request_cpus    = 1
 
 executable      = /bin/bash
-arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} || exit 1; done'"
+arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} ${VERSION:+--version ${VERSION}} || exit 1; done'"
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).out
 error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log
