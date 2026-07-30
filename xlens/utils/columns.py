@@ -52,6 +52,11 @@ DETECTION_KEEP_COLUMNS: tuple[str, ...] = (
     "wsel",
     "dwsel_dg1",
     "dwsel_dg2",
+    # Local background under the source, from the detector's ring cascade,
+    # with its shear derivatives.
+    "bkg",
+    "dbkg_dg1",
+    "dbkg_dg2",
     # FPFS ellipticity + shear derivatives (used by shear estimator).
     "fpfs_e1",
     "fpfs_de1_dg1",

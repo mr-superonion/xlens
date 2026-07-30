@@ -480,6 +480,9 @@ def generate_pure_noise(
         survey=survey,
         is_sim=False,
     )
+    # Drawn in float64 and stored in float32, to match the science plane: the
+    # rounding is 7 significant digits down on a number that is itself random,
+    # and AnaCal widens back to double when it reads the pixels.
     if noise_corr is None:
         noise_array = (
             np.random.RandomState(noise_seed)
@@ -487,7 +490,7 @@ def generate_pure_noise(
                 scale=noise_std,
                 size=(ny, nx),
             )
-            .astype(np.float64)
+            .astype(np.float32)
         )
     else:
         noise_corr = rotate_noise_corr(noise_corr)
@@ -500,7 +503,7 @@ def generate_pure_noise(
                 scale=pixel_scale,
             )
             * noise_std
-        )
+        ).astype(np.float32)
     return noise_array
 
 
@@ -704,6 +707,7 @@ def prepare_noise_array(
     else:
         # Rotate noise image by 90 degrees CCW to remove anisotropy
         noise_array = np.rot90(noise_array, k=1)
+    noise_array = np.asarray(noise_array, dtype=np.float32)
 
     anacal.mask.mask_galaxy_image(
         noise_array,
@@ -799,7 +803,12 @@ def prepare_data(
     if psf_array is None:
         psf_array = prepare_psf_array(exposure, npix)
 
-    gal_array = np.asarray(exposure.image.array, dtype=np.float64)
+    # float32, the dtype the coadd is already stored in (ExposureF). AnaCal
+    # takes the science and noise planes at single precision and widens to
+    # double once, when the pixels are copied into the FFT buffer, so a float64
+    # copy of the whole patch here would cost memory and buy no accuracy.
+    # ``np.array`` (not ``asarray``) because the masking below writes into it.
+    gal_array = np.array(exposure.image.array, dtype=np.float32)
 
     mask_array = prepare_mask(
         exposure.image.array,
@@ -908,7 +917,8 @@ def prepare_data_one_cell(
     pixel_scale = float(wcs.getPixelScale().asArcseconds())
 
     bbox = outer.bbox
-    gal_array = np.asarray(outer.image.array, dtype=np.float64)
+    # float32 and a real copy, for the reasons given in prepare_data
+    gal_array = np.array(outer.image.array, dtype=np.float32)
 
     if psf_array is None:
         psf_array = prepare_psf_array_cell(cell, npix)
@@ -933,9 +943,9 @@ def prepare_data_one_cell(
     if do_noise_bias_correction and noise_array is None:
         noise_reals = outer.noise_realizations
         if len(noise_reals) > 0:
-            noise_array = np.asarray(
+            noise_array = np.array(
                 noise_reals[0].array,
-                dtype=np.float64,
+                dtype=np.float32,
             )
 
     noise_array = prepare_noise_array(
