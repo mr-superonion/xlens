@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Any
+from typing import Any, Sequence
 
 import anacal
 import astropy
@@ -148,7 +148,9 @@ class AnacalTask(Task):
         *,
         pixel_scale: float,
         mag_zero: float,
-        noise_variance: float,
+        # One value for a plain image, one per band for a (nband, ny, nx)
+        # stack -- anacal takes either.
+        noise_variance: float | Sequence[float],
         gal_array: NDArray,
         psf_array: NDArray,
         mask_array: NDArray,
@@ -320,4 +322,77 @@ class AnacalTask(Task):
             )
         else:
             data["psf_object"] = None
+        return data
+
+    def prepare_data_multiband(
+        self,
+        *,
+        exposures: dict,
+        bands: Sequence[str],
+        seed: int,
+        survey: str | None = None,
+        noise_corrs: dict | None = None,
+        skyMap=None,
+        tract: int = 0,
+        patch: int = 0,
+        star_cat: NDArray | None = None,
+        mask_array: NDArray | None = None,
+        detection: astropy.table.Table | None = None,
+        blocks: list | None = None,
+        **kwargs,
+    ):
+        """Prepare a stack of bands as one anacal detection input.
+
+        Same as :meth:`prepare_data` but for several bands at once: the
+        image, PSF and noise arrays gain a leading band axis and
+        ``noise_variance`` becomes one value per band.  anacal deconvolves
+        each band's own PSF before averaging them, so the bands do not need
+        to be PSF-matched here -- only aligned on the same pixel grid.
+
+        Args:
+        exposures (dict):  band -> LSST exposure
+        bands (Sequence[str]):  bands to coadd, in the order they are stacked
+        seed (int):  random seed
+        noise_corrs (dict):  band -> noise correlation function (None)
+        """
+        assert isinstance(self.config, AnacalConfig)
+        bands = list(bands)
+        missing = [b for b in bands if b not in exposures]
+        if missing:
+            raise KeyError(f"no exposure for band(s) {missing}")
+
+        exps = [exposures[b] for b in bands]
+        pixel_scale = float(exps[0].wcs.getPixelScale().asArcseconds())
+        if blocks is None:
+            blocks = utils.image.get_blocks_multiband(
+                lsst_psfs=[e.getPsf() for e in exps],
+                lsst_bbox=exps[0].getBBox(),
+                pixel_scale=pixel_scale,
+                npix=self.config.npix,
+            )
+        data = utils.image.prepare_data_multiband(
+            bands=bands,
+            exposures=exposures,
+            seed=seed,
+            noiseId=self.config.noiseId,
+            rotId=self.config.rotId,
+            npix=self.config.npix,
+            noise_corrs=noise_corrs,
+            do_noise_bias_correction=self.config.do_noise_bias_correction,
+            badMaskPlanes=self.config.badMaskPlanes,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
+            star_cat=star_cat,
+            mask_array=mask_array,
+            detection=detection,
+            blocks=blocks,
+            survey=survey,
+        )
+        # The detection image belongs to no single band, so it carries no
+        # band prefix, and PSF validation / per-object PSFs -- both defined
+        # against one exposure -- do not apply.
+        data["lsst_psf"] = None
+        data["base_column_name"] = None
+        data["psf_object"] = None
         return data

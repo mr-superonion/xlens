@@ -373,6 +373,55 @@ def get_blocks(*, lsst_psf, lsst_bbox, pixel_scale, npix, psf_array):
     return new_blocks
 
 
+def get_blocks_multiband(*, lsst_psfs, lsst_bbox, pixel_scale, npix):
+    """Blocks whose PSF stamp is a ``(nband, npix, npix)`` stack.
+
+    Same geometry as :func:`get_blocks`; the only difference is that each
+    block carries one PSF per band instead of one.  A block is dropped
+    unless *every* band can supply a PSF at its centre, so all bands are
+    detected on exactly the same set of blocks.
+
+    Parameters
+    ----------
+    lsst_psfs : sequence
+        One LSST PSF model per band, in the same order as the image stack
+        that will be handed to anacal.
+    """
+    if len(lsst_psfs) == 0:
+        raise ValueError("get_blocks_multiband needs at least one PSF")
+
+    min_corner = lsst_bbox.getMin()
+    x_min, y_min = min_corner.getX(), min_corner.getY()
+    width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
+    blocks = anacal.geometry.get_block_list(
+        img_ny=height,
+        img_nx=width,
+        block_nx=250,
+        block_ny=250,
+        block_overlap=80,
+        scale=pixel_scale,
+    )
+    new_blocks = []
+    for bb in blocks:
+        x0 = int(np.clip(bb.xcen, 0, width - 1))
+        y0 = int(np.clip(bb.ycen, 0, height - 1))
+        point = lsst_geom.Point2D(x_min + x0, y_min + y0)
+        stamps = []
+        try:
+            for lsst_psf in lsst_psfs:
+                stamps.append(
+                    resize_array(
+                        lsst_psf.computeImage(point).getArray(),
+                        (npix, npix),
+                    )
+                )
+        except Exception:
+            continue
+        bb.psf_array = np.asarray(stamps, dtype=np.float64)
+        new_blocks.append(bb)
+    return new_blocks
+
+
 def stack_psfs_cells(*, cell_coadd, npix):
     psf_array = np.zeros((npix, npix))
     npsf = 0.0
@@ -1008,6 +1057,245 @@ def prepare_data_one_cell(
             else (f"{survey}_{band}_" if survey is not None else band + "_")
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Multi-band detection input
+#
+# Detection can use several bands at once.  Each band is prepared exactly as
+# it would be on its own -- masked, noise-matched, normalised onto
+# MAG_ZERO_AB -- and the per-band planes are then stacked into
+# ``(nband, ny, nx)`` arrays.  anacal removes each band's own PSF before
+# combining them, so nothing here needs to know about PSF matching; it only
+# has to keep the bands aligned and hand over one noise variance per band.
+# ---------------------------------------------------------------------------
+
+
+def _union_mask(image_arrays, mask_objects, variance_arrays, badMaskPlanes,
+                mask_array=None):
+    """Mask that flags a pixel bad if it is bad in ANY band.
+
+    Every band is masked with this same union, so a pixel that one band
+    cannot be trusted on does not leak into the coadd through the others.
+    """
+    out = mask_array
+    for image_array, mask_object, variance_array in zip(
+        image_arrays, mask_objects, variance_arrays
+    ):
+        out = prepare_mask(
+            image_array,
+            mask_object,
+            variance_array,
+            badMaskPlanes,
+            original_mask_array=out,
+        )
+    return out
+
+
+def _stack_bands(per_band_data, bands, keys=("gal_array", "noise_array")):
+    """Move each band's planes into one preallocated stack.
+
+    ``per_band_data`` is a generator of single-band dicts.  The planes are
+    copied into the stack and dropped from the dict as soon as they land, so
+    at most one band's worth of extra memory is held on top of the stack --
+    ``np.stack`` on a list of all the bands would hold two full copies.
+    """
+    SHARED = ("pixel_scale", "begin_x", "begin_y", "mag_zero")
+
+    stacks: dict = {}
+    psf_stack = None
+    variances: list[float] = []
+    first: dict | None = None
+    # Kept separately: the planes are emptied out of ``first`` as they are
+    # moved into the stack, so the dict cannot be used as the reference.
+    ref_shape: tuple | None = None
+    ref_shared: dict = {}
+
+    for iband, data in enumerate(per_band_data):
+        if first is None:
+            first = data
+            nband = len(bands)
+            ref_shape = data["gal_array"].shape
+            ref_shared = {name: data[name] for name in SHARED}
+            ny, nx = ref_shape
+            for key in keys:
+                if data.get(key) is None:
+                    stacks[key] = None
+                else:
+                    stacks[key] = np.empty(
+                        (nband, ny, nx), dtype=data[key].dtype,
+                    )
+            npsf = data["psf_array"].shape[-1]
+            psf_stack = np.empty((nband, npsf, npsf), dtype=np.float64)
+        else:
+            if data["gal_array"].shape != ref_shape:
+                raise ValueError(
+                    f"band '{bands[iband]}' has image shape "
+                    f"{data['gal_array'].shape}, expected {ref_shape}"
+                )
+            for name in SHARED:
+                if data[name] != ref_shared[name]:
+                    raise ValueError(
+                        f"band '{bands[iband]}' has {name}={data[name]}, "
+                        f"but band '{bands[0]}' has {ref_shared[name]}"
+                    )
+
+        for key in keys:
+            if (stacks[key] is None) != (data.get(key) is None):
+                raise ValueError(
+                    f"band '{bands[iband]}' disagrees with band "
+                    f"'{bands[0]}' on whether '{key}' is present"
+                )
+            if stacks[key] is not None:
+                stacks[key][iband] = data[key]
+                data[key] = None
+        psf_stack[iband] = data["psf_array"]
+        variances.append(float(data["noise_variance"]))
+
+    out = dict(first)
+    out.update(stacks)
+    out["psf_array"] = psf_stack
+    out["noise_variance"] = variances
+    if "base_column_name" in out:
+        # The coadd belongs to no single band, so it gets no band prefix.
+        out["base_column_name"] = None
+    return out
+
+
+def prepare_data_multiband(
+    *,
+    bands: Sequence[str],
+    exposures: dict,
+    seed: int,
+    noiseId: int = 0,
+    rotId: int = 0,
+    npix: int = 64,
+    noise_corrs: dict | None = None,
+    do_noise_bias_correction: bool = True,
+    badMaskPlanes: List[str] = badMaskDefault,
+    skyMap=None,
+    tract: int = 0,
+    patch: int = 0,
+    star_cat: NDArray | None = None,
+    mask_array: NDArray | None = None,
+    detection: astropy.table.Table | None = None,
+    blocks: List | None = None,
+    survey: str | None = None,
+    **kwargs,
+):
+    """Stack several bands' exposures into one anacal detection input.
+
+    Returns the same dict as :func:`prepare_data`, except that
+    ``gal_array``, ``noise_array`` and ``psf_array`` gain a leading band
+    axis and ``noise_variance`` is a list with one entry per band.
+    """
+    bands = list(bands)
+    if len(bands) == 0:
+        raise ValueError("prepare_data_multiband needs at least one band")
+    if len(set(bands)) != len(bands):
+        raise ValueError(f"duplicate entries in bands: {bands}")
+    missing = [b for b in bands if b not in exposures]
+    if missing:
+        raise KeyError(f"no exposure for band(s) {missing}")
+
+    exps = [exposures[b] for b in bands]
+    union = _union_mask(
+        [e.image.array for e in exps],
+        [e.mask for e in exps],
+        [e.variance.array for e in exps],
+        badMaskPlanes,
+        mask_array=mask_array,
+    )
+    noise_corrs = noise_corrs or {}
+
+    def per_band():
+        for band, exposure in zip(bands, exps):
+            yield prepare_data(
+                band=band,
+                exposure=exposure,
+                seed=seed,
+                noiseId=noiseId,
+                rotId=rotId,
+                npix=npix,
+                noise_corr=noise_corrs.get(band, None),
+                do_noise_bias_correction=do_noise_bias_correction,
+                badMaskPlanes=badMaskPlanes,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                star_cat=star_cat,
+                mask_array=union,
+                detection=detection,
+                blocks=blocks,
+                survey=survey,
+            )
+
+    return _stack_bands(per_band(), bands)
+
+
+def prepare_data_one_cell_multiband(
+    *,
+    bands: Sequence[str],
+    cells: dict,
+    seed: int,
+    mag_zeros: dict,
+    npix: int = 64,
+    do_noise_bias_correction: bool = True,
+    badMaskPlanes: List[str] = badMaskDefault,
+    skyMap=None,
+    tract: int = 0,
+    patch: int = 0,
+    star_cat: NDArray | None = None,
+    mask_array: NDArray | None = None,
+    detection: astropy.table.Table | None = None,
+    blocks: List | None = None,
+    survey: str | None = None,
+    **kwargs,
+):
+    """Cell-coadd counterpart of :func:`prepare_data_multiband`.
+
+    ``cells`` maps band to the ``SingleCellCoadd`` at the same cell id, and
+    ``mag_zeros`` gives that band coadd's native zeropoint.
+    """
+    bands = list(bands)
+    if len(bands) == 0:
+        raise ValueError("prepare_data_one_cell_multiband needs at least one band")
+    if len(set(bands)) != len(bands):
+        raise ValueError(f"duplicate entries in bands: {bands}")
+    missing = [b for b in bands if b not in cells]
+    if missing:
+        raise KeyError(f"no cell for band(s) {missing}")
+
+    outers = [cells[b].outer for b in bands]
+    union = _union_mask(
+        [o.image.array for o in outers],
+        [o.mask for o in outers],
+        [o.variance.array for o in outers],
+        badMaskPlanes,
+        mask_array=mask_array,
+    )
+
+    def per_band():
+        for band in bands:
+            yield prepare_data_one_cell(
+                cell=cells[band],
+                band=band,
+                seed=seed,
+                mag_zero=mag_zeros[band],
+                npix=npix,
+                do_noise_bias_correction=do_noise_bias_correction,
+                badMaskPlanes=badMaskPlanes,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                star_cat=star_cat,
+                mask_array=union,
+                detection=detection,
+                blocks=blocks,
+                survey=survey,
+            )
+
+    return _stack_bands(per_band(), bands)
 
 
 # ---------------------------------------------------------------------------

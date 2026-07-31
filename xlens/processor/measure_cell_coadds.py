@@ -64,6 +64,7 @@ from ..utils.image import (
     make_psf_stamp_exposure,
     measure_psf_hsm_moments,
     prepare_data_one_cell,
+    prepare_data_one_cell_multiband,
 )
 from .anacal import AnacalTask
 from .fpfs import FpfsMeasurementTask
@@ -113,7 +114,7 @@ class MeasureCellCoaddsPipeConfig(
 ):
     anacal = ConfigurableField(
         target=AnacalTask,
-        doc="AnaCal Task for detection stage (i-band)",
+        doc="AnaCal Task for the detection stage (see detection_bands)",
     )
     fpfs = ConfigurableField(
         target=FpfsMeasurementTask,
@@ -134,6 +135,17 @@ class MeasureCellCoaddsPipeConfig(
             "delivered by the butler does not match this list."
         ),
         default=["g", "r", "i", "z"],
+    )
+    detection_bands = ListField[str](
+        doc=(
+            "PHYSICAL bands combined to form the detection image. AnaCal "
+            "removes each band's own PSF first and then averages the bands "
+            "with inverse-variance weights, so the bands need not be "
+            "PSF-matched. Forced measurement in the second stage is "
+            "unaffected and still runs band by band. A single entry "
+            "reproduces the previous single-band behaviour exactly."
+        ),
+        default=["i"],
     )
     survey = Field[str](
         doc=(
@@ -171,6 +183,25 @@ class MeasureCellCoaddsPipeConfig(
                 self.fpfs.__class__.sigma_shapelets1,
                 self,
                 "sigma_shapelets1 in a wrong range",
+            )
+        if len(self.detection_bands) == 0:
+            raise FieldValidationError(
+                self.__class__.detection_bands,
+                self,
+                "detection_bands must name at least one band.",
+            )
+        if len(set(self.detection_bands)) != len(self.detection_bands):
+            raise FieldValidationError(
+                self.__class__.detection_bands,
+                self,
+                f"detection_bands has duplicates: {list(self.detection_bands)}",
+            )
+        missing = [b for b in self.detection_bands if b not in self.bands]
+        if missing:
+            raise FieldValidationError(
+                self.__class__.detection_bands,
+                self,
+                f"detection_bands must be a subset of bands; missing {missing}.",
             )
 
     def setDefaults(self):
@@ -352,6 +383,45 @@ class MeasureCellCoaddsPipe(PipelineTask):
         data["blocks"][0].psf_array = data["psf_array"].copy()
         return data
 
+    def _prepare_cell_multiband(
+        self,
+        cells: dict,
+        *,
+        bands: list[str],
+        seed: int,
+        mag_zeros: dict,
+        skyMap,
+        tract: int,
+        patch: int,
+        mask_array: NDArray | None = None,
+    ) -> dict:
+        """Build the data dict for one cell across several bands.
+
+        ``cells`` maps band to that band's ``SingleCellCoadd`` for the same
+        cell id.  The cells share a pixel grid, so one block covers them all.
+        """
+        assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
+        npix = self.config.anacal.npix
+        blocks = self._build_cell_block(cells[bands[0]])
+        noise_correction = self.config.anacal.do_noise_bias_correction
+        data = prepare_data_one_cell_multiband(
+            cells=cells,
+            bands=bands,
+            survey=self.config.survey,
+            seed=seed,
+            mag_zeros=mag_zeros,
+            npix=npix,
+            do_noise_bias_correction=noise_correction,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
+            blocks=blocks,
+            mask_array=mask_array,
+        )
+        # One PSF stamp per band, in the order the images were stacked.
+        data["blocks"][0].psf_array = data["psf_array"].copy()
+        return data
+
     def _cell_mask(
         self,
         stitched_mask_array: NDArray | None,
@@ -377,41 +447,59 @@ class MeasureCellCoaddsPipe(PipelineTask):
         stitched_mask_array: NDArray | None = None,
         mask_origin: tuple[int, int] | None = None,
     ) -> dict:
-        """Detect on the i-band cell coadd.
+        """Detect on the cell coadd of ``config.detection_bands``.
 
         Returns ``det_cats``, mapping each cell_id with non-empty
-        detections to its anacal detection catalog.  The i-band
-        photometric zeropoint is computed locally for use in detection
-        but is not returned; ``_force`` re-derives the per-band
+        detections to its anacal detection catalog.  The detection bands'
+        photometric zeropoints are computed locally for use in detection
+        but are not returned; ``_force`` re-derives the per-band
         zeropoint from each band's coadd.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
-        band = "i"
-        if band not in coadd_handles_dict:
-            raise KeyError(f"band '{band}' not in {coadd_handles_dict.keys()}")
+        bands = list(self.config.detection_bands)
+        missing = [b for b in bands if b not in coadd_handles_dict]
+        if missing:
+            raise KeyError(
+                f"detection band(s) {missing} not in "
+                f"{list(coadd_handles_dict.keys())}"
+            )
+        if len(bands) > 1:
+            self.log.info("Detecting on the coadd of bands %s", bands)
 
-        det_coadd = coadd_handles_dict[band].get()
-        mag_zero = self._coadd_mag_zero(det_coadd)
-        det_cells = dict(det_coadd.cells)
+        det_coadds = {b: coadd_handles_dict[b].get() for b in bands}
+        mag_zeros = {b: self._coadd_mag_zero(c) for b, c in det_coadds.items()}
+        det_cells = {b: dict(c.cells) for b, c in det_coadds.items()}
 
         det_cats: dict = {}
-        for cell_id, det_cell in det_cells.items():
+        for cell_id, det_cell in det_cells[bands[0]].items():
             cell_mask = self._cell_mask(
                 stitched_mask_array,
                 mask_origin,
                 det_cell,
             )
             try:
-                data = self._prepare_cell(
-                    det_cell,
-                    band=band,
-                    seed=seed,
-                    mag_zero=mag_zero,
-                    skyMap=skyMap,
-                    tract=tract,
-                    patch=patch,
-                    mask_array=cell_mask,
-                )
+                if len(bands) == 1:
+                    data = self._prepare_cell(
+                        det_cell,
+                        band=bands[0],
+                        seed=seed,
+                        mag_zero=mag_zeros[bands[0]],
+                        skyMap=skyMap,
+                        tract=tract,
+                        patch=patch,
+                        mask_array=cell_mask,
+                    )
+                else:
+                    data = self._prepare_cell_multiband(
+                        {b: det_cells[b][cell_id] for b in bands},
+                        bands=bands,
+                        seed=seed,
+                        mag_zeros=mag_zeros,
+                        skyMap=skyMap,
+                        tract=tract,
+                        patch=patch,
+                        mask_array=cell_mask,
+                    )
                 cat = self.anacal.run(**data)
                 del data
                 if len(cat) > 0:
@@ -426,7 +514,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
                     iy,
                     e,
                 )
-        del det_coadd, det_cells
+        del det_coadds, det_cells
 
         if not det_cats:
             # Edge-of-tract patches whose every cell fails noise estimation

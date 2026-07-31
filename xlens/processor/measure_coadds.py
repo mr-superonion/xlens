@@ -148,7 +148,7 @@ class MeasureCoaddsPipeConfig(
 ):
     anacal = ConfigurableField(
         target=AnacalTask,
-        doc="AnaCal Task for detection stage (i-band)",
+        doc="AnaCal Task for the detection stage (see detection_bands)",
     )
     fpfs = ConfigurableField(
         target=FpfsMeasurementTask,
@@ -176,6 +176,17 @@ class MeasureCoaddsPipeConfig(
     sim_bands = ListField[str](
         doc="PHYSICAL bands to simulate when ``use_sim`` is True.",
         default=["u", "g", "r", "i", "z", "y"],
+    )
+    detection_bands = ListField[str](
+        doc=(
+            "PHYSICAL bands combined to form the detection image. AnaCal "
+            "removes each band's own PSF first and then averages the bands "
+            "with inverse-variance weights, so the bands need not be "
+            "PSF-matched. Forced measurement in the second stage is "
+            "unaffected and still runs band by band. A single entry "
+            "reproduces the previous single-band behaviour exactly."
+        ),
+        default=["i"],
     )
     survey = Field[str](
         doc=(
@@ -219,12 +230,27 @@ class MeasureCoaddsPipeConfig(
                 self,
                 "sigma_shapelets1 in a wrong range",
             )
-        if self.use_sim and "i" not in self.sim_bands:
+        if len(self.detection_bands) == 0:
             raise FieldValidationError(
-                self.__class__.sim_bands,
+                self.__class__.detection_bands,
                 self,
-                "sim_bands must include 'i' (the detection band).",
+                "detection_bands must name at least one band.",
             )
+        if len(set(self.detection_bands)) != len(self.detection_bands):
+            raise FieldValidationError(
+                self.__class__.detection_bands,
+                self,
+                f"detection_bands has duplicates: {list(self.detection_bands)}",
+            )
+        if self.use_sim:
+            missing = [b for b in self.detection_bands if b not in self.sim_bands]
+            if missing:
+                raise FieldValidationError(
+                    self.__class__.sim_bands,
+                    self,
+                    f"sim_bands must include every detection band; "
+                    f"missing {missing}.",
+                )
 
     def setDefaults(self):
         super().setDefaults()
@@ -393,26 +419,50 @@ class MeasureCoaddsPipe(PipelineTask):
         mask_array: NDArray | None = None,
     ) -> np.ndarray:
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
-        band = "i"
-        if band not in exposure_handles_dict:
-            raise KeyError(f"band '{band}' not in {exposure_handles_dict.keys()}")
+        bands = list(self.config.detection_bands)
+        missing = [b for b in bands if b not in exposure_handles_dict]
+        if missing:
+            raise KeyError(
+                f"detection band(s) {missing} not in "
+                f"{list(exposure_handles_dict.keys())}"
+            )
 
-        handle = exposure_handles_dict[band]
-        exposure = handle.get()
-        exposure.getPsf().setCacheCapacity(self.config.psfCache)
-        noise_corr = self._load_noise_corr(corr_array, band)
-        data = self.anacal.prepare_data(
-            exposure=exposure,
-            band=band,
-            survey=self.config.survey,
-            seed=seed,
-            noise_corr=noise_corr,
-            detection=None,
-            skyMap=skyMap,
-            tract=tract,
-            patch=patch,
-            mask_array=mask_array,
-        )
+        exposures = {}
+        noise_corrs = {}
+        for band in bands:
+            exposure = exposure_handles_dict[band].get()
+            exposure.getPsf().setCacheCapacity(self.config.psfCache)
+            exposures[band] = exposure
+            noise_corrs[band] = self._load_noise_corr(corr_array, band)
+
+        if len(bands) == 1:
+            band = bands[0]
+            data = self.anacal.prepare_data(
+                exposure=exposures[band],
+                band=band,
+                survey=self.config.survey,
+                seed=seed,
+                noise_corr=noise_corrs[band],
+                detection=None,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                mask_array=mask_array,
+            )
+        else:
+            self.log.info("Detecting on the coadd of bands %s", bands)
+            data = self.anacal.prepare_data_multiband(
+                exposures=exposures,
+                bands=bands,
+                survey=self.config.survey,
+                seed=seed,
+                noise_corrs=noise_corrs,
+                detection=None,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                mask_array=mask_array,
+            )
         return self.anacal.run(**data)
 
     def _force(

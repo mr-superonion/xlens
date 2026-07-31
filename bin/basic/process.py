@@ -5,6 +5,14 @@ exp-<band>-<seed>.fits per band, runs detection + forced measurement +
 truth match, and writes cat-<seed>.fits. Seeds whose sim outputs are
 missing are skipped (with a note), so the two scripts can run
 independently and be resumed.
+
+Detection runs on ``--detection-band`` (default 'i'); give it several
+bands to detect on their inverse-variance coadd, e.g.
+
+    process.py --band r,i,z --detection-band r,i,z --version 1
+
+Forced measurement is per band over ``--band`` regardless, so the output
+columns are the same either way.
 """
 import argparse
 import gc
@@ -68,6 +76,15 @@ parser.add_argument(
     help="comma-separated bands list (e.g. 'r,i,z')",
 )
 parser.add_argument(
+    "--detection-band", type=str, default="i",
+    help="comma-separated bands to coadd for DETECTION (e.g. 'r,i,z'); "
+         "must be a subset of --band. AnaCal removes each band's own PSF "
+         "before averaging them with inverse-variance weights, so the bands "
+         "need not be PSF-matched. Forced measurement still runs band by "
+         "band over --band either way. Use --version to keep catalogs from "
+         "different detection bands in separate directories.",
+)
+parser.add_argument(
     "--version", type=int, default=None,
     help="Optional integer tag; when set, catalogs go to "
          "process_mode<N>-v<version>/ instead of process_mode<N>/.",
@@ -89,11 +106,29 @@ bands = [b.strip() for b in args.band.split(",") if b.strip()]
 if not bands:
     raise ValueError(f"Invalid --band argument: {args.band!r}")
 
+detection_bands = [
+    b.strip() for b in args.detection_band.split(",") if b.strip()
+]
+if not detection_bands:
+    raise ValueError(
+        f"Invalid --detection-band argument: {args.detection_band!r}"
+    )
+# Detection reads the same exposures the forced measurement does, so it can
+# only use bands that were loaded.
+missing_det = [b for b in detection_bands if b not in bands]
+if missing_det:
+    raise ValueError(
+        f"--detection-band {missing_det} not in --band {bands}; "
+        f"add them to --band so the exposures get loaded"
+    )
+
 if RANK == 0:
     if SIZE == 1:
         print("[Info] Running single-process (no mpirun/srun needed).")
     else:
         print(f"[Info] Running with MPI across {SIZE} ranks.")
+    print(f"[Info] Detecting on {','.join(detection_bands)}; "
+          f"forced measurement on {','.join(bands)}.")
 
 # ------------------------------
 # SkyMap Setup
@@ -103,7 +138,7 @@ if RANK == 0:
     print("SkyMap created.")
 
 # ------------------------------
-# Detection + per-band forced measurement (all bands together)
+# Detection (on detection_bands) + per-band forced measurement (all bands)
 # ------------------------------
 detect_config = MeasureCoaddsPipeConfig()
 detect_config.anacal.sigma_arcsec = 0.38
@@ -113,6 +148,8 @@ detect_config.anacal.do_noise_bias_correction = True
 detect_config.fpfs.do_noise_bias_correction = True
 detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
 detect_config.use_sim = False
+detect_config.detection_bands = detection_bands
+detect_config.validate()
 meas_task = MeasureCoaddsPipe(config=detect_config)
 
 config = matchPipeConfig()
@@ -186,7 +223,6 @@ for i in range(istart, iend):
         dm_catalog=None,
         truth_catalog=truth_catalog,
     ).catalog
-    res = res[res["wsel"] > 1e-7]
     fitsio.write(outfname, res)
 
     # clean up
