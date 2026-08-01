@@ -95,14 +95,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mag-max",
         type=float,
-        default=24.5,
+        default=25.0,
         help="Flux cut applied to each band before selection.",
-    )
-    parser.add_argument(
-        "--z-bounds",
-        type=str,
-        default="0.3,0.6,0.9,1.2,1.5,1.8",
-        help="Comma-separated redshift boundarys, e.g. '0.3,0.6,0.9,1.2,1.8'.",
     )
     parser.add_argument(
         "--emax",
@@ -164,7 +158,8 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
     esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
     m0 = (src["lsst_i_flux_fpfs1"] > flux_min) & (esq0 < emax * emax)
     w0 = src["wsel"][m0]
-    ename = "lsst_i_fpfs1"
+    #ename = "lsst_i_fpfs1"
+    ename = "fpfs"
     e1 = np.sum(w0 * src[f"{ename}_e1"][m0])
     e2 = np.sum(w0 * src[f"{ename}_e2"][m0])
 
@@ -404,6 +399,7 @@ def main() -> None:
         raise SystemExit("--max-id must be > --min-id")
 
     flux_min = 10.0 ** ((MAG_ZERO_AB - args.mag_max) / 2.5)
+    print(flux_min)
     if not args.summary:
         my_ids = np.arange(args.min_id, args.max_id, dtype=int)
         if len(my_ids) > 0:

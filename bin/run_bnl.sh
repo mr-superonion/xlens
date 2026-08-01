@@ -18,6 +18,7 @@ KAPPA="0.0"                 # --kappa F
 ROT="0"                     # --rot N
 LAYOUT="random"             # --layout STR
 BAND="u,g,r,i,z,y"          # --band STR
+DETECTION_BAND=""           # --detection-band STR (optional; empty = script default)
 VERSION=""                  # --version N (optional; empty = unversioned outputs)
 MEMORY=1228                 # request_memory in MB; override with: --memory N
 
@@ -41,6 +42,9 @@ Options:
   --kappa F             kappa (default: ${KAPPA})
   --rot N               rotation (default: ${ROT})
   --band STR            band (default: ${BAND})
+  --detection-band STR  bands to coadd for detection; injects
+                        --detection-band STR into the python arguments
+                        (default: none = the python script's own default)
   --version N           optional integer tag; injects --version N into the
                         python arguments (default: none)
   --memory N            HTCondor request_memory in MB (default: ${MEMORY})
@@ -73,7 +77,8 @@ while [[ $# -gt 0 ]]; do
     --kappa)        KAPPA="$2"; shift 2 ;;
     --rot)          ROT="$2"; shift 2 ;;
     --layout)       LAYOUT="$2"; shift 2 ;;
-    --band)         BAND="$2"; shift 2 ;;
+    --band)           BAND="$2"; shift 2 ;;
+    --detection-band) DETECTION_BAND="$2"; shift 2 ;;
     --version)      VERSION="$2"; shift 2 ;;
     --memory)       MEMORY="$2"; shift 2 ;;
     --dry-run)      DRY_RUN=true; shift ;;
@@ -126,7 +131,7 @@ request_memory  = ${MEMORY}
 request_cpus    = 1
 
 executable      = /bin/bash
-arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} ${VERSION:+--version ${VERSION}} || exit 1; done'"
+arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} ${DETECTION_BAND:+--detection-band ${DETECTION_BAND}} ${VERSION:+--version ${VERSION}} || exit 1; done'"
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).out
 error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log

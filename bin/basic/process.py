@@ -153,7 +153,6 @@ detect_config.validate()
 meas_task = MeasureCoaddsPipe(config=detect_config)
 
 config = matchPipeConfig()
-config.mag_zero = 30.0
 config.mag_max_truth = 28.0
 match_task = matchPipe(config=config)
 
