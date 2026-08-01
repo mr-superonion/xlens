@@ -33,6 +33,7 @@ from numpy.typing import NDArray
 
 from .. import utils
 from ..utils.constants import FPFS_C0
+from ..utils.image import badMaskDefault
 from ..wcs import pixel_to_sky
 
 
@@ -79,7 +80,7 @@ class AnacalConfig(Config):
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
-        default=[],
+        default=badMaskDefault,
     )
     noiseId = Field[int](
         doc="Noise realization id",

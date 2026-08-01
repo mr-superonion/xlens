@@ -120,7 +120,7 @@ class AnacalDetectPipeConfig(
         if self.do_fpfs:
             if self.fpfs.sigma_shapelets1 < 0.0:
                 raise FieldValidationError(
-                    self.fpfs.fields["sigma_shapelets1"],
+                    self.fpfs.__class__.sigma_shapelets1,
                     self,
                     "sigma_shapelets1 in a wrong range",
                 )

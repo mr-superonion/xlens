@@ -30,13 +30,13 @@ from typing import Any
 
 import anacal
 import numpy as np
-from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError, ListField
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
 from ..utils.constants import FPFS_C0
+from ..utils.image import badMaskDefault
 from ..utils.random import num_rot
 
 
@@ -113,7 +113,7 @@ class FpfsMeasurementConfig(Config):
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
-        default=[],
+        default=badMaskDefault,
     )
     noiseId = Field[int](
         doc="Noise realization id",
@@ -165,8 +165,8 @@ class FpfsMeasurementTask(Task):
     """Measure FPFS shapelet observables from coadd image data.
 
     Wraps :func:`anacal.fpfs.process_image` behind the Rubin ``Task``
-    interface.  Call :meth:`prepare_data` to extract arrays from an
-    LSST ``ExposureF``, then :meth:`run` to perform the measurement.
+    interface.  Call :meth:`run` with the data dict prepared by
+    ``AnacalTask.prepare_data``.
     """
 
     _DefaultName = "FpfsMeasurementTask"
@@ -270,58 +270,3 @@ class FpfsMeasurementTask(Task):
         )
         return catalog
 
-    def prepare_data(
-        self,
-        *,
-        exposure: ExposureF,
-        seed: int,
-        band: str | None,
-        survey: str | None = None,
-        noise_corr: NDArray | None = None,
-        mask_array: NDArray | None = None,
-        noise_array: NDArray | None = None,
-        star_cat: NDArray | None = None,
-        detection: NDArray | None = None,
-        **kwargs,
-    ):
-        """Prepares the data from LSST exposure
-        Args:
-        exposure (ExposureF):   LSST exposure
-        seed (int):  random seed
-        band (str | None):  physical band label (butler ``band`` dimension)
-        survey (str | None):  survey name; sets the ``{survey}_{band}_`` output
-            column prefix and makes the noise seed survey-aware
-        noise_corr (NDArray):  image noise correlation function (None)
-        detection (NDArray | None):  external detection catalog (None)
-
-        Returns:
-            (dict)
-        """
-        assert isinstance(self.config, FpfsMeasurementConfig)
-        lsst_bbox = exposure.getBBox()
-
-        data = utils.image.prepare_data(
-            band=band,
-            survey=survey,
-            exposure=exposure,
-            seed=seed,
-            noiseId=self.config.noiseId,
-            rotId=self.config.rotId,
-            npix=self.config.npix,
-            noise_corr=noise_corr,
-            do_noise_bias_correction=self.config.do_noise_bias_correction,
-            badMaskPlanes=self.config.badMaskPlanes,
-            star_cat=star_cat,
-            mask_array=mask_array,
-            noise_array=noise_array,
-            detection=detection,
-        )
-        if self.config.psf_model_type == "object":
-            data["psf_object"] = utils.image.LsstPsf(
-                psf=exposure.getPsf(),
-                npix=self.config.npix,
-                lsst_bbox=lsst_bbox,
-            )
-        else:
-            data["psf_object"] = None
-        return data

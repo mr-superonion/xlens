@@ -81,8 +81,20 @@ def get_noise_seed(
     parts = []
     for item in mixed_list:
         if isinstance(item, int):
-            # Directly store integer as uint32
-            parts.append(np.uint32(item))
+            if 0 <= item < 2**32:
+                # Directly store integer as uint32
+                parts.append(np.uint32(item))
+            else:
+                # np.uint32() would raise OverflowError here (numpy >= 2;
+                # numpy 1 silently kept only the low 32 bits).  Real-data
+                # seeds are packed 64-bit catalog_ids, so split the 64-bit
+                # two's-complement value into low and high words instead --
+                # every bit enters the seed, and values in [0, 2**32) keep
+                # the single-word form above, so historical seeds are
+                # unchanged.
+                value = item & 0xFFFFFFFFFFFFFFFF
+                parts.append(np.uint32(value & 0xFFFFFFFF))
+                parts.append(np.uint32(value >> 32))
         else:
             # Convert non-int (e.g., str) into uint32s via hashing
             h = hashlib.sha256(str(item).encode("utf-8")).digest()
