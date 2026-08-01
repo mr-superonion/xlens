@@ -403,8 +403,8 @@ class BuildSystematicsTask(PipelineTask):
         nstars = len(catalog)
 
         if nstars >= 1:
-            np.random.seed(seed)
-            ind = np.random.randint(0, nstars)
+            rng = np.random.RandomState(seed)
+            ind = rng.randint(0, nstars)
             src = catalog[ind]
             # Collect the PSF image
             lsst_psf = exposure.getPsf()

@@ -249,6 +249,7 @@ class AddNoisePipe(PipelineTask):
             noiseId=self.config.noiseId,
             rotId=self.config.rotId,
             band=band,
+            survey=self.config.survey_name,
             is_sim=True,
         )
         height, width = exposure.getMaskedImage().image.array.shape

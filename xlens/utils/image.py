@@ -988,14 +988,24 @@ def prepare_data_one_cell(
         mask_array,
     )
 
-    # Extract noise from cell if available and not provided
+    # The noise plane must be the cell coadd's own stored realization, built
+    # by the DM pipeline from the input visits.  Never fall back to generating
+    # pure noise here: a generated plane would not carry the coadd's noise
+    # correlations, and the patch-level seed would hand every cell in the
+    # patch the same realization.
     if do_noise_bias_correction and noise_array is None:
         noise_reals = outer.noise_realizations
-        if len(noise_reals) > 0:
-            noise_array = np.array(
-                noise_reals[0].array,
-                dtype=np.float32,
+        if len(noise_reals) == 0:
+            raise RuntimeError(
+                "noise bias correction needs a noise realization stored in "
+                "the cell coadd, but this cell has none; build the cell "
+                "coadds with noise realizations or set "
+                "do_noise_bias_correction=False"
             )
+        noise_array = np.array(
+            noise_reals[0].array,
+            dtype=np.float32,
+        )
 
     noise_array = prepare_noise_array(
         noise_array=noise_array,

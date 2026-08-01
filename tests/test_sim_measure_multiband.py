@@ -154,6 +154,14 @@ def _validatable_config():
     return config
 
 
+def test_sigma_shapelets_validation():
+    # Default sigma_shapelets1 is negative on purpose, so an unconfigured
+    # task fails validation instead of measuring with a bad scale.
+    config = MeasureCoaddsPipeConfig()
+    with pytest.raises(Exception, match="sigma_shapelets1"):
+        config.validate()
+
+
 def test_detection_bands_validation():
     config = _validatable_config()
     config.detection_bands = []
