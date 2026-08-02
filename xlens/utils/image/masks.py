@@ -19,9 +19,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Pixel-mask preparation for AnaCal measurements: the default
-bad-mask-plane list, per-band mask building, and the
-multi-band union mask.
+"""Pixel-mask building for the systematics tasks: the default
+bad-mask-plane list and the per-band mask builder.
+
+Mask building happens ONLY in the systematics tasks
+(``BuildSystematicsTask`` / ``BuildCellSystematicsTask``); the measurement
+``prepare_data*`` functions read the resulting ``mask_array`` and never
+build masks themselves.
 
 Split out of ``xlens.utils.image``, which re-exports every public name here
 for backward compatibility.
@@ -99,24 +103,3 @@ def prepare_mask(
     if original_mask_array is None:
         return new_mask
     return (new_mask | original_mask_array.astype(np.int16)).astype(np.int16)
-
-
-def _union_mask(image_arrays, mask_objects, variance_arrays, badMaskPlanes,
-                mask_array=None):
-    """Mask that flags a pixel bad if it is bad in ANY band.
-
-    Every band is masked with this same union, so a pixel that one band
-    cannot be trusted on does not leak into the coadd through the others.
-    """
-    out = mask_array
-    for image_array, mask_object, variance_array in zip(
-        image_arrays, mask_objects, variance_arrays
-    ):
-        out = prepare_mask(
-            image_array,
-            mask_object,
-            variance_array,
-            badMaskPlanes,
-            original_mask_array=out,
-        )
-    return out

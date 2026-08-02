@@ -551,6 +551,16 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         else:
             stitched_mask_array = None
             mask_origin = None
+            # Mask building lives entirely in BuildCellSystematicsTask now;
+            # without its output, measurement runs unmasked (saturated
+            # pixels, streaks, bright-star halos included).
+            self.log.warning(
+                "No systematics mask for tract=%d patch=%d; measuring "
+                "with NO pixel masking. Run BuildCellSystematicsTask "
+                "upstream unless this is intentional.",
+                tract,
+                patch,
+            )
 
         det_cats = self._detect(
             coadd_handles_dict=coadd_handles_dict,

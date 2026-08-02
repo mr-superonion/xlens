@@ -441,6 +441,17 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             mask_array = mask.getArray()
         else:
             mask_array = None
+            if not self.config.use_sim:
+                # Mask building lives entirely in BuildSystematicsTask now;
+                # without its output, real-data measurement runs unmasked
+                # (saturated pixels, streaks, bright-star halos included).
+                self.log.warning(
+                    "No systematics mask for tract=%d patch=%d; measuring "
+                    "with NO pixel masking. Run BuildSystematicsTask "
+                    "upstream unless this is intentional.",
+                    tract,
+                    patch,
+                )
         if detection is not None:
             det_cat = detection
         else:

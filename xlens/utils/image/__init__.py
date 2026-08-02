@@ -47,7 +47,6 @@ from .hsm import (  # noqa: F401
     measure_psf_hsm_moments,
 )
 from .masks import (  # noqa: F401
-    _union_mask,
     badMaskDefault,
     prepare_mask,
 )

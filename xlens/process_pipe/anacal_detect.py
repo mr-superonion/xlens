@@ -77,6 +77,14 @@ class AnacalDetectPipeConnections(
         multiple=True,
         deferLoad=True,
     )
+    mask = cT.Input(
+        doc="Combined mask from bad pixels and bright stars across all bands.",
+        name="{coaddName}_coadd_systematics_mask",
+        storageClass="Mask",
+        dimensions=("skymap", "tract", "patch"),
+        minimum=0,
+        multiple=False,
+    )
     output_catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
         name="{coaddName}_coadd_anacal_detect",
@@ -140,12 +148,14 @@ class AnacalDetectPipe(AnacalMeasureTaskBase):
         else:
             correlation_handles_dict = {handle.dataId["band"]: handle for handle in correlation_handles}
         skyMap = inputs["skyMap"]
+        mask = inputs.get("mask", None)
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            mask_array=None if mask is None else mask.getArray(),
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -174,6 +184,16 @@ class AnacalDetectPipe(AnacalMeasureTaskBase):
     ):
         assert isinstance(self.config, AnacalDetectPipeConfig)
         band = "i"
+        if mask_array is None:
+            # Mask building lives entirely in BuildSystematicsTask now;
+            # without its output, detection runs unmasked.
+            self.log.warning(
+                "No systematics mask for tract=%d patch=%d; detecting "
+                "with NO pixel masking. Run BuildSystematicsTask "
+                "upstream unless this is intentional.",
+                tract,
+                patch,
+            )
         handle = exposure_handles_dict[band]
         exposure = handle.get()
         exposure.getPsf().setCacheCapacity(self.config.psfCache)

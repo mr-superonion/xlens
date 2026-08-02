@@ -74,7 +74,6 @@ def _compare(sim, fpfs_config):
         noise_array=sim["noise_array"],
         mask_array=None,
         detection=sim["det"],
-        do_compute_detect_weight=False,
     )
 
     # Nonlinear (ground truth)

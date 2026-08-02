@@ -30,13 +30,12 @@ from typing import Any
 
 import anacal
 import numpy as np
-from lsst.pex.config import Config, Field, FieldValidationError, ListField
+from lsst.pex.config import Config, Field, FieldValidationError
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
 from ..utils.constants import FPFS_C0
-from ..utils.image import badMaskDefault
 from ..utils.random import num_rot
 
 
@@ -47,16 +46,11 @@ class FpfsMeasurementConfig(Config):
         doc="number of pixels in stamp [pixel]",
         default=64,
     )
-    bound = Field[int](
-        doc="Sources to be removed if too close to boundary [pixel]",
-        default=35,
-    )
-    sigma_shapelets = Field[float](
-        doc="Shapelet's Gaussian kernel size for detection [arcsec]",
-        default=0.52,
-    )
     sigma_shapelets1 = Field[float](
-        doc="Shapelet's Gaussian kernel size for measurement [arcsec]",
+        doc=(
+            "Shapelet's Gaussian kernel size for measurement [arcsec]. "
+            "REQUIRED (> 0) whenever the fpfs subtask runs."
+        ),
         optional=True,
         default=-1,
     )
@@ -64,20 +58,6 @@ class FpfsMeasurementConfig(Config):
         doc="Shapelet's Gaussian kernel for the second measurement [arcsec]",
         optional=True,
         default=-1,
-    )
-    snr_min = Field[float](
-        doc="Minimum signal-to-noise ratio for the flux selection.",
-        optional=True,
-        default=12.0,
-    )
-    r2_min = Field[float](
-        doc=(
-            "Minimum of the size ratio (m00 + m20) / m00. Matches the same "
-            "cut in the ngmix/Task path (``fpfs_m2 - 0.05 * fpfs_m0``) and "
-            "``trace_min`` in ``xlens.catalog.base``."
-        ),
-        optional=True,
-        default=0.05,
     )
     c0 = Field[float](
         doc=(
@@ -87,20 +67,12 @@ class FpfsMeasurementConfig(Config):
         ),
         default=FPFS_C0,
     )
-    pthres = Field[float](
-        doc="peak detection threshold",
-        default=0.12,
-    )
     kmax_thres = Field[float](
         doc="threshold to determine the maximum k in Fourier space",
         default=1e-12,
     )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
-        default=True,
-    )
-    do_compute_detect_weight = Field[bool](
-        doc="whether to compute detection mode",
         default=True,
     )
     return_only_linear_modes = Field[bool](
@@ -110,10 +82,6 @@ class FpfsMeasurementConfig(Config):
     psf_model_type = Field[str](
         doc="type of psf model (choose from object, block, patch)",
         default="patch",
-    )
-    badMaskPlanes = ListField[str](
-        doc="Mask planes used to reject bad pixels.",
-        default=badMaskDefault,
     )
     noiseId = Field[int](
         doc="Noise realization id",
@@ -126,12 +94,6 @@ class FpfsMeasurementConfig(Config):
 
     def validate(self):
         super().validate()
-        if self.sigma_shapelets > 2.0 or self.sigma_shapelets < 0.0:
-            raise FieldValidationError(
-                self.__class__.sigma_shapelets,
-                self,
-                "sigma_shapelets in a wrong range",
-            )
         if self.sigma_shapelets1 > 2.0:
             raise FieldValidationError(
                 self.__class__.sigma_shapelets1,
@@ -178,13 +140,8 @@ class FpfsMeasurementTask(Task):
         self.fpfs_config = anacal.fpfs.FpfsConfig(
             npix=self.config.npix,
             kmax_thres=self.config.kmax_thres,
-            sigma_shapelets=self.config.sigma_shapelets,
             sigma_shapelets1=self.config.sigma_shapelets1,
             sigma_shapelets2=self.config.sigma_shapelets2,
-            pthres=self.config.pthres,
-            bound=self.config.bound,
-            snr_min=self.config.snr_min,
-            r2_min=self.config.r2_min,
             c0=self.config.c0,
         )
         return
@@ -224,9 +181,11 @@ class FpfsMeasurementTask(Task):
             Bad-pixel mask array.
         noise_array : NDArray or None
             Noise realisation for noise-bias correction.
-        detection : NDArray or None
-            External detection catalog with ``x1_det``, ``x2_det`` columns
-            (in arcsec). If *None*, peaks are detected internally.
+        detection : NDArray
+            Detection catalog from the AnaCal detector with ``x1_det``,
+            ``x2_det`` columns (in arcsec). Required: FPFS no longer
+            detects internally (``anacal.fpfs.process_image`` raises
+            without it).
         psf_object : LsstPsf or None
             Position-dependent PSF model.
         base_column_name : str or None
@@ -263,7 +222,6 @@ class FpfsMeasurementTask(Task):
             noise_array=noise_array,
             detection=det,
             psf_object=psf_object,
-            do_compute_detect_weight=self.config.do_compute_detect_weight,
             base_column_name=base_column_name,
             return_only_linear_modes=self.config.return_only_linear_modes,
             pack_linear_modes=True,

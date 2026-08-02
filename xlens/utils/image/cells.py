@@ -34,7 +34,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..constants import MAG_ZERO_AB
-from .masks import _union_mask, badMaskDefault, prepare_mask
 from .noise import estimate_noise_variance, prepare_noise_array
 from .prepare import _stack_bands, prepare_detection
 from .psf import prepare_psf_array_cell
@@ -48,7 +47,6 @@ def prepare_data_one_cell(
     mag_zero: float,
     npix: int = 64,
     do_noise_bias_correction: bool = True,
-    badMaskPlanes: List[str] = badMaskDefault,
     skyMap=None,
     tract: int = 0,
     patch: int = 0,
@@ -62,6 +60,10 @@ def prepare_data_one_cell(
     **kwargs,
 ):
     """Collect metadata and auxiliary arrays from a SingleCellCoadd.
+
+    ``mask_array`` is consumed as-is: mask building lives in
+    ``BuildCellSystematicsTask``, and callers pass the cell's slice of
+    its stitched output here.  ``None`` means no masking.
 
     ``survey`` (when given) makes the noise seed survey-aware and sets the
     ``{survey}_{band}_`` output-column prefix.
@@ -77,13 +79,12 @@ def prepare_data_one_cell(
     if psf_array is None:
         psf_array = prepare_psf_array_cell(cell, npix)
 
-    mask_array = prepare_mask(
-        outer.image.array,
-        outer.mask,
-        outer.variance.array,
-        badMaskPlanes,
-        original_mask_array=mask_array,
-    )
+    # Private int16 copy: mask_galaxy_image can write bright-star halos into
+    # the mask it is given, and the caller's array must not be mutated.
+    if mask_array is None:
+        mask_array = np.zeros(gal_array.shape, dtype=np.int16)
+    else:
+        mask_array = np.array(mask_array, dtype=np.int16)
 
     anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
 
@@ -182,7 +183,6 @@ def prepare_data_one_cell_multiband(
     mag_zeros: dict,
     npix: int = 64,
     do_noise_bias_correction: bool = True,
-    badMaskPlanes: List[str] = badMaskDefault,
     skyMap=None,
     tract: int = 0,
     patch: int = 0,
@@ -197,6 +197,10 @@ def prepare_data_one_cell_multiband(
 
     ``cells`` maps band to the ``SingleCellCoadd`` at the same cell id, and
     ``mag_zeros`` gives that band coadd's native zeropoint.
+
+    ``mask_array`` (the cell's slice of the stitched systematics mask,
+    already a union over ALL bands plus bright stars) is handed unchanged
+    to every band, so every band is masked on the same pixel footprint.
     """
     bands = list(bands)
     if len(bands) == 0:
@@ -207,15 +211,6 @@ def prepare_data_one_cell_multiband(
     if missing:
         raise KeyError(f"no cell for band(s) {missing}")
 
-    outers = [cells[b].outer for b in bands]
-    union = _union_mask(
-        [o.image.array for o in outers],
-        [o.mask for o in outers],
-        [o.variance.array for o in outers],
-        badMaskPlanes,
-        mask_array=mask_array,
-    )
-
     def per_band():
         for band in bands:
             yield prepare_data_one_cell(
@@ -225,12 +220,11 @@ def prepare_data_one_cell_multiband(
                 mag_zero=mag_zeros[band],
                 npix=npix,
                 do_noise_bias_correction=do_noise_bias_correction,
-                badMaskPlanes=badMaskPlanes,
                 skyMap=skyMap,
                 tract=tract,
                 patch=patch,
                 star_cat=star_cat,
-                mask_array=union,
+                mask_array=mask_array,
                 detection=detection,
                 blocks=blocks,
                 survey=survey,

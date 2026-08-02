@@ -90,10 +90,6 @@ class AnacalMeasureConfigBase(Config):
                 "sigma_shapelets1 in a wrong range",
             )
 
-    def setDefaults(self):
-        super().setDefaults()
-        self.fpfs.do_compute_detect_weight = False
-
 
 class MeasureBandsConfigBase(AnacalMeasureConfigBase):
     """Adds the fields shared by the two detect-then-force measurement tasks.

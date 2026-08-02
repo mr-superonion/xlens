@@ -7,8 +7,8 @@ from lsst.meas.base import SkyMapIdGeneratorConfig
 from xlens.utils.handle import make_data_id
 from xlens.utils.image import (
     _stack_bands,
-    _union_mask,
     combine_sim_exposures,
+    prepare_mask,
 )
 
 
@@ -176,17 +176,25 @@ def test_stack_bands_rejects_mismatched_bands():
         )
 
 
-def test_union_mask_flags_a_pixel_bad_in_any_band():
-    exposures = [_make_exposure(1.0, 1.0) for _ in range(3)]
-    for iband, exposure in enumerate(exposures):
-        exposure.mask.array[0, iband] = exposure.mask.getPlaneBitMask("BAD")
+def test_prepare_mask_planes_negative_pixels_and_original():
+    # prepare_mask is the single mask-building primitive used by the
+    # systematics tasks: configured planes, the -6 sigma negative-pixel
+    # guard, and OR with a pre-existing mask.
+    exposure = _make_exposure(1.0, 1.0)
+    exposure.mask.array[0, 0] = exposure.mask.getPlaneBitMask("BAD")
+    exposure.image.array[1, 1] = -7.0  # < -6 * sqrt(variance=1)
+    original = np.zeros((2, 3), dtype=np.int16)
+    original[1, 2] = 1
 
-    union = _union_mask(
-        [e.image.array for e in exposures],
-        [e.mask for e in exposures],
-        [e.variance.array for e in exposures],
-        ["BAD"],
+    mask = prepare_mask(
+        exposure.image.array,
+        exposure.mask,
+        exposure.variance.array,
+        ["BAD", "NOT_A_PLANE"],  # unknown planes are silently skipped
+        original_mask_array=original,
     )
     expected = np.zeros((2, 3), dtype=np.int16)
-    expected[0, :3] = 1
-    np.testing.assert_array_equal(union, expected)
+    expected[0, 0] = 1  # BAD plane
+    expected[1, 1] = 1  # negative-pixel guard
+    expected[1, 2] = 1  # carried over from original
+    np.testing.assert_array_equal(mask, expected)

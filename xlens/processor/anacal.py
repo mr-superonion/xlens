@@ -27,13 +27,12 @@ import numpy as np
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
 from lsst.geom import Point2D
-from lsst.pex.config import Config, Field, FieldValidationError, ListField
+from lsst.pex.config import Config, Field, FieldValidationError
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
 from ..utils.constants import FPFS_C0
-from ..utils.image import badMaskDefault
 from ..wcs import pixel_to_sky
 
 
@@ -77,10 +76,6 @@ class AnacalConfig(Config):
     do_fpfs = Field[bool](
         doc="whether to do FPFS measurement",
         default=True,
-    )
-    badMaskPlanes = ListField[str](
-        doc="Mask planes used to reject bad pixels.",
-        default=badMaskDefault,
     )
     noiseId = Field[int](
         doc="Noise realization id",
@@ -179,11 +174,12 @@ class AnacalTask(Task):
         # uses it as both centre and width, so the smooth step vanishes
         # exactly at v = 0, the strict-local-maximum boundary).  This value is
         # the "v.003" configuration, which gave the best selection-response
-        # conditioning in the blended-simulation scan.
+        # conditioning in the blended-simulation scan (values rounded to
+        # three decimals).
         task = anacal.task.Task(
             scale=pixel_scale,
-            omega_f=0.2178468328620605,
-            omega_v=0.010892341643103026,
+            omega_f=0.218,
+            omega_v=0.011,
             fpfs_c0=FPFS_C0,
             mag_zero=mag_zero,
             **self.config_kwargs,
@@ -292,7 +288,6 @@ class AnacalTask(Task):
             npix=self.config.npix,
             noise_corr=noise_corr,
             do_noise_bias_correction=self.config.do_noise_bias_correction,
-            badMaskPlanes=self.config.badMaskPlanes,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
@@ -380,7 +375,6 @@ class AnacalTask(Task):
             npix=self.config.npix,
             noise_corrs=noise_corrs,
             do_noise_bias_correction=self.config.do_noise_bias_correction,
-            badMaskPlanes=self.config.badMaskPlanes,
             skyMap=skyMap,
             tract=tract,
             patch=patch,

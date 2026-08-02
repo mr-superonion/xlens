@@ -37,7 +37,6 @@ from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
 from ..constants import MAG_ZERO_AB
-from .masks import _union_mask, badMaskDefault, prepare_mask
 from .noise import estimate_noise_variance, prepare_noise_array
 from .psf import prepare_psf_array, resize_array
 
@@ -224,7 +223,6 @@ def prepare_data(
     npix: int = 64,
     noise_corr: NDArray | None = None,
     do_noise_bias_correction: bool = True,
-    badMaskPlanes: List[str] = badMaskDefault,
     skyMap=None,
     tract: int = 0,
     patch: int = 0,
@@ -238,6 +236,11 @@ def prepare_data(
     **kwargs,
 ):
     """Collect metadata and auxiliary arrays from an LSST ExposureF.
+
+    ``mask_array`` is consumed as-is: mask building lives in
+    ``BuildSystematicsTask`` (bad planes unioned over all bands, the
+    -6 sigma negative-pixel guard, GAIA bright stars), and its output is
+    what callers pass here.  ``None`` means no masking.
 
     ``survey`` (when given) makes the noise-realisation seed
     survey-aware and is used by callers to build the
@@ -258,13 +261,13 @@ def prepare_data(
     # ``np.array`` (not ``asarray``) because the masking below writes into it.
     gal_array = np.array(exposure.image.array, dtype=np.float32)
 
-    mask_array = prepare_mask(
-        exposure.image.array,
-        exposure.mask,
-        exposure.variance.array,
-        badMaskPlanes,
-        original_mask_array=mask_array,
-    )
+    # Private int16 copy: mask_galaxy_image can write bright-star halos into
+    # the mask it is given, and the caller's array (the stitched systematics
+    # mask, shared across bands) must not be mutated.
+    if mask_array is None:
+        mask_array = np.zeros(gal_array.shape, dtype=np.int16)
+    else:
+        mask_array = np.array(mask_array, dtype=np.int16)
 
     anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
 
@@ -426,7 +429,6 @@ def prepare_data_multiband(
     npix: int = 64,
     noise_corrs: dict | None = None,
     do_noise_bias_correction: bool = True,
-    badMaskPlanes: List[str] = badMaskDefault,
     skyMap=None,
     tract: int = 0,
     patch: int = 0,
@@ -442,6 +444,10 @@ def prepare_data_multiband(
     Returns the same dict as :func:`prepare_data`, except that
     ``gal_array``, ``noise_array`` and ``psf_array`` gain a leading band
     axis and ``noise_variance`` is a list with one entry per band.
+
+    ``mask_array`` (the systematics mask, already a union over ALL bands
+    plus bright stars) is handed unchanged to every band, so every band
+    is masked on the same pixel footprint.
     """
     bands = list(bands)
     if len(bands) == 0:
@@ -453,13 +459,6 @@ def prepare_data_multiband(
         raise KeyError(f"no exposure for band(s) {missing}")
 
     exps = [exposures[b] for b in bands]
-    union = _union_mask(
-        [e.image.array for e in exps],
-        [e.mask for e in exps],
-        [e.variance.array for e in exps],
-        badMaskPlanes,
-        mask_array=mask_array,
-    )
     noise_corrs = noise_corrs or {}
 
     def per_band():
@@ -473,12 +472,11 @@ def prepare_data_multiband(
                 npix=npix,
                 noise_corr=noise_corrs.get(band, None),
                 do_noise_bias_correction=do_noise_bias_correction,
-                badMaskPlanes=badMaskPlanes,
                 skyMap=skyMap,
                 tract=tract,
                 patch=patch,
                 star_cat=star_cat,
-                mask_array=union,
+                mask_array=mask_array,
                 detection=detection,
                 blocks=blocks,
                 survey=survey,
