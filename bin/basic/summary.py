@@ -9,10 +9,10 @@ import glob
 import os
 from typing import Iterable, List, Optional, Tuple
 
+import common
 import fitsio
 import numpy as np
 
-import common
 from xlens.utils.constants import MAG_ZERO_AB
 
 
@@ -158,7 +158,7 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
     esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
     m0 = (src["lsst_i_flux_fpfs1"] > flux_min) & (esq0 < emax * emax)
     w0 = src["wsel"][m0]
-    #ename = "lsst_i_fpfs1"
+    # ename = "lsst_i_fpfs1"
     ename = "fpfs"
     e1 = np.sum(w0 * src[f"{ename}_e1"][m0])
     e2 = np.sum(w0 * src[f"{ename}_e2"][m0])

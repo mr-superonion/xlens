@@ -40,8 +40,6 @@ import numpy as np
 from lsst.meas.algorithms import KernelPsf
 from numpy.typing import NDArray
 
-
-
 # ---------------------------------------------------------------------------
 # PSF HSM-moment measurement utilities
 # ---------------------------------------------------------------------------

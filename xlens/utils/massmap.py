@@ -225,10 +225,10 @@ def build_flat_wcs_grid(ra_bcg, dec_bcg, ra, dec,
     """Project sources to flat-sky degrees relative to (ra_bcg, dec_bcg) and
     return both the source `(x, y)` and an NxN `(x_grid, y_grid)` mesh.
     """
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord
     from astropy.wcs import WCS
     from astropy.wcs.utils import skycoord_to_pixel
-    from astropy.coordinates import SkyCoord
-    import astropy.units as u
 
     wcs = WCS(naxis=2)
     wcs.wcs.crval = [ra_bcg, dec_bcg]

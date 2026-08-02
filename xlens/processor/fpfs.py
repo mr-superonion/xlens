@@ -269,4 +269,3 @@ class FpfsMeasurementTask(Task):
             pack_linear_modes=True,
         )
         return catalog
-

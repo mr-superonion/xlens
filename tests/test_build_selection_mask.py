@@ -23,7 +23,6 @@ from xlens.catalog.base import (
 )
 from xlens.catalog.utils import _resolve_cut, _resolve_cut_name
 
-
 SN = "fpfs_"
 SHAPE = "fpfs"
 BANDS = ["lsst_g", "lsst_r", "lsst_i", "lsst_z"]

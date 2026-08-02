@@ -35,7 +35,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-
 def subpixel_shift(image: NDArray, shift_x: float, shift_y: float) -> NDArray:
     """Shift an image by arbitrary subpixel offsets using Fourier methods.
 

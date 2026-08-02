@@ -33,13 +33,14 @@ append_specz_columns(meas, specz, idx)
 spec_selection(meas, sepcheck)
     Boolean mask = matched & per-band mag cuts & trace cut & confidence cut.
 """
-import numpy as np
 import astropy.units as u
+import numpy as np
 from astropy.coordinates import SkyCoord
 
 # Basic golden selection: per-band mag cuts (mag_zero = 31.4) + trace > 0.1
 # + spec-z confidence > 0.82.
 from .constants import MAG_ZERO_AB as MAG_ZERO
+
 MAG_CUTS = {
     "lsst_u": 27.5, "lsst_g": 26.5, "lsst_r": 26.0,
     "lsst_i": 25.0, "lsst_z": 25.0, "lsst_y": 25.0,

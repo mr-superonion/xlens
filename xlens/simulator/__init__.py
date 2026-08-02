@@ -35,8 +35,8 @@ from . import (
     mog,
     noise,
     perturbation,
-    sim,
     seds,
+    sim,
 )
 
 __all__ = [

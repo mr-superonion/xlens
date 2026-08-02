@@ -26,7 +26,6 @@ from xlens.utils.mask import (
     get_gaia_table,
 )
 
-
 PIXEL_SCALE_ARCSEC = 0.2  # ComCam DP1 cell-coadd pixel scale
 CRPIX = lsst_geom.Point2D(2000.0, 3000.0)  # reference pixel (arbitrary)
 CRVAL = lsst_geom.SpherePoint(150.0, 2.0, lsst_geom.degrees)  # ref sky position

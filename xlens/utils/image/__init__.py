@@ -26,7 +26,7 @@ re-exported here so existing ``xlens.utils.image.<name>`` imports keep
 working:
 
 - :mod:`~xlens.utils.image.masks`   -- bad-mask planes, per-band + union masks
-- :mod:`~xlens.utils.image.noise`   -- noise generation / variance / noise plane
+- :mod:`~xlens.utils.image.noise`   -- noise generation, variance, noise plane
 - :mod:`~xlens.utils.image.psf`     -- PSF wrappers and PSF-stamp preparation
 - :mod:`~xlens.utils.image.prepare` -- exposure / patch-coadd prepare_data
 - :mod:`~xlens.utils.image.cells`   -- cell-coadd prepare_data

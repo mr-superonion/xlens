@@ -18,6 +18,7 @@ import argparse
 import gc
 import os
 
+import common
 import fitsio
 import numpy as np
 from lsst.afw.image import ExposureF
@@ -32,8 +33,6 @@ from xlens.processor.measure_coadds import (
     MeasureCoaddsPipeConfig,
 )
 from xlens.utils.handle import make_exposure_handles
-
-import common
 
 COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()

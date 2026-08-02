@@ -33,7 +33,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-
 def rotate_noise_corr(noise_corr):
     noise_max = np.amax(noise_corr)
     noise_corr = noise_corr / noise_max

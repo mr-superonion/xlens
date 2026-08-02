@@ -36,8 +36,8 @@ from numpy.typing import NDArray
 from ..constants import MAG_ZERO_AB
 from .masks import _union_mask, badMaskDefault, prepare_mask
 from .noise import estimate_noise_variance, prepare_noise_array
-from .psf import prepare_psf_array_cell
 from .prepare import _stack_bands, prepare_detection
+from .psf import prepare_psf_array_cell
 
 
 def prepare_data_one_cell(

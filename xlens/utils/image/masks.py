@@ -33,8 +33,6 @@ import lsst.pex.exceptions as pexExcept
 import numpy as np
 from numpy.typing import NDArray
 
-
-
 badMaskDefault = [
     "BAD",
     "SAT",

@@ -8,6 +8,7 @@ import argparse
 import gc
 import os
 
+import common
 import fitsio
 from mpi4py import MPI
 
@@ -16,8 +17,6 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
-
-import common
 
 COMM = MPI.COMM_WORLD
 RANK = COMM.Get_rank()
