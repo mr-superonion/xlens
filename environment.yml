@@ -6,7 +6,7 @@ platforms:
 dependencies:
   # runtime (mirrors requirements.txt)
   - python=3.13
-  - anacal=0.8.0=py313*
+  - anacal=0.8.1=py313*
   - stackvana>=0.2026.13=py313*
   - click
   - healpy
