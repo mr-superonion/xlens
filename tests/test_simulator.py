@@ -288,49 +288,28 @@ def test_catalog_disable_lensing_position_shifts():
     return
 
 
-def test_galaxies_draw_mog_consistency():
-    from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+def _make_tiny_skymap(npix=150, pixel_scale=0.2):
+    """Single-tract, single-patch skymap ``npix`` pixels on a side.
 
-    config = MultibandSimConfig()
-    config.use_mog = False
-    simtask = MultibandSimTask(config=config)
+    BATSim renders every object through a supersampled fine grid, which is
+    far more expensive per galaxy than the GalSim path used elsewhere, and
+    the truth catalog is drawn over the whole tract.  A tiny tract keeps the
+    IA test to a few dozen galaxies instead of several hundred.
+    """
+    from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 
-    tract_info = skymap0[0]
-    rng = np.random.RandomState(0)
-    catalog = xlens.simulator.galaxies.CatSim2017Catalog(
-        rng=rng,
-        tract_info=tract_info,
-        layout_name="random",
-    )
-    wcs = tract_info.getWcs()
-    bbox_outer = tract_info[0].getOuterBBox()
-    psf_galsim = galsim.Moffat(fwhm=0.8, beta=2.5)
-
-    image_default = simtask.draw_catalog(
-        galaxy_catalog=catalog,
-        wcs=wcs,
-        bbox_outer=bbox_outer,
-        psf_obj=psf_galsim,
-        mag_zero=30,
-        band="i",
-    )
-
-    config = MultibandSimConfig()
-    config.use_mog = True
-    simtask = MultibandSimTask(config=config)
-    image_mog = simtask.draw_catalog(
-        galaxy_catalog=catalog,
-        wcs=wcs,
-        bbox_outer=bbox_outer,
-        psf_obj=psf_galsim,
-        mag_zero=30,
-        band="i",
-    )
-    diff = np.abs(image_default - image_mog)
-    baseline = np.max(np.abs(image_default))
-    assert np.mean(diff) / baseline < 5e-4
-    assert np.max(diff) / baseline < 1e-1
-    return
+    config = DiscreteSkyMapConfig()
+    config.raList = [0.0]
+    config.decList = [0.0]
+    # small enough that the tract is a single ``npix`` patch
+    config.radiusList = [0.4 * npix * pixel_scale / 3600.0]
+    config.rotation = 0.0
+    config.projection = "TAN"
+    config.patchInnerDimensions = [npix, npix]
+    config.patchBorder = 0
+    config.pixelScale = pixel_scale
+    config.tractOverlap = 0.0
+    return DiscreteSkyMap(config)
 
 
 @pytest.mark.skipif(
@@ -346,7 +325,7 @@ def test_iasim():
         MultibandSimTask,
     )
 
-    tract_info = skymap0[0]
+    tract_info = _make_tiny_skymap()[0]
 
     catalog_config = CatalogShearTaskConfig()
     catalog_config.mode = 2
@@ -355,7 +334,6 @@ def test_iasim():
     truth_catalog = catalog_task.run(tract_info=tract_info, seed=0).truthCatalog
 
     multiband_config = MultibandSimConfig()
-    multiband_config.use_mog = False
     multiband_config.include_point_source = False
     multiband_task = MultibandSimTask(config=multiband_config)
     multiband_output = multiband_task.run(
@@ -367,7 +345,6 @@ def test_iasim():
     )
 
     ia_config = IASimConfig()
-    ia_config.use_mog = False
     ia_config.ia_amplitude = 0.0
     ia_config.include_point_source = False
     ia_task = IASimTask(config=ia_config)

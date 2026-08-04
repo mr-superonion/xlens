@@ -37,13 +37,40 @@ import numpy as np
 import pyarrow.parquet as pq
 from numpy.lib import recfunctions as rfn
 
-from . import mog
 from .layout import Layout
+
+
+# ``force_galaxy_type`` codes shared by every catalog implementation
+FORCE_GALAXY_TYPE_NONE = 0
+FORCE_GALAXY_TYPE_GAUSSIAN = 1
+FORCE_GALAXY_TYPE_EXPONENTIAL = 2
 
 
 def _galsim_round_sersic(n, sersic_prec):
     """Round a Sersic index to the nearest multiple of *sersic_prec*."""
     return float(int(n / sersic_prec + 0.5)) * sersic_prec
+
+
+def _forced_profile(force_galaxy_type, *, flux, half_light_radius):
+    """Return the radial profile requested by *force_galaxy_type*.
+
+    Parameters
+    ----------
+    force_galaxy_type : int
+        1 for Gaussian, 2 for Exponential.
+    flux : float
+        Total flux of the component.
+    half_light_radius : float
+        Half-light radius (arcsec) of the component.
+    """
+    if force_galaxy_type == FORCE_GALAXY_TYPE_GAUSSIAN:
+        return galsim.Gaussian(flux=flux, half_light_radius=half_light_radius)
+    if force_galaxy_type == FORCE_GALAXY_TYPE_EXPONENTIAL:
+        return galsim.Exponential(flux=flux, half_light_radius=half_light_radius)
+    raise ValueError(
+        "force_galaxy_type must be 1 (gaussian) or 2 (exponential), "
+        f"not {force_galaxy_type}"
+    )
 
 
 def get_catalog(fname):
@@ -329,7 +356,7 @@ class BaseGalaxyCatalog(ABC):
 
     @abstractmethod
     def _generate_galaxy(
-        self, *, entry: Any, mag_zero: float, band: str, use_mog=False, **kwargs
+        self, *, entry: Any, mag_zero: float, band: str, **kwargs
     ) -> galsim.GSObject:
         """Build and return a GalSim GSObject from one catalog entry."""
 
@@ -526,8 +553,8 @@ class BaseGalaxyCatalog(ABC):
         ind,
         mag_zero: float,
         band: str,
-        use_mog: bool = False,
         force_isotropic: bool = False,
+        force_galaxy_type: int = FORCE_GALAXY_TYPE_NONE,
         include_point_source: bool = True,
         survey_name: str = "",
     ) -> dict[str, list]:
@@ -541,10 +568,13 @@ class BaseGalaxyCatalog(ABC):
             Zeropoint magnitude for flux conversion.
         band : str
             Photometric band label.
-        use_mog : bool, optional
-            Use Mixture-of-Gaussians profiles instead of native GalSim.
         force_isotropic : bool, optional
             Force all galaxies to have circular isophotes.
+        force_galaxy_type : int, optional
+            If greater than zero, override the bulge and disk radial profiles
+            with a single fixed type: 1 for Gaussian, 2 for Exponential.  The
+            half-light radii, fluxes and ellipticities of the components are
+            kept.  Zero (the default) keeps the catalog's native profiles.
         include_point_source : bool, optional
             Include AGN or point-source components.
         survey_name : str, optional
@@ -562,9 +592,9 @@ class BaseGalaxyCatalog(ABC):
             entry=src,
             mag_zero=mag_zero,
             band=band,
-            use_mog=use_mog,
             include_point_source=include_point_source,
             force_isotropic=force_isotropic,
+            force_galaxy_type=force_galaxy_type,
             survey_name=survey_name,
         )
         gal = gal.rotate(src["angles"] * galsim.radians)
@@ -610,16 +640,12 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         entry,
         mag_zero,
         band,
-        use_mog=False,
         include_point_source=True,
         force_isotropic=False,
+        force_galaxy_type=FORCE_GALAXY_TYPE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a CatSim 2017 catalog row."""
-        if use_mog:
-            _simulator = mog
-        else:
-            _simulator = galsim
         dd = entry.copy()
         if not include_point_source:
             dd["fluxnorm_agn"] = 0.0
@@ -647,9 +673,13 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             else:
                 q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(dd["pa_disk"])
-            disk = _simulator.Exponential(flux=disk_flux, half_light_radius=hlr_d).shear(
-                q=q_d, beta=beta_d * galsim.radians
-            )
+            if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+                disk = _forced_profile(
+                    force_galaxy_type, flux=disk_flux, half_light_radius=hlr_d
+                )
+            else:
+                disk = galsim.Exponential(flux=disk_flux, half_light_radius=hlr_d)
+            disk = disk.shear(q=q_d, beta=beta_d * galsim.radians)
             components.append(disk)
 
         # Bulge
@@ -661,9 +691,13 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             else:
                 q_b = (b_b / a_b) if a_b > 0 else 1.0
             beta_b = np.radians(dd["pa_bulge"])
-            bulge = _simulator.DeVaucouleurs(flux=bulge_flux, half_light_radius=hlr_b).shear(
-                q=q_b, beta=beta_b * galsim.radians
-            )
+            if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+                bulge = _forced_profile(
+                    force_galaxy_type, flux=bulge_flux, half_light_radius=hlr_b
+                )
+            else:
+                bulge = galsim.DeVaucouleurs(flux=bulge_flux, half_light_radius=hlr_b)
+            bulge = bulge.shear(q=q_b, beta=beta_b * galsim.radians)
             components.append(bulge)
 
         # AGN (nearly point-like)
@@ -712,13 +746,11 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         mag_zero,
         band,
         survey_name,
-        use_mog=False,
         force_isotropic=False,
+        force_galaxy_type=FORCE_GALAXY_TYPE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Flagship 2025 catalog row."""
-        if use_mog:
-            raise NotImplementedError("Flagship2025Catalog does not support the MoG renderer")
         sname = survey_name
         if sname == "hsc":
             sname = "lsst"
@@ -744,10 +776,16 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
                 q_d = float(entry["disk_axis_ratio"])
                 # axis ratio is minor/major; clamp to valid range
                 q_d = min(max(q_d, 0.00), 1.0)
-            disk = galsim.Exponential(
-                flux=disk_flux,
-                half_light_radius=disk_hlr,
-            ).shear(q=q_d, beta=pa)
+            if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+                disk = _forced_profile(
+                    force_galaxy_type, flux=disk_flux, half_light_radius=disk_hlr
+                )
+            else:
+                disk = galsim.Exponential(
+                    flux=disk_flux,
+                    half_light_radius=disk_hlr,
+                )
+            disk = disk.shear(q=q_d, beta=pa)
             components.append(disk)
 
         # Bulge
@@ -760,11 +798,17 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
             else:
                 q_b = float(entry["bulge_axis_ratio"])
                 q_b = min(max(q_b, 0.00), 1.0)
-            bulge = galsim.Sersic(
-                n=bulge_n,
-                flux=bulge_flux,
-                half_light_radius=bulge_hlr,
-            ).shear(q=q_b, beta=pa)
+            if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+                bulge = _forced_profile(
+                    force_galaxy_type, flux=bulge_flux, half_light_radius=bulge_hlr
+                )
+            else:
+                bulge = galsim.Sersic(
+                    n=bulge_n,
+                    flux=bulge_flux,
+                    half_light_radius=bulge_hlr,
+                )
+            bulge = bulge.shear(q=q_b, beta=pa)
             components.append(bulge)
 
         if not components:
@@ -805,15 +849,11 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         mag_zero,
         band,
         survey_name,
-        use_mog=False,
         force_isotropic=False,
+        force_galaxy_type=FORCE_GALAXY_TYPE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Diffsky catalog row."""
-        if use_mog:
-            _simulator = mog
-        else:
-            _simulator = galsim
         if survey_name == "hsc":
             sname = "lsst"
         else:
@@ -838,16 +878,26 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
         disk_mag = entry[f"{sname}_{band}_disk"]
         disk_flux = 10 ** ((mag_zero - disk_mag) / 2.5)
-        disk = _simulator.Exponential(
-            flux=disk_flux,
-            half_light_radius=disk_hlr,
-        ).shear(g1=disk_e1, g2=disk_e2)
+        if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+            disk = _forced_profile(
+                force_galaxy_type, flux=disk_flux, half_light_radius=disk_hlr
+            )
+        else:
+            disk = galsim.Exponential(
+                flux=disk_flux,
+                half_light_radius=disk_hlr,
+            )
+        disk = disk.shear(g1=disk_e1, g2=disk_e2)
 
         bulge_mag = entry[f"{sname}_{band}_bulge"]
         bulge_flux = 10 ** ((mag_zero - bulge_mag) / 2.5)
-        bulge = _simulator.DeVaucouleurs(flux=bulge_flux, half_light_radius=bulge_hlr).shear(
-            g1=bulge_e1, g2=bulge_e2
-        )
+        if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+            bulge = _forced_profile(
+                force_galaxy_type, flux=bulge_flux, half_light_radius=bulge_hlr
+            )
+        else:
+            bulge = galsim.DeVaucouleurs(flux=bulge_flux, half_light_radius=bulge_hlr)
+        bulge = bulge.shear(g1=bulge_e1, g2=bulge_e2)
 
         gal = (bulge + disk).withFlux(disk_flux + bulge_flux)
         return gal
