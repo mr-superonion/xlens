@@ -40,10 +40,10 @@ from numpy.lib import recfunctions as rfn
 from .layout import Layout
 
 
-# ``force_galaxy_type`` codes shared by every catalog implementation
-FORCE_GALAXY_TYPE_NONE = 0
-FORCE_GALAXY_TYPE_GAUSSIAN = 1
-FORCE_GALAXY_TYPE_EXPONENTIAL = 2
+# ``force_galaxy_profile`` codes shared by every catalog implementation
+FORCE_GALAXY_PROFILE_NONE = 0
+FORCE_GALAXY_PROFILE_GAUSSIAN = 1
+FORCE_GALAXY_PROFILE_EXPONENTIAL = 2
 
 
 def _galsim_round_sersic(n, sersic_prec):
@@ -51,25 +51,25 @@ def _galsim_round_sersic(n, sersic_prec):
     return float(int(n / sersic_prec + 0.5)) * sersic_prec
 
 
-def _forced_profile(force_galaxy_type, *, flux, half_light_radius):
-    """Return the radial profile requested by *force_galaxy_type*.
+def _forced_profile(force_galaxy_profile, *, flux, half_light_radius):
+    """Return the radial profile requested by *force_galaxy_profile*.
 
     Parameters
     ----------
-    force_galaxy_type : int
+    force_galaxy_profile : int
         1 for Gaussian, 2 for Exponential.
     flux : float
         Total flux of the component.
     half_light_radius : float
         Half-light radius (arcsec) of the component.
     """
-    if force_galaxy_type == FORCE_GALAXY_TYPE_GAUSSIAN:
+    if force_galaxy_profile == FORCE_GALAXY_PROFILE_GAUSSIAN:
         return galsim.Gaussian(flux=flux, half_light_radius=half_light_radius)
-    if force_galaxy_type == FORCE_GALAXY_TYPE_EXPONENTIAL:
+    if force_galaxy_profile == FORCE_GALAXY_PROFILE_EXPONENTIAL:
         return galsim.Exponential(flux=flux, half_light_radius=half_light_radius)
     raise ValueError(
-        "force_galaxy_type must be 1 (gaussian) or 2 (exponential), "
-        f"not {force_galaxy_type}"
+        "force_galaxy_profile must be 1 (gaussian) or 2 (exponential), "
+        f"not {force_galaxy_profile}"
     )
 
 
@@ -554,7 +554,7 @@ class BaseGalaxyCatalog(ABC):
         mag_zero: float,
         band: str,
         force_isotropic: bool = False,
-        force_galaxy_type: int = FORCE_GALAXY_TYPE_NONE,
+        force_galaxy_profile: int = FORCE_GALAXY_PROFILE_NONE,
         include_point_source: bool = True,
         survey_name: str = "",
     ) -> dict[str, list]:
@@ -570,11 +570,11 @@ class BaseGalaxyCatalog(ABC):
             Photometric band label.
         force_isotropic : bool, optional
             Force all galaxies to have circular isophotes.
-        force_galaxy_type : int, optional
+        force_galaxy_profile : int, optional
             If greater than zero, override the bulge and disk radial profiles
-            with a single fixed type: 1 for Gaussian, 2 for Exponential.  The
-            half-light radii, fluxes and ellipticities of the components are
-            kept.  Zero (the default) keeps the catalog's native profiles.
+            with a single fixed profile: 1 for Gaussian, 2 for Exponential.
+            The half-light radii, fluxes and ellipticities of the components
+            are kept.  Zero (the default) keeps the catalog's native profiles.
         include_point_source : bool, optional
             Include AGN or point-source components.
         survey_name : str, optional
@@ -594,7 +594,7 @@ class BaseGalaxyCatalog(ABC):
             band=band,
             include_point_source=include_point_source,
             force_isotropic=force_isotropic,
-            force_galaxy_type=force_galaxy_type,
+            force_galaxy_profile=force_galaxy_profile,
             survey_name=survey_name,
         )
         gal = gal.rotate(src["angles"] * galsim.radians)
@@ -642,7 +642,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         band,
         include_point_source=True,
         force_isotropic=False,
-        force_galaxy_type=FORCE_GALAXY_TYPE_NONE,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a CatSim 2017 catalog row."""
@@ -673,9 +673,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             else:
                 q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(dd["pa_disk"])
-            if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
                 disk = _forced_profile(
-                    force_galaxy_type, flux=disk_flux, half_light_radius=hlr_d
+                    force_galaxy_profile, flux=disk_flux, half_light_radius=hlr_d
                 )
             else:
                 disk = galsim.Exponential(flux=disk_flux, half_light_radius=hlr_d)
@@ -691,9 +691,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             else:
                 q_b = (b_b / a_b) if a_b > 0 else 1.0
             beta_b = np.radians(dd["pa_bulge"])
-            if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
                 bulge = _forced_profile(
-                    force_galaxy_type, flux=bulge_flux, half_light_radius=hlr_b
+                    force_galaxy_profile, flux=bulge_flux, half_light_radius=hlr_b
                 )
             else:
                 bulge = galsim.DeVaucouleurs(flux=bulge_flux, half_light_radius=hlr_b)
@@ -747,7 +747,7 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         band,
         survey_name,
         force_isotropic=False,
-        force_galaxy_type=FORCE_GALAXY_TYPE_NONE,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Flagship 2025 catalog row."""
@@ -776,9 +776,9 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
                 q_d = float(entry["disk_axis_ratio"])
                 # axis ratio is minor/major; clamp to valid range
                 q_d = min(max(q_d, 0.00), 1.0)
-            if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
                 disk = _forced_profile(
-                    force_galaxy_type, flux=disk_flux, half_light_radius=disk_hlr
+                    force_galaxy_profile, flux=disk_flux, half_light_radius=disk_hlr
                 )
             else:
                 disk = galsim.Exponential(
@@ -798,9 +798,9 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
             else:
                 q_b = float(entry["bulge_axis_ratio"])
                 q_b = min(max(q_b, 0.00), 1.0)
-            if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
                 bulge = _forced_profile(
-                    force_galaxy_type, flux=bulge_flux, half_light_radius=bulge_hlr
+                    force_galaxy_profile, flux=bulge_flux, half_light_radius=bulge_hlr
                 )
             else:
                 bulge = galsim.Sersic(
@@ -850,7 +850,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         band,
         survey_name,
         force_isotropic=False,
-        force_galaxy_type=FORCE_GALAXY_TYPE_NONE,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Diffsky catalog row."""
@@ -878,9 +878,9 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
         disk_mag = entry[f"{sname}_{band}_disk"]
         disk_flux = 10 ** ((mag_zero - disk_mag) / 2.5)
-        if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+        if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
             disk = _forced_profile(
-                force_galaxy_type, flux=disk_flux, half_light_radius=disk_hlr
+                force_galaxy_profile, flux=disk_flux, half_light_radius=disk_hlr
             )
         else:
             disk = galsim.Exponential(
@@ -891,9 +891,9 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
         bulge_mag = entry[f"{sname}_{band}_bulge"]
         bulge_flux = 10 ** ((mag_zero - bulge_mag) / 2.5)
-        if force_galaxy_type > FORCE_GALAXY_TYPE_NONE:
+        if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
             bulge = _forced_profile(
-                force_galaxy_type, flux=bulge_flux, half_light_radius=bulge_hlr
+                force_galaxy_profile, flux=bulge_flux, half_light_radius=bulge_hlr
             )
         else:
             bulge = galsim.DeVaucouleurs(flux=bulge_flux, half_light_radius=bulge_hlr)

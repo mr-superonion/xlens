@@ -211,9 +211,10 @@ class MultibandSimConfig(
         doc="force all input catalog to be isotropic",
         default=False,
     )
-    force_galaxy_type = Field[int](
-        doc="if > 0, force the bulge and disk radial profiles to a single type "
-        "(1: gaussian, 2: exponential); 0 keeps the catalog's native profiles",
+    force_galaxy_profile = Field[int](
+        doc="if > 0, force the bulge and disk radial profiles to a single "
+        "profile (1: gaussian, 2: exponential); 0 keeps the catalog's native "
+        "profiles",
         default=0,
     )
     psf_e1 = Field[float](
@@ -254,11 +255,11 @@ class MultibandSimConfig(
                 self,
                 "We require noiseId >=0 ",
             )
-        if self.force_galaxy_type not in [0, 1, 2]:
+        if self.force_galaxy_profile not in [0, 1, 2]:
             raise FieldValidationError(
-                self.__class__.force_galaxy_type,
+                self.__class__.force_galaxy_profile,
                 self,
-                "We require force_galaxy_type in [0, 1, 2]",
+                "We require force_galaxy_profile in [0, 1, 2]",
             )
         if self.galaxy_type not in ["catsim2017", "flagship2025", "diffsky"]:
             raise FieldValidationError(
@@ -425,7 +426,7 @@ class MultibandSimTask(PipelineTask):
                     mag_zero=mag_zero,
                     band=band,
                     force_isotropic=self.config.force_isotropic,
-                    force_galaxy_type=self.config.force_galaxy_type,
+                    force_galaxy_profile=self.config.force_galaxy_profile,
                     include_point_source=self.config.include_point_source,
                     survey_name=survey_name,
                 )
@@ -764,7 +765,7 @@ class IASimTask(MultibandSimTask):
                     mag_zero=mag_zero,
                     band=band,
                     force_isotropic=self.config.force_isotropic,
-                    force_galaxy_type=self.config.force_galaxy_type,
+                    force_galaxy_profile=self.config.force_galaxy_profile,
                     include_point_source=self.config.include_point_source,
                     survey_name=survey_name,
                 )
