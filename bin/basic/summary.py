@@ -399,7 +399,6 @@ def main() -> None:
         raise SystemExit("--max-id must be > --min-id")
 
     flux_min = 10.0 ** ((MAG_ZERO_AB - args.mag_max) / 2.5)
-    print(flux_min)
     if not args.summary:
         my_ids = np.arange(args.min_id, args.max_id, dtype=int)
         if len(my_ids) > 0:
