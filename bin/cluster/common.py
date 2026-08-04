@@ -103,8 +103,9 @@ def halo_tag():
 
 def _outdir(layout, rot, kind, version=None):
     """Internal: build/create the output directory for `kind` in
-    {'sim', 'process'}. prepare_sim.py + sim.py write truth + exposures
-    to the 'sim_rot<r>' directory; process.py reads from 'sim_rot<r>'
+    {'sim_truth', 'sim', 'process'}. prepare_sim.py writes truth
+    catalogs to 'sim_truth_rot<r>'; sim.py reads them and writes
+    exposures to 'sim_rot<r>'; process.py reads from 'sim_rot<r>'
     and writes catalogs to 'process_rot<r>'. When `version` is set,
     `-v<version>` is appended to the leaf directory name so parallel
     processing runs can coexist (same convention as bin/basic's
@@ -123,8 +124,14 @@ def _outdir(layout, rot, kind, version=None):
     return outdir
 
 
+def truth_outdir(layout, rot):
+    """Directory that holds the truth catalogs (prepare_sim.py products)."""
+    return _outdir(layout, rot, "sim_truth")
+
+
 def sim_outdir(layout, rot):
-    """Directory that holds truth catalogs + per-(band, patch) exposures."""
+    """Directory that holds the per-(band, patch) exposures (sim.py
+    products)."""
     return _outdir(layout, rot, "sim")
 
 

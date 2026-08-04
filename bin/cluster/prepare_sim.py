@@ -3,9 +3,10 @@
 
 Each realization (sim_seed) gets one truth-<seed>.fits covering the
 WHOLE tract (all 9 patches), with the NFW halo of common.py at the
-tract centre (ra=0, dec=0). sim.py then renders the 9 patches of a
-realization from this shared truth catalog, so prepare_sim.py must run
-first. Existing outputs are reused; missing outputs are (re)generated.
+tract centre (ra=0, dec=0). Truth catalogs go to sim_truth_rot<r>/
+(the exposures sim.py renders from them go to sim_rot<r>/). sim.py
+needs the truth catalog, so prepare_sim.py must run first. Existing
+outputs are reused; missing outputs are (re)generated.
 
 Job indices map directly to realizations: --start/--end select
 sim_seed in [start, end).  The mode swept by run_bnl.sh IS the
@@ -103,7 +104,7 @@ cfg_cat.layout = args.layout
 cfg_cat.validate()
 cat_task = CatalogHaloTask(config=cfg_cat)
 
-outdir = common.sim_outdir(args.layout, rot)
+outdir = common.truth_outdir(args.layout, rot)
 
 # ------------------------------
 # Work loop; the realized seed set is independent of the rank count.

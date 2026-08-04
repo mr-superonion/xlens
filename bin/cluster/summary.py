@@ -136,8 +136,8 @@ def read_realization(layout, rot, sim_seed, version=None):
     (realization, rotation). Returns (catalog, truth) or None if any
     file is missing."""
     proc_dir = common.process_outdir(layout, rot, version=version)
-    sim_dir = common.sim_outdir(layout, rot)
-    truthfname = common.truth_path(sim_dir, sim_seed)
+    truth_dir = common.truth_outdir(layout, rot)
+    truthfname = common.truth_path(truth_dir, sim_seed)
     cat_fnames = [
         common.cat_path(proc_dir, sim_seed, patch)
         for patch in range(common.N_PATCH)

@@ -159,8 +159,10 @@ detect_config.validate()
 meas_task = MeasureCoaddsPipe(config=detect_config)
 
 # ------------------------------
-# Output layout: prepare_sim.py/sim.py write truth/exposures under sim/;
-# process.py reads from there and writes catalogs under process/.
+# Output layout: sim.py writes exposures under sim_rot<r>/ (truth
+# catalogs live in sim_truth_rot<r>/ but are not needed here);
+# process.py reads the exposures and writes catalogs under
+# process_rot<r>/.
 # ------------------------------
 sim_dir = common.sim_outdir(args.layout, rot)
 proc_dir = common.process_outdir(args.layout, rot, version=args.version)

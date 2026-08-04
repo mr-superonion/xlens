@@ -6,9 +6,9 @@ The global index encodes (realization, patch):
 ``sim_seed, patch_id = divmod(index, 9)``, so submitting indices
 [0, 9*n_realizations) simulates every patch of every realization with
 each job doing exactly one patch. The truth catalog of the realization
-must already exist (run prepare_sim.py first); indices whose truth file
-is missing are skipped with a note so the two scripts can run
-independently and be resumed.
+must already exist in sim_truth_rot<r>/ (run prepare_sim.py first);
+indices whose truth file is missing are skipped with a note so the two
+scripts can run independently and be resumed.
 
 Each output is exp-<band>-<seed>-p<patch>.fits. Existing outputs are
 reused; missing outputs are (re)generated per file.
@@ -110,6 +110,7 @@ cfg_sim.draw_image_noise = True
 cfg_sim.rotId = rot
 sim_task = MultibandSimTask(config=cfg_sim)
 
+truth_dir = common.truth_outdir(args.layout, rot)
 outdir = common.sim_outdir(args.layout, rot)
 
 # ------------------------------
@@ -118,7 +119,7 @@ outdir = common.sim_outdir(args.layout, rot)
 for index in range(istart + RANK, iend, SIZE):
     sim_seed, patch_id = common.seed_patch_from_index(index)
 
-    truthfname = common.truth_path(outdir, sim_seed)
+    truthfname = common.truth_path(truth_dir, sim_seed)
     if not os.path.isfile(truthfname):
         print(
             f"[skip] index={index} (seed={sim_seed}, patch={patch_id}): "
