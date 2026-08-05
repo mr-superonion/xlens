@@ -21,6 +21,14 @@ PATCH_ID = 0
 PIXEL_SCALE = 0.2  # arcsec/pixel
 
 # ------------------------------
+# Input galaxy catalog
+# ------------------------------
+# Shared by the truth-catalog task and the image simulation task: the
+# truth catalog carries the input-catalog property columns, so the two
+# must always agree.
+GALAXY_TYPE = "flagship2025"
+
+# ------------------------------
 # Output directory
 # ------------------------------
 OUTPUT_ROOT = (

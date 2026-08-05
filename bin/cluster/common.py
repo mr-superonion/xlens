@@ -35,6 +35,13 @@ RA_CENTER = 0.0  # deg; tract (and halo) centre
 DEC_CENTER = 0.0  # deg
 
 # ------------------------------
+# Input galaxy catalog
+# ------------------------------
+# Shared by prepare_sim.py and sim.py: the truth catalog carries the
+# input-catalog property columns, so the two must always agree.
+GALAXY_TYPE = "flagship2025"
+
+# ------------------------------
 # Fiducial NFW halo (at the tract centre)
 # ------------------------------
 HALO_MASS = 4e14  # M_sun

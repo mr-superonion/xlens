@@ -105,6 +105,7 @@ if RANK == 0:
 # Image Simulation Task
 # ------------------------------
 cfg_sim = MultibandSimConfig()
+cfg_sim.galaxy_type = common.GALAXY_TYPE
 cfg_sim.survey_name = "lsst"
 cfg_sim.draw_image_noise = True
 cfg_sim.rotId = rot

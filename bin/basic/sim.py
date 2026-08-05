@@ -100,6 +100,7 @@ if RANK == 0:
 # Image Simulation Task
 # ------------------------------
 cfg_cat = CatalogShearTaskConfig()
+cfg_cat.galaxy_type = common.GALAXY_TYPE
 cfg_cat.z_bounds = [0.0, 0.63, 0.98, 1.48, 10.0]
 cfg_cat.mode = shear_mode
 cfg_cat.rotId = rot_id
@@ -112,6 +113,7 @@ cfg_cat.sep_arcsec = 14
 cat_task = CatalogShearTask(config=cfg_cat)
 
 cfg_sim = MultibandSimConfig()
+cfg_sim.galaxy_type = common.GALAXY_TYPE
 cfg_sim.survey_name = "lsst"
 cfg_sim.draw_image_noise = True
 sim_task = MultibandSimTask(config=cfg_sim)

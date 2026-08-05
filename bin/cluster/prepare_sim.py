@@ -95,6 +95,7 @@ if RANK == 0:
 # Truth-catalog task (NFW halo at the tract centre)
 # ------------------------------
 cfg_cat = CatalogHaloTaskConfig()
+cfg_cat.galaxy_type = common.GALAXY_TYPE
 cfg_cat.mass = common.HALO_MASS
 cfg_cat.conc = common.HALO_CONC
 cfg_cat.z_lens = common.Z_LENS
