@@ -21,6 +21,8 @@
 
 """Shared numeric constants for xlens."""
 
+import anacal
+
 # AB magnitude zeropoint for fluxes measured in nanojansky:
 #   m_AB = MAG_ZERO_AB - 2.5 * log10(F_nJy)
 #   F_nJy = 10**((MAG_ZERO_AB - m)/2.5)
@@ -30,3 +32,17 @@
 # downstream consumers convert flux->mag with this single constant
 # (no per-catalog mag_zero needed).
 MAG_ZERO_AB = 31.4
+
+# Soft-bias regulariser in the FPFS ellipticity denominator,
+#   e = m22c / (m00 + FPFS_C0),
+# on the same MAG_ZERO_AB flux scale as the moments it is added to, so it is
+# used as-is with no per-coadd rescaling.
+#
+# READ FROM ANACAL rather than duplicated here, so the two repos cannot drift:
+# this IS ``anacal.fpfs.FpfsConfig.c0``, which AnaCal defines at its
+# ``THRESHOLD_REF_MAG_ZERO`` (= MAG_ZERO_AB).  Every xlens consumer -- the
+# Task path (``processor.anacal``), the FPFS path (``processor.fpfs``), the
+# per-band combination (``processor.merge``) and the standalone recombination
+# (``utils.nxg.calibrate_shapes``) -- must use this one value, otherwise they
+# produce different ellipticities for the same catalog.
+FPFS_C0 = anacal.fpfs.FpfsConfig().c0

@@ -52,6 +52,11 @@ DETECTION_KEEP_COLUMNS: tuple[str, ...] = (
     "wsel",
     "dwsel_dg1",
     "dwsel_dg2",
+    # Local background under the source, from the detector's ring cascade,
+    # with its shear derivatives.
+    "bkg",
+    "dbkg_dg1",
+    "dbkg_dg2",
     # FPFS ellipticity + shear derivatives (used by shear estimator).
     "fpfs_e1",
     "fpfs_de1_dg1",
@@ -68,7 +73,6 @@ DETECTION_KEEP_COLUMNS: tuple[str, ...] = (
     "fpfs_dm2_dg2",
     # Flags.
     "mask_value",
-    "is_peak",
     "is_primary",
 )
 
@@ -97,10 +101,6 @@ GAUSS_APERTURE_COLUMNS: tuple[str, ...] = (
     "dflux_gauss2_dg1",
     "dflux_gauss2_dg2",
     "flux_gauss2_err",
-    "flux_gauss4",
-    "dflux_gauss4_dg1",
-    "dflux_gauss4_dg2",
-    "flux_gauss4_err",
 )
 
 

@@ -12,8 +12,6 @@ while ``gX`` should remain consistent with zero.
 
 import os
 
-import anacal
-import lsst.geom as geom
 import numpy as np
 import pytest
 from lsst.skymap.ringsSkyMap import (
@@ -22,6 +20,10 @@ from lsst.skymap.ringsSkyMap import (
 )
 
 from xlens.analysis.cluster import HaloMcBiasMultibandPipe as ClusterPipe
+from xlens.processor.measure_coadds import (
+    MeasureCoaddsPipe,
+    MeasureCoaddsPipeConfig,
+)
 from xlens.simulator.catalog import (
     CatalogHaloTask,
     CatalogHaloTaskConfig,
@@ -30,6 +32,7 @@ from xlens.simulator.sim import (
     MultibandSimConfig,
     MultibandSimTask,
 )
+from xlens.utils.handle import make_exposure_handles
 
 PATCH_DIM = 1001
 PIXEL_SCALE = 0.2
@@ -80,36 +83,36 @@ def _simulate(skymap, truth):
     ).simExposure
 
 
-def _measure(exposure):
-    gal_array = np.asarray(exposure.image.array, dtype=np.float64)
-    lsst_psf = exposure.getPsf()
-    center = geom.Point2D(PATCH_DIM // 2, PATCH_DIM // 2)
-    psf_array = np.asarray(
-        anacal.utils.resize_array(
-            lsst_psf.computeImage(center).getArray(), (64, 64),
-        ),
-        dtype=np.float64,
+def _measure(exposure, skymap):
+    """Run the production measurement pipeline, exactly like the cluster
+    example notebook: AnaCal detection (detector.h) + forced FPFS, with
+    the detector's differentiable selection weight ``wsel``.
+    """
+    config = MeasureCoaddsPipeConfig()
+    config.anacal.sigma_arcsec = 0.52   # detection / e1, e2, w kernel
+    config.fpfs.sigma_shapelets1 = 0.45  # kernel 1
+    config.fpfs.sigma_shapelets2 = 0.55  # kernel 2
+    pipe = MeasureCoaddsPipe(config=config)
+    handles = make_exposure_handles(
+        exposure,
+        tract=TRACT_ID,
+        patch=PATCH_ID,
+        band="i",
+        skyMap=skymap,
     )
-    fpfs_config = anacal.fpfs.FpfsConfig(
-        sigma_shapelets=0.52,
-        sigma_shapelets1=0.45,
-        sigma_shapelets2=0.55,
-    )
-    return anacal.fpfs.process_image(
-        fpfs_config=fpfs_config,
-        mag_zero=MAG_ZERO,
-        gal_array=gal_array,
-        psf_array=psf_array,
-        pixel_scale=PIXEL_SCALE,
-        noise_variance=NOISE_VARIANCE,
-        noise_array=None,
-        detection=None,
-    )
+    return pipe.run(
+        exposure_handles_dict=handles,
+        corr_array=None,
+        skyMap=skymap,
+        tract=TRACT_ID,
+        patch=PATCH_ID,
+    ).anacalCatalog
 
 
 def _radial_shear(out, skymap):
     wcs = skymap[TRACT_ID].getWcs()
-    ra, dec = wcs.pixelToSkyArray(out["x"], out["y"], degrees=True)
+    ra = np.asarray(out["ra"])
+    dec = np.asarray(out["dec"])
     ra_lens = wcs.getSkyOrigin().getRa().asDegrees()
     dec_lens = wcs.getSkyOrigin().getDec().asDegrees()
 
@@ -120,17 +123,19 @@ def _radial_shear(out, skymap):
 
     e1 = out["fpfs_e1"]
     e2 = out["fpfs_e2"]
-    w = out["fpfs_w"]
+    w = out["wsel"]
     e1_g1 = out["fpfs_de1_dg1"]
     e2_g2 = out["fpfs_de2_dg2"]
-    w_g1 = out["fpfs_dw_dg1"]
-    w_g2 = out["fpfs_dw_dg2"]
+    w_g1 = out["dwsel_dg1"]
+    w_g2 = out["dwsel_dg2"]
 
     eT, eX = ClusterPipe._rotate_spin_2_vec(e1, e2, angle)
     r11, r22 = ClusterPipe._get_response_from_w_and_der(
         e1, e2, w, e1_g1, e2_g2, w_g1, w_g2,
     )
-    rT, rX = ClusterPipe._rotate_spin_2_vec(r11, r22, angle)
+    # Responses rotate as a (diagonal) matrix, not as a spin-2 vector --
+    # this matches what ClusterPipe.run itself does.
+    rT, rX = ClusterPipe._rotate_spin_2_matrix(r11, r22, angle)
     return eT, eX, rT, rX, w, dist
 
 
@@ -160,11 +165,14 @@ def test_cluster_lensing_isotropic():
     skymap = _build_skymap()
     truth = _make_truth(skymap)
     exposure = _simulate(skymap, truth)
-    out = _measure(exposure)
+    out = _measure(exposure, skymap)
     assert len(out) > 50, f"too few detections: {len(out)}"
 
     eT, eX, rT, rX, w, dist = _radial_shear(out, skymap)
-    edges = np.linspace(5.0, 50.0, 5)
+    # Start outside the strong-lensing core (< 15 arcsec): the linear
+    # shear estimator saturates there and the innermost annulus holds
+    # only a handful of sources.
+    edges = np.linspace(15.0, 60.0, 4)
     gT, gX, counts = _bin_shear(eT, eX, rT, rX, w, dist, edges)
 
     assert np.all(counts > 0), f"empty radial bins: counts={counts}"

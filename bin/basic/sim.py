@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Simulation-only variant of sim.py: writes the input (truth) catalog and the
-per-band simulated exposures to disk, then exits. No detection, no measurement,
-no matching.
+"""Generate truth catalogs and simulated multiband exposures for the
+constant-shear tests. Each output seed produces one truth-<seed>.fits
+plus one exp-<band>-<seed>.fits per band. Existing outputs are reused;
+missing outputs are (re)generated per file.
 """
 import argparse
 import gc
 import os
 
+import common
 import fitsio
-from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
 from mpi4py import MPI
 
 from xlens.simulator.catalog import (
@@ -22,8 +23,11 @@ RANK = COMM.Get_rank()
 SIZE = COMM.Get_size()
 COMM.Barrier()
 
+# ------------------------------
+# Argument Parsing
+# ------------------------------
 parser = argparse.ArgumentParser(
-    description="Run constant shear simulation, write truth + exposures only",
+    description="Simulate constant-shear multiband exposures (MPI optional)",
     allow_abbrev=False,
 )
 parser.add_argument("--target", type=str, default="g1", help="test target")
@@ -68,6 +72,7 @@ iend = args.end
 if iend - istart <= 0:
     raise ValueError(f"Invalid range: start={istart}, end={iend}")
 
+
 bands = [b.strip() for b in args.band.split(",") if b.strip()]
 if not bands:
     raise ValueError(f"Invalid --band argument: {args.band!r}")
@@ -84,24 +89,19 @@ if RANK == 0:
     else:
         print(f"[Info] Running with MPI across {SIZE} ranks.")
 
-tract_id = 0
-patch_id = 0
-pixel_scale = 0.2  # arcsec/pixel
-config = DiscreteSkyMapConfig()
-config.raList = [0.0]
-config.decList = [0.0]
-config.radiusList = [0.1]
-config.rotation = 0.0
-config.projection = "TAN"
-config.patchInnerDimensions = [1500, 1500]
-config.patchBorder = 0
-config.pixelScale = pixel_scale
-config.tractOverlap = 0.0
-skymap = DiscreteSkyMap(config)
+# ------------------------------
+# SkyMap Setup
+# ------------------------------
+skymap = common.build_skymap()
 if RANK == 0:
     print("SkyMap created.")
 
+# ------------------------------
+# Image Simulation Task
+# ------------------------------
 cfg_cat = CatalogShearTaskConfig()
+cfg_cat.galaxy_type = common.GALAXY_TYPE
+cfg_cat.survey_name_list = common.SURVEY_NAME_LIST
 cfg_cat.z_bounds = [0.0, 0.63, 0.98, 1.48, 10.0]
 cfg_cat.mode = shear_mode
 cfg_cat.rotId = rot_id
@@ -114,49 +114,56 @@ cfg_cat.sep_arcsec = 14
 cat_task = CatalogShearTask(config=cfg_cat)
 
 cfg_sim = MultibandSimConfig()
-cfg_sim.survey_name = "lsst"
+cfg_sim.galaxy_type = common.GALAXY_TYPE
+cfg_sim.survey_name = common.SURVEY_NAME_LIST[0]
 cfg_sim.draw_image_noise = True
 sim_task = MultibandSimTask(config=cfg_sim)
 
-# Output layout:
-#   $PSCRATCH/constant_shear_<layout>/<target>/shearXX/sim_modeNN/
-pscratch = os.environ.get("PSCRATCH", ".")
-outdir = os.path.join(
-    pscratch,
-    f"constant_shear_{args.layout}",
-    test_target,
-    f"shear{int(shear_value * 100):02d}",
-    f"sim_mode{shear_mode}",
-)
-os.makedirs(outdir, exist_ok=True)
+
+# ------------------------------
+# Output layout (sim products live under sim_mode<N>/; process.py reads
+# from this dir and writes catalogs under process_mode<N>/).
+# ------------------------------
+outdir = common.sim_outdir(args.layout, test_target, shear_value, shear_mode)
 
 
+# ------------------------------
+# Work loop (unique seeds per RANK if MPI)
+# ------------------------------
 for i in range(istart, iend):
     sim_seed = i * SIZE + RANK
-    truthfname = os.path.join(outdir, f"truth-{sim_seed:05d}.fits")
 
-    truth_catalog = cat_task.run(
-        tract_info=skymap[tract_id],
-        seed=sim_seed,
-    ).truthCatalog
-    fitsio.write(truthfname, truth_catalog, clobber=True)
+    truthfname = common.truth_path(outdir, sim_seed)
 
+    if os.path.isfile(truthfname):
+        truth_catalog = fitsio.read(truthfname)
+    else:
+        truth_catalog = cat_task.run(
+            tract_info=skymap[common.TRACT_ID],
+            seed=sim_seed,
+        ).truthCatalog
+        fitsio.write(truthfname, truth_catalog)
+
+    exp_fnames = {bb: common.exp_path(outdir, bb, sim_seed) for bb in bands}
     for bb in bands:
-        exp_fname = os.path.join(outdir, f"exp-{bb}-{sim_seed:05d}.fits")
-        exposure = sim_task.run(
-            tract_info=skymap[tract_id],
-            patch_id=patch_id,
+        exp_fname = exp_fnames[bb]
+        if os.path.isfile(exp_fname):
+            continue
+        exp = sim_task.run(
+            tract_info=skymap[common.TRACT_ID],
+            patch_id=common.PATCH_ID,
             band=bb,
             seed=sim_seed,
             truthCatalog=truth_catalog,
         ).simExposure
-        exposure.writeFits(exp_fname)
-        del exposure
+        exp.writeFits(exp_fname)
+        del exp
         gc.collect()
 
     del truth_catalog
     gc.collect()
 
+# Ensure all ranks finish (no-op in single process)
 COMM.Barrier()
 if RANK == 0:
     print("Done.")

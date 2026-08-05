@@ -1,11 +1,27 @@
 #!/usr/bin/env python3
+"""Process simulated multiband exposures (produced by sim.py) into
+matched catalogs. For each seed, reads truth-<seed>.fits and
+exp-<band>-<seed>.fits per band, runs detection + forced measurement +
+truth match, and writes cat-<seed>.fits. Seeds whose sim outputs are
+missing are skipped (with a note), so the two scripts can run
+independently and be resumed.
+
+Detection runs on ``--detection-band`` (default 'i'); give it several
+bands to detect on their inverse-variance coadd, e.g.
+
+    process.py --band r,i,z --detection-band r,i,z --version 1
+
+Forced measurement is per band over ``--band`` regardless, so the output
+columns are the same either way.
+"""
 import argparse
 import gc
 import os
 
+import common
 import fitsio
 import numpy as np
-from lsst.skymap.discreteSkyMap import DiscreteSkyMap, DiscreteSkyMapConfig
+from lsst.afw.image import ExposureF
 from mpi4py import MPI
 
 from xlens.processor.match import (
@@ -16,11 +32,6 @@ from xlens.processor.measure_coadds import (
     MeasureCoaddsPipe,
     MeasureCoaddsPipeConfig,
 )
-from xlens.simulator.catalog import (
-    CatalogShearTask,
-    CatalogShearTaskConfig,
-)
-from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
 from xlens.utils.handle import make_exposure_handles
 
 COMM = MPI.COMM_WORLD
@@ -32,7 +43,7 @@ COMM.Barrier()
 # Argument Parsing
 # ------------------------------
 parser = argparse.ArgumentParser(
-    description="Run constant shear simulation (MPI optional)",
+    description="Process simulated constant-shear exposures (MPI optional)",
     allow_abbrev=False,
 )
 parser.add_argument("--target", type=str, default="g1", help="test target")
@@ -63,14 +74,26 @@ parser.add_argument(
     "--band", type=str, default="u,g,r,i,z,y",
     help="comma-separated bands list (e.g. 'r,i,z')",
 )
+parser.add_argument(
+    "--detection-band", type=str, default="i",
+    help="comma-separated bands to coadd for DETECTION (e.g. 'r,i,z'); "
+         "must be a subset of --band. AnaCal removes each band's own PSF "
+         "before averaging them with inverse-variance weights, so the bands "
+         "need not be PSF-matched. Forced measurement still runs band by "
+         "band over --band either way. Use --version to keep catalogs from "
+         "different detection bands in separate directories.",
+)
+parser.add_argument(
+    "--version", type=int, default=None,
+    help="Optional integer tag; when set, catalogs go to "
+         "process_mode<N>-v<version>/ instead of process_mode<N>/.",
+)
 args, unknown_args = parser.parse_known_args()
 if unknown_args:
     print("[warn] Ignoring unknown args:", unknown_args)
 
 shear_mode = int(args.mode)
 shear_value = args.shear
-kappa_value = args.kappa
-rot_id = args.rot
 test_target = args.target
 istart = args.start
 iend = args.end
@@ -81,61 +104,40 @@ if iend - istart <= 0:
 bands = [b.strip() for b in args.band.split(",") if b.strip()]
 if not bands:
     raise ValueError(f"Invalid --band argument: {args.band!r}")
-if args.layout == "random":
-    extend_ratio = 1.08
-elif args.layout == "grid":
-    extend_ratio = 0.92
-else:
-    raise ValueError("Cannot support layout")
+
+detection_bands = [
+    b.strip() for b in args.detection_band.split(",") if b.strip()
+]
+if not detection_bands:
+    raise ValueError(
+        f"Invalid --detection-band argument: {args.detection_band!r}"
+    )
+# Detection reads the same exposures the forced measurement does, so it can
+# only use bands that were loaded.
+missing_det = [b for b in detection_bands if b not in bands]
+if missing_det:
+    raise ValueError(
+        f"--detection-band {missing_det} not in --band {bands}; "
+        f"add them to --band so the exposures get loaded"
+    )
 
 if RANK == 0:
     if SIZE == 1:
         print("[Info] Running single-process (no mpirun/srun needed).")
     else:
         print(f"[Info] Running with MPI across {SIZE} ranks.")
+    print(f"[Info] Detecting on {','.join(detection_bands)}; "
+          f"forced measurement on {','.join(bands)}.")
 
 # ------------------------------
 # SkyMap Setup
 # ------------------------------
-tract_id = 0
-patch_id = 0
-pixel_scale = 0.2  # arcsec/pixel
-config = DiscreteSkyMapConfig()
-config.raList = [0.0]
-config.decList = [0.0]
-config.radiusList = [0.1]
-config.rotation = 0.0
-config.projection = "TAN"
-config.patchInnerDimensions = [1500, 1500]
-config.patchBorder = 0
-config.pixelScale = pixel_scale
-config.tractOverlap = 0.0
-skymap = DiscreteSkyMap(config)
+skymap = common.build_skymap()
 if RANK == 0:
     print("SkyMap created.")
 
 # ------------------------------
-# Image Simulation Task
-# ------------------------------
-cfg_cat = CatalogShearTaskConfig()
-cfg_cat.z_bounds = [0.0, 0.63, 0.98, 1.48, 10.0]
-cfg_cat.mode = shear_mode
-cfg_cat.rotId = rot_id
-cfg_cat.kappa_value = kappa_value
-cfg_cat.test_value = shear_value
-cfg_cat.test_target = test_target
-cfg_cat.layout = args.layout
-cfg_cat.extend_ratio = extend_ratio
-cfg_cat.sep_arcsec = 14
-cat_task = CatalogShearTask(config=cfg_cat)
-
-cfg_sim = MultibandSimConfig()
-cfg_sim.survey_name = "lsst"
-cfg_sim.draw_image_noise = True
-sim_task = MultibandSimTask(config=cfg_sim)
-
-# ------------------------------
-# Detection + per-band forced measurement (all bands together)
+# Detection (on detection_bands) + per-band forced measurement (all bands)
 # ------------------------------
 detect_config = MeasureCoaddsPipeConfig()
 detect_config.anacal.sigma_arcsec = 0.38
@@ -145,25 +147,25 @@ detect_config.anacal.do_noise_bias_correction = True
 detect_config.fpfs.do_noise_bias_correction = True
 detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
 detect_config.use_sim = False
+detect_config.detection_bands = detection_bands
+detect_config.validate()
 meas_task = MeasureCoaddsPipe(config=detect_config)
 
 config = matchPipeConfig()
-config.mag_zero = 30.0
 config.mag_max_truth = 28.0
 match_task = matchPipe(config=config)
 
 
-# Outdir layout:
-#   $PSCRATCH/constant_shear_<layout>/<target>/shearXX/
-pscratch = os.environ.get("PSCRATCH", ".")
-outdir = os.path.join(
-    pscratch,
-    f"constant_shear_{args.layout}",
-    test_target,
-    f"shear{int(shear_value * 100):02d}",
-    f"mode{shear_mode}",
+# ------------------------------
+# Output layout: sim.py writes truth/exposures under sim_mode<N>/;
+# process.py reads from there and writes catalogs under process_mode<N>/.
+# ------------------------------
+sim_dir = common.sim_outdir(
+    args.layout, test_target, shear_value, shear_mode,
 )
-os.makedirs(outdir, exist_ok=True)
+proc_dir = common.process_outdir(
+    args.layout, test_target, shear_value, shear_mode, version=args.version,
+)
 
 
 # ------------------------------
@@ -171,42 +173,41 @@ os.makedirs(outdir, exist_ok=True)
 # ------------------------------
 for i in range(istart, iend):
     sim_seed = i * SIZE + RANK
-    outfname = os.path.join(outdir, "cat-%05d.fits" % (sim_seed))
+
+    outfname = common.cat_path(proc_dir, sim_seed)
     if os.path.isfile(outfname):
         continue
 
-    truth_catalog = cat_task.run(
-        tract_info=skymap[tract_id],
-        seed=sim_seed,
-    ).truthCatalog
-    truthfname = os.path.join(outdir, "truth-%05d.fits" % (sim_seed))
-    if not os.path.isfile(truthfname):
-        fitsio.write(truthfname, truth_catalog)
+    truthfname = common.truth_path(sim_dir, sim_seed)
+    exp_fnames = {bb: common.exp_path(sim_dir, bb, sim_seed) for bb in bands}
 
-    exposures = {
-        bb: sim_task.run(
-            tract_info=skymap[tract_id],
-            patch_id=patch_id,
-            band=bb,
-            seed=sim_seed,
-            truthCatalog=truth_catalog,
-        ).simExposure
-        for bb in bands
-    }
+    # Skip if any required sim output is missing (sim.py hasn't produced
+    # it yet, or was run with a different band list).
+    missing = [p for p in (truthfname, *exp_fnames.values())
+               if not os.path.isfile(p)]
+    if missing:
+        print(
+            f"[skip] seed={sim_seed}: {len(missing)} sim file(s) missing "
+            f"(first: {missing[0]})"
+        )
+        continue
+
+    truth_catalog = fitsio.read(truthfname)
+    exposures = {bb: ExposureF(exp_fnames[bb]) for bb in bands}
 
     handles = make_exposure_handles(
         exposures,
         skymap="test",
-        tract=tract_id,
-        patch=patch_id,
+        tract=common.TRACT_ID,
+        patch=common.PATCH_ID,
         skyMap=skymap,
     )
     res = meas_task.run(
         exposure_handles_dict=handles,
         corr_array=None,
         skyMap=skymap,
-        tract=tract_id,
-        patch=patch_id,
+        tract=common.TRACT_ID,
+        patch=common.PATCH_ID,
         mask=None,
         detection=None,
         seed=100000 + sim_seed,
@@ -214,13 +215,12 @@ for i in range(istart, iend):
 
     res = match_task.run(
         skyMap=skymap,
-        tract=tract_id,
-        patch=patch_id,
+        tract=common.TRACT_ID,
+        patch=common.PATCH_ID,
         catalog=res,
         dm_catalog=None,
         truth_catalog=truth_catalog,
     ).catalog
-    res = res[res["wsel"] > 1e-7]
     fitsio.write(outfname, res)
 
     # clean up

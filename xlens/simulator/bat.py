@@ -90,8 +90,18 @@ def draw_ia(
     )
     x_d = image_pos.x
     y_d = image_pos.y
-    x_i = np.round(x_d).astype(int)
-    y_i = np.round(y_d).astype(int)
+    x_i = int(np.round(x_d))
+    y_i = int(np.round(y_d))
+
+    # BATSim samples the profile on a grid whose origin is the stamp centre, so
+    # the sub-pixel residual of the requested position is applied to the galaxy
+    # itself.  ``use_true_center=False`` puts that origin on integer pixel
+    # ``stamp_size // 2``, which is where ``setCenter`` below places (x_i, y_i)
+    # for an even-sized stamp.
+    gal_obj = gal_obj.shift(
+        (x_d - x_i) * pixel_scale,
+        (y_d - y_i) * pixel_scale,
+    )
 
     gal_img = batsim.simulate_galaxy(
         ngrid=stamp_size,
@@ -100,8 +110,7 @@ def draw_ia(
         transform_obj=transform_obj,
         psf_obj=psf_obj,
         draw_method=draw_method,
-        delta_image_x=(x_d - x_i),
-        delta_image_y=(y_d - y_i),
+        use_true_center=False,
     )
     stamp = galsim.ImageF(gal_img, scale=pixel_scale)
     stamp.setCenter(x_i, y_i)

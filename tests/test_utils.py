@@ -5,7 +5,11 @@ from lsst.geom import Box2I, Extent2I, Point2I
 from lsst.meas.base import SkyMapIdGeneratorConfig
 
 from xlens.utils.handle import make_data_id
-from xlens.utils.image import combine_sim_exposures
+from xlens.utils.image import (
+    _stack_bands,
+    combine_sim_exposures,
+    prepare_mask,
+)
 
 
 def _make_exposure(value: float, variance: float) -> ExposureF:
@@ -84,3 +88,113 @@ def test_make_data_id_catalog_id_sweep_patch():
         dtype=np.int64,
     )
     np.testing.assert_array_equal(catalog_ids, np.arange(0, 1000))
+
+
+# ---------------------------------------------------------------------------
+# Multi-band detection input
+#
+# Both the patch path (prepare_data_multiband) and the cell path
+# (prepare_data_one_cell_multiband) funnel through these two helpers, so
+# testing them here covers the stacking logic for both.
+# ---------------------------------------------------------------------------
+
+
+def _band_dict(gal, noise, psf, variance, **overrides):
+    out = {
+        "gal_array": gal,
+        "noise_array": noise,
+        "psf_array": psf,
+        "noise_variance": variance,
+        "pixel_scale": 0.2,
+        "begin_x": 0,
+        "begin_y": 0,
+        "mag_zero": 31.4,
+        "base_column_name": "lsst_i_",
+    }
+    out.update(overrides)
+    return out
+
+
+def test_stack_bands_builds_one_stack_per_plane():
+    bands = ["r", "i", "z"]
+    gals = [np.full((2, 3), float(i), dtype=np.float32) for i in range(3)]
+    noises = [np.full((2, 3), -float(i), dtype=np.float32) for i in range(3)]
+    psfs = [np.full((4, 4), 0.1 * i, dtype=np.float64) for i in range(3)]
+
+    out = _stack_bands(
+        (
+            _band_dict(g, n, p, v)
+            for g, n, p, v in zip(gals, noises, psfs, [1.0, 2.0, 3.0])
+        ),
+        bands,
+    )
+
+    assert out["gal_array"].shape == (3, 2, 3)
+    assert out["gal_array"].dtype == np.float32
+    assert out["noise_array"].shape == (3, 2, 3)
+    assert out["psf_array"].shape == (3, 4, 4)
+    assert out["noise_variance"] == [1.0, 2.0, 3.0]
+    # The coadd belongs to no single band.
+    assert out["base_column_name"] is None
+    for i in range(3):
+        np.testing.assert_array_equal(out["gal_array"][i], gals[i])
+        np.testing.assert_array_equal(out["noise_array"][i], noises[i])
+        np.testing.assert_array_equal(out["psf_array"][i], psfs[i])
+
+
+def test_stack_bands_rejects_mismatched_bands():
+    gal = np.zeros((2, 3), dtype=np.float32)
+    psf = np.zeros((4, 4), dtype=np.float64)
+
+    with pytest.raises(ValueError, match="image shape"):
+        _stack_bands(
+            iter([
+                _band_dict(gal, gal.copy(), psf, 1.0),
+                _band_dict(
+                    np.zeros((3, 3), dtype=np.float32), gal.copy(), psf, 1.0,
+                ),
+            ]),
+            ["r", "i"],
+        )
+
+    with pytest.raises(ValueError, match="pixel_scale"):
+        _stack_bands(
+            iter([
+                _band_dict(gal, gal.copy(), psf, 1.0),
+                _band_dict(gal, gal.copy(), psf, 1.0, pixel_scale=0.17),
+            ]),
+            ["r", "i"],
+        )
+
+    with pytest.raises(ValueError, match="noise_array"):
+        _stack_bands(
+            iter([
+                _band_dict(gal, gal.copy(), psf, 1.0),
+                _band_dict(gal, None, psf, 1.0),
+            ]),
+            ["r", "i"],
+        )
+
+
+def test_prepare_mask_planes_negative_pixels_and_original():
+    # prepare_mask is the single mask-building primitive used by the
+    # systematics tasks: configured planes, the -6 sigma negative-pixel
+    # guard, and OR with a pre-existing mask.
+    exposure = _make_exposure(1.0, 1.0)
+    exposure.mask.array[0, 0] = exposure.mask.getPlaneBitMask("BAD")
+    exposure.image.array[1, 1] = -7.0  # < -6 * sqrt(variance=1)
+    original = np.zeros((2, 3), dtype=np.int16)
+    original[1, 2] = 1
+
+    mask = prepare_mask(
+        exposure.image.array,
+        exposure.mask,
+        exposure.variance.array,
+        ["BAD", "NOT_A_PLANE"],  # unknown planes are silently skipped
+        original_mask_array=original,
+    )
+    expected = np.zeros((2, 3), dtype=np.int16)
+    expected[0, 0] = 1  # BAD plane
+    expected[1, 1] = 1  # negative-pixel guard
+    expected[1, 2] = 1  # carried over from original
+    np.testing.assert_array_equal(mask, expected)

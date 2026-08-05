@@ -28,13 +28,10 @@ __all__ = [
 import logging
 from typing import Any
 
-import lsst.afw.table as afwTable
-import lsst.daf.base as dafBase
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
 from lsst.afw.image import MaskX
 from lsst.daf.butler import DataCoordinate
-from lsst.meas.base import SingleFrameMeasurementTask, SkyMapIdGeneratorConfig
 from lsst.pex.config import (
     ConfigurableField,
     Field,
@@ -42,7 +39,6 @@ from lsst.pex.config import (
     ListField,
 )
 from lsst.pipe.base import (
-    PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
     Struct,
@@ -53,23 +49,10 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-from ..catalog.utils import add_magnitude_columns
 from ..simulator.sim import MultibandSimTask
-from ..utils.catalog import set_isPrimary
-from ..utils.columns import (
-    select_band_gauss_fluxes,
-    select_detection_columns,
-)
-from ..utils.constants import MAG_ZERO_AB
+from ..utils.columns import select_detection_columns
 from ..utils.handle import SimulatedExposureHandle
-from ..utils.image import (
-    broadcast_psf_hsm_moments,
-    build_psf_hsm_context,
-    default_psf_hsm_plugin_config,
-    measure_psf_hsm_moments,
-)
-from .anacal import AnacalTask
-from .fpfs import FpfsMeasurementTask
+from .measure_base import AnacalMeasureTaskBase, MeasureBandsConfigBase
 
 band_order = "ugrizy"
 
@@ -77,7 +60,11 @@ band_order = "ugrizy"
 class MeasureCoaddsPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
-    defaultTemplates={"inputName": "deep_coadd", "outName": "deep_coadd", "catName": "cat"},
+    defaultTemplates={
+        "inputName": "deep_coadd",
+        "outName": "deep_coadd",
+        "catName": "cat"
+    },
 ):
     skyMap = cT.Input(
         doc="SkyMap to use in processing",
@@ -143,17 +130,10 @@ class MeasureCoaddsPipeConnections(
 
 
 class MeasureCoaddsPipeConfig(
+    MeasureBandsConfigBase,
     PipelineTaskConfig,
     pipelineConnections=MeasureCoaddsPipeConnections,
 ):
-    anacal = ConfigurableField(
-        target=AnacalTask,
-        doc="AnaCal Task for detection stage (i-band)",
-    )
-    fpfs = ConfigurableField(
-        target=FpfsMeasurementTask,
-        doc="Fpfs Source Measurement Task",
-    )
     simulator = ConfigurableField(
         target=MultibandSimTask,
         doc="Simulation task used to generate per-band exposures.",
@@ -165,79 +145,31 @@ class MeasureCoaddsPipeConfig(
         ),
         default=False,
     )
-    do_measure_flux_gauss = Field[bool](
-        doc=(
-            "If True, also run AnaCal forced measurement during the "
-            "force stage to extract per-band Gaussian fluxes and merge "
-            "them into the output catalog."
-        ),
-        default=False,
-    )
     sim_bands = ListField[str](
         doc="PHYSICAL bands to simulate when ``use_sim`` is True.",
         default=["u", "g", "r", "i", "z", "y"],
-    )
-    survey = Field[str](
-        doc=(
-            "Survey name for the survey-prefixed output columns "
-            "``{survey}_{band}_...`` and the survey-aware noise seed."
-        ),
-        default="lsst",
     )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
     )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
-    doPsfHsmMoments = Field[bool](
-        doc=(
-            "If True, run lsst.meas.extensions.shapeHSM.HsmPsfMomentsPlugin "
-            "+ HigherOrderMomentsPSFPlugin once per (exposure, band) at "
-            "the exposure bbox centre (PSF model sampled on the pixel "
-            "grid via computeKernelImage — no subpixel offset) and "
-            "broadcast those PSF moments to every source. Adds "
-            "{band}_ext_shapeHSM_HsmPsfMoments_{xx,yy,xy,flag,...} and "
-            "{band}_ext_shapeHSM_HigherOrderMomentsPSF_{pq,flag} columns "
-            "to the per-source anacal catalog."
-        ),
-        default=False,
-    )
-    psfHsmMeasurement = ConfigurableField(
-        target=SingleFrameMeasurementTask,
-        doc=(
-            "DRP-style single-frame measurement subtask used to evaluate "
-            "the per-band PSF model HSM moments at the exposure centre. "
-            "Only used when doPsfHsmMoments is True."
-        ),
-    )
 
     def validate(self):
         super().validate()
-        if self.fpfs.sigma_shapelets1 < 0.0:
-            raise FieldValidationError(
-                self.fpfs.fields["sigma_shapelets1"],
-                self,
-                "sigma_shapelets1 in a wrong range",
-            )
-        if self.use_sim and "i" not in self.sim_bands:
-            raise FieldValidationError(
-                self.__class__.sim_bands,
-                self,
-                "sim_bands must include 'i' (the detection band).",
-            )
-
-    def setDefaults(self):
-        super().setDefaults()
-        self.anacal.force_size = True
-        self.anacal.force_center = True
-        self.fpfs.do_compute_detect_weight = False
-        # Shared DRP-equivalent plugin wiring; same setup as
-        # MeasureCellCoaddsPipe so column names match across both
-        # flavours.
-        default_psf_hsm_plugin_config(self.psfHsmMeasurement)
+        if self.use_sim:
+            missing = [
+                b for b in self.detection_bands if b not in self.sim_bands
+            ]
+            if missing:
+                raise FieldValidationError(
+                    self.__class__.sim_bands,
+                    self,
+                    f"sim_bands must include every detection band; "
+                    f"missing {missing}.",
+                )
 
 
-class MeasureCoaddsPipe(PipelineTask):
+class MeasureCoaddsPipe(AnacalMeasureTaskBase):
     _DefaultName = "MeasureCoaddsPipe"
     ConfigClass = MeasureCoaddsPipeConfig
 
@@ -257,20 +189,9 @@ class MeasureCoaddsPipe(PipelineTask):
         )
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
 
-        self.makeSubtask("anacal")
-        self.makeSubtask("fpfs")
+        self._make_measure_subtasks()
         if self.config.use_sim:
             self.makeSubtask("simulator")
-        if self.config.doPsfHsmMoments:
-            schema = afwTable.SourceTable.makeMinimalSchema()
-            self.makeSubtask(
-                "psfHsmMeasurement",
-                schema=schema,
-                algMetadata=dafBase.PropertyList(),
-            )
-            self._psfHsmCtx = build_psf_hsm_context(
-                schema, self.config.psfHsmMeasurement,
-            )
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
@@ -290,7 +211,7 @@ class MeasureCoaddsPipe(PipelineTask):
             # use it to seed the IdGenerator (matches the patch-level
             # quantum dimensions). The same seed is forwarded to ``run``
             # because ``SimulatedExposureHandle`` carries no dataId.
-            seed = self.config.idGenerator.apply(inputRefs.psfArray.dataId).catalog_id
+            seed = self._seed_from_handle(inputRefs.psfArray)
             exposure_handles_dict = self._build_simulated_handles(
                 quantum_data_id=butlerQC.quantum.dataId,
                 truthCatalog=truthCatalog,
@@ -358,27 +279,18 @@ class MeasureCoaddsPipe(PipelineTask):
             )
         return handles
 
-    def _load_noise_corr(self, corr_array: np.ndarray | None, band: str) -> NDArray | None:
+    def _load_noise_corr(
+        self, corr_array: np.ndarray | None, band: str
+    ) -> NDArray | None:
         if corr_array is None:
             return None
         if band not in band_order:
             return None
-
-        iband = band_order.index(band)
-        noise_corr = corr_array[iband]
-        variance = float(np.amax(noise_corr))
-        if variance <= 0:
-            return None
-        noise_corr = noise_corr / variance
-        ny, nx = noise_corr.shape
-        if not np.isclose(noise_corr[ny // 2, nx // 2], 1.0):
-            raise RuntimeError("Noise correlation is not normalized to 1 at the center pixel.")
-
-        self.log.debug(
-            "With correlation (band=%s), variance=%s",
-            band,
-            variance,
+        noise_corr = self._normalize_noise_corr(
+            corr_array[band_order.index(band)]
         )
+        if noise_corr is not None:
+            self.log.debug("With correlation (band=%s)", band)
         return noise_corr
 
     def _detect(
@@ -393,26 +305,50 @@ class MeasureCoaddsPipe(PipelineTask):
         mask_array: NDArray | None = None,
     ) -> np.ndarray:
         assert isinstance(self.config, MeasureCoaddsPipeConfig)
-        band = "i"
-        if band not in exposure_handles_dict:
-            raise KeyError(f"band '{band}' not in {exposure_handles_dict.keys()}")
+        bands = list(self.config.detection_bands)
+        missing = [b for b in bands if b not in exposure_handles_dict]
+        if missing:
+            raise KeyError(
+                f"detection band(s) {missing} not in "
+                f"{list(exposure_handles_dict.keys())}"
+            )
 
-        handle = exposure_handles_dict[band]
-        exposure = handle.get()
-        exposure.getPsf().setCacheCapacity(self.config.psfCache)
-        noise_corr = self._load_noise_corr(corr_array, band)
-        data = self.anacal.prepare_data(
-            exposure=exposure,
-            band=band,
-            survey=self.config.survey,
-            seed=seed,
-            noise_corr=noise_corr,
-            detection=None,
-            skyMap=skyMap,
-            tract=tract,
-            patch=patch,
-            mask_array=mask_array,
-        )
+        exposures = {}
+        noise_corrs = {}
+        for band in bands:
+            exposure = exposure_handles_dict[band].get()
+            exposure.getPsf().setCacheCapacity(self.config.psfCache)
+            exposures[band] = exposure
+            noise_corrs[band] = self._load_noise_corr(corr_array, band)
+
+        if len(bands) == 1:
+            band = bands[0]
+            data = self.anacal.prepare_data(
+                exposure=exposures[band],
+                band=band,
+                survey=self.config.survey,
+                seed=seed,
+                noise_corr=noise_corrs[band],
+                detection=None,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                mask_array=mask_array,
+            )
+        else:
+            self.log.info("Detecting on the coadd of bands %s", bands)
+            data = self.anacal.prepare_data_multiband(
+                exposures=exposures,
+                bands=bands,
+                survey=self.config.survey,
+                seed=seed,
+                noise_corrs=noise_corrs,
+                detection=None,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                mask_array=mask_array,
+            )
         return self.anacal.run(**data)
 
     def _force(
@@ -449,26 +385,13 @@ class MeasureCoaddsPipe(PipelineTask):
                 mask_array=mask_array,
             )
             cat = self.fpfs.run(**data)
-            if self.config.do_measure_flux_gauss:
-                gauss_cat = select_band_gauss_fluxes(
-                    self.anacal.run(**data),
-                    band,
-                    survey=self.config.survey,
-                )
-                cat = np.asarray(rfn.merge_arrays([cat, gauss_cat], flatten=True))
-            if self.config.doPsfHsmMoments:
-                # One PSF model HSM measurement per (exposure, band) at
-                # the exposure bbox centre; broadcast across all
-                # sources in this band. HsmPsfMomentsPlugin uses
-                # computeKernelImage (no subpixel offset) by default.
-                psf_moments = measure_psf_hsm_moments(
-                    self._psfHsmCtx, self.psfHsmMeasurement, exposure,
-                )
-                psf_block = broadcast_psf_hsm_moments(
-                    psf_moments, band, n=len(cat),
-                    survey=self.config.survey,
-                )
-                cat = np.asarray(rfn.merge_arrays([cat, psf_block], flatten=True))
+            cat = self._append_gauss_fluxes(cat, data=data, band=band)
+            # HSM measures the PSF model at the exposure bbox centre
+            # (HsmPsfMomentsPlugin uses computeKernelImage, no subpixel
+            # offset).
+            cat = self._append_psf_hsm_moments(
+                cat, band=band, hsm_exposure=exposure,
+            )
             per_band.append(cat)
 
         return rfn.merge_arrays(per_band, flatten=True)
@@ -513,12 +436,22 @@ class MeasureCoaddsPipe(PipelineTask):
         # coding "i".
         if seed is None:
             first_handle = next(iter(exposure_handles_dict.values()))
-            idGenerator = self.config.idGenerator.apply(first_handle.dataId)
-            seed = idGenerator.catalog_id
+            seed = self._seed_from_handle(first_handle)
         if mask is not None:
             mask_array = mask.getArray()
         else:
             mask_array = None
+            if not self.config.use_sim:
+                # Mask building lives entirely in BuildSystematicsTask now;
+                # without its output, real-data measurement runs unmasked
+                # (saturated pixels, streaks, bright-star halos included).
+                self.log.warning(
+                    "No systematics mask for tract=%d patch=%d; measuring "
+                    "with NO pixel masking. Run BuildSystematicsTask "
+                    "upstream unless this is intentional.",
+                    tract,
+                    patch,
+                )
         if detection is not None:
             det_cat = detection
         else:
@@ -545,20 +478,7 @@ class MeasureCoaddsPipe(PipelineTask):
             [select_detection_columns(det_cat), force_cat],
             flatten=True,
         )
-        # Per-band AB magnitude + shear response for each published flux
-        # family (fluxes are on the fixed MAG_ZERO_AB zeropoint here).
-        final = np.asarray(add_magnitude_columns(final, MAG_ZERO_AB))
-        object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(final), dtype=np.int64)
-        final = rfn.append_fields(
-            final,
-            "object_id",
-            object_ids,
-            usemask=False,
+        final = self._finalize_catalog(
+            final, seed=seed, skyMap=skyMap, tract=tract, patch=patch,
         )
-        if skyMap is not None:
-            # Use skymap's patchInfo for is_primary (not exposure bbox)
-            tractInfo = skyMap[tract]
-            patchInfo = tractInfo[patch]
-            pixel_scale = float(tractInfo.getWcs().getPixelScale().asArcseconds())
-            set_isPrimary(final, skyMap, tractInfo, patchInfo, pixel_scale)
         return Struct(anacalCatalog=final)

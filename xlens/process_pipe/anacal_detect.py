@@ -29,15 +29,8 @@ import logging
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
-import numpy as np
-from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import (
-    ConfigurableField,
-    Field,
-    FieldValidationError,
-)
+from lsst.pex.config import Field
 from lsst.pipe.base import (
-    PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
     Struct,
@@ -47,8 +40,10 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-from ..processor.anacal import AnacalTask
-from ..processor.fpfs import FpfsMeasurementTask
+from ..processor.measure_base import (
+    AnacalMeasureConfigBase,
+    AnacalMeasureTaskBase,
+)
 from ..utils.catalog import set_isPrimary
 
 
@@ -82,6 +77,14 @@ class AnacalDetectPipeConnections(
         multiple=True,
         deferLoad=True,
     )
+    mask = cT.Input(
+        doc="Combined mask from bad pixels and bright stars across all bands.",
+        name="{coaddName}_coadd_systematics_mask",
+        storageClass="Mask",
+        dimensions=("skymap", "tract", "patch"),
+        minimum=0,
+        multiple=False,
+    )
     output_catalog = cT.Output(
         doc="Source catalog with joint detection and measurement",
         name="{coaddName}_coadd_anacal_detect",
@@ -94,17 +97,10 @@ class AnacalDetectPipeConnections(
 
 
 class AnacalDetectPipeConfig(
+    AnacalMeasureConfigBase,
     PipelineTaskConfig,
     pipelineConnections=AnacalDetectPipeConnections,
 ):
-    anacal = ConfigurableField(
-        target=AnacalTask,
-        doc="AnaCal Task Detect",
-    )
-    fpfs = ConfigurableField(
-        target=FpfsMeasurementTask,
-        doc="Fpfs Source Measurement Task",
-    )
     do_fpfs = Field[bool](
         doc="Whether to drun fpfs task",
         default=False,
@@ -113,24 +109,14 @@ class AnacalDetectPipeConfig(
         doc="Size of PSF cache",
         default=100,
     )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
 
-    def validate(self):
-        super().validate()
-        if self.do_fpfs:
-            if self.fpfs.sigma_shapelets1 < 0.0:
-                raise FieldValidationError(
-                    self.fpfs.fields["sigma_shapelets1"],
-                    self,
-                    "sigma_shapelets1 in a wrong range",
-                )
-
-    def setDefaults(self):
-        super().setDefaults()
-        self.fpfs.do_compute_detect_weight = False
+    def _fpfs_required(self) -> bool:
+        # The sigma_shapelets1 check in the base validate() only applies
+        # when the fpfs subtask actually runs.
+        return bool(self.do_fpfs)
 
 
-class AnacalDetectPipe(PipelineTask):
+class AnacalDetectPipe(AnacalMeasureTaskBase):
     _DefaultName = "AnacalDetectPipe"
     ConfigClass = AnacalDetectPipeConfig
 
@@ -162,12 +148,14 @@ class AnacalDetectPipe(PipelineTask):
         else:
             correlation_handles_dict = {handle.dataId["band"]: handle for handle in correlation_handles}
         skyMap = inputs["skyMap"]
+        mask = inputs.get("mask", None)
         outputs = self.run(
             exposure_handles_dict=exposure_handles_dict,
             correlation_handles_dict=correlation_handles_dict,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            mask_array=None if mask is None else mask.getArray(),
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -196,22 +184,27 @@ class AnacalDetectPipe(PipelineTask):
     ):
         assert isinstance(self.config, AnacalDetectPipeConfig)
         band = "i"
+        if mask_array is None:
+            # Mask building lives entirely in BuildSystematicsTask now;
+            # without its output, detection runs unmasked.
+            self.log.warning(
+                "No systematics mask for tract=%d patch=%d; detecting "
+                "with NO pixel masking. Run BuildSystematicsTask "
+                "upstream unless this is intentional.",
+                tract,
+                patch,
+            )
         handle = exposure_handles_dict[band]
         exposure = handle.get()
         exposure.getPsf().setCacheCapacity(self.config.psfCache)
         if correlation_handles_dict is not None:
-            noise_corr = correlation_handles_dict[band].get().getArray()
-            variance = np.amax(noise_corr)
-            noise_corr = noise_corr / variance
-            ny, nx = noise_corr.shape
-            if noise_corr[ny // 2, nx // 2] != 1:
-                raise RuntimeError("noise correlation peak is not at the center pixel")
-            self.log.debug("With correlation, variance:", variance)
+            noise_corr = self._normalize_noise_corr(
+                correlation_handles_dict[band].get().getArray()
+            )
         else:
             noise_corr = None
 
-        idGenerator = self.config.idGenerator.apply(handle.dataId)
-        seed = idGenerator.catalog_id + seed_offset
+        seed = self._seed_from_handle(handle) + seed_offset
         data = self.anacal.prepare_data(
             exposure=exposure,
             band=band,

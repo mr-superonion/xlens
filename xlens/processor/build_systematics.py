@@ -45,7 +45,12 @@ from lsst.pipe.base import (
 )
 from lsst.pipe.base import connectionTypes as cT
 
-from xlens.utils.image import resize_array, subpixel_shift
+from xlens.utils.image import (
+    badMaskDefault,
+    prepare_mask,
+    resize_array,
+    subpixel_shift,
+)
 from xlens.utils.mask import (
     STAR_MASK_RADIUS_FUNCS,
     build_gaia_xyr,
@@ -124,18 +129,7 @@ class BuildSystematicsConfig(PipelineTaskConfig, pipelineConnections=BuildSystem
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
-        default=[
-            "BAD",
-            "SAT",
-            "CR",
-            "NO_DATA",
-            "UNMASKEDNAN",
-            "CROSSTALK",
-            "INTRP",
-            "STREAK",
-            "VIGNETTED",
-            "CLIPPED",
-        ],
+        default=badMaskDefault,
     )
     gaiaPadding = Field[int](
         doc="Padding (pixels) when selecting GAIA sources around the patch.",
@@ -320,10 +314,18 @@ class BuildSystematicsTask(PipelineTask):
         return (global_mask | band_mask).astype(np.int16)
 
     def _build_mask_band(self, *, exposure: ExposureF) -> np.ndarray:
+        """Bad-pixel mask for one band: the configured mask planes plus the
+        image < -6 sigma negative-outlier guard.  This is the ONLY place a
+        mask is built for the patch-coadd shear path; the measurement tasks
+        consume the union across bands (plus bright stars) as-is.
+        """
         assert isinstance(self.config, BuildSystematicsConfig)
-        bitv = exposure.mask.getPlaneBitMask(self.config.badMaskPlanes)
-        mask_band = ((exposure.mask.array & bitv) != 0).astype(np.int16)
-        return mask_band
+        return prepare_mask(
+            exposure.image.array,
+            exposure.mask,
+            exposure.variance.array,
+            self.config.badMaskPlanes,
+        )
 
     def get_noise_corr(self, exposure, mask_array):
         assert isinstance(self.config, BuildSystematicsConfig)
@@ -403,8 +405,8 @@ class BuildSystematicsTask(PipelineTask):
         nstars = len(catalog)
 
         if nstars >= 1:
-            np.random.seed(seed)
-            ind = np.random.randint(0, nstars)
+            rng = np.random.RandomState(seed)
+            ind = rng.randint(0, nstars)
             src = catalog[ind]
             # Collect the PSF image
             lsst_psf = exposure.getPsf()

@@ -54,20 +54,26 @@ def _setup_sim(g1=0.0, g2=0.0, noise_var=0.0, seed=42):
 def _compare(sim, fpfs_config):
     """Run both nonlinear and linear paths, compare via
     shapelets_linear2ell."""
-    C0 = fpfs_config.c0
+    # ``fpfs_config.c0`` is defined at AnaCal's THRESHOLD_REF_MAG_ZERO, and
+    # ``process_image`` rescales it internally to the image's ``mag_zero``.
+    # The linear path here applies no such scaling, so apply it explicitly
+    # to compare like with like (this also exercises the rescaling).
+    MAG_ZERO = 30.0
+    C0 = fpfs_config.c0 * 10.0 ** (
+        (MAG_ZERO - anacal.fpfs.THRESHOLD_REF_MAG_ZERO) / 2.5
+    )
     prefix = "fpfs1_"
 
     common = dict(
         fpfs_config=fpfs_config,
         pixel_scale=sim["pixel_scale"],
-        mag_zero=30.0,
+        mag_zero=MAG_ZERO,
         noise_variance=sim["noise_var"],
         gal_array=sim["gal_array"],
         psf_array=sim["psf_array"],
         noise_array=sim["noise_array"],
         mask_array=None,
         detection=sim["det"],
-        do_compute_detect_weight=False,
     )
 
     # Nonlinear (ground truth)

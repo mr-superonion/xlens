@@ -3,7 +3,7 @@
 # - Sweeps seed indices [INDEX_START, INDEX_END] (each job gets
 #   --min-id/--max-id) with chunk size --per-task (default: 10)
 # - Logs to ${HOME}/log
-# - Passes: --emax --layout --target --shear --mag-zero --width-max --z-bounds \
+# - Passes: --emax --layout --target --shear --width-max --z-bounds \
 #   --pixel-scale --bands --redshift
 #   [--no-correction] --min-id --max-id
 
@@ -16,12 +16,12 @@ TARGET="g1"                 # --target STR
 SHEAR="0.02"                # --shear F
 EMAX="0.30"                 # --emax F
 LAYOUT="random"             # --layout STR
-MAG_ZERO="30.0"             # --mag-zero F
 WIDTH_MAX="2.75"            # --width-max F
 Z_BOUNDS="0.3,0.6,0.9,1.2,1.5,1.8"   # --z-bounds STR
 PIXEL_SCALE="0.2"           # --pixel-scale F
 BANDS="ugrizy"              # --bands STR
 REDSHIFT="flexzboost"       # --redshift STR
+VERSION=""                  # --version N (optional; empty = unversioned outputs)
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="summary.py"
@@ -42,12 +42,13 @@ Options:
   --target STR          target (default: ${TARGET})
   --shear F             shear (default: ${SHEAR})
   --emax F              emax (default: ${EMAX})
-  --mag-zero F          magnitude zero point (default: ${MAG_ZERO})
   --width-max F         width maximum (default: ${WIDTH_MAX})
   --z-bounds STR        comma-separated redshift bounds (default: ${Z_BOUNDS})
   --pixel-scale F       pixel scale (arcsec/pixel, default: ${PIXEL_SCALE})
   --bands STR           bands used for photo-z estimation (default: ${BANDS})
   --redshift STR        photo-z estimator name (default: ${REDSHIFT})
+  --version N           optional integer tag; injects --version N into the
+                        python arguments (default: none)
   --no-correction       add --no-correction to summary_seeds.py arguments
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
@@ -75,12 +76,12 @@ while [[ $# -gt 0 ]]; do
     --layout)        LAYOUT="$2"; shift 2 ;;
     --target)        TARGET="$2"; shift 2 ;;
     --shear)         SHEAR="$2"; shift 2 ;;
-    --mag-zero)      MAG_ZERO="$2"; shift 2 ;;
     --width-max)     WIDTH_MAX="$2"; shift 2 ;;
     --z-bounds)      Z_BOUNDS="$2"; shift 2 ;;
     --pixel-scale)   PIXEL_SCALE="$2"; shift 2 ;;
     --bands)         BANDS="$2"; shift 2 ;;
     --redshift)      REDSHIFT="$2"; shift 2 ;;
+    --version)       VERSION="$2"; shift 2 ;;
     --no-correction) NO_CORR=true; shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     -h|--help)       usage; exit 0 ;;
@@ -88,13 +89,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Resolve relative --script paths against the current working directory
+# so HTCondor workers (which start in a different CWD) can find the file.
+if [[ "$SCRIPT_PATH" != /* ]]; then
+  SCRIPT_PATH="${PWD}/${SCRIPT_PATH}"
+fi
+
 # -------------------------------
 # Sanity checks
 # -------------------------------
-if [[ -z "${PSCRATCH:-}" ]]; then
-  echo "Error: PSCRATCH environment variable is not set." >&2
-  exit 1
-fi
 if [[ -z "$PYTHON_EXE_PATH" ]]; then
   echo "Error: python3 not found in PATH." >&2
   exit 1
@@ -138,12 +141,12 @@ arguments       = ${SCRIPT_PATH} \\
                   --layout ${LAYOUT} \\
                   --target ${TARGET} \\
                   --shear ${SHEAR} \\
-                  --mag-zero ${MAG_ZERO} \\
                   --width-max ${WIDTH_MAX} \\
                   --z-bounds ${Z_BOUNDS} \\
                   --pixel-scale ${PIXEL_SCALE} \\
                   --bands ${BANDS} \\
                   --redshift ${REDSHIFT} \\
+                  ${VERSION:+--version ${VERSION}} \\
                   ${NO_CORR_ARG} \\
                   --min-id \$(start) --max-id \$(end)
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out

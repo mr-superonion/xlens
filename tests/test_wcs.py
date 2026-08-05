@@ -77,7 +77,6 @@ def simulate_and_measure(
         mask_array=None,
         noise_array=None,
         detection=det,
-        do_compute_detect_weight=False,
     )
 
 
@@ -100,7 +99,6 @@ def simulate_and_measure_linear(
         mask_array=None,
         noise_array=None,
         detection=det,
-        do_compute_detect_weight=False,
         return_only_linear_modes=True,
         pack_linear_modes=True,
     )

@@ -55,7 +55,7 @@ from lsst.pipe.base import (
 from lsst.pipe.base import connectionTypes as cT
 from lsst.skymap import BaseSkyMap
 
-from xlens.utils.image import stack_psfs_cells
+from xlens.utils.image import badMaskDefault, prepare_mask, stack_psfs_cells
 from xlens.utils.mask import (
     GAIA_TABLE_DTYPE,
     STAR_MASK_RADIUS_FUNCS,
@@ -138,18 +138,7 @@ class BuildCellSystematicsConfig(
     )
     badMaskPlanes = ListField[str](
         doc="Mask planes used to reject bad pixels.",
-        default=[
-            "BAD",
-            "SAT",
-            "CR",
-            "NO_DATA",
-            "UNMASKEDNAN",
-            "CROSSTALK",
-            "INTRP",
-            "STREAK",
-            "VIGNETTED",
-            "CLIPPED",
-        ],
+        default=badMaskDefault,
     )
     gaiaPadding = Field[int](
         doc="Padding (pixels) when selecting GAIA sources around the patch.",
@@ -482,11 +471,16 @@ class BuildCellSystematicsTask(PipelineTask):
         )
 
     def _build_mask_band(self, exposure) -> np.ndarray:
-        """Build a bad-pixel mask for one band from a stitched exposure."""
+        """Bad-pixel mask for one band from a stitched exposure: the
+        configured mask planes plus the image < -6 sigma negative-outlier
+        guard.  This is the ONLY place a mask is built for the cell-coadd
+        shear path; the measurement tasks consume the union across bands
+        (plus bright stars) as-is.
+        """
         assert isinstance(self.config, BuildCellSystematicsConfig)
-        avail = set(exposure.mask.getMaskPlaneDict().keys())
-        planes = [p for p in self.config.badMaskPlanes if p in avail]
-        if not planes:
-            return np.zeros(exposure.mask.array.shape, dtype=np.int16)
-        bitv = exposure.mask.getPlaneBitMask(planes)
-        return ((exposure.mask.array & bitv) != 0).astype(np.int16)
+        return prepare_mask(
+            exposure.image.array,
+            exposure.mask,
+            exposure.variance.array,
+            self.config.badMaskPlanes,
+        )

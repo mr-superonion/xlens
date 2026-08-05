@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Any
+from typing import Any, Sequence
 
 import anacal
 import astropy
@@ -27,11 +27,12 @@ import numpy as np
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
 from lsst.geom import Point2D
-from lsst.pex.config import Config, Field, FieldValidationError, ListField
+from lsst.pex.config import Config, Field, FieldValidationError
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
 from .. import utils
+from ..utils.constants import FPFS_C0
 from ..wcs import pixel_to_sky
 
 
@@ -41,8 +42,8 @@ class AnacalConfig(Config):
         default=64,
     )
     bound = Field[int](
-        doc="Sources to be removed if too close to boundary",
-        default=40,
+        doc="Sources to be removed if too close to boundary [pixel]",
+        default=35,
     )
     sigma_arcsec = Field[float](
         doc="Kernel size for re-smoothing",
@@ -68,14 +69,6 @@ class AnacalConfig(Config):
         doc="Whether validating PSF",
         default=False,
     )
-    p_min = Field[float](
-        doc="peak detection threshold",
-        default=0.12,
-    )
-    omega_p = Field[float](
-        doc="peak detection threshold",
-        default=0.05,
-    )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
@@ -83,10 +76,6 @@ class AnacalConfig(Config):
     do_fpfs = Field[bool](
         doc="whether to do FPFS measurement",
         default=True,
-    )
-    badMaskPlanes = ListField[str](
-        doc="Mask planes used to reject bad pixels.",
-        default=[],
     )
     noiseId = Field[int](
         doc="Noise realization id",
@@ -139,8 +128,6 @@ class AnacalTask(Task):
         prior.set_sigma_a(anacal.math.qnumber(0.05))
         prior.set_sigma_x(anacal.math.qnumber(0.05))
         self.config_kwargs = {
-            "p_min": self.config.p_min,
-            "omega_p": self.config.omega_p,
             "sigma_arcsec": self.config.sigma_arcsec,
             "snr_peak_min": self.config.snr_min,
             "stamp_size": self.config.npix,
@@ -157,7 +144,9 @@ class AnacalTask(Task):
         *,
         pixel_scale: float,
         mag_zero: float,
-        noise_variance: float,
+        # One value for a plain image, one per band for a (nband, ny, nx)
+        # stack -- anacal takes either.
+        noise_variance: float | Sequence[float],
         gal_array: NDArray,
         psf_array: NDArray,
         mask_array: NDArray,
@@ -175,16 +164,23 @@ class AnacalTask(Task):
     ):
         assert isinstance(self.config, AnacalConfig)
 
-        # Base thresholds are at the AnaCal reference zeropoint (30);
-        # the Task owns the mag_zero threshold scaling. The image is
+        # These flux-scale thresholds are defined at AnaCal's
+        # THRESHOLD_REF_MAG_ZERO, which equals MAG_ZERO_AB. The image is
         # already normalized to MAG_ZERO_AB upstream (prepare_data), so
-        # ``mag_zero`` here is MAG_ZERO_AB.
+        # ``mag_zero`` here is MAG_ZERO_AB and the Task's threshold scaling
+        # is exactly 1.0 -- the values below are the ones actually used.
+        #
+        # ``omega_v`` is the single neighbour-difference parameter (AnaCal
+        # uses it as both centre and width, so the smooth step vanishes
+        # exactly at v = 0, the strict-local-maximum boundary).  This value is
+        # the "v.003" configuration, which gave the best selection-response
+        # conditioning in the blended-simulation scan (values rounded to
+        # three decimals).
         task = anacal.task.Task(
             scale=pixel_scale,
-            omega_f=0.06,
-            v_min=0.013,
-            omega_v=0.025,
-            fpfs_c0=8.4,
+            omega_f=0.218,
+            omega_v=0.011,
+            fpfs_c0=FPFS_C0,
             mag_zero=mag_zero,
             **self.config_kwargs,
         )
@@ -292,7 +288,6 @@ class AnacalTask(Task):
             npix=self.config.npix,
             noise_corr=noise_corr,
             do_noise_bias_correction=self.config.do_noise_bias_correction,
-            badMaskPlanes=self.config.badMaskPlanes,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
@@ -323,4 +318,76 @@ class AnacalTask(Task):
             )
         else:
             data["psf_object"] = None
+        return data
+
+    def prepare_data_multiband(
+        self,
+        *,
+        exposures: dict,
+        bands: Sequence[str],
+        seed: int,
+        survey: str | None = None,
+        noise_corrs: dict | None = None,
+        skyMap=None,
+        tract: int = 0,
+        patch: int = 0,
+        star_cat: NDArray | None = None,
+        mask_array: NDArray | None = None,
+        detection: astropy.table.Table | None = None,
+        blocks: list | None = None,
+        **kwargs,
+    ):
+        """Prepare a stack of bands as one anacal detection input.
+
+        Same as :meth:`prepare_data` but for several bands at once: the
+        image, PSF and noise arrays gain a leading band axis and
+        ``noise_variance`` becomes one value per band.  anacal deconvolves
+        each band's own PSF before averaging them, so the bands do not need
+        to be PSF-matched here -- only aligned on the same pixel grid.
+
+        Args:
+        exposures (dict):  band -> LSST exposure
+        bands (Sequence[str]):  bands to coadd, in the order they are stacked
+        seed (int):  random seed
+        noise_corrs (dict):  band -> noise correlation function (None)
+        """
+        assert isinstance(self.config, AnacalConfig)
+        bands = list(bands)
+        missing = [b for b in bands if b not in exposures]
+        if missing:
+            raise KeyError(f"no exposure for band(s) {missing}")
+
+        exps = [exposures[b] for b in bands]
+        pixel_scale = float(exps[0].wcs.getPixelScale().asArcseconds())
+        if blocks is None:
+            blocks = utils.image.get_blocks_multiband(
+                lsst_psfs=[e.getPsf() for e in exps],
+                lsst_bbox=exps[0].getBBox(),
+                pixel_scale=pixel_scale,
+                npix=self.config.npix,
+            )
+        data = utils.image.prepare_data_multiband(
+            bands=bands,
+            exposures=exposures,
+            seed=seed,
+            noiseId=self.config.noiseId,
+            rotId=self.config.rotId,
+            npix=self.config.npix,
+            noise_corrs=noise_corrs,
+            do_noise_bias_correction=self.config.do_noise_bias_correction,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
+            star_cat=star_cat,
+            mask_array=mask_array,
+            detection=detection,
+            blocks=blocks,
+            survey=survey,
+        )
+        # The detection image belongs to no single band, so it carries no
+        # band prefix, and PSF validation / per-object PSFs -- both defined
+        # against one exposure -- do not apply.
+        data["lsst_psf"] = None
+        data["base_column_name"] = None
+        data["psf_object"] = None
         return data

@@ -29,18 +29,11 @@ import logging
 from typing import Any
 
 import anacal
-import lsst.afw.table as afwTable
-import lsst.daf.base as dafBase
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.meas.base import (
-    SingleFrameMeasurementTask,
-    SkyMapIdGeneratorConfig,
-)
-from lsst.pex.config import ConfigurableField, Field, FieldValidationError, ListField
+from lsst.pex.config import FieldValidationError, ListField
 from lsst.pipe.base import (
     NoWorkFound,
-    PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
     Struct,
@@ -50,23 +43,13 @@ from lsst.utils.logging import LsstLogAdapter
 from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-from ..catalog.utils import add_magnitude_columns
-from ..utils.catalog import set_isPrimary
-from ..utils.columns import (
-    select_band_gauss_fluxes,
-    select_detection_columns,
-)
-from ..utils.constants import MAG_ZERO_AB
+from ..utils.columns import select_detection_columns
 from ..utils.image import (
-    broadcast_psf_hsm_moments,
-    build_psf_hsm_context,
-    default_psf_hsm_plugin_config,
     make_psf_stamp_exposure,
-    measure_psf_hsm_moments,
     prepare_data_one_cell,
+    prepare_data_one_cell_multiband,
 )
-from .anacal import AnacalTask
-from .fpfs import FpfsMeasurementTask
+from .measure_base import AnacalMeasureTaskBase, MeasureBandsConfigBase
 
 
 class MeasureCellCoaddsPipeConnections(
@@ -108,25 +91,10 @@ class MeasureCellCoaddsPipeConnections(
 
 
 class MeasureCellCoaddsPipeConfig(
+    MeasureBandsConfigBase,
     PipelineTaskConfig,
     pipelineConnections=MeasureCellCoaddsPipeConnections,
 ):
-    anacal = ConfigurableField(
-        target=AnacalTask,
-        doc="AnaCal Task for detection stage (i-band)",
-    )
-    fpfs = ConfigurableField(
-        target=FpfsMeasurementTask,
-        doc="Fpfs Source Measurement Task",
-    )
-    do_measure_flux_gauss = Field[bool](
-        doc=(
-            "If True, also run AnaCal forced measurement during the "
-            "force stage to extract per-band Gaussian fluxes and merge "
-            "them into the output catalog."
-        ),
-        default=False,
-    )
     bands = ListField[str](
         doc=(
             "PHYSICAL bands (butler ``band`` dimension) required in the input "
@@ -135,60 +103,23 @@ class MeasureCellCoaddsPipeConfig(
         ),
         default=["g", "r", "i", "z"],
     )
-    survey = Field[str](
-        doc=(
-            "Survey name used to build the survey-prefixed output column names "
-            "``{survey}_{band}_...`` and to make the noise seed survey-aware."
-        ),
-        default="lsst",
-    )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
-    doPsfHsmMoments = Field[bool](
-        doc=(
-            "If True, run lsst.meas.extensions.shapeHSM.HsmPsfMomentsPlugin "
-            "+ HigherOrderMomentsPSFPlugin (the same plugins DRP uses) once "
-            "per (cell, band) on the cell PSF stamp, and broadcast the "
-            "resulting per-cell PSF moments to every source in that cell. "
-            "Adds {band}_ext_shapeHSM_HsmPsfMoments_{xx,yy,xy,flag,...} and "
-            "{band}_ext_shapeHSM_HigherOrderMomentsPSF_{pq,flag} columns to "
-            "the per-source anacal catalog."
-        ),
-        default=False,
-    )
-    psfHsmMeasurement = ConfigurableField(
-        target=SingleFrameMeasurementTask,
-        doc=(
-            "DRP-style single-frame measurement subtask used to evaluate "
-            "the PSF moments on each cell PSF stamp. Only used when "
-            "doPsfHsmMoments is True."
-        ),
-    )
 
     def validate(self):
         super().validate()
-        if self.fpfs.sigma_shapelets1 < 0.0:
+        missing = [b for b in self.detection_bands if b not in self.bands]
+        if missing:
             raise FieldValidationError(
-                self.fpfs.__class__.sigma_shapelets1,
+                self.__class__.detection_bands,
                 self,
-                "sigma_shapelets1 in a wrong range",
+                f"detection_bands must be a subset of bands; missing {missing}.",
             )
 
     def setDefaults(self):
         super().setDefaults()
-        self.anacal.force_size = True
-        self.anacal.force_center = True
         self.anacal.bound = 5
-        self.fpfs.do_compute_detect_weight = False
-        # Shared DRP-equivalent plugin wiring for the per-cell PSF
-        # measurement; lives in xlens.utils.image so measure_coadds
-        # uses the exact same setup. HigherOrderMomentsPSF defaults
-        # to (min_order=3, max_order=4); to widen, set
-        # cfg.psfHsmMeasurement.plugins[
-        #     "ext_shapeHSM_HigherOrderMomentsPSF"].max_order = N.
-        default_psf_hsm_plugin_config(self.psfHsmMeasurement)
 
 
-class MeasureCellCoaddsPipe(PipelineTask):
+class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
     """Detect and measure sources on cell-based coadds.
 
     Each SingleCellCoadd has a 250x250 outer region and a 150x150 inner
@@ -221,22 +152,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
             **kwargs,
         )
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
-
-        self.makeSubtask("anacal")
-        self.makeSubtask("fpfs")
-
-        if self.config.doPsfHsmMoments:
-            # Schema is shared across every per-cell measurement; the
-            # plugins register their fields on construction.
-            schema = afwTable.SourceTable.makeMinimalSchema()
-            self.makeSubtask(
-                "psfHsmMeasurement",
-                schema=schema,
-                algMetadata=dafBase.PropertyList(),
-            )
-            self._psfHsmCtx = build_psf_hsm_context(
-                schema, self.config.psfHsmMeasurement,
-            )
+        self._make_measure_subtasks()
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
@@ -352,6 +268,45 @@ class MeasureCellCoaddsPipe(PipelineTask):
         data["blocks"][0].psf_array = data["psf_array"].copy()
         return data
 
+    def _prepare_cell_multiband(
+        self,
+        cells: dict,
+        *,
+        bands: list[str],
+        seed: int,
+        mag_zeros: dict,
+        skyMap,
+        tract: int,
+        patch: int,
+        mask_array: NDArray | None = None,
+    ) -> dict:
+        """Build the data dict for one cell across several bands.
+
+        ``cells`` maps band to that band's ``SingleCellCoadd`` for the same
+        cell id.  The cells share a pixel grid, so one block covers them all.
+        """
+        assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
+        npix = self.config.anacal.npix
+        blocks = self._build_cell_block(cells[bands[0]])
+        noise_correction = self.config.anacal.do_noise_bias_correction
+        data = prepare_data_one_cell_multiband(
+            cells=cells,
+            bands=bands,
+            survey=self.config.survey,
+            seed=seed,
+            mag_zeros=mag_zeros,
+            npix=npix,
+            do_noise_bias_correction=noise_correction,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
+            blocks=blocks,
+            mask_array=mask_array,
+        )
+        # One PSF stamp per band, in the order the images were stacked.
+        data["blocks"][0].psf_array = data["psf_array"].copy()
+        return data
+
     def _cell_mask(
         self,
         stitched_mask_array: NDArray | None,
@@ -377,41 +332,59 @@ class MeasureCellCoaddsPipe(PipelineTask):
         stitched_mask_array: NDArray | None = None,
         mask_origin: tuple[int, int] | None = None,
     ) -> dict:
-        """Detect on the i-band cell coadd.
+        """Detect on the cell coadd of ``config.detection_bands``.
 
         Returns ``det_cats``, mapping each cell_id with non-empty
-        detections to its anacal detection catalog.  The i-band
-        photometric zeropoint is computed locally for use in detection
-        but is not returned; ``_force`` re-derives the per-band
+        detections to its anacal detection catalog.  The detection bands'
+        photometric zeropoints are computed locally for use in detection
+        but are not returned; ``_force`` re-derives the per-band
         zeropoint from each band's coadd.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
-        band = "i"
-        if band not in coadd_handles_dict:
-            raise KeyError(f"band '{band}' not in {coadd_handles_dict.keys()}")
+        bands = list(self.config.detection_bands)
+        missing = [b for b in bands if b not in coadd_handles_dict]
+        if missing:
+            raise KeyError(
+                f"detection band(s) {missing} not in "
+                f"{list(coadd_handles_dict.keys())}"
+            )
+        if len(bands) > 1:
+            self.log.info("Detecting on the coadd of bands %s", bands)
 
-        det_coadd = coadd_handles_dict[band].get()
-        mag_zero = self._coadd_mag_zero(det_coadd)
-        det_cells = dict(det_coadd.cells)
+        det_coadds = {b: coadd_handles_dict[b].get() for b in bands}
+        mag_zeros = {b: self._coadd_mag_zero(c) for b, c in det_coadds.items()}
+        det_cells = {b: dict(c.cells) for b, c in det_coadds.items()}
 
         det_cats: dict = {}
-        for cell_id, det_cell in det_cells.items():
+        for cell_id, det_cell in det_cells[bands[0]].items():
             cell_mask = self._cell_mask(
                 stitched_mask_array,
                 mask_origin,
                 det_cell,
             )
             try:
-                data = self._prepare_cell(
-                    det_cell,
-                    band=band,
-                    seed=seed,
-                    mag_zero=mag_zero,
-                    skyMap=skyMap,
-                    tract=tract,
-                    patch=patch,
-                    mask_array=cell_mask,
-                )
+                if len(bands) == 1:
+                    data = self._prepare_cell(
+                        det_cell,
+                        band=bands[0],
+                        seed=seed,
+                        mag_zero=mag_zeros[bands[0]],
+                        skyMap=skyMap,
+                        tract=tract,
+                        patch=patch,
+                        mask_array=cell_mask,
+                    )
+                else:
+                    data = self._prepare_cell_multiband(
+                        {b: det_cells[b][cell_id] for b in bands},
+                        bands=bands,
+                        seed=seed,
+                        mag_zeros=mag_zeros,
+                        skyMap=skyMap,
+                        tract=tract,
+                        patch=patch,
+                        mask_array=cell_mask,
+                    )
                 cat = self.anacal.run(**data)
                 del data
                 if len(cat) > 0:
@@ -426,7 +399,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
                     iy,
                     e,
                 )
-        del det_coadd, det_cells
+        del det_coadds, det_cells
 
         if not det_cats:
             # Edge-of-tract patches whose every cell fails noise estimation
@@ -492,39 +465,18 @@ class MeasureCellCoaddsPipe(PipelineTask):
                         mask_array=cell_mask,
                     )
                     cat = self.fpfs.run(**data)
-                    if self.config.do_measure_flux_gauss:
-                        gauss_cat = select_band_gauss_fluxes(
-                            self.anacal.run(**data),
-                            band,
-                            survey=self.config.survey,
-                        )
-                        cat = np.asarray(
-                            rfn.merge_arrays(
-                                [cat, gauss_cat],
-                                flatten=True,
-                            )
-                        )
+                    cat = self._append_gauss_fluxes(
+                        cat, data=data, band=band,
+                    )
                     if self.config.doPsfHsmMoments:
-                        # One HSM measurement per (cell, band) —
-                        # broadcast to every source in this cell. The
-                        # synthetic ExposureF + temporaries built by
-                        # make_psf_stamp_exposure / measure_psf_hsm_moments
-                        # are released as soon as this iteration exits.
-                        stamp_exp = make_psf_stamp_exposure(cell.psf_image)
-                        psf_moments = measure_psf_hsm_moments(
-                            self._psfHsmCtx,
-                            self.psfHsmMeasurement,
-                            stamp_exp,
-                        )
-                        psf_block = broadcast_psf_hsm_moments(
-                            psf_moments, band, n=len(cat),
-                            survey=self.config.survey,
-                        )
-                        cat = np.asarray(
-                            rfn.merge_arrays(
-                                [cat, psf_block],
-                                flatten=True,
-                            )
+                        # HSM measures the cell PSF stamp (the synthetic
+                        # ExposureF is released as this iteration exits).
+                        cat = self._append_psf_hsm_moments(
+                            cat,
+                            band=band,
+                            hsm_exposure=make_psf_stamp_exposure(
+                                cell.psf_image
+                            ),
                         )
                     cell_force_parts[cell_id].append(cat)
                 except Exception as e:
@@ -591,8 +543,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
             )
 
         first_handle = next(iter(coadd_handles_dict.values()))
-        idGenerator = self.config.idGenerator.apply(first_handle.dataId)
-        seed = idGenerator.catalog_id
+        seed = self._seed_from_handle(first_handle)
 
         if mask is not None:
             stitched_mask_array = mask.getArray()
@@ -600,6 +551,16 @@ class MeasureCellCoaddsPipe(PipelineTask):
         else:
             stitched_mask_array = None
             mask_origin = None
+            # Mask building lives entirely in BuildCellSystematicsTask now;
+            # without its output, measurement runs unmasked (saturated
+            # pixels, streaks, bright-star halos included).
+            self.log.warning(
+                "No systematics mask for tract=%d patch=%d; measuring "
+                "with NO pixel masking. Run BuildCellSystematicsTask "
+                "upstream unless this is intentional.",
+                tract,
+                patch,
+            )
 
         det_cats = self._detect(
             coadd_handles_dict=coadd_handles_dict,
@@ -639,25 +600,7 @@ class MeasureCellCoaddsPipe(PipelineTask):
             )
 
         output = np.concatenate(cell_results)
-        # Per-band AB magnitude + shear response for each published flux
-        # family (fluxes are on the fixed MAG_ZERO_AB zeropoint here).
-        output = add_magnitude_columns(output, MAG_ZERO_AB)
-        # Stable per-object IDs derived from the patch-level seed. Used
-        # downstream by ``photoZPipe`` and any object-level joiners.
-        object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(output), dtype=np.int64)
-        output = rfn.append_fields(
-            output,
-            "object_id",
-            object_ids,
-            usemask=False,
+        output = self._finalize_catalog(
+            output, seed=seed, skyMap=skyMap, tract=tract, patch=patch,
         )
-        if skyMap is not None:
-            # Use skymap's patchInfo (not MultipleCellCoadd.inner_bbox)
-            # for is_primary deduplication. The skymap patch inner bbox
-            # (3000x3000) defines the non-overlapping tiling, while
-            # MultipleCellCoadd.inner_bbox equals the patch outer bbox.
-            tractInfo = skyMap[tract]
-            patchInfo = tractInfo[patch]
-            pixel_scale = float(tractInfo.getWcs().getPixelScale().asArcseconds())
-            set_isPrimary(output, skyMap, tractInfo, patchInfo, pixel_scale)
         return Struct(anacalCatalog=output)

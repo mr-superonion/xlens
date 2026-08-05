@@ -70,7 +70,7 @@ class ShearLogNormalFlat:
         self.field_size_deg = field_size_deg
         self.npix = npix
         self.seed = seed
-        np.random.seed(self.seed)
+        rng = np.random.RandomState(self.seed)
 
         # 1. Get Power Spectrum
         # Create a narrow redshift distribution for the WeakLensingTracer
@@ -114,8 +114,8 @@ class ShearLogNormalFlat:
         gaussian_field_fourier = (
             np.sqrt(pk_2d_scaled)
             * (
-                np.random.normal(size=(self.npix, self.npix))
-                + 1j * np.random.normal(size=(self.npix, self.npix))
+                rng.normal(size=(self.npix, self.npix))
+                + 1j * rng.normal(size=(self.npix, self.npix))
             )
             / np.sqrt(2.0)
         )

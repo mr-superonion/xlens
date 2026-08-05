@@ -18,6 +18,9 @@ KAPPA="0.0"                 # --kappa F
 ROT="0"                     # --rot N
 LAYOUT="random"             # --layout STR
 BAND="u,g,r,i,z,y"          # --band STR
+DETECTION_BAND=""           # --detection-band STR (optional; empty = script default)
+VERSION=""                  # --version N (optional; empty = unversioned outputs)
+MEMORY=1228                 # request_memory in MB; override with: --memory N
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="sim.py"
@@ -39,6 +42,12 @@ Options:
   --kappa F             kappa (default: ${KAPPA})
   --rot N               rotation (default: ${ROT})
   --band STR            band (default: ${BAND})
+  --detection-band STR  bands to coadd for detection; injects
+                        --detection-band STR into the python arguments
+                        (default: none = the python script's own default)
+  --version N           optional integer tag; injects --version N into the
+                        python arguments (default: none)
+  --memory N            HTCondor request_memory in MB (default: ${MEMORY})
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
   --modes "M1,M2,..."   replace default modes (e.g. "0,40")
@@ -68,20 +77,25 @@ while [[ $# -gt 0 ]]; do
     --kappa)        KAPPA="$2"; shift 2 ;;
     --rot)          ROT="$2"; shift 2 ;;
     --layout)       LAYOUT="$2"; shift 2 ;;
-    --band)         BAND="$2"; shift 2 ;;
+    --band)           BAND="$2"; shift 2 ;;
+    --detection-band) DETECTION_BAND="$2"; shift 2 ;;
+    --version)      VERSION="$2"; shift 2 ;;
+    --memory)       MEMORY="$2"; shift 2 ;;
     --dry-run)      DRY_RUN=true; shift ;;
     -h|--help)      usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
   esac
 done
 
+# Resolve relative --script paths against the current working directory
+# so HTCondor workers (which start in a different CWD) can find the file.
+if [[ "$SCRIPT_PATH" != /* ]]; then
+  SCRIPT_PATH="${PWD}/${SCRIPT_PATH}"
+fi
+
 # -------------------------------
 # Sanity checks
 # -------------------------------
-if [[ -z "${PSCRATCH:-}" ]]; then
-  echo "Error: PSCRATCH environment variable is not set." >&2
-  exit 1
-fi
 if [[ -z "$PYTHON_EXE_PATH" ]]; then
   echo "Error: python3 not found in PATH." >&2
   exit 1
@@ -98,6 +112,10 @@ if (( PER_TASK <= 0 )); then
   echo "Error: --per-task must be a positive integer (got ${PER_TASK})." >&2
   exit 1
 fi
+if ! [[ "$MEMORY" =~ ^[0-9]+$ ]] || (( MEMORY <= 0 )); then
+  echo "Error: --memory must be a positive integer in MB (got ${MEMORY})." >&2
+  exit 1
+fi
 mkdir -p "$LOG_DIR"
 
 # -------------------------------
@@ -109,11 +127,11 @@ universe        = vanilla
 initialdir      = ${PWD}
 notification    = never
 getenv          = true
-request_memory  = 1228
+request_memory  = ${MEMORY}
 request_cpus    = 1
 
 executable      = /bin/bash
-arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} || exit 1; done'"
+arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} ${DETECTION_BAND:+--detection-band ${DETECTION_BAND}} ${VERSION:+--version ${VERSION}} || exit 1; done'"
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).out
 error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log

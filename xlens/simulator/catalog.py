@@ -103,6 +103,16 @@ class CatalogConfig(
         doc="galaxy type",
         default="catsim2017",
     )
+    survey_name_list = ListField[str](
+        doc=(
+            "Survey names selecting the survey-prefixed photometry columns "
+            "``{survey_name}_{band}`` read from the input galaxy catalog. "
+            "The columns of every listed survey are collected, so one truth "
+            "catalog can feed simulations of several surveys; it must list "
+            "the survey_name of every simulation task that renders it."
+        ),
+        default=["lsst"],
+    )
     layout = Field[str](
         doc="layout type",
         default="random",
@@ -181,6 +191,28 @@ class CatalogConfig(
                 self,
                 "We require galaxy_type in " "['catsim2017', 'flagship2025', 'diffsky']",
             )
+        survey_names = [str(s).lower() for s in self.survey_name_list]
+        if len(survey_names) == 0:
+            raise FieldValidationError(
+                self.__class__.survey_name_list,
+                self,
+                "survey_name_list must name at least one survey.",
+            )
+        if not set(survey_names) <= {"lsst", "hsc", "euclid"}:
+            raise FieldValidationError(
+                self.__class__.survey_name_list,
+                self,
+                "survey_name_list entries must be in ['lsst', 'hsc', 'euclid']",
+            )
+        # Only flagship2025 carries the Euclid photometry columns (the
+        # renderer reads ``entry[f"{survey_name}_{band}"]``).
+        if "euclid" in survey_names and self.galaxy_type != "flagship2025":
+            raise FieldValidationError(
+                self.__class__.galaxy_type,
+                self,
+                "Euclid simulations require galaxy_type='flagship2025'",
+            )
+        self.survey_name_list = survey_names
         lists = {
             "select_observable": self.select_observable,
             "select_lower_limit": self.select_lower_limit,
@@ -267,6 +299,7 @@ class CatalogTask(PipelineTask):
             extend_ratio=self.config.extend_ratio,
             force_pixel_center=self.config.force_pixel_center,
             catsim_dir=self.config.catsim_dir,
+            survey_name_list=list(self.config.survey_name_list),
             select_observable=(select_observable if select_observable else None),
             select_lower_limit=(select_lower_limit if select_lower_limit else None),
             select_upper_limit=(select_upper_limit if select_upper_limit else None),

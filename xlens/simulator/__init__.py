@@ -32,11 +32,10 @@ from . import (
     defaults,
     galaxies,
     layout,
-    mog,
     noise,
     perturbation,
-    sim,
     seds,
+    sim,
 )
 
 __all__ = [
@@ -45,7 +44,6 @@ __all__ = [
     "defaults",
     "galaxies",
     "layout",
-    "mog",
     "noise",
     "perturbation",
     "sim",

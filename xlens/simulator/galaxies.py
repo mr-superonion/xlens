@@ -37,8 +37,22 @@ import numpy as np
 import pyarrow.parquet as pq
 from numpy.lib import recfunctions as rfn
 
-from . import mog
 from .layout import Layout
+
+
+# ``force_galaxy_profile`` codes shared by every catalog implementation
+FORCE_GALAXY_PROFILE_NONE = 0
+FORCE_GALAXY_PROFILE_GAUSSIAN = 1
+FORCE_GALAXY_PROFILE_EXPONENTIAL = 2
+
+# Default upper bound (arcsec) on the bulge half-light radius used for
+# rendering, shared by every catalog implementation.  Input catalogs carry
+# a tail of implausibly large bulges (flagship reaches 16.6", 99.9th
+# percentile 3.8"), and a Sersic bulge that large makes GalSim size the
+# stamp at several thousand pixels; the FFT of that one stamp then sets
+# the peak memory of an entire run.  Override per catalog class with the
+# ``max_bulge_hlr_arcsec`` attribute.
+MAX_BULGE_HLR_ARCSEC = 3.0
 
 
 def _galsim_round_sersic(n, sersic_prec):
@@ -46,29 +60,49 @@ def _galsim_round_sersic(n, sersic_prec):
     return float(int(n / sersic_prec + 0.5)) * sersic_prec
 
 
-def get_catalog(fname):
-    """Read a FITS or Parquet catalog and append an ``indices`` column.
+def _forced_profile(force_galaxy_profile, *, flux, half_light_radius):
+    """Return the radial profile requested by *force_galaxy_profile*.
+
+    Parameters
+    ----------
+    force_galaxy_profile : int
+        1 for Gaussian, 2 for Exponential.
+    flux : float
+        Total flux of the component.
+    half_light_radius : float
+        Half-light radius (arcsec) of the component.
+    """
+    if force_galaxy_profile == FORCE_GALAXY_PROFILE_GAUSSIAN:
+        return galsim.Gaussian(flux=flux, half_light_radius=half_light_radius)
+    if force_galaxy_profile == FORCE_GALAXY_PROFILE_EXPONENTIAL:
+        return galsim.Exponential(flux=flux, half_light_radius=half_light_radius)
+    raise ValueError(
+        "force_galaxy_profile must be 1 (gaussian) or 2 (exponential), "
+        f"not {force_galaxy_profile}"
+    )
+
+
+def get_catalog(fname, columns=None):
+    """Read a FITS catalog.
+
+    Row numbers are tracked separately (see
+    :meth:`BaseGalaxyCatalog._apply_selection`) rather than materialised
+    as a column: adding a field to a structured array copies the whole
+    array, which for the larger inputs costs hundreds of MiB.
 
     Parameters
     ----------
     fname : str
-        Path to a FITS or Parquet file readable by ``fitsio``.
+        Path to a FITS file readable by ``fitsio``.
+    columns : list of str or None, optional
+        Subset of columns to read.  ``None`` reads every column.
 
     Returns
     -------
     numpy.ndarray
-        Structured array with an additional ``indices`` column (``int32``).
+        Structured array of the requested columns.
     """
-    cat = fitsio.read(fname)
-    idx = np.arange(len(cat), dtype=np.int32)
-    cat = rfn.append_fields(
-        cat,
-        "indices",
-        idx,
-        dtypes=[np.int32],
-        usemask=False,
-    )
-    return cat
+    return fitsio.read(fname, columns=columns)
 
 
 class BaseGalaxyCatalog(ABC):
@@ -97,6 +131,7 @@ class BaseGalaxyCatalog(ABC):
         extend_ratio: float = 1.08,
         force_pixel_center: bool = False,
         catsim_dir: str | None = None,
+        survey_name_list: Iterable[str] | None = None,
     ):
         """Construct a galaxy catalog from scratch with a spatial layout.
 
@@ -122,8 +157,20 @@ class BaseGalaxyCatalog(ABC):
         catsim_dir : str or None, optional
             Directory for input catalog files.  Falls back to the
             ``CATSIM_DIR`` environment variable when *None*.
+        survey_name_list : iterable of str or None, optional
+            Surveys whose ``{survey}_{band}`` photometry columns are read
+            from the input catalog; the columns of every entry are
+            collected, so one catalog can feed simulations of several
+            surveys.  Must cover the ``survey_name`` of every simulation
+            task that later renders this catalog, otherwise the magnitudes
+            it needs will not have been read.  Defaults to ``["lsst"]``.
         """
         self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
+        if survey_name_list is None:
+            survey_name_list = ["lsst"]
+        self.survey_name_list = tuple(
+            str(name).lower() for name in survey_name_list
+        )
         self.prepare_tract_info(tract_info)
         wcs = tract_info.getWcs()
         ps = float(wcs.getPixelScale().asArcseconds())
@@ -136,7 +183,10 @@ class BaseGalaxyCatalog(ABC):
             sep_arcsec=sep_arcsec,
             extend_ratio=extend_ratio,
         )
-        input_catalog = self._read_catalog(
+        # ``input_row_ids`` are the row numbers in the unfiltered input
+        # file, carried alongside the (possibly cut) catalog instead of
+        # as a column to avoid copying the whole array.
+        input_catalog, input_row_ids = self._read_catalog(
             select_observable=select_observable,
             select_lower_limit=select_lower_limit,
             select_upper_limit=select_upper_limit,
@@ -205,7 +255,7 @@ class BaseGalaxyCatalog(ABC):
         placement["prelensed_ra"] = ra
         placement["prelensed_dec"] = dec
         placement["has_finite_shear"] = np.ones(num, dtype=bool)
-        placement["indices"] = selected["indices"]
+        placement["indices"] = input_row_ids[idx]
         placement["redshift"] = selected["redshift"]
         placement["hlr"] = self._build_hlr_array(selected)
 
@@ -247,14 +297,47 @@ class BaseGalaxyCatalog(ABC):
     # set this; ``_read_catalog`` resolves it against ``self.catsim_dir``.
     catalog_filename: ClassVar[str]
 
-    def _load_catalog_file(self, fname: str) -> Any:
+    # Columns required from the input catalog.  ``None`` reads every
+    # column; subclasses set this so that large inputs do not pull in
+    # tens of unused columns.  Selection observables are added on top.
+    required_columns: ClassVar[tuple[str, ...] | None] = None
+
+    # Fallback surveys used when the catalog is rebuilt by ``from_array``,
+    # which never re-reads the input file.
+    survey_name_list: tuple[str, ...] = ("lsst",)
+
+    # Bulge half-light radii are clipped to this value (arcsec) before
+    # rendering; see :data:`MAX_BULGE_HLR_ARCSEC`.
+    max_bulge_hlr_arcsec: ClassVar[float] = MAX_BULGE_HLR_ARCSEC
+
+    def _required_columns(self) -> tuple[str, ...] | None:
+        """Columns this catalog needs, possibly survey-dependent.
+
+        Subclasses whose photometry columns are survey-prefixed override
+        this to select only the bands of ``self.survey_name_list``.
+        """
+        return self.required_columns
+
+    def _catalog_columns(self, select_observable) -> list[str] | None:
+        """Columns to read, or ``None`` to read the whole catalog."""
+        required = self._required_columns()
+        if required is None:
+            return None
+        cols = list(required)
+        if select_observable is not None:
+            for name in np.atleast_1d(select_observable):
+                if str(name) not in cols:
+                    cols.append(str(name))
+        return cols
+
+    def _load_catalog_file(self, fname: str, columns=None) -> Any:
         """Load the raw catalog from ``fname``.
 
-        Default implementation reads a FITS file via :func:`get_catalog`,
-        which also appends an ``indices`` column.  Subclasses with a
-        non-FITS on-disk format (e.g. Parquet) should override this.
+        Default implementation reads a FITS file via :func:`get_catalog`.
+        Subclasses with a non-FITS on-disk format (e.g. Parquet) should
+        override this.
         """
-        return get_catalog(fname)
+        return get_catalog(fname, columns=columns)
 
     @staticmethod
     def _apply_selection(
@@ -267,9 +350,17 @@ class BaseGalaxyCatalog(ABC):
         """Apply per-column lower / upper bound cuts to a structured array.
 
         Shared by all subclasses; called from :meth:`_read_catalog`.
+
+        Returns
+        -------
+        tuple
+            ``(cat, row_ids)`` where ``row_ids`` are the row numbers of
+            the surviving entries in the *unfiltered* input file.  These
+            become the ``indices`` column of the truth catalog, which
+            downstream code uses to index back into the input catalog.
         """
         if select_observable is None:
-            return cat
+            return cat, np.arange(len(cat), dtype=np.int64)
         select_observable = np.atleast_1d(select_observable)
         if not set(select_observable) < set(cat.dtype.names):
             raise ValueError("Selection observables not in the catalog columns")
@@ -294,7 +385,7 @@ class BaseGalaxyCatalog(ABC):
                 )
             for nn, ul in zip(select_observable, select_upper_limit):
                 mask = mask & (cat[nn] <= ul)
-        return cat[mask]
+        return cat[mask], np.flatnonzero(mask).astype(np.int64)
 
     def _read_catalog(
         self,
@@ -305,8 +396,14 @@ class BaseGalaxyCatalog(ABC):
     ) -> Any:
         """Load the input galaxy catalog and apply optional selection cuts.
 
-        Subclasses customise this by setting ``catalog_filename`` and,
-        if needed, overriding :meth:`_load_catalog_file`.
+        Subclasses customise this by setting ``catalog_filename``,
+        ``required_columns`` and, if needed, overriding
+        :meth:`_load_catalog_file`.
+
+        Returns
+        -------
+        tuple
+            ``(cat, row_ids)``; see :meth:`_apply_selection`.
         """
         fname = os.path.join(self.catsim_dir, self.catalog_filename)
         if not os.path.isfile(fname):
@@ -315,7 +412,9 @@ class BaseGalaxyCatalog(ABC):
                 f"{self.catsim_dir}. "
                 "Please download it and place it under $CATSIM_DIR."
             )
-        cat = self._load_catalog_file(fname)
+        cat = self._load_catalog_file(
+            fname, columns=self._catalog_columns(select_observable)
+        )
         return self._apply_selection(
             cat,
             select_observable=select_observable,
@@ -329,7 +428,7 @@ class BaseGalaxyCatalog(ABC):
 
     @abstractmethod
     def _generate_galaxy(
-        self, *, entry: Any, mag_zero: float, band: str, use_mog=False, **kwargs
+        self, *, entry: Any, mag_zero: float, band: str, **kwargs
     ) -> galsim.GSObject:
         """Build and return a GalSim GSObject from one catalog entry."""
 
@@ -389,8 +488,11 @@ class BaseGalaxyCatalog(ABC):
         wcs = tract_info.getWcs()
         self.pixel_scale = float(wcs.getPixelScale().asArcseconds())
 
-        # Validate required placement columns
-        for col in ["dx", "dy", "indices", "angles"]:
+        # Validate required placement columns. Draw time uses only
+        # (ra, dec) via wcs.skyToPixel (see sim.py:400-405), so dx/dy
+        # are not required on reload; angles and indices are still
+        # consumed by get_obj / _generate_galaxy.
+        for col in ["ra", "dec", "indices", "angles"]:
             if col not in list(truthCatalog.dtype.names):
                 raise ValueError(f"Missing required column '{col}' in truthCatalog array")
         # The truth catalog is self-contained (placement + shear + galaxy
@@ -480,13 +582,13 @@ class BaseGalaxyCatalog(ABC):
         prelensed_x = self.x_center + self.data["dx"] / ps
         prelensed_y = self.y_center + self.data["dy"] / ps
         wcs = self.tract_info.getWcs()
-        pre_ra, pre_dec = wcs.pixelToSkyArray(
-            x=prelensed_x,
-            y=prelensed_y,
-            degrees=True,
-        )
-        self.data["prelensed_ra"] = pre_ra
-        self.data["prelensed_dec"] = pre_dec
+
+        # Snapshot pre-lens tangent-plane positions so we can restore
+        # them if the caller opts out of position shifts, keeping
+        # dx/dy consistent with the ra/dec we write below.
+        dx0 = self.data["dx"].copy()
+        dy0 = self.data["dy"].copy()
+
         for row in self.data:
             res = shear_obj.distort_galaxy(row)
             for key in (
@@ -502,6 +604,8 @@ class BaseGalaxyCatalog(ABC):
             image_x = self.x_center + self.data["dx"] / ps
             image_y = self.y_center + self.data["dy"] / ps
         else:
+            self.data["dx"] = dx0
+            self.data["dy"] = dy0
             image_x = prelensed_x
             image_y = prelensed_y
 
@@ -521,8 +625,8 @@ class BaseGalaxyCatalog(ABC):
         ind,
         mag_zero: float,
         band: str,
-        use_mog: bool = False,
         force_isotropic: bool = False,
+        force_galaxy_profile: int = FORCE_GALAXY_PROFILE_NONE,
         include_point_source: bool = True,
         survey_name: str = "",
     ) -> dict[str, list]:
@@ -536,10 +640,13 @@ class BaseGalaxyCatalog(ABC):
             Zeropoint magnitude for flux conversion.
         band : str
             Photometric band label.
-        use_mog : bool, optional
-            Use Mixture-of-Gaussians profiles instead of native GalSim.
         force_isotropic : bool, optional
             Force all galaxies to have circular isophotes.
+        force_galaxy_profile : int, optional
+            If greater than zero, override the bulge and disk radial profiles
+            with a single fixed profile: 1 for Gaussian, 2 for Exponential.
+            The half-light radii, fluxes and ellipticities of the components
+            are kept.  Zero (the default) keeps the catalog's native profiles.
         include_point_source : bool, optional
             Include AGN or point-source components.
         survey_name : str, optional
@@ -557,9 +664,9 @@ class BaseGalaxyCatalog(ABC):
             entry=src,
             mag_zero=mag_zero,
             band=band,
-            use_mog=use_mog,
             include_point_source=include_point_source,
             force_isotropic=force_isotropic,
+            force_galaxy_profile=force_galaxy_profile,
             survey_name=survey_name,
         )
         gal = gal.rotate(src["angles"] * galsim.radians)
@@ -584,6 +691,29 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
 
     catalog_filename = "OneDegSq.fits"
 
+    # ``prob`` drives sampling, ``a_*``/``b_*``/``pa_*``/``fluxnorm_*``
+    # the profile, ``*_ab`` the photometry.  ``ra``/``dec``/``galtileid``
+    # are unused: positions come from the layout, not the input file.
+    required_columns: ClassVar[tuple[str, ...] | None] = (
+        "prob",
+        "redshift",
+        "a_d",
+        "b_d",
+        "a_b",
+        "b_b",
+        "pa_disk",
+        "pa_bulge",
+        "fluxnorm_disk",
+        "fluxnorm_bulge",
+        "fluxnorm_agn",
+        "u_ab",
+        "g_ab",
+        "r_ab",
+        "i_ab",
+        "z_ab",
+        "y_ab",
+    )
+
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a 1-deg^2 catalog."""
         return cat.size / (60.0 * 60.0)
@@ -605,16 +735,12 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         entry,
         mag_zero,
         band,
-        use_mog=False,
         include_point_source=True,
         force_isotropic=False,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a CatSim 2017 catalog row."""
-        if use_mog:
-            _simulator = mog
-        else:
-            _simulator = galsim
         dd = entry.copy()
         if not include_point_source:
             dd["fluxnorm_agn"] = 0.0
@@ -642,23 +768,31 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
             else:
                 q_d = (b_d / a_d) if a_d > 0 else 1.0
             beta_d = np.radians(dd["pa_disk"])
-            disk = _simulator.Exponential(flux=disk_flux, half_light_radius=hlr_d).shear(
-                q=q_d, beta=beta_d * galsim.radians
-            )
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                disk = _forced_profile(
+                    force_galaxy_profile, flux=disk_flux, half_light_radius=hlr_d
+                )
+            else:
+                disk = galsim.Exponential(flux=disk_flux, half_light_radius=hlr_d)
+            disk = disk.shear(q=q_d, beta=beta_d * galsim.radians)
             components.append(disk)
 
         # Bulge
         if bulge_flux > 0:
             a_b, b_b = dd["a_b"], dd["b_b"]
-            hlr_b = np.sqrt(a_b * b_b)
+            hlr_b = min(np.sqrt(a_b * b_b), self.max_bulge_hlr_arcsec)
             if force_isotropic:
                 q_b = 1.0
             else:
                 q_b = (b_b / a_b) if a_b > 0 else 1.0
             beta_b = np.radians(dd["pa_bulge"])
-            bulge = _simulator.DeVaucouleurs(flux=bulge_flux, half_light_radius=hlr_b).shear(
-                q=q_b, beta=beta_b * galsim.radians
-            )
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                bulge = _forced_profile(
+                    force_galaxy_profile, flux=bulge_flux, half_light_radius=hlr_b
+                )
+            else:
+                bulge = galsim.DeVaucouleurs(flux=bulge_flux, half_light_radius=hlr_b)
+            bulge = bulge.shear(q=q_b, beta=beta_b * galsim.radians)
             components.append(bulge)
 
         # AGN (nearly point-like)
@@ -686,6 +820,49 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
 
     catalog_filename = "flagship_cosmos.fits"
 
+    # Survey-independent columns: ``ra_gal``/``dec_gal`` set the density
+    # footprint and the disk/bulge columns the profile.  Photometry is
+    # survey-prefixed and added by ``_required_columns`` below, so a run
+    # never loads the bands of a survey it is not simulating.  Dropping
+    # those plus the unused ``decam_*``, ``disk_nsersic`` and halo columns
+    # keeps most of this 3.7M-row catalog out of memory.
+    required_columns: ClassVar[tuple[str, ...] | None] = (
+        "ra_gal",
+        "dec_gal",
+        "redshift",
+        "pa",
+        "bulge_fraction",
+        "disk_r50",
+        "disk_axis_ratio",
+        "bulge_r50",
+        "bulge_nsersic",
+        "bulge_axis_ratio",
+    )
+
+    # Bands carried by this catalog for each survey prefix.  ``hsc`` reuses
+    # the LSST photometry, matching ``_generate_galaxy``.
+    survey_bands: ClassVar[dict[str, tuple[str, ...]]] = {
+        "lsst": ("u", "g", "r", "i", "z", "y"),
+        "euclid": ("vis", "nisp_y", "nisp_j", "nisp_h"),
+    }
+
+    def _required_columns(self) -> tuple[str, ...] | None:
+        """Collect ``{survey}_{band}`` magnitudes of every listed survey."""
+        assert self.required_columns is not None
+        cols = list(self.required_columns)
+        for survey in self.survey_name_list:
+            sname = "lsst" if survey == "hsc" else survey
+            bands = self.survey_bands.get(sname)
+            if bands is None:
+                # unknown survey: fall back to reading every column rather
+                # than silently dropping the magnitudes the renderer needs
+                return None
+            for band in bands:
+                name = f"{sname}_{band}"
+                if name not in cols:
+                    cols.append(name)
+        return tuple(cols)
+
     def _compute_density(self, cat) -> float:
         """Return density (objects/arcmin^2) from the sky footprint."""
         ra = cat["ra_gal"]
@@ -707,13 +884,11 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         mag_zero,
         band,
         survey_name,
-        use_mog=False,
         force_isotropic=False,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Flagship 2025 catalog row."""
-        if use_mog:
-            raise NotImplementedError("Flagship2025Catalog does not support the MoG renderer")
         sname = survey_name
         if sname == "hsc":
             sname = "lsst"
@@ -739,15 +914,24 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
                 q_d = float(entry["disk_axis_ratio"])
                 # axis ratio is minor/major; clamp to valid range
                 q_d = min(max(q_d, 0.00), 1.0)
-            disk = galsim.Exponential(
-                flux=disk_flux,
-                half_light_radius=disk_hlr,
-            ).shear(q=q_d, beta=pa)
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                disk = _forced_profile(
+                    force_galaxy_profile, flux=disk_flux, half_light_radius=disk_hlr
+                )
+            else:
+                disk = galsim.Exponential(
+                    flux=disk_flux,
+                    half_light_radius=disk_hlr,
+                )
+            disk = disk.shear(q=q_d, beta=pa)
             components.append(disk)
 
         # Bulge
         if bulge_flux > 0:
-            bulge_hlr = max(float(entry["bulge_r50"]), 1e-4)
+            bulge_hlr = min(
+                max(float(entry["bulge_r50"]), 1e-4),
+                self.max_bulge_hlr_arcsec,
+            )
             bulge_n = float(entry["bulge_nsersic"])
             bulge_n = _galsim_round_sersic(bulge_n, 0.1)
             if force_isotropic:
@@ -755,11 +939,17 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
             else:
                 q_b = float(entry["bulge_axis_ratio"])
                 q_b = min(max(q_b, 0.00), 1.0)
-            bulge = galsim.Sersic(
-                n=bulge_n,
-                flux=bulge_flux,
-                half_light_radius=bulge_hlr,
-            ).shear(q=q_b, beta=pa)
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                bulge = _forced_profile(
+                    force_galaxy_profile, flux=bulge_flux, half_light_radius=bulge_hlr
+                )
+            else:
+                bulge = galsim.Sersic(
+                    n=bulge_n,
+                    flux=bulge_flux,
+                    half_light_radius=bulge_hlr,
+                )
+            bulge = bulge.shear(q=q_b, beta=pa)
             components.append(bulge)
 
         if not components:
@@ -782,8 +972,12 @@ class DiffskyCatalog(BaseGalaxyCatalog):
     # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
     catalog_filename = "diffsky_arr.parquet"
 
-    def _load_catalog_file(self, fname: str):
-        return pq.read_table(fname).to_pandas().to_records(index=False)
+    def _load_catalog_file(self, fname: str, columns=None):
+        return (
+            pq.read_table(fname, columns=columns)
+            .to_pandas()
+            .to_records(index=False)
+        )
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a cone with a 1 deg radius"""
@@ -800,21 +994,17 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         mag_zero,
         band,
         survey_name,
-        use_mog=False,
         force_isotropic=False,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Diffsky catalog row."""
-        if use_mog:
-            _simulator = mog
-        else:
-            _simulator = galsim
         if survey_name == "hsc":
             sname = "lsst"
         else:
             sname = survey_name
 
-        bulge_hlr = entry["r50_bulge_as"]
+        bulge_hlr = min(float(entry["r50_bulge_as"]), self.max_bulge_hlr_arcsec)
         disk_hlr = entry["r50_disk_as"]
 
         # shear-ellipticity components
@@ -833,16 +1023,26 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
         disk_mag = entry[f"{sname}_{band}_disk"]
         disk_flux = 10 ** ((mag_zero - disk_mag) / 2.5)
-        disk = _simulator.Exponential(
-            flux=disk_flux,
-            half_light_radius=disk_hlr,
-        ).shear(g1=disk_e1, g2=disk_e2)
+        if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+            disk = _forced_profile(
+                force_galaxy_profile, flux=disk_flux, half_light_radius=disk_hlr
+            )
+        else:
+            disk = galsim.Exponential(
+                flux=disk_flux,
+                half_light_radius=disk_hlr,
+            )
+        disk = disk.shear(g1=disk_e1, g2=disk_e2)
 
         bulge_mag = entry[f"{sname}_{band}_bulge"]
         bulge_flux = 10 ** ((mag_zero - bulge_mag) / 2.5)
-        bulge = _simulator.DeVaucouleurs(flux=bulge_flux, half_light_radius=bulge_hlr).shear(
-            g1=bulge_e1, g2=bulge_e2
-        )
+        if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+            bulge = _forced_profile(
+                force_galaxy_profile, flux=bulge_flux, half_light_radius=bulge_hlr
+            )
+        else:
+            bulge = galsim.DeVaucouleurs(flux=bulge_flux, half_light_radius=bulge_hlr)
+        bulge = bulge.shear(g1=bulge_e1, g2=bulge_e2)
 
         gal = (bulge + disk).withFlux(disk_flux + bulge_flux)
         return gal

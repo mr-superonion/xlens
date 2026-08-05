@@ -40,6 +40,7 @@ import lsst.pipe.base.connectionTypes as cT
 import matplotlib.pyplot as plt
 import numpy as np
 from astropy.coordinates import SkyCoord
+from lsst.geom import SpherePoint, degrees
 from lsst.pex.config import Field
 from lsst.pipe.base import (
     PipelineTask,
@@ -122,6 +123,12 @@ class HaloMcBiasMultibandPipeConnections(
         storageClass="ArrowAstropy",
         dimensions=("skymap",),
     )
+    outputPerGalaxy = cT.Output(
+        doc="Per-galaxy matched measurements",
+        name="{coaddName}_halo_mc_{dataType}_per_galaxy",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap",),
+    )
 
     summaryPlot = cT.Output(
         doc="simple plot of summary stats",
@@ -160,30 +167,37 @@ class HaloMcBiasMultibandPipeConfig(
         default="wsel",
     )
 
-    mass = Field[float](
-        doc="halo mass",
-        default=5e-14,
-    )
-
-    conc = Field[float](
-        doc="halo concertration",
-        default=1.0,
-    )
-
-    z_lens = Field[float](
-        doc="halo redshift",
-        default=1.0,
-    )
-
-    z_source = Field[float](
-        doc="source redshift",
+    ra_lens = Field[float](
+        doc="RA of the halo center [deg]; None uses the tract sky origin",
         default=None,
+        optional=True,
+    )
+
+    dec_lens = Field[float](
+        doc="Dec of the halo center [deg]; None uses the tract sky origin",
+        default=None,
+        optional=True,
+    )
+
+    rmin = Field[float](
+        doc="inner edge of the radial binning [arcsec]",
+        default=15.0,
+    )
+
+    pixel_scale = Field[float](
+        doc="pixel scale [arcsec/pixel]; None uses the skymap pixel scale",
+        default=None,
+        optional=True,
     )
 
     def validate(self):
         super().validate()
         if len(self.connections.dataType) == 0:
-            raise ValueError("connections.dataTape missing")
+            raise ValueError("connections.dataType missing")
+        if (self.ra_lens is None) != (self.dec_lens is None):
+            raise ValueError(
+                "ra_lens and dec_lens must be set together (or both left None)"
+            )
 
 
 class HaloMcBiasMultibandPipe(PipelineTask):
@@ -566,7 +580,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return np.zeros(n_gal, dtype=dt)
 
     @staticmethod
-    def angsep(ra, dec, ra2=200.0, dec2=0.0):
+    def angsep(ra, dec, ra2, dec2):
         c1 = SkyCoord(ra=ra * u.deg, dec=dec * u.deg, frame="icrs")
         c2 = SkyCoord(ra=ra2 * u.deg, dec=dec2 * u.deg, frame="icrs")
         return c1.separation(c2).arcsec
@@ -873,27 +887,35 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         tractList,
         **kwargs,
     ):
+        assert isinstance(
+            self.config,
+            HaloMcBiasMultibandPipeConfig,
+        )
         self.log.info("load truth list")
-        self.log.info(f"len truth00List: {len(truth00List)}")
-        self.log.info(f"len truth01List: {len(truth01List)}")
+        self.log.info("len truth00List: %d", len(truth00List))
+        self.log.info("len truth01List: %d", len(truth01List))
 
-        pixel_scale = skymap.config.pixelScale  # arcsec per pixel
+        if self.config.pixel_scale is not None:
+            pixel_scale = self.config.pixel_scale  # arcsec per pixel
+        else:
+            pixel_scale = skymap.config.pixelScale
         image_dim = skymap.config.patchInnerDimensions[0]  # in pixels
 
         max_pixel = (image_dim - 64) / 2
 
-        self.log.info("image dim", image_dim)
-        self.log.info("pixel scale", pixel_scale)
+        self.log.info("image dim: %s", image_dim)
+        self.log.info("pixel scale: %s", pixel_scale)
 
-        self.log.info("max pixel", max_pixel)
+        self.log.info("max pixel: %s", max_pixel)
         self.log.info(
-            "max pixel in arcsec",
+            "max pixel in arcsec: %s",
             max_pixel * pixel_scale,
         )
 
         n_bins = 15
-        # starting from 15 arcsec
-        pixel_bin_edges = np.linspace(15.0 / 0.2, max_pixel, n_bins + 1)
+        pixel_bin_edges = np.linspace(
+            self.config.rmin / pixel_scale, max_pixel, n_bins + 1
+        )
         angular_bin_edges = pixel_bin_edges * pixel_scale
 
         en = self.ename
@@ -912,7 +934,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         wg2n = self.wgname(2)
 
         self.log.info(
-            "The length of source list is",
+            "The length of source list is %d, %d",
             len(src00List),
             len(src01List),
         )
@@ -1026,7 +1048,6 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             e1 = np.concatenate([sr_00_res[e1n], sr_01_res[e1n]])
             e2 = np.concatenate([sr_00_res[e2n], sr_01_res[e2n]])
-            print(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
 
             det_x = np.concatenate(
                 [
@@ -1050,44 +1071,7 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             m00 = np.concatenate([sr_00_res["fpfs_m0"], sr_01_res["fpfs_m0"]])
             m20 = np.concatenate([sr_00_res["fpfs_m2"], sr_01_res["fpfs_m2"]])
 
-            self.log.info(f"i: {i}, e1: {e1.shape}, e2: {e2.shape}")
-            e1_g1 = np.concatenate(
-                [
-                    sr_00_res[e1g1n],
-                    sr_01_res[e1g1n],
-                ]
-            )
-            e2_g2 = np.concatenate(
-                [
-                    sr_00_res[e2g2n],
-                    sr_01_res[e2g2n],
-                ]
-            )
-            w = np.concatenate([sr_00_res[wn], sr_01_res[wn]])
-            w_g1 = np.concatenate(
-                [
-                    sr_00_res[wg1n],
-                    sr_01_res[wg1n],
-                ]
-            )
-            w_g2 = np.concatenate(
-                [
-                    sr_00_res[wg2n],
-                    sr_01_res[wg2n],
-                ]
-            )
-            m00 = np.concatenate(
-                [
-                    sr_00_res["fpfs_m0"],
-                    sr_01_res["fpfs_m0"],
-                ]
-            )
-            m20 = np.concatenate(
-                [
-                    sr_00_res["fpfs_m2"],
-                    sr_01_res["fpfs_m2"],
-                ]
-            )
+            self.log.info("i: %d, e1: %s, e2: %s", i, e1.shape, e2.shape)
 
             # Convert prelensed ra/dec to pixel positions via WCS
             pre_ra = np.concatenate(
@@ -1136,15 +1120,26 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             ind_lensed_x_list.append(lensed_x)
             ind_lensed_y_list.append(lensed_y)
 
-            pix_origin = wcs.getPixelOrigin()
+            # Halo center: configured (ra_lens, dec_lens) or the tract sky
+            # origin, used consistently for the angular separation, the
+            # position angle and the radial-shift reference below.
+            if self.config.ra_lens is not None:
+                sky_ra = self.config.ra_lens
+                sky_dec = self.config.dec_lens
+                pix_origin = wcs.skyToPixel(
+                    SpherePoint(sky_ra * degrees, sky_dec * degrees)
+                )
+            else:
+                sky_origin = wcs.getSkyOrigin()
+                sky_ra = sky_origin.getRa().asDegrees()
+                sky_dec = sky_origin.getDec().asDegrees()
+                pix_origin = wcs.getPixelOrigin()
+
             lensed_shift = np.sqrt((lensed_x - x) ** 2 + (lensed_y - y) ** 2) * pixel_scale
             radial_dist_lensed = np.sqrt((lensed_x - pix_origin.x) ** 2 + (lensed_y - pix_origin.y) ** 2)
             radial_dist = np.sqrt((x - pix_origin.x) ** 2 + (y - pix_origin.y) ** 2)
             radial_lensed_shift = (radial_dist_lensed - radial_dist) * pixel_scale
 
-            sky_origin = wcs.getSkyOrigin()
-            sky_ra = sky_origin.getRa().asDegrees()
-            sky_dec = sky_origin.getDec().asDegrees()
             angle = self.position_angle_ccw_from_east(sky_ra, sky_dec, det_ra, det_dec).rad
             all_true_angle = self.position_angle_ccw_from_east(
                 sky_ra,
@@ -1160,8 +1155,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
 
             ind_gT_true_list.append(gT_true_matched)
 
-            dist = self.angsep(det_ra, det_dec)
-            all_true_dist = self.angsep(all_true_ra, all_true_dec)
+            dist = self.angsep(det_ra, det_dec, sky_ra, sky_dec)
+            all_true_dist = self.angsep(all_true_ra, all_true_dec, sky_ra, sky_dec)
 
             ind_dist_list.append(dist)
 
@@ -1240,8 +1235,8 @@ class HaloMcBiasMultibandPipe(PipelineTask):
             rX_ensemble[i, :] = rX_list
             eT_ensemble[i, :] = eT_list
             eX_ensemble[i, :] = eX_list
-            gT_true_matched_ensemble[i, :] = gT_true_list
-            gX_true_matched_ensemble[i, :] = gX_true_list
+            gT_true_matched_ensemble[i, :] = gT_true_matched_list
+            gX_true_matched_ensemble[i, :] = gX_true_matched_list
             gT_true_ensemble[i, :] = gT_true_list
             gX_true_ensemble[i, :] = gX_true_list
             all_true_gT_ensemble[i, :] = all_true_gT_list
@@ -1326,5 +1321,5 @@ class HaloMcBiasMultibandPipe(PipelineTask):
         return Struct(
             outputSummary=summary_stats,
             summaryPlot=summary_plot,
-            perGalaxy=per_galaxy_struct,
+            outputPerGalaxy=per_galaxy_struct,
         )

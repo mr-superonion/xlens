@@ -9,8 +9,17 @@ import glob
 import os
 from typing import Iterable, List, Optional, Tuple
 
+import common
 import fitsio
 import numpy as np
+
+from xlens.utils.constants import MAG_ZERO_AB
+
+
+def _shear_root(layout, target, shear):
+    # Both process_mode0/ and process_mode40/ share this parent.
+    return os.path.dirname(common.process_outdir(layout, target, shear, 40))
+
 
 colnames = [
     "wsel",
@@ -51,12 +60,6 @@ def parse_args() -> argparse.Namespace:
     )
     # Directory layout and naming
     parser.add_argument(
-        "--pscratch",
-        type=str,
-        default=os.environ.get("PSCRATCH", "."),
-        help="Root directory where results were written.",
-    )
-    parser.add_argument(
         "--layout",
         type=str,
         default="grid",
@@ -92,14 +95,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mag-max",
         type=float,
-        default=24.5,
+        default=25.0,
         help="Flux cut applied to each band before selection.",
-    )
-    parser.add_argument(
-        "--z-bounds",
-        type=str,
-        default="0.3,0.6,0.9,1.2,1.5,1.8",
-        help="Comma-separated redshift boundarys, e.g. '0.3,0.6,0.9,1.2,1.8'.",
     )
     parser.add_argument(
         "--emax",
@@ -126,12 +123,6 @@ def parse_args() -> argparse.Namespace:
         default=0.2,
         help="Pixel scale (arcsec/pixel).",
     )
-    parser.add_argument(
-        "--mag-zero",
-        type=float,
-        default=31.4,
-        help="magnitude zero point",
-    )
     # Bootstrap
     parser.add_argument(
         "--bootstrap",
@@ -139,26 +130,23 @@ def parse_args() -> argparse.Namespace:
         default=10000,
         help="# bootstrap resamples for m uncertainty",
     )
+    parser.add_argument(
+        "--version",
+        type=int,
+        default=None,
+        help="Optional integer tag; reads catalogs from "
+             "process_mode<N>-v<version>/ and writes partials to "
+             "summary-flux-40-00-v<version>/.",
+    )
     args, unknown_args = parser.parse_known_args()
     if unknown_args:
         print("[warn] Ignoring unknown args:", unknown_args)
     return args
 
 
-def base_path(pscratch, layout, target, shear):
-    sd = f"shear{int(shear*100):02d}"
-    return os.path.join(
-        pscratch,
-        f"constant_shear_{layout}",
-        target,
-        sd,
-    )
-
-
-def cat_read(base_dir: str, sim_id: int, mode: int) -> np.ndarray:
-    main_path = os.path.join(base_dir, f"mode{mode}", f"cat-{sim_id:05d}.fits")
-    main = fitsio.read(main_path, columns=colnames)
-    return main
+def cat_read(layout, target, shear, mode, sim_id, version=None):
+    outdir = common.process_outdir(layout, target, shear, mode, version=version)
+    return fitsio.read(common.cat_path(outdir, sim_id), columns=colnames)
 
 
 def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
@@ -170,7 +158,8 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
     esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
     m0 = (src["lsst_i_flux_fpfs1"] > flux_min) & (esq0 < emax * emax)
     w0 = src["wsel"][m0]
-    ename = "lsst_i_fpfs1"
+    # ename = "lsst_i_fpfs1"
+    ename = "fpfs"
     e1 = np.sum(w0 * src[f"{ename}_e1"][m0])
     e2 = np.sum(w0 * src[f"{ename}_e2"][m0])
 
@@ -226,11 +215,13 @@ def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
 
 def per_rank_work(
     ids_chunk: Iterable[int],
-    base_dir: str,
+    layout: str,
+    target: str,
+    shear: float,
     flux_min: float,
     emax: float,
     dg: float,
-    target: str,
+    version: Optional[int] = None,
 ):
     e_pos_rows = []
     e_neg_rows = []
@@ -239,7 +230,9 @@ def per_rank_work(
     n_pos_rows = []
     n_neg_rows = []
     for sim_id in ids_chunk:
-        src_pos = cat_read(base_dir, sim_id, mode=40)
+        src_pos = cat_read(
+            layout, target, shear, mode=40, sim_id=sim_id, version=version,
+        )
         out_pos = measure_shear(
             src=src_pos,
             flux_min=flux_min,
@@ -249,7 +242,9 @@ def per_rank_work(
         )
         del src_pos
         gc.collect()
-        src_neg = cat_read(base_dir, sim_id, mode=0)
+        src_neg = cat_read(
+            layout, target, shear, mode=0, sim_id=sim_id, version=version,
+        )
         out_neg = measure_shear(
             src=src_neg,
             flux_min=flux_min,
@@ -276,13 +271,19 @@ def per_rank_work(
     )
 
 
-def summary_directory(outdir: str) -> str:
-    partdir = os.path.join(outdir, "summary-flux-40-00")
-    return partdir
+def summary_directory(
+    layout: str, target: str, shear: float, version: Optional[int] = None,
+) -> str:
+    leaf = "summary-flux-40-00"
+    if version is not None:
+        leaf = f"{leaf}-v{int(version)}"
+    return os.path.join(_shear_root(layout, target, shear), leaf)
 
 
 def save_rank_partial(
-    outdir: str,
+    layout: str,
+    target: str,
+    shear: float,
     seed_index: int,
     e_pos: np.ndarray,
     e_neg: np.ndarray,
@@ -290,8 +291,9 @@ def save_rank_partial(
     r_neg: np.ndarray,
     n_pos: np.ndarray,
     n_neg: np.ndarray,
+    version: Optional[int] = None,
 ) -> str:
-    partdir = summary_directory(outdir)
+    partdir = summary_directory(layout, target, shear, version=version)
     os.makedirs(partdir, exist_ok=True)
     path = os.path.join(partdir, f"seed_{seed_index:05d}.npz")
     np.savez_compressed(
@@ -308,10 +310,13 @@ def save_rank_partial(
 
 
 def load_and_stack_all(
-    outdir: str,
+    layout: str,
+    target: str,
+    shear: float,
     ncut_expected: Optional[int] = None,
+    version: Optional[int] = None,
 ):
-    partdir = summary_directory(outdir)
+    partdir = summary_directory(layout, target, shear, version=version)
     arrays_E_pos: List[np.ndarray] = []
     arrays_E_neg: List[np.ndarray] = []
     arrays_R_pos: List[np.ndarray] = []
@@ -392,22 +397,25 @@ def main() -> None:
     args = parse_args()
     if args.max_id <= args.min_id:
         raise SystemExit("--max-id must be > --min-id")
-    base_dir = base_path(args.pscratch, args.layout, args.target, args.shear)
 
-    flux_min = 10.0 ** ((args.mag_zero - args.mag_max) / 2.5)
+    flux_min = 10.0 ** ((MAG_ZERO_AB - args.mag_max) / 2.5)
     if not args.summary:
         my_ids = np.arange(args.min_id, args.max_id, dtype=int)
         if len(my_ids) > 0:
             e_pos, e_neg, r_pos, r_neg, n_pos, n_neg = per_rank_work(
                 my_ids,
-                base_dir,
+                args.layout,
+                args.target,
+                args.shear,
                 flux_min,
                 args.emax,
                 args.dg,
-                args.target,
+                version=args.version,
             )
             save_rank_partial(
-                base_dir,
+                args.layout,
+                args.target,
+                args.shear,
                 int(my_ids[0]),
                 e_pos,
                 e_neg,
@@ -415,10 +423,14 @@ def main() -> None:
                 r_neg,
                 n_pos,
                 n_neg,
+                version=args.version,
             )
     else:
         all_e_pos, all_e_neg, all_r_pos, all_r_neg, all_n_pos, all_n_neg = \
-            load_and_stack_all(base_dir, ncut_expected=1,)
+            load_and_stack_all(
+                args.layout, args.target, args.shear, ncut_expected=1,
+                version=args.version,
+            )
 
         if all_e_pos.size == 0 or all_e_neg.size == 0:
             raise SystemExit(
@@ -470,7 +482,10 @@ def main() -> None:
         sigma_c = (ord_cs[hi_idx] - ord_cs[lo_idx]) / 2.0
 
         print("==============================================")
-        print(f"Catalog directory: {base_dir}")
+        print(
+            "Catalog directory: "
+            f"{_shear_root(args.layout, args.target, args.shear)}"
+        )
         print("flux cut")
         print(f"Paired IDs (found): {all_e_pos.shape[0]}")
         print(f"Area (arcmin^2): {area_arcmin2:.3f}")
