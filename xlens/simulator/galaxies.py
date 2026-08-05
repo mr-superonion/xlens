@@ -45,6 +45,15 @@ FORCE_GALAXY_PROFILE_NONE = 0
 FORCE_GALAXY_PROFILE_GAUSSIAN = 1
 FORCE_GALAXY_PROFILE_EXPONENTIAL = 2
 
+# Default upper bound (arcsec) on the bulge half-light radius used for
+# rendering, shared by every catalog implementation.  Input catalogs carry
+# a tail of implausibly large bulges (flagship reaches 16.6", 99.9th
+# percentile 3.8"), and a Sersic bulge that large makes GalSim size the
+# stamp at several thousand pixels; the FFT of that one stamp then sets
+# the peak memory of an entire run.  Override per catalog class with the
+# ``max_bulge_hlr_arcsec`` attribute.
+MAX_BULGE_HLR_ARCSEC = 3.0
+
 
 def _galsim_round_sersic(n, sersic_prec):
     """Round a Sersic index to the nearest multiple of *sersic_prec*."""
@@ -296,6 +305,10 @@ class BaseGalaxyCatalog(ABC):
     # Fallback surveys used when the catalog is rebuilt by ``from_array``,
     # which never re-reads the input file.
     survey_name_list: tuple[str, ...] = ("lsst",)
+
+    # Bulge half-light radii are clipped to this value (arcsec) before
+    # rendering; see :data:`MAX_BULGE_HLR_ARCSEC`.
+    max_bulge_hlr_arcsec: ClassVar[float] = MAX_BULGE_HLR_ARCSEC
 
     def _required_columns(self) -> tuple[str, ...] | None:
         """Columns this catalog needs, possibly survey-dependent.
@@ -767,7 +780,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         # Bulge
         if bulge_flux > 0:
             a_b, b_b = dd["a_b"], dd["b_b"]
-            hlr_b = np.sqrt(a_b * b_b)
+            hlr_b = min(np.sqrt(a_b * b_b), self.max_bulge_hlr_arcsec)
             if force_isotropic:
                 q_b = 1.0
             else:
@@ -915,7 +928,10 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
 
         # Bulge
         if bulge_flux > 0:
-            bulge_hlr = max(float(entry["bulge_r50"]), 1e-4)
+            bulge_hlr = min(
+                max(float(entry["bulge_r50"]), 1e-4),
+                self.max_bulge_hlr_arcsec,
+            )
             bulge_n = float(entry["bulge_nsersic"])
             bulge_n = _galsim_round_sersic(bulge_n, 0.1)
             if force_isotropic:
@@ -988,7 +1004,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         else:
             sname = survey_name
 
-        bulge_hlr = entry["r50_bulge_as"]
+        bulge_hlr = min(float(entry["r50_bulge_as"]), self.max_bulge_hlr_arcsec)
         disk_hlr = entry["r50_disk_as"]
 
         # shear-ellipticity components
