@@ -96,6 +96,7 @@ if RANK == 0:
 # ------------------------------
 cfg_cat = CatalogHaloTaskConfig()
 cfg_cat.galaxy_type = common.GALAXY_TYPE
+cfg_cat.survey_name_list = common.SURVEY_NAME_LIST
 cfg_cat.mass = common.HALO_MASS
 cfg_cat.conc = common.HALO_CONC
 cfg_cat.z_lens = common.Z_LENS

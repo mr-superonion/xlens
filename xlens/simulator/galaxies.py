@@ -73,29 +73,27 @@ def _forced_profile(force_galaxy_profile, *, flux, half_light_radius):
     )
 
 
-def get_catalog(fname):
-    """Read a FITS or Parquet catalog and append an ``indices`` column.
+def get_catalog(fname, columns=None):
+    """Read a FITS catalog.
+
+    Row numbers are tracked separately (see
+    :meth:`BaseGalaxyCatalog._apply_selection`) rather than materialised
+    as a column: adding a field to a structured array copies the whole
+    array, which for the larger inputs costs hundreds of MiB.
 
     Parameters
     ----------
     fname : str
-        Path to a FITS or Parquet file readable by ``fitsio``.
+        Path to a FITS file readable by ``fitsio``.
+    columns : list of str or None, optional
+        Subset of columns to read.  ``None`` reads every column.
 
     Returns
     -------
     numpy.ndarray
-        Structured array with an additional ``indices`` column (``int32``).
+        Structured array of the requested columns.
     """
-    cat = fitsio.read(fname)
-    idx = np.arange(len(cat), dtype=np.int32)
-    cat = rfn.append_fields(
-        cat,
-        "indices",
-        idx,
-        dtypes=[np.int32],
-        usemask=False,
-    )
-    return cat
+    return fitsio.read(fname, columns=columns)
 
 
 class BaseGalaxyCatalog(ABC):
@@ -124,6 +122,7 @@ class BaseGalaxyCatalog(ABC):
         extend_ratio: float = 1.08,
         force_pixel_center: bool = False,
         catsim_dir: str | None = None,
+        survey_name_list: Iterable[str] | None = None,
     ):
         """Construct a galaxy catalog from scratch with a spatial layout.
 
@@ -149,8 +148,20 @@ class BaseGalaxyCatalog(ABC):
         catsim_dir : str or None, optional
             Directory for input catalog files.  Falls back to the
             ``CATSIM_DIR`` environment variable when *None*.
+        survey_name_list : iterable of str or None, optional
+            Surveys whose ``{survey}_{band}`` photometry columns are read
+            from the input catalog; the columns of every entry are
+            collected, so one catalog can feed simulations of several
+            surveys.  Must cover the ``survey_name`` of every simulation
+            task that later renders this catalog, otherwise the magnitudes
+            it needs will not have been read.  Defaults to ``["lsst"]``.
         """
         self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
+        if survey_name_list is None:
+            survey_name_list = ["lsst"]
+        self.survey_name_list = tuple(
+            str(name).lower() for name in survey_name_list
+        )
         self.prepare_tract_info(tract_info)
         wcs = tract_info.getWcs()
         ps = float(wcs.getPixelScale().asArcseconds())
@@ -163,7 +174,10 @@ class BaseGalaxyCatalog(ABC):
             sep_arcsec=sep_arcsec,
             extend_ratio=extend_ratio,
         )
-        input_catalog = self._read_catalog(
+        # ``input_row_ids`` are the row numbers in the unfiltered input
+        # file, carried alongside the (possibly cut) catalog instead of
+        # as a column to avoid copying the whole array.
+        input_catalog, input_row_ids = self._read_catalog(
             select_observable=select_observable,
             select_lower_limit=select_lower_limit,
             select_upper_limit=select_upper_limit,
@@ -232,7 +246,7 @@ class BaseGalaxyCatalog(ABC):
         placement["prelensed_ra"] = ra
         placement["prelensed_dec"] = dec
         placement["has_finite_shear"] = np.ones(num, dtype=bool)
-        placement["indices"] = selected["indices"]
+        placement["indices"] = input_row_ids[idx]
         placement["redshift"] = selected["redshift"]
         placement["hlr"] = self._build_hlr_array(selected)
 
@@ -274,14 +288,43 @@ class BaseGalaxyCatalog(ABC):
     # set this; ``_read_catalog`` resolves it against ``self.catsim_dir``.
     catalog_filename: ClassVar[str]
 
-    def _load_catalog_file(self, fname: str) -> Any:
+    # Columns required from the input catalog.  ``None`` reads every
+    # column; subclasses set this so that large inputs do not pull in
+    # tens of unused columns.  Selection observables are added on top.
+    required_columns: ClassVar[tuple[str, ...] | None] = None
+
+    # Fallback surveys used when the catalog is rebuilt by ``from_array``,
+    # which never re-reads the input file.
+    survey_name_list: tuple[str, ...] = ("lsst",)
+
+    def _required_columns(self) -> tuple[str, ...] | None:
+        """Columns this catalog needs, possibly survey-dependent.
+
+        Subclasses whose photometry columns are survey-prefixed override
+        this to select only the bands of ``self.survey_name_list``.
+        """
+        return self.required_columns
+
+    def _catalog_columns(self, select_observable) -> list[str] | None:
+        """Columns to read, or ``None`` to read the whole catalog."""
+        required = self._required_columns()
+        if required is None:
+            return None
+        cols = list(required)
+        if select_observable is not None:
+            for name in np.atleast_1d(select_observable):
+                if str(name) not in cols:
+                    cols.append(str(name))
+        return cols
+
+    def _load_catalog_file(self, fname: str, columns=None) -> Any:
         """Load the raw catalog from ``fname``.
 
-        Default implementation reads a FITS file via :func:`get_catalog`,
-        which also appends an ``indices`` column.  Subclasses with a
-        non-FITS on-disk format (e.g. Parquet) should override this.
+        Default implementation reads a FITS file via :func:`get_catalog`.
+        Subclasses with a non-FITS on-disk format (e.g. Parquet) should
+        override this.
         """
-        return get_catalog(fname)
+        return get_catalog(fname, columns=columns)
 
     @staticmethod
     def _apply_selection(
@@ -294,9 +337,17 @@ class BaseGalaxyCatalog(ABC):
         """Apply per-column lower / upper bound cuts to a structured array.
 
         Shared by all subclasses; called from :meth:`_read_catalog`.
+
+        Returns
+        -------
+        tuple
+            ``(cat, row_ids)`` where ``row_ids`` are the row numbers of
+            the surviving entries in the *unfiltered* input file.  These
+            become the ``indices`` column of the truth catalog, which
+            downstream code uses to index back into the input catalog.
         """
         if select_observable is None:
-            return cat
+            return cat, np.arange(len(cat), dtype=np.int64)
         select_observable = np.atleast_1d(select_observable)
         if not set(select_observable) < set(cat.dtype.names):
             raise ValueError("Selection observables not in the catalog columns")
@@ -321,7 +372,7 @@ class BaseGalaxyCatalog(ABC):
                 )
             for nn, ul in zip(select_observable, select_upper_limit):
                 mask = mask & (cat[nn] <= ul)
-        return cat[mask]
+        return cat[mask], np.flatnonzero(mask).astype(np.int64)
 
     def _read_catalog(
         self,
@@ -332,8 +383,14 @@ class BaseGalaxyCatalog(ABC):
     ) -> Any:
         """Load the input galaxy catalog and apply optional selection cuts.
 
-        Subclasses customise this by setting ``catalog_filename`` and,
-        if needed, overriding :meth:`_load_catalog_file`.
+        Subclasses customise this by setting ``catalog_filename``,
+        ``required_columns`` and, if needed, overriding
+        :meth:`_load_catalog_file`.
+
+        Returns
+        -------
+        tuple
+            ``(cat, row_ids)``; see :meth:`_apply_selection`.
         """
         fname = os.path.join(self.catsim_dir, self.catalog_filename)
         if not os.path.isfile(fname):
@@ -342,7 +399,9 @@ class BaseGalaxyCatalog(ABC):
                 f"{self.catsim_dir}. "
                 "Please download it and place it under $CATSIM_DIR."
             )
-        cat = self._load_catalog_file(fname)
+        cat = self._load_catalog_file(
+            fname, columns=self._catalog_columns(select_observable)
+        )
         return self._apply_selection(
             cat,
             select_observable=select_observable,
@@ -619,6 +678,29 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
 
     catalog_filename = "OneDegSq.fits"
 
+    # ``prob`` drives sampling, ``a_*``/``b_*``/``pa_*``/``fluxnorm_*``
+    # the profile, ``*_ab`` the photometry.  ``ra``/``dec``/``galtileid``
+    # are unused: positions come from the layout, not the input file.
+    required_columns: ClassVar[tuple[str, ...] | None] = (
+        "prob",
+        "redshift",
+        "a_d",
+        "b_d",
+        "a_b",
+        "b_b",
+        "pa_disk",
+        "pa_bulge",
+        "fluxnorm_disk",
+        "fluxnorm_bulge",
+        "fluxnorm_agn",
+        "u_ab",
+        "g_ab",
+        "r_ab",
+        "i_ab",
+        "z_ab",
+        "y_ab",
+    )
+
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a 1-deg^2 catalog."""
         return cat.size / (60.0 * 60.0)
@@ -724,6 +806,49 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
     """
 
     catalog_filename = "flagship_cosmos.fits"
+
+    # Survey-independent columns: ``ra_gal``/``dec_gal`` set the density
+    # footprint and the disk/bulge columns the profile.  Photometry is
+    # survey-prefixed and added by ``_required_columns`` below, so a run
+    # never loads the bands of a survey it is not simulating.  Dropping
+    # those plus the unused ``decam_*``, ``disk_nsersic`` and halo columns
+    # keeps most of this 3.7M-row catalog out of memory.
+    required_columns: ClassVar[tuple[str, ...] | None] = (
+        "ra_gal",
+        "dec_gal",
+        "redshift",
+        "pa",
+        "bulge_fraction",
+        "disk_r50",
+        "disk_axis_ratio",
+        "bulge_r50",
+        "bulge_nsersic",
+        "bulge_axis_ratio",
+    )
+
+    # Bands carried by this catalog for each survey prefix.  ``hsc`` reuses
+    # the LSST photometry, matching ``_generate_galaxy``.
+    survey_bands: ClassVar[dict[str, tuple[str, ...]]] = {
+        "lsst": ("u", "g", "r", "i", "z", "y"),
+        "euclid": ("vis", "nisp_y", "nisp_j", "nisp_h"),
+    }
+
+    def _required_columns(self) -> tuple[str, ...] | None:
+        """Collect ``{survey}_{band}`` magnitudes of every listed survey."""
+        assert self.required_columns is not None
+        cols = list(self.required_columns)
+        for survey in self.survey_name_list:
+            sname = "lsst" if survey == "hsc" else survey
+            bands = self.survey_bands.get(sname)
+            if bands is None:
+                # unknown survey: fall back to reading every column rather
+                # than silently dropping the magnitudes the renderer needs
+                return None
+            for band in bands:
+                name = f"{sname}_{band}"
+                if name not in cols:
+                    cols.append(name)
+        return tuple(cols)
 
     def _compute_density(self, cat) -> float:
         """Return density (objects/arcmin^2) from the sky footprint."""
@@ -831,8 +956,12 @@ class DiffskyCatalog(BaseGalaxyCatalog):
     # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
     catalog_filename = "diffsky_arr.parquet"
 
-    def _load_catalog_file(self, fname: str):
-        return pq.read_table(fname).to_pandas().to_records(index=False)
+    def _load_catalog_file(self, fname: str, columns=None):
+        return (
+            pq.read_table(fname, columns=columns)
+            .to_pandas()
+            .to_records(index=False)
+        )
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a cone with a 1 deg radius"""

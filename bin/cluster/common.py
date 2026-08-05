@@ -40,6 +40,9 @@ DEC_CENTER = 0.0  # deg
 # Shared by prepare_sim.py and sim.py: the truth catalog carries the
 # input-catalog property columns, so the two must always agree.
 GALAXY_TYPE = "flagship2025"
+# Selects which {survey}_{band} photometry columns are read from the
+# input catalog; must cover the survey the image stage renders.
+SURVEY_NAME_LIST = ["lsst"]
 
 # ------------------------------
 # Fiducial NFW halo (at the tract centre)
