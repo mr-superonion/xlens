@@ -26,7 +26,6 @@ __all__ = [
 ]
 
 import logging
-import os
 from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
@@ -142,10 +141,6 @@ class matchPipeConfig(
         doc="matching distance in pixels",
         default=6,
     )
-    catsim_dir = Field[str](
-        doc="Directory containing input galaxy catalogs.",
-        default=os.environ.get("CATSIM_DIR", "."),
-    )
     galaxy_type = Field[str](
         doc="input galaxy catalog the truth catalog was drawn from; it "
         "sets how the magnitude columns are named",
@@ -185,6 +180,16 @@ class matchPipeConfig(
                 "We require galaxy_type in "
                 f"{sorted(GALAXY_CATALOG_CLASSES)}",
             )
+        # Resolve the magnitude columns now so an unsupported
+        # (survey_name, band) fails here instead of mid-run.
+        try:
+            get_catalog_class(self.galaxy_type).magnitude_columns(
+                self.survey_name, self.band
+            )
+        except ValueError as err:
+            raise FieldValidationError(
+                self.__class__.survey_name, self, str(err)
+            ) from err
 
     def setDefaults(self):
         super().setDefaults()
@@ -253,7 +258,6 @@ class matchPipe(PipelineTask):
             catalog=anacal_catalog,
             dm_catalog=dm_catalog,
             truth_catalog=truth_catalog,
-            catsim_dir=self.config.catsim_dir,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -375,7 +379,6 @@ class matchPipe(PipelineTask):
         src: np.ndarray,
         mrc: np.ndarray,
         pixel_scale=0.168,
-        catsim_dir: str | None = None,
         wcs=None,
     ):
         assert isinstance(self.config, matchPipeConfig)
@@ -416,7 +419,6 @@ class matchPipe(PipelineTask):
         catalog: NDArray,
         dm_catalog: NDArray | None = None,
         truth_catalog: NDArray | None = None,
-        catsim_dir: str | None = None,
         **kwargs,
     ):
         assert isinstance(self.config, matchPipeConfig)
@@ -431,7 +433,6 @@ class matchPipe(PipelineTask):
                 catalog,
                 truth_catalog,
                 pixel_scale,
-                catsim_dir=catsim_dir,
                 wcs=wcs,
             )
 

@@ -32,6 +32,11 @@ GALAXY_TYPE = "flagship2025"
 SURVEY_NAME_LIST = ["lsst"]
 # Band whose truth magnitude matchPipe cuts on (mag_max_truth).
 MATCH_BAND = "i"
+# Faint limit of the truth catalog entering the match.  Note flagship's
+# median lsst_i is 26.56, so 28.0 keeps ~94% of the truth galaxies;
+# lower it (e.g. 27.0) if the cut should actually suppress faint truth
+# rows competing for matches.
+MAG_MAX_TRUTH = 28.0
 
 # ------------------------------
 # Output directory

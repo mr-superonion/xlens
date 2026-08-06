@@ -152,7 +152,7 @@ detect_config.validate()
 meas_task = MeasureCoaddsPipe(config=detect_config)
 
 config = matchPipeConfig()
-config.mag_max_truth = 28.0
+config.mag_max_truth = common.MAG_MAX_TRUTH
 # The magnitude column names of the truth catalog follow from the input
 # galaxy catalog it was drawn from and the survey/band being cut on.
 config.galaxy_type = common.GALAXY_TYPE
