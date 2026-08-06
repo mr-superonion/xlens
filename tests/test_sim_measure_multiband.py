@@ -203,12 +203,22 @@ def test_coadd_catalog_matches_truth(measured):
     for name in ("truth_index", "redshift"):
         assert name in match.dtype.names
 
-    # Each detection is joined to at most one truth galaxy, and the
-    # truth rows addressed are rows of the input catalog it came from.
+    # ``truth_index`` addresses rows of the input catalog the truth was
+    # drawn from.  It is NOT unique across the join: galaxies are sampled
+    # with replacement, so ~n^2/2N of the truth rows share an input row
+    # (here ~2k of 121k), and two distinct truth galaxies placed from the
+    # same input row can both be detected and matched.
     truth_index = np.asarray(match["truth_index"])
-    assert len(np.unique(truth_index)) == len(truth_index)
     assert truth_index.min() >= 0
-    assert np.all(np.isin(truth_index, np.asarray(measured.truth["indices"])))
+    input_rows, first = np.unique(
+        np.asarray(measured.truth["indices"]), return_index=True
+    )
+    where = np.searchsorted(input_rows, truth_index)
+    assert np.all(input_rows[where] == truth_index), (
+        "matched truth_index values that are not rows of the truth catalog"
+    )
+    # The mag_max_truth cut reaches the join: nothing fainter is matched.
+    assert np.all(mag[first][where] < MAG_MAX_TRUTH)
 
     # The truth columns carried over are live, and the measured columns
     # survive the merge intact.
