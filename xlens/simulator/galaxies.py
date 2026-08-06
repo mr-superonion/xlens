@@ -310,6 +310,26 @@ class BaseGalaxyCatalog(ABC):
     # rendering; see :data:`MAX_BULGE_HLR_ARCSEC`.
     max_bulge_hlr_arcsec: ClassVar[float] = MAX_BULGE_HLR_ARCSEC
 
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """Columns holding the ``(survey_name, band)`` magnitude.
+
+        Returning more than one column means the catalog stores the
+        photometry per component (disk, bulge, ...); the total magnitude
+        is then the sum of the component fluxes.  These are columns of
+        the *input* catalog, which the truth catalog carries over, so
+        consumers such as ``matchPipe`` can read the magnitude from the
+        truth catalog without re-opening the input file.
+
+        Parameters
+        ----------
+        survey_name : str
+            Survey whose photometry is wanted (``lsst``, ``hsc``, ...).
+        band : str
+            Band name, e.g. ``i`` for LSST or ``vis`` for Euclid.
+        """
+        raise NotImplementedError
+
     def _required_columns(self) -> tuple[str, ...] | None:
         """Columns this catalog needs, possibly survey-dependent.
 
@@ -714,6 +734,11 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         "y_ab",
     )
 
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """``*_ab`` photometry; this catalog only covers LSST/HSC bands."""
+        return (f"{band}_ab",)
+
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a 1-deg^2 catalog."""
         return cat.size / (60.0 * 60.0)
@@ -846,6 +871,12 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         "euclid": ("vis", "nisp_y", "nisp_j", "nisp_h"),
     }
 
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """``{survey}_{band}``; ``hsc`` reuses the LSST photometry."""
+        sname = "lsst" if survey_name == "hsc" else survey_name
+        return (f"{sname}_{band}",)
+
     def _required_columns(self) -> tuple[str, ...] | None:
         """Collect ``{survey}_{band}`` magnitudes of every listed survey."""
         assert self.required_columns is not None
@@ -972,6 +1003,12 @@ class DiffskyCatalog(BaseGalaxyCatalog):
     # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
     catalog_filename = "diffsky_arr.parquet"
 
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """Disk and bulge are stored separately in this catalog."""
+        sname = "lsst" if survey_name == "hsc" else survey_name
+        return (f"{sname}_{band}_disk", f"{sname}_{band}_bulge")
+
     def _load_catalog_file(self, fname: str, columns=None):
         return (
             pq.read_table(fname, columns=columns)
@@ -1046,3 +1083,24 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
         gal = (bulge + disk).withFlux(disk_flux + bulge_flux)
         return gal
+
+
+# ---------------------------------------------------------
+# galaxy_type registry
+# ---------------------------------------------------------
+GALAXY_CATALOG_CLASSES: dict[str, type[BaseGalaxyCatalog]] = {
+    "catsim2017": CatSim2017Catalog,
+    "flagship2025": Flagship2025Catalog,
+    "diffsky": DiffskyCatalog,
+}
+
+
+def get_catalog_class(galaxy_type: str) -> type[BaseGalaxyCatalog]:
+    """Return the catalog class implementing *galaxy_type*."""
+    try:
+        return GALAXY_CATALOG_CLASSES[galaxy_type]
+    except KeyError:
+        raise ValueError(
+            f"invalid galaxy_type {galaxy_type!r}; expected one of "
+            f"{sorted(GALAXY_CATALOG_CLASSES)}"
+        ) from None

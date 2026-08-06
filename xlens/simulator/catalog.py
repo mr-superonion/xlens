@@ -55,11 +55,7 @@ from ..utils.random import (
     gal_seed_base,
     num_rot,
 )
-from .galaxies import (
-    CatSim2017Catalog,
-    DiffskyCatalog,
-    Flagship2025Catalog,
-)
+from .galaxies import GALAXY_CATALOG_CLASSES, get_catalog_class
 from .perturbation import ShearHalo, ShearLogNormalFlat, ShearRedshift
 
 
@@ -185,11 +181,12 @@ class CatalogConfig(
                 self,
                 f"rotId needs to be smaller than {num_rot}",
             )
-        if self.galaxy_type not in ["catsim2017", "flagship2025", "diffsky"]:
+        if self.galaxy_type not in GALAXY_CATALOG_CLASSES:
             raise FieldValidationError(
                 self.__class__.galaxy_type,
                 self,
-                "We require galaxy_type in " "['catsim2017', 'flagship2025', 'diffsky']",
+                "We require galaxy_type in "
+                f"{sorted(GALAXY_CATALOG_CLASSES)}",
             )
         survey_names = [str(s).lower() for s in self.survey_name_list]
         if len(survey_names) == 0:
@@ -270,14 +267,7 @@ class CatalogTask(PipelineTask):
     ):
         """Instantiate a galaxy catalog class based on the configuration."""
         assert isinstance(self.config, CatalogConfig)
-        if self.config.galaxy_type == "catsim2017":
-            GalClass = CatSim2017Catalog
-        elif self.config.galaxy_type == "flagship2025":
-            GalClass = Flagship2025Catalog
-        elif self.config.galaxy_type == "diffsky":
-            GalClass = DiffskyCatalog
-        else:
-            raise ValueError("invalid galaxy_type")
+        GalClass = get_catalog_class(self.config.galaxy_type)
 
         rng = np.random.RandomState(seed)
         select_observable = (

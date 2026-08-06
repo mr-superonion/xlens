@@ -146,6 +146,10 @@ det_task = MeasureCoaddsPipe(config=detect_config)
 config = matchPipeConfig()
 config.mag_zero = 27.0
 config.mag_max_truth = 28.0
+config.galaxy_type = "catsim2017"
+config.survey_name = "hsc"
+config.band = "i"
+config.validate()
 match_task = matchPipe(config=config)
 
 

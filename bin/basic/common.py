@@ -30,6 +30,8 @@ GALAXY_TYPE = "flagship2025"
 # Selects which {survey}_{band} photometry columns are read from the
 # input catalog; must cover the survey the image stage renders.
 SURVEY_NAME_LIST = ["lsst"]
+# Band whose truth magnitude matchPipe cuts on (mag_max_truth).
+MATCH_BAND = "i"
 
 # ------------------------------
 # Output directory
