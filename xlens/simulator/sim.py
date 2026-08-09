@@ -172,6 +172,10 @@ class MultibandSimConfig(
         doc="galaxy type",
         default="catsim2017",
     )
+    foreground_model = Field[str](
+        doc='Foreground model type',
+        default="None"
+    )
     survey_name = Field[str](
         doc="Name of the survey",
         default="LSST",
@@ -306,8 +310,6 @@ class MultibandSimTask(PipelineTask):
         assert isinstance(self.config, MultibandSimConfig)
         xmin = bbox_outer.getMinX()
         ymin = bbox_outer.getMinY()
-        xmax = bbox_outer.getMaxX()
-        ymax = bbox_outer.getMaxY()
         width = bbox_outer.getWidth()
         height = bbox_outer.getHeight()
 
@@ -327,7 +329,7 @@ class MultibandSimTask(PipelineTask):
             ny=height,
         )
 
-        return stamp
+        return stamp.array
     
     def simulate_images(
         self,
@@ -639,18 +641,6 @@ class MultibandSimTask(PipelineTask):
             draw_method=draw_method,
         )
 
-        ###### TEMP ########
-        foreground_array = self.simulate_foreground(
-            galaxy_catalog.pixel_scale, 
-            None, 
-            psf_galsim,
-            boundary_box,
-            band,
-            mag_zero,
-            draw_method
-        )
-        galaxy_array += foreground_array # add to galsim image before noise and afw conversion
-
         # Obtain Noise correlation array
         if noiseCorrArray is None:
             noise_corr = None
@@ -709,6 +699,26 @@ class MultibandSimTask(PipelineTask):
             del noise_array
         exp_out.getMaskedImage().mask.array[:, :] = mask_array
         del mask_array, galaxy_array
+
+        if self.config.foreground_model != 'None':
+            foreground_array = self.simulate_foreground(
+                galaxy_catalog.pixel_scale, 
+                self.config.foreground_model, 
+                psf_galsim,
+                boundary_box,
+                band,
+                mag_zero,
+                draw_method
+            )
+            exp_fore = exp_out.clone()
+            exp_fore.getMaskedImage().image.array[:, :] = (
+                exp_fore.getMaskedImage().image.array[:, :] + foreground_array
+            )
+            outputs = Struct(
+                simExposure=exp_out,
+                foreExposure = exp_fore
+            )
+            return outputs
 
         outputs = Struct(
             simExposure=exp_out,
