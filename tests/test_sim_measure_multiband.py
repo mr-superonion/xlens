@@ -9,6 +9,13 @@ The r+i+z detection image is deeper, so it is expected to find more
 sources; what the tests pin down is that the extra sources come with sane
 columns and that turning the feature off leaves the old path exactly as it
 was.
+
+The r+i+z catalog is then joined to the truth catalog with ``matchPipe``,
+mirroring what ``bin/basic/process.py`` does.  The input catalog here is
+``flagship2025`` rather than the default ``catsim2017`` so this covers the
+non-default magnitude-column naming: ``indices`` are row numbers of the
+catalog that produced the truth, and the magnitude ``mag_max_truth`` cuts
+on is ``lsst_i`` rather than ``i_ab``.
 """
 
 from types import SimpleNamespace
@@ -20,6 +27,7 @@ from lsst.skymap.discreteSkyMap import (
     DiscreteSkyMapConfig,
 )
 
+from xlens.processor.match import matchPipe, matchPipeConfig
 from xlens.processor.measure_coadds import (
     MeasureCoaddsPipe,
     MeasureCoaddsPipeConfig,
@@ -36,6 +44,10 @@ PATCH_DIM = 1000
 TRACT_ID = 0
 PATCH_ID = 0
 BANDS = ["r", "i", "z"]
+GALAXY_TYPE = "flagship2025"
+SURVEY_NAME = "lsst"
+MATCH_BAND = "i"
+MAG_MAX_TRUTH = 27.0
 
 
 def _make_skymap() -> DiscreteSkyMap:
@@ -54,10 +66,13 @@ def _make_skymap() -> DiscreteSkyMap:
 
 def _make_truth(skymap):
     cat_config = CatalogShearTaskConfig()
+    cat_config.galaxy_type = GALAXY_TYPE
+    cat_config.survey_name_list = [SURVEY_NAME]
     cat_config.kappa_value = 0.0
     cat_config.layout = "random"
     cat_config.z_bounds = [-0.01, 1.0, 20.0]
     cat_config.mode = 0
+    cat_config.validate()
     return CatalogShearTask(config=cat_config).run(
         tract_info=skymap[TRACT_ID], seed=0,
     ).truthCatalog
@@ -65,7 +80,8 @@ def _make_truth(skymap):
 
 def _simulate(skymap, truth, band):
     sim_config = MultibandSimConfig()
-    sim_config.survey_name = "lsst"
+    sim_config.galaxy_type = GALAXY_TYPE
+    sim_config.survey_name = SURVEY_NAME
     sim_config.draw_image_noise = True
     sim_config.noiseId = 1
     sim_config.force_isotropic = True
@@ -110,6 +126,7 @@ def measured():
     )
     return SimpleNamespace(
         skymap=skymap,
+        truth=truth,
         single=_measure(handles, skymap, ["i"]),
         multi=_measure(handles, skymap, BANDS),
     )
@@ -145,6 +162,70 @@ def test_coadd_catalog_is_well_formed(measured):
     assert np.sum(multi["wsel"]) > 0.0
     assert np.any(multi["dwsel_dg1"] != 0.0)
     assert np.any(multi["fpfs_de1_dg1"] != 0.0)
+
+
+def test_coadd_catalog_matches_truth(measured):
+    """Join the r+i+z catalog to the truth catalog, as bin/basic does.
+
+    ``matchPipe`` reads the magnitude it cuts on out of the truth
+    catalog, using column names derived from ``galaxy_type`` plus
+    ``survey_name``/``band``.  With flagship2025 that is ``lsst_i``;
+    getting it from a fixed input file instead would index the wrong
+    catalog, since ``indices`` are row numbers of flagship_cosmos.fits
+    (3.7M rows), not of OneDegSq.fits (858k).
+    """
+    config = matchPipeConfig()
+    config.mag_max_truth = MAG_MAX_TRUTH
+    config.galaxy_type = GALAXY_TYPE
+    config.survey_name = SURVEY_NAME
+    config.band = MATCH_BAND
+    config.validate()
+    task = matchPipe(config=config)
+
+    mag = task.truth_magnitude(measured.truth)
+    assert np.all(np.isfinite(mag))
+    n_bright = int((mag < MAG_MAX_TRUTH).sum())
+    assert 0 < n_bright < len(measured.truth), (
+        f"mag_max_truth={MAG_MAX_TRUTH} kept {n_bright} of "
+        f"{len(measured.truth)} truth galaxies; the cut does nothing"
+    )
+
+    match = task.run(
+        skyMap=measured.skymap,
+        tract=TRACT_ID,
+        patch=PATCH_ID,
+        catalog=measured.multi,
+        dm_catalog=None,
+        truth_catalog=measured.truth,
+    ).catalog
+
+    assert 0 < len(match) <= len(measured.multi)
+    for name in ("truth_index", "redshift"):
+        assert name in match.dtype.names
+
+    # ``truth_index`` addresses rows of the input catalog the truth was
+    # drawn from.  It is NOT unique across the join: galaxies are sampled
+    # with replacement, so ~n^2/2N of the truth rows share an input row
+    # (here ~2k of 121k), and two distinct truth galaxies placed from the
+    # same input row can both be detected and matched.
+    truth_index = np.asarray(match["truth_index"])
+    assert truth_index.min() >= 0
+    input_rows, first = np.unique(
+        np.asarray(measured.truth["indices"]), return_index=True
+    )
+    where = np.searchsorted(input_rows, truth_index)
+    assert np.all(input_rows[where] == truth_index), (
+        "matched truth_index values that are not rows of the truth catalog"
+    )
+    # The mag_max_truth cut reaches the join: nothing fainter is matched.
+    assert np.all(mag[first][where] < MAG_MAX_TRUTH)
+
+    # The truth columns carried over are live, and the measured columns
+    # survive the merge intact.
+    assert np.all(np.isfinite(np.asarray(match["redshift"])))
+    assert np.all(np.asarray(match["redshift"]) > 0.0)
+    for band in BANDS:
+        assert f"lsst_{band}_fpfs1_e1" in match.dtype.names
 
 
 def _validatable_config():

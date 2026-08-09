@@ -55,6 +55,11 @@ FORCE_GALAXY_PROFILE_EXPONENTIAL = 2
 MAX_BULGE_HLR_ARCSEC = 3.0
 
 
+def _survey_prefix(survey_name: str) -> str:
+    """Column prefix for *survey_name*; hsc reuses the LSST photometry."""
+    return "lsst" if survey_name == "hsc" else survey_name
+
+
 def _galsim_round_sersic(n, sersic_prec):
     """Round a Sersic index to the nearest multiple of *sersic_prec*."""
     return float(int(n / sersic_prec + 0.5)) * sersic_prec
@@ -309,6 +314,26 @@ class BaseGalaxyCatalog(ABC):
     # Bulge half-light radii are clipped to this value (arcsec) before
     # rendering; see :data:`MAX_BULGE_HLR_ARCSEC`.
     max_bulge_hlr_arcsec: ClassVar[float] = MAX_BULGE_HLR_ARCSEC
+
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """Columns holding the ``(survey_name, band)`` magnitude.
+
+        Returning more than one column means the catalog stores the
+        photometry per component (disk, bulge, ...); the total magnitude
+        is then the sum of the component fluxes.  These are columns of
+        the *input* catalog, which the truth catalog carries over, so
+        consumers such as ``matchPipe`` can read the magnitude from the
+        truth catalog without re-opening the input file.
+
+        Parameters
+        ----------
+        survey_name : str
+            Survey whose photometry is wanted (``lsst``, ``hsc``, ...).
+        band : str
+            Band name, e.g. ``i`` for LSST or ``vis`` for Euclid.
+        """
+        raise NotImplementedError
 
     def _required_columns(self) -> tuple[str, ...] | None:
         """Columns this catalog needs, possibly survey-dependent.
@@ -714,6 +739,16 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         "y_ab",
     )
 
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """``*_ab`` photometry, shared by the surveys this catalog covers."""
+        if survey_name not in ("lsst", "hsc", "des"):
+            raise ValueError(
+                f"catsim2017 has no {survey_name!r} photometry; supported "
+                "surveys are ['lsst', 'hsc', 'des']"
+            )
+        return (f"{band}_ab",)
+
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a 1-deg^2 catalog."""
         return cat.size / (60.0 * 60.0)
@@ -846,12 +881,29 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         "euclid": ("vis", "nisp_y", "nisp_j", "nisp_h"),
     }
 
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """``{survey}_{band}``; ``hsc`` reuses the LSST photometry."""
+        sname = _survey_prefix(survey_name)
+        bands = cls.survey_bands.get(sname)
+        if bands is None:
+            raise ValueError(
+                f"flagship2025 has no {survey_name!r} photometry; supported "
+                f"surveys are {sorted(cls.survey_bands) + ['hsc']}"
+            )
+        if band not in bands:
+            raise ValueError(
+                f"flagship2025 has no {band!r} band for survey "
+                f"{survey_name!r}; available bands are {list(bands)}"
+            )
+        return (f"{sname}_{band}",)
+
     def _required_columns(self) -> tuple[str, ...] | None:
         """Collect ``{survey}_{band}`` magnitudes of every listed survey."""
         assert self.required_columns is not None
         cols = list(self.required_columns)
         for survey in self.survey_name_list:
-            sname = "lsst" if survey == "hsc" else survey
+            sname = _survey_prefix(survey)
             bands = self.survey_bands.get(sname)
             if bands is None:
                 # unknown survey: fall back to reading every column rather
@@ -889,9 +941,7 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Flagship 2025 catalog row."""
-        sname = survey_name
-        if sname == "hsc":
-            sname = "lsst"
+        sname = _survey_prefix(survey_name)
 
         mag = entry[f"{sname}_{band}"]
         flux = 10 ** ((mag_zero - mag) / 2.5)
@@ -972,6 +1022,17 @@ class DiffskyCatalog(BaseGalaxyCatalog):
     # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
     catalog_filename = "diffsky_arr.parquet"
 
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """Disk and bulge are stored separately in this catalog."""
+        sname = _survey_prefix(survey_name)
+        if sname != "lsst":
+            raise ValueError(
+                f"diffsky has no {survey_name!r} photometry; supported "
+                "surveys are ['lsst', 'hsc']"
+            )
+        return (f"{sname}_{band}_disk", f"{sname}_{band}_bulge")
+
     def _load_catalog_file(self, fname: str, columns=None):
         return (
             pq.read_table(fname, columns=columns)
@@ -999,10 +1060,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
         **kwargs,
     ) -> galsim.GSObject:
         """Build a GalSim galaxy from a Diffsky catalog row."""
-        if survey_name == "hsc":
-            sname = "lsst"
-        else:
-            sname = survey_name
+        sname = _survey_prefix(survey_name)
 
         bulge_hlr = min(float(entry["r50_bulge_as"]), self.max_bulge_hlr_arcsec)
         disk_hlr = entry["r50_disk_as"]
@@ -1046,3 +1104,24 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
         gal = (bulge + disk).withFlux(disk_flux + bulge_flux)
         return gal
+
+
+# ---------------------------------------------------------
+# galaxy_type registry
+# ---------------------------------------------------------
+GALAXY_CATALOG_CLASSES: dict[str, type[BaseGalaxyCatalog]] = {
+    "catsim2017": CatSim2017Catalog,
+    "flagship2025": Flagship2025Catalog,
+    "diffsky": DiffskyCatalog,
+}
+
+
+def get_catalog_class(galaxy_type: str) -> type[BaseGalaxyCatalog]:
+    """Return the catalog class implementing *galaxy_type*."""
+    try:
+        return GALAXY_CATALOG_CLASSES[galaxy_type]
+    except KeyError:
+        raise ValueError(
+            f"invalid galaxy_type {galaxy_type!r}; expected one of "
+            f"{sorted(GALAXY_CATALOG_CLASSES)}"
+        ) from None

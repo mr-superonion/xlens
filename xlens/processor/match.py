@@ -26,13 +26,11 @@ __all__ = [
 ]
 
 import logging
-import os
 from typing import Any
 
-import fitsio
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.pex.config import DictField, Field
+from lsst.pex.config import DictField, Field, FieldValidationError
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -47,6 +45,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial import KDTree
 from scipy.spatial.distance import cdist
 
+from ..simulator.galaxies import GALAXY_CATALOG_CLASSES, get_catalog_class
 from ..wcs import sky_to_pixel
 
 # dm_colnames = [
@@ -142,9 +141,19 @@ class matchPipeConfig(
         doc="matching distance in pixels",
         default=6,
     )
-    catsim_dir = Field[str](
-        doc="Directory containing input galaxy catalogs.",
-        default=os.environ.get("CATSIM_DIR", "."),
+    galaxy_type = Field[str](
+        doc="input galaxy catalog the truth catalog was drawn from; it "
+        "sets how the magnitude columns are named",
+        default="catsim2017",
+    )
+    survey_name = Field[str](
+        doc="survey whose photometry the ``mag_max_truth`` cut uses",
+        default="lsst",
+    )
+    band = Field[str](
+        doc="band whose photometry the ``mag_max_truth`` cut uses, e.g. "
+        "'i' for LSST or 'vis' for Euclid",
+        default="i",
     )
     band_column_names = DictField(
         keytype=str,
@@ -164,6 +173,23 @@ class matchPipeConfig(
 
     def validate(self):
         super().validate()
+        if self.galaxy_type not in GALAXY_CATALOG_CLASSES:
+            raise FieldValidationError(
+                self.__class__.galaxy_type,
+                self,
+                "We require galaxy_type in "
+                f"{sorted(GALAXY_CATALOG_CLASSES)}",
+            )
+        # Resolve the magnitude columns now so an unsupported
+        # (survey_name, band) fails here instead of mid-run.
+        try:
+            get_catalog_class(self.galaxy_type).magnitude_columns(
+                self.survey_name, self.band
+            )
+        except ValueError as err:
+            raise FieldValidationError(
+                self.__class__.survey_name, self, str(err)
+            ) from err
 
     def setDefaults(self):
         super().setDefaults()
@@ -183,7 +209,6 @@ class matchPipe(PipelineTask):
     ):
         super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, matchPipeConfig)
-        self._cat_ref: np.ndarray | None = None
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -233,7 +258,6 @@ class matchPipe(PipelineTask):
             catalog=anacal_catalog,
             dm_catalog=dm_catalog,
             truth_catalog=truth_catalog,
-            catsim_dir=self.config.catsim_dir,
         )
         butlerQC.put(outputs, outputRefs)
         return
@@ -313,25 +337,52 @@ class matchPipe(PipelineTask):
         )
         return combined
 
+    def truth_magnitude(self, mrc: np.ndarray) -> NDArray:
+        """Return the magnitude used for the ``mag_max_truth`` cut.
+
+        The column names follow from ``galaxy_type`` (which input catalog
+        produced the truth) plus ``survey_name``/``band`` (which
+        photometry to cut on), and the values are read straight out of
+        the truth catalog, which carries the photometry of the input rows
+        it was built from.  Reading them from the input file instead is
+        not possible in general: ``indices`` are row numbers of whichever
+        catalog produced the truth (OneDegSq.fits for ``catsim2017``,
+        flagship_*.fits for ``flagship2025``, ...), so a fixed reference
+        file gives wrong magnitudes or an IndexError.
+        """
+        assert isinstance(self.config, matchPipeConfig)
+        columns = get_catalog_class(self.config.galaxy_type).magnitude_columns(
+            self.config.survey_name, self.config.band
+        )
+        names = mrc.dtype.names or ()
+        missing = [c for c in columns if c not in names]
+        if missing:
+            raise KeyError(
+                f"truth catalog is missing {missing} needed for the "
+                f"mag_max_truth cut of galaxy_type="
+                f"{self.config.galaxy_type!r}, survey_name="
+                f"{self.config.survey_name!r}, band={self.config.band!r}. "
+                "Check that these match the simulation that wrote it, and "
+                "that its survey_name_list covered this survey."
+            )
+        if len(columns) == 1:
+            return np.asarray(mrc[columns[0]], dtype=float)
+        # Catalogs that store the photometry per component (diffsky:
+        # disk + bulge); the total magnitude sums the component fluxes.
+        flux = sum(
+            10 ** (-0.4 * np.asarray(mrc[c], dtype=float)) for c in columns
+        )
+        return -2.5 * np.log10(flux)
+
     def merge_truth(
         self,
         src: np.ndarray,
         mrc: np.ndarray,
         pixel_scale=0.168,
-        catsim_dir: str | None = None,
         wcs=None,
     ):
         assert isinstance(self.config, matchPipeConfig)
-        if self._cat_ref is None:
-            catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
-            path = os.path.join(catsim_dir, "OneDegSq.fits")
-            self.log.info("Caching truth catalog reference from %s", path)
-            self._cat_ref = fitsio.read(
-                path,
-                columns=["i_ab"],
-            )
-        assert self._cat_ref is not None
-        mag_mrc = self._cat_ref[mrc["indices"]]["i_ab"]
+        mag_mrc = self.truth_magnitude(mrc)
         mrc = mrc[mag_mrc < self.config.mag_max_truth]
         assert wcs is not None, "wcs is required for merge_truth"
         x_mrc, y_mrc = sky_to_pixel(
@@ -368,7 +419,6 @@ class matchPipe(PipelineTask):
         catalog: NDArray,
         dm_catalog: NDArray | None = None,
         truth_catalog: NDArray | None = None,
-        catsim_dir: str | None = None,
         **kwargs,
     ):
         assert isinstance(self.config, matchPipeConfig)
@@ -383,7 +433,6 @@ class matchPipe(PipelineTask):
                 catalog,
                 truth_catalog,
                 pixel_scale,
-                catsim_dir=catsim_dir,
                 wcs=wcs,
             )
 
