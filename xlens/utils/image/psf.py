@@ -27,8 +27,6 @@ Split out of ``xlens.utils.image``, which re-exports every public name here
 for backward compatibility.
 """
 
-from typing import Any
-
 import logging
 import threading
 from collections import OrderedDict
@@ -86,32 +84,11 @@ def subpixel_shift(image: NDArray, shift_x: float, shift_y: float) -> NDArray:
     return shifted_image
 
 
-def resize_array(
-    array: NDArray[Any],
-    target_shape: tuple[int, int] = (64, 64),
-):
-    """Resize an image-like array to a square target shape.
-
-    The function first crops the array symmetrically if it is larger than the
-    requested output size and then applies zero-padding when the array is too
-    small.
-
-    Parameters
-    ----------
-    array
-        Input array to resize.  The array is assumed to be two-dimensional.
-    target_shape
-        Tuple of ``(height, width)`` describing the requested output shape.
-
-    Returns
-    -------
-    numpy.ndarray
-        The resized array.
-    """
-    th, tw = target_shape
-    return anacal.psfmodel.resize_array(
-        np.ascontiguousarray(array, dtype=np.float64), int(th), int(tw)
-    )
+# Centre crop / zero-pad to (height, width).  Re-exported rather than
+# wrapped: the single implementation of this convention is the C++
+# ``anacal.psf.resize_array``, which forcecasts any dtype and returns
+# float64, so a python-side copy would buy nothing.
+resize_array = anacal.psf.resize_array
 
 
 # One native model per (DM PSF object, bbox), shared by every consumer
@@ -148,11 +125,11 @@ def _native_coadd_model_cached(lsst_psf, lsst_bbox):
         if isinstance(hit[1], Exception):
             raise hit[1]
         return hit[1]
-    from anacal import psfmodel as apm
+    from anacal import psf as apsf
 
     try:
-        name, cache = apm.read_coadd_psf_config(lsst_psf)
-        model = apm.load_coadd_psf_model(
+        name, cache = apsf.read_coadd_psf_config(lsst_psf)
+        model = apsf.load_coadd_psf_model(
             lsst_psf, lsst_bbox, name, cache
         )
     except _PERMANENT_LOAD_ERRORS as err:
@@ -210,12 +187,12 @@ def make_object_psf(psf, npix, lsst_bbox):
 
     The parameters of a DM CoaddPsf (PSFEx or PIFF inputs) are
     extracted once and every evaluation runs in AnaCal C++
-    (``anacal.psfmodel``), reproducing the DM pipeline to float
+    (``anacal.psf``), reproducing the DM pipeline to float
     precision.  There is NO fallback to Python-side per-galaxy drawing:
     a PSF the native loader cannot handle is an error -- use the
     per-cell PSF mode instead for such data.
     """
-    from anacal import psfmodel as apm
+    from anacal import psf as apsf
 
     try:
         model = _native_coadd_model_cached(psf, lsst_bbox)
@@ -227,7 +204,7 @@ def make_object_psf(psf, npix, lsst_bbox):
             type(err).__name__, err,
         )
         raise
-    return apm.NativeCoaddPsf(model, npix=npix, lsst_bbox=lsst_bbox)
+    return apsf.NativeCoaddPsf(model, npix=npix, lsst_bbox=lsst_bbox)
 
 
 class GridPsf(anacal.psf.BasePsf):
@@ -276,9 +253,9 @@ class GridPsf(anacal.psf.BasePsf):
         """C++ PerSourcePsf handle: the stamp grid evaluated natively
         inside the ForceTask loop (no Python per-galaxy drawing)."""
         if getattr(self, "_native_model", None) is None:
-            from anacal import psfmodel as apm
+            from anacal import psf as apsf
 
-            self._native_model = apm.GridPsfModel(
+            self._native_model = apsf.GridPsfModel(
                 stamps=np.ascontiguousarray(self.model, dtype=np.float64),
                 dx=float(self.dx),
                 dy=float(self.dy),
