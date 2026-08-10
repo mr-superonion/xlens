@@ -20,13 +20,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Measurement-input preparation for exposures and patch coadds:
-block lists, detection-catalog preparation, and the single- and
+cell lists, detection-catalog preparation, and the single- and
 multi-band ``prepare_data`` entry points.
 
 Split out of ``xlens.utils.image``, which re-exports every public name here
 for backward compatibility.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Sequence
 
 import anacal
@@ -38,43 +39,82 @@ from numpy.typing import NDArray
 
 from ..constants import MAG_ZERO_AB
 from .noise import estimate_noise_variance, prepare_noise_array
-from .psf import prepare_psf_array, resize_array
+from .psf import (
+    prepare_psf_array,
+    resize_array,
+    truncate_square,
+    try_native_coadd_model,
+)
 
 
-def get_blocks(*, lsst_psf, lsst_bbox, pixel_scale, npix, psf_array):
+def get_cells(
+    *, lsst_psf, lsst_bbox, pixel_scale, npix, psf_array, num_workers=1,
+):
     min_corner = lsst_bbox.getMin()
     x_min, y_min = min_corner.getX(), min_corner.getY()
     width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
-    # Create blocks
-    blocks = anacal.geometry.get_block_list(
+    # Create cells
+    cells = anacal.geometry.get_cell_list(
         img_ny=height,
         img_nx=width,
-        block_nx=250,
-        block_ny=250,
-        block_overlap=80,
+        cell_nx=250,
+        cell_ny=250,
+        cell_overlap=80,
         scale=pixel_scale,
     )
-    new_blocks = []
-    for bb in blocks:
-        # Center of the block
+    # Native model when the PSF supports it: cell stamps are then drawn
+    # by AnaCal C++ (~4x faster than DM CoaddPsf on DP1 PIFF coadds, and
+    # GIL-free, hence threadable below); unsupported PSFs (e.g.
+    # simulations) keep the DM path.
+    native = try_native_coadd_model(lsst_psf, lsst_bbox)
+
+    def draw_one(bb):
+        # Center of the cell
         x0 = int(np.clip(bb.xcen, 0, width - 1))
         y0 = int(np.clip(bb.ycen, 0, height - 1))
         try:
-            this_psf = lsst_psf.computeImage(lsst_geom.Point2D(x_min + x0, y_min + y0)).getArray()
-            bb.psf_array = resize_array(this_psf, (npix, npix))
+            if native is not None:
+                bb.psf_array = native.draw(
+                    float(x_min + x0), float(y_min + y0), npix
+                )
+            else:
+                this_psf = lsst_psf.computeImage(
+                    lsst_geom.Point2D(x_min + x0, y_min + y0)
+                ).getArray()
+                bb.psf_array = resize_array(this_psf, (npix, npix))
         except Exception:
-            continue
-        new_blocks.append(bb)
-    return new_blocks
+            # no coverage at the cell centre (DM InvalidPsfError /
+            # native RuntimeError): drop the cell, as before
+            return None
+        return bb
+
+    return [bb for bb in _map_cells(draw_one, cells, native, num_workers)
+            if bb is not None]
 
 
-def get_blocks_multiband(*, lsst_psfs, lsst_bbox, pixel_scale, npix):
-    """Blocks whose PSF stamp is a ``(nband, npix, npix)`` stack.
+def _map_cells(fn, cells, native, num_workers):
+    """Apply ``fn`` to every cell, in order, threaded when it pays.
 
-    Same geometry as :func:`get_blocks`; the only difference is that each
-    block carries one PSF per band instead of one.  A block is dropped
+    Only the native model releases the GIL while drawing, so the DM
+    fallback is always run serially -- a thread pool there would add
+    contention without any overlap.
+    """
+    workers = min(int(num_workers), len(cells))
+    if native is None or workers <= 1:
+        return [fn(bb) for bb in cells]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(fn, cells))
+
+
+def get_cells_multiband(
+    *, lsst_psfs, lsst_bbox, pixel_scale, npix, num_workers=1,
+):
+    """Cells whose PSF stamp is a ``(nband, npix, npix)`` stack.
+
+    Same geometry as :func:`get_cells`; the only difference is that each
+    cell carries one PSF per band instead of one.  A cell is dropped
     unless *every* band can supply a PSF at its centre, so all bands are
-    detected on exactly the same set of blocks.
+    detected on exactly the same set of cells.
 
     Parameters
     ----------
@@ -83,38 +123,52 @@ def get_blocks_multiband(*, lsst_psfs, lsst_bbox, pixel_scale, npix):
         that will be handed to anacal.
     """
     if len(lsst_psfs) == 0:
-        raise ValueError("get_blocks_multiband needs at least one PSF")
+        raise ValueError("get_cells_multiband needs at least one PSF")
 
     min_corner = lsst_bbox.getMin()
     x_min, y_min = min_corner.getX(), min_corner.getY()
     width, height = lsst_bbox.getWidth(), lsst_bbox.getHeight()
-    blocks = anacal.geometry.get_block_list(
+    cells = anacal.geometry.get_cell_list(
         img_ny=height,
         img_nx=width,
-        block_nx=250,
-        block_ny=250,
-        block_overlap=80,
+        cell_nx=250,
+        cell_ny=250,
+        cell_overlap=80,
         scale=pixel_scale,
     )
-    new_blocks = []
-    for bb in blocks:
+    natives = [
+        try_native_coadd_model(p, lsst_bbox) for p in lsst_psfs
+    ]
+    all_native = all(n is not None for n in natives)
+
+    def draw_one(bb):
         x0 = int(np.clip(bb.xcen, 0, width - 1))
         y0 = int(np.clip(bb.ycen, 0, height - 1))
         point = lsst_geom.Point2D(x_min + x0, y_min + y0)
         stamps = []
         try:
-            for lsst_psf in lsst_psfs:
-                stamps.append(
-                    resize_array(
-                        lsst_psf.computeImage(point).getArray(),
-                        (npix, npix),
+            for lsst_psf, native in zip(lsst_psfs, natives):
+                if native is not None:
+                    stamps.append(native.draw(
+                        float(x_min + x0), float(y_min + y0), npix
+                    ))
+                else:
+                    stamps.append(
+                        resize_array(
+                            lsst_psf.computeImage(point).getArray(),
+                            (npix, npix),
+                        )
                     )
-                )
         except Exception:
-            continue
+            return None
         bb.psf_array = np.asarray(stamps, dtype=np.float64)
-        new_blocks.append(bb)
-    return new_blocks
+        return bb
+
+    # A single DM-backed band would serialize the whole cell, so thread
+    # only when every band draws natively.
+    return [bb for bb in _map_cells(
+        draw_one, cells, True if all_native else None, num_workers,
+    ) if bb is not None]
 
 
 def combine_sim_exposures(
@@ -177,13 +231,13 @@ def prepare_detection(
     pixel_scale: float,
     beginx: int,
     beginy: int,
-    blocks: List | None = None,
+    cells: List | None = None,
 ) -> NDArray | None:
     """Prepare a detection catalog for forced measurement.
 
-    Copies the catalog and selects anacal columns.  Block ownership is no
-    longer assigned here: AnaCal recomputes block_id internally from
-    x1_det/x2_det (Task::assign_block_ids), and block_id is not a catalog
+    Copies the catalog and selects anacal columns.  Cell ownership is no
+    longer assigned here: AnaCal recomputes cell_id internally from
+    x1_det/x2_det (Task::assign_cell_ids), and cell_id is not a catalog
     column any more.
 
     Parameters
@@ -195,7 +249,7 @@ def prepare_detection(
     beginx, beginy : int
         Image origin in pixel coordinates.  Unused, kept for caller
         compatibility.
-    blocks : list or None
+    cells : list or None
         Unused, kept for caller compatibility.
 
     Returns
@@ -231,7 +285,7 @@ def prepare_data(
     mask_array: NDArray | None = None,
     noise_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
-    blocks: List | None = None,
+    cells: List | None = None,
     survey: str | None = None,
     **kwargs,
 ):
@@ -252,7 +306,31 @@ def prepare_data(
     lsst_bbox = exposure.getBBox()
 
     if psf_array is None:
-        psf_array = prepare_psf_array(exposure, npix)
+        stamps0 = (
+            np.asarray(cells[0].psf_array) if cells else None
+        )
+        # Only usable when the cells carry ONE stamp per cell at this
+        # function's stamp size: a multiband stack (3-D) has no single
+        # exposure PSF, and cells built by a caller with a different
+        # npix would silently change the returned shape.
+        if (
+            stamps0 is not None
+            and stamps0.ndim == 2
+            and stamps0.shape == (npix, npix)
+        ):
+            # Exposure-average PSF = mean of the per-cell stamps
+            # already in hand (no second grid of PSF evaluations),
+            # finished with the same truncation the grid average used.
+            psf_array = np.mean(
+                np.stack([
+                    np.asarray(bb.psf_array, dtype=np.float64)
+                    for bb in cells
+                ]),
+                axis=0,
+            )
+            truncate_square(psf_array, npix // 2 - 2)
+        else:
+            psf_array = prepare_psf_array(exposure, npix)
 
     # float32, the dtype the coadd is already stored in (ExposureF). AnaCal
     # takes the science and noise planes at single precision and widens to
@@ -307,7 +385,7 @@ def prepare_data(
         pixel_scale=pixel_scale,
         beginx=beginx,
         beginy=beginy,
-        blocks=blocks,
+        cells=cells,
     )
 
     # Normalize the image onto the fixed AB zeropoint so the measured
@@ -333,7 +411,7 @@ def prepare_data(
         "tractInfo": tractInfo,
         "patchInfo": patchInfo,
         "detection": detection,
-        "blocks": blocks,
+        "cells": cells,
     }
 
 
@@ -435,7 +513,7 @@ def prepare_data_multiband(
     star_cat: NDArray | None = None,
     mask_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
-    blocks: List | None = None,
+    cells: List | None = None,
     survey: str | None = None,
     **kwargs,
 ):
@@ -478,7 +556,7 @@ def prepare_data_multiband(
                 star_cat=star_cat,
                 mask_array=mask_array,
                 detection=detection,
-                blocks=blocks,
+                cells=cells,
                 survey=survey,
             )
 

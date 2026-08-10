@@ -103,7 +103,6 @@ def _measure(handles, skymap, detection_bands):
     config.anacal.validate_psf = False
     config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
     config.fpfs.do_noise_bias_correction = False
-    config.fpfs.return_only_linear_modes = False
     config.detection_bands = detection_bands
     config.validate()
 

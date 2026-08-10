@@ -21,13 +21,17 @@
 
 """PSF models and PSF-stamp utilities: array helpers, the
 ``anacal.psf.BasePsf`` wrappers, and per-patch / per-cell PSF
-stamp preparation (including block construction inputs).
+stamp preparation (including cell construction inputs).
 
 Split out of ``xlens.utils.image``, which re-exports every public name here
 for backward compatibility.
 """
 
 from typing import Any
+
+import logging
+import threading
+from collections import OrderedDict
 
 import anacal
 import lsst.geom as lsst_geom
@@ -104,39 +108,75 @@ def resize_array(
     numpy.ndarray
         The resized array.
     """
-    target_height, target_width = target_shape
-    input_height, input_width = array.shape
+    th, tw = target_shape
+    return anacal.psfmodel.resize_array(
+        np.ascontiguousarray(array, dtype=np.float64), int(th), int(tw)
+    )
 
-    # Crop if larger
-    if input_height > target_height:
-        start_h = (input_height - target_height) // 2
-        array = array[start_h : start_h + target_height, :]
-    if input_width > target_width:
-        start_w = (input_width - target_width) // 2
-        array = array[:, start_w : start_w + target_width]
 
-    # Pad with zeros if smaller
-    if input_height < target_height:
-        pad_height = target_height - input_height
-        pad_top = pad_height // 2
-        pad_bottom = pad_height - pad_top
-        array = np.pad(
-            array,
-            ((pad_bottom, pad_top), (0, 0)),
-            mode="constant",
-            constant_values=0.0,
+# One native model per (DM PSF object, bbox), shared by every consumer
+# (get_cells, get_cells_multiband, make_object_psf): loading costs
+# ~0.5-2 s per exposure (persisted-config round trip + per-visit WCS
+# fits), and without sharing it would run ~13x per patch.  Entries hold
+# a strong reference to the PSF so the id() key cannot be recycled
+# while the entry lives.  The bbox is part of the key because the
+# per-visit WCS polynomials are fitted OVER it -- a model fitted for
+# one bbox must not be handed out for another.  Bounded FIFO so
+# long-lived processes cannot grow it, and lock-guarded because the
+# tasks may call this from their cell thread pools.
+_NATIVE_MODEL_CACHE: "OrderedDict" = OrderedDict()
+_NATIVE_MODEL_CACHE_MAX = 64
+_NATIVE_MODEL_LOCK = threading.Lock()
+
+# Only these mean "this PSF can never be loaded natively"; anything else
+# (I/O while reading the persisted config, transient allocation errors)
+# is NOT cached, so a blip cannot poison a PSF for the whole process.
+_PERMANENT_LOAD_ERRORS = (NotImplementedError, ValueError, TypeError)
+
+
+def _native_coadd_model_cached(lsst_psf, lsst_bbox):
+    """Native model for a DM PSF, loaded once per (PSF, bbox).
+
+    Returns the model, or raises the loader error (permanent failures
+    are remembered so an unsupported PSF is only attempted once).
+    """
+    key = (id(lsst_psf), tuple(lsst_bbox.getBegin()),
+           tuple(lsst_bbox.getEnd()))
+    with _NATIVE_MODEL_LOCK:
+        hit = _NATIVE_MODEL_CACHE.get(key)
+    if hit is not None and hit[0] is lsst_psf:
+        if isinstance(hit[1], Exception):
+            raise hit[1]
+        return hit[1]
+    from anacal import psfmodel as apm
+
+    try:
+        name, cache = apm.read_coadd_psf_config(lsst_psf)
+        model = apm.load_coadd_psf_model(
+            lsst_psf, lsst_bbox, name, cache
         )
+    except _PERMANENT_LOAD_ERRORS as err:
+        model = err
+    with _NATIVE_MODEL_LOCK:
+        _NATIVE_MODEL_CACHE[key] = (lsst_psf, model)
+        while len(_NATIVE_MODEL_CACHE) > _NATIVE_MODEL_CACHE_MAX:
+            _NATIVE_MODEL_CACHE.popitem(last=False)
+    if isinstance(model, Exception):
+        raise model
+    return model
 
-    if input_width < target_width:
-        pad_width = target_width - input_width
-        pad_right = pad_width // 2
-        pad_left = pad_width - pad_right
-        array = np.pad(
-            array,
-            ((0, 0), (pad_left, pad_right)),
-            mode="constant",
-        )
-    return array
+
+def try_native_coadd_model(lsst_psf, lsst_bbox):
+    """Native CoaddPsfModel for a DM CoaddPsf, or None if unsupported.
+
+    Used by the cell-stamp builders: native draws replace the DM
+    ``computeImage`` calls when possible (PSFEx/PIFF coadds); anything
+    else (e.g. simulated PSFs) keeps the DM path.
+    """
+    try:
+        return _native_coadd_model_cached(lsst_psf, lsst_bbox)
+    except Exception:
+        return None
 
 
 class LsstPsf(anacal.psf.BasePsf):
@@ -158,9 +198,36 @@ class LsstPsf(anacal.psf.BasePsf):
 
     def draw(self, x, y):
         """Evaluate the PSF image centered on the requested pixel position."""
-        this_psf = self.psf.computeImage(lsst_geom.Point2D(x + self.x_min, y + self.y_min)).getArray()
+        this_psf = self.psf.computeImage(
+            lsst_geom.Point2D(x + self.x_min, y + self.y_min)
+        ).getArray()
         this_psf = resize_array(this_psf, self.shape)
         return this_psf
+
+
+def make_object_psf(psf, npix, lsst_bbox):
+    """Per-source PSF adapter backed by the native GIL-free model.
+
+    The parameters of a DM CoaddPsf (PSFEx or PIFF inputs) are
+    extracted once and every evaluation runs in AnaCal C++
+    (``anacal.psfmodel``), reproducing the DM pipeline to float
+    precision.  There is NO fallback to Python-side per-galaxy drawing:
+    a PSF the native loader cannot handle is an error -- use the
+    per-cell PSF mode instead for such data.
+    """
+    from anacal import psfmodel as apm
+
+    try:
+        model = _native_coadd_model_cached(psf, lsst_bbox)
+    except Exception as err:
+        logging.error(
+            "native PSF model unavailable (%s: %s); per-source PSF "
+            "mode requires it -- use psf_model_type='cell' for this "
+            "data.",
+            type(err).__name__, err,
+        )
+        raise
+    return apm.NativeCoaddPsf(model, npix=npix, lsst_bbox=lsst_bbox)
 
 
 class GridPsf(anacal.psf.BasePsf):
@@ -203,6 +270,20 @@ class GridPsf(anacal.psf.BasePsf):
         j = int(np.clip(x // self.dx, 0, nx - 1))
         i = int(np.clip(y // self.dy, 0, ny - 1))
         return np.ascontiguousarray(self.model[i, j])
+
+    @property
+    def native_model(self):
+        """C++ PerSourcePsf handle: the stamp grid evaluated natively
+        inside the ForceTask loop (no Python per-galaxy drawing)."""
+        if getattr(self, "_native_model", None) is None:
+            from anacal import psfmodel as apm
+
+            self._native_model = apm.GridPsfModel(
+                stamps=np.ascontiguousarray(self.model, dtype=np.float64),
+                dx=float(self.dx),
+                dy=float(self.dy),
+            )
+        return self._native_model
 
     @property
     def average(self) -> NDArray:

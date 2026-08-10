@@ -75,12 +75,20 @@ class FpfsMeasurementConfig(Config):
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
     )
-    return_only_linear_modes = Field[bool](
-        doc="whether only return linear modes",
-        default=False,
+    mask_value_max = Field[int](
+        doc=(
+            "Skip forced measurement of sources whose mask_value exceeds "
+            "this (their output rows are zero-filled; applied in C++ "
+            "inside ForceTask). None disables the cut. In the "
+            "measure*coadds tasks this is DERIVED: validate() mirrors "
+            "config.anacal.mask_value_max here, so set that instead."
+        ),
+        default=None,
+        optional=True,
     )
+
     psf_model_type = Field[str](
-        doc="type of psf model (choose from object, block, patch)",
+        doc="type of psf model (choose from object, cell, patch)",
         default="patch",
     )
     noiseId = Field[int](
@@ -211,6 +219,29 @@ class FpfsMeasurementTask(Task):
             det["y"] = detection["x2_det"] / pixel_scale - begin_y
         else:
             det = None
+        # Native per-source PSF: hand the C++ ForceTask the model
+        # itself -- every stamp is drawn inside its GIL-released loop
+        # (no Python per-galaxy drawing), and sources outside the
+        # model's coverage get mask_value = 414 written back in place.
+        # The 414 sentinel is always skipped by the C++ measurement,
+        # with or without a configured mask_value_max cut.
+        psf_model = getattr(psf_object, "native_model", None)
+        psf_offset = (
+            float(getattr(psf_object, "x_min", 0.0)),
+            float(getattr(psf_object, "y_min", 0.0)),
+        )
+        mask_value = None
+        mask_value_max = self.config.mask_value_max
+        has_mask_col = detection is not None and "mask_value" in (
+            detection.dtype.names or ()
+        )
+        if has_mask_col:
+            mask_value = np.ascontiguousarray(
+                detection["mask_value"], dtype=np.int32
+            )
+        elif psf_model is not None and detection is not None:
+            # writable sentinel target even without a systematics mask
+            mask_value = np.zeros(len(detection), dtype=np.int32)
         catalog = anacal.fpfs.process_image(
             fpfs_config=self.fpfs_config,
             pixel_scale=pixel_scale,
@@ -223,7 +254,19 @@ class FpfsMeasurementTask(Task):
             detection=det,
             psf_object=psf_object,
             base_column_name=base_column_name,
-            return_only_linear_modes=self.config.return_only_linear_modes,
-            pack_linear_modes=True,
+            mask_value=mask_value,
+            mask_value_max=mask_value_max,
+            psf_model=psf_model,
+            psf_offset=psf_offset,
         )
+        if (
+            psf_model is not None
+            and mask_value is not None
+            and detection is not None
+            and has_mask_col
+        ):
+            # propagate 414 sentinels the C++ wrote into the caller's
+            # catalog, so later bands skip the same sources and the
+            # output rows carry the flag
+            detection["mask_value"] = mask_value
         return catalog

@@ -331,9 +331,6 @@ class BuildSystematicsTask(PipelineTask):
         assert isinstance(self.config, BuildSystematicsConfig)
         mask = exposure.mask
 
-        # Always check what planes exist in this exposure:
-        print(mask.getMaskPlaneDict().keys())
-
         planes = ["BAD", "CR", "NO_DATA", "SAT", "UNMASKEDNAN", "DETECTED", "DETECTED_NEGATIVE"]
         avail = set(mask.getMaskPlaneDict().keys())
         planes = [p for p in planes if p in avail]
@@ -344,10 +341,16 @@ class BuildSystematicsTask(PipelineTask):
             1000:3000, 1000:3000
         ]
 
-        noise_array = np.asarray(
-            exposure.getMaskedImage().image.array,
+        # ``.copy()`` is load-bearing: the exposure image is already
+        # float32, so np.asarray returns a VIEW and the zeroing below
+        # would write through into the CALLER's pixels -- blanking every
+        # DETECTED source in the central window of an exposure the
+        # caller still intends to measure.  (build_cell_systematics
+        # copies here for the same reason.)
+        noise_array = np.array(
+            exposure.getMaskedImage().image.array[1000:3000, 1000:3000],
             dtype=np.float32,
-        )[1000:3000, 1000:3000]
+        )
         window_array = window_array * (noise_array**2.0 < variance_array * 9) * (~np.isnan(variance_array))
 
         noise_array[~window_array.astype(bool)] = 0.0

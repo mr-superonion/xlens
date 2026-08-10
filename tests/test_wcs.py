@@ -12,7 +12,6 @@ from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 import xlens
 from xlens.wcs import (
     correct_ellipticity_wcs,
-    correct_fpfs_spin2_wcs,
     dm_wcs_to_header,
     extract_perturbation_dm_wcs,
     extract_perturbation_galsim_wcs,
@@ -77,30 +76,6 @@ def simulate_and_measure(
         mask_array=None,
         noise_array=None,
         detection=det,
-    )
-
-
-def simulate_and_measure_linear(
-    gal_obj, psf_obj, wcs, stamp_size, center, pixel_scale, sigma_shapelets,
-):
-    """Draw galaxy+PSF with given WCS and return raw linear shapelet
-    moments."""
-    gal_image, psf_image = _draw_images(
-        gal_obj, psf_obj, wcs, stamp_size, center,
-    )
-    fpfs_config, det = _make_fpfs_config_and_det(center, sigma_shapelets)
-    return anacal.fpfs.process_image(
-        fpfs_config=fpfs_config,
-        pixel_scale=pixel_scale,
-        mag_zero=30.0,
-        noise_variance=0.0,
-        gal_array=gal_image.array,
-        psf_array=psf_image.array,
-        mask_array=None,
-        noise_array=None,
-        detection=det,
-        return_only_linear_modes=True,
-        pack_linear_modes=True,
     )
 
 
@@ -374,23 +349,6 @@ def test_isotropic_galaxy(wcs_g1, wcs_g2, wcs_rho):
     np.testing.assert_allclose(g1_corr, g1_ref, atol=5e-4)
     np.testing.assert_allclose(g2_corr, g2_ref, atol=5e-4)
 
-    # Also check linear moment correction via correct_fpfs_spin2_wcs
-    data = simulate_and_measure_linear(
-        gal, psf_obj, wcs, stamp_size, center, pixel_scale, sigma_shapelets,
-    )
-    data_ref = simulate_and_measure_linear(
-        gal, psf_obj, wcs_ref, stamp_size, center,
-        pixel_scale, sigma_shapelets,
-    )
-    corrected = correct_fpfs_spin2_wcs(
-        data, rec_g1, rec_g2, rec_rho, prefix="fpfs1_",
-    )
-    for col in ["fpfs1_m22c", "fpfs1_m22s", "fpfs1_m42c", "fpfs1_m42s"]:
-        np.testing.assert_allclose(
-            corrected[col][0], data_ref[col][0], atol=1.0,
-            err_msg=f"{col} mismatch",
-        )
-
 
 # ---------------------------------------------------------------------------
 # Test: FPFS sheared galaxy quartet (45-degree rotation cancellation)
@@ -472,26 +430,6 @@ def test_sheared_galaxy(wcs_g1, wcs_g2, wcs_rho, gal_g1, gal_g2):
     assert raw_mag > 1e-3, (
         f"Raw avg too small ({raw_mag:.2e}), WCS distortion not visible"
     )
-
-    # Also check linear moment correction on a single sheared galaxy
-    gal_single = gal_base
-    data = simulate_and_measure_linear(
-        gal_single, psf_obj, wcs, stamp_size, center,
-        pixel_scale, sigma_shapelets,
-    )
-    data_ref = simulate_and_measure_linear(
-        gal_single, psf_obj, wcs_ref, stamp_size, center,
-        pixel_scale, sigma_shapelets,
-    )
-    corrected = correct_fpfs_spin2_wcs(
-        data, rec_g1, rec_g2, rec_rho, prefix="fpfs1_",
-    )
-    for col in ["fpfs1_m22c", "fpfs1_m22s", "fpfs1_m42c", "fpfs1_m42s"]:
-        np.testing.assert_allclose(
-            corrected[col][0], data_ref[col][0],
-            rtol=5e-2,
-            err_msg=f"{col} mismatch",
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -59,8 +59,8 @@ from .noise import (  # noqa: F401
 from .prepare import (  # noqa: F401
     _stack_bands,
     combine_sim_exposures,
-    get_blocks,
-    get_blocks_multiband,
+    get_cells,
+    get_cells_multiband,
     prepare_data,
     prepare_data_multiband,
     prepare_detection,
@@ -68,6 +68,7 @@ from .prepare import (  # noqa: F401
 from .psf import (  # noqa: F401
     GridPsf,
     LsstPsf,
+    make_object_psf,
     get_psf_array,
     prepare_psf_array,
     prepare_psf_array_cell,

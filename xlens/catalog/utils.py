@@ -238,19 +238,6 @@ def add_magnitude_columns(
     return np.asarray(rfn.append_fields(catalog, new_names, new_cols, usemask=False))
 
 
-def _linear_modes_to_derivs(xx: dict[str, NDArray]) -> dict[str, NDArray]:
-    d: dict[str, NDArray] = {}
-    d["dm00_dg1"] = -np.sqrt(2.0) * xx["m22c"]
-    d["dm00_dg2"] = -np.sqrt(2.0) * xx["m22s"]
-    d["dm20_dg1"] = -np.sqrt(6.0) * xx["m42c"]
-    d["dm20_dg2"] = -np.sqrt(6.0) * xx["m42s"]
-    d["dm22c_dg1"] = (1.0 / np.sqrt(2.0)) * (xx["m00"] - xx["m40"]) - np.sqrt(3.0) * xx["m44c"]
-    d["dm22c_dg2"] = -np.sqrt(3.0) * xx["m44s"]
-    d["dm22s_dg1"] = -np.sqrt(3.0) * xx["m44s"]
-    d["dm22s_dg2"] = (1.0 / np.sqrt(2.0)) * (xx["m00"] - xx["m40"]) + np.sqrt(3.0) * xx["m44c"]
-    return d
-
-
 def _moments_to_ell(
     nobj: int,
     C0: float,
@@ -320,55 +307,6 @@ def _moments_to_ell(
     out[f"{p}dm2_dg1"] = dm2_dg1
     out[f"{p}dm2_dg2"] = dm2_dg2
     return out
-
-
-def shapelets_linear2ell(
-    data: NDArray,
-    C0: float,
-    prefix: str = "fpfs1_",
-) -> NDArray:
-    p = prefix
-    moment_names = [
-        "m00",
-        "m20",
-        "m22c",
-        "m22s",
-        "m40",
-        "m42c",
-        "m42s",
-        "m44c",
-        "m44s",
-    ]
-    noise_names = [
-        "n00",
-        "n20",
-        "n22c",
-        "n22s",
-        "n40",
-        "n42c",
-        "n42s",
-        "n44c",
-        "n44s",
-    ]
-    xx = {mn: data[f"{p}{mn}"] - 2.0 * data[f"{p}{nn}"] for mn, nn in zip(moment_names, noise_names)}
-    d = _linear_modes_to_derivs(xx)
-    return _moments_to_ell(
-        len(data),
-        C0,
-        prefix,
-        data[f"{p}m00"],
-        data[f"{p}m20"],
-        data[f"{p}m22c"],
-        data[f"{p}m22s"],
-        d["dm00_dg1"],
-        d["dm00_dg2"],
-        d["dm20_dg1"],
-        d["dm20_dg2"],
-        d["dm22c_dg1"],
-        d["dm22c_dg2"],
-        d["dm22s_dg1"],
-        d["dm22s_dg2"],
-    )
 
 
 def _multiband_moments2ell(
@@ -451,72 +389,6 @@ def _normalize_band_weights(
     if not (total > 0):
         raise ValueError("weights must have positive sum")
     return (arr / total).tolist()
-
-
-def multiband_shapelets_linear2ell(
-    cat: NDArray,
-    bands: list[str],
-    C0: float,
-    prefix: str = "fpfs1_",
-    weights: list[float] | None = None,
-) -> NDArray:
-    """Combine per-band linear-mode shapelets into a single shape catalog.
-
-    Per-band weights are user-supplied constants (no per-object error
-    needed); they are normalized to sum to 1.  Because the weights are
-    constant in shear, ``dw/dg1`` and ``dw/dg2`` are exactly zero.
-    """
-    p = prefix
-    nobj = len(cat)
-
-    moment_names = [
-        "m00",
-        "m20",
-        "m22c",
-        "m22s",
-        "m40",
-        "m42c",
-        "m42s",
-        "m44c",
-        "m44s",
-    ]
-    noise_names = [
-        "n00",
-        "n20",
-        "n22c",
-        "n22s",
-        "n40",
-        "n42c",
-        "n42s",
-        "n44c",
-        "n44s",
-    ]
-
-    w_list = _normalize_band_weights(bands, weights)
-
-    moments: dict[str, dict[str, NDArray]] = {}
-    noises: dict[str, dict[str, NDArray]] = {}
-    for b in bands:
-        moments[b] = {mn: np.asarray(cat[f"{b}_{p}{mn}"], dtype=np.float64) for mn in moment_names}
-        noises[b] = {nn: np.asarray(cat[f"{b}_{p}{nn}"], dtype=np.float64) for nn in noise_names}
-
-    # --- per-band dm_dg using (m - 2n) ------------------------------------
-    dmom_dg: dict[str, dict[str, NDArray]] = {}
-    for b in bands:
-        m = moments[b]
-        n = noises[b]
-        xx = {mn: m[mn] - 2.0 * n[nn] for mn, nn in zip(moment_names, noise_names)}
-        dmom_dg[b] = _linear_modes_to_derivs(xx)
-
-    return _multiband_moments2ell(
-        nobj,
-        bands,
-        C0,
-        prefix,
-        w_list,
-        moments,
-        dmom_dg,
-    )
 
 
 def multiband_shapelets2ell(

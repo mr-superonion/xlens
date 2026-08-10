@@ -55,7 +55,7 @@ def prepare_data_one_cell(
     mask_array: NDArray | None = None,
     noise_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
-    blocks: List | None = None,
+    cells: List | None = None,
     survey: str | None = None,
     **kwargs,
 ):
@@ -140,7 +140,7 @@ def prepare_data_one_cell(
         pixel_scale=pixel_scale,
         beginx=beginx,
         beginy=beginy,
-        blocks=blocks,
+        cells=cells,
     )
 
     # Normalize the image onto the fixed AB zeropoint; the measurement
@@ -165,7 +165,7 @@ def prepare_data_one_cell(
         "tractInfo": tractInfo,
         "patchInfo": patchInfo,
         "detection": detection,
-        "blocks": blocks,
+        "cells": cells,
         "psf_object": None,
         "lsst_psf": None,
         "base_column_name": (
@@ -178,7 +178,7 @@ def prepare_data_one_cell(
 def prepare_data_one_cell_multiband(
     *,
     bands: Sequence[str],
-    cells: dict,
+    lsst_cells: dict,
     seed: int,
     mag_zeros: dict,
     npix: int = 64,
@@ -189,14 +189,15 @@ def prepare_data_one_cell_multiband(
     star_cat: NDArray | None = None,
     mask_array: NDArray | None = None,
     detection: astropy.table.Table | None = None,
-    blocks: List | None = None,
+    cells: List | None = None,
     survey: str | None = None,
     **kwargs,
 ):
     """Cell-coadd counterpart of :func:`prepare_data_multiband`.
 
-    ``cells`` maps band to the ``SingleCellCoadd`` at the same cell id, and
-    ``mag_zeros`` gives that band coadd's native zeropoint.
+    ``lsst_cells`` maps band to the ``SingleCellCoadd`` at the same cell
+    id, and ``mag_zeros`` gives that band coadd's native zeropoint;
+    ``cells`` is the AnaCal cell list for the measurement.
 
     ``mask_array`` (the cell's slice of the stitched systematics mask,
     already a union over ALL bands plus bright stars) is handed unchanged
@@ -207,14 +208,14 @@ def prepare_data_one_cell_multiband(
         raise ValueError("prepare_data_one_cell_multiband needs at least one band")
     if len(set(bands)) != len(bands):
         raise ValueError(f"duplicate entries in bands: {bands}")
-    missing = [b for b in bands if b not in cells]
+    missing = [b for b in bands if b not in lsst_cells]
     if missing:
         raise KeyError(f"no cell for band(s) {missing}")
 
     def per_band():
         for band in bands:
             yield prepare_data_one_cell(
-                cell=cells[band],
+                cell=lsst_cells[band],
                 band=band,
                 seed=seed,
                 mag_zero=mag_zeros[band],
@@ -226,7 +227,7 @@ def prepare_data_one_cell_multiband(
                 star_cat=star_cat,
                 mask_array=mask_array,
                 detection=detection,
-                blocks=blocks,
+                cells=cells,
                 survey=survey,
             )
 

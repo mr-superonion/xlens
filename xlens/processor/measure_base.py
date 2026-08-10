@@ -35,6 +35,9 @@ __all__ = [
     "AnacalMeasureTaskBase",
 ]
 
+from concurrent.futures import ThreadPoolExecutor
+
+import anacal
 import lsst.afw.table as afwTable
 import lsst.daf.base as dafBase
 import numpy as np
@@ -83,6 +86,15 @@ class AnacalMeasureConfigBase(Config):
 
     def validate(self):
         super().validate()
+        # Single mask-cut knob for the whole task: set
+        # ``config.anacal.mask_value_max`` and the fpfs subtask always
+        # measures with the SAME threshold -- the two stages skipping
+        # different sources would produce an inconsistent catalog.
+        # Guarded so a re-validation of an already-frozen config (where
+        # the two necessarily agree) is a no-op instead of a
+        # "Cannot modify a frozen Config" error.
+        if self.fpfs.mask_value_max != self.anacal.mask_value_max:
+            self.fpfs.mask_value_max = self.anacal.mask_value_max
         if self._fpfs_required() and self.fpfs.sigma_shapelets1 < 0.0:
             raise FieldValidationError(
                 self.fpfs.__class__.sigma_shapelets1,
@@ -145,9 +157,24 @@ class MeasureBandsConfigBase(AnacalMeasureConfigBase):
             "True."
         ),
     )
+    num_workers = Field[int](
+        doc="Worker threads for the per-cell loops. 1 means a plain "
+            "serial Python loop. Values >1 use a thread pool: AnaCal "
+            "releases the GIL around its C++ compute (detection, "
+            "measurement and the native per-source PSF draws), so the "
+            "cell loops scale -- ~3x at 8 workers on a patch coadd. "
+            "Results are independent of this value.",
+        default=1,
+    )
 
     def validate(self):
         super().validate()
+        if self.num_workers < 1:
+            raise FieldValidationError(
+                self.__class__.num_workers,
+                self,
+                "num_workers must be >= 1.",
+            )
         if len(self.detection_bands) == 0:
             raise FieldValidationError(
                 self.__class__.detection_bands,
@@ -182,6 +209,116 @@ class AnacalMeasureTaskBase(PipelineTask):
     which only need ``idGenerator``).  Not runnable on its own: it defines
     no ``ConfigClass`` or connections.
     """
+
+    def _map_parallel(self, fn, items: list) -> list:
+        """Apply ``fn`` to ``items`` in order; threaded if num_workers > 1.
+
+        The work-unit loops of the measurement tasks (AnaCal cells over a
+        patch coadd, DM coadd cells for cell coadds) all run through
+        here, so the
+        ``num_workers`` config is the single dispatch point for threaded
+        (and future GPU) AnaCal backends.
+        """
+        if self.config.num_workers <= 1 or len(items) <= 1:
+            return [fn(item) for item in items]
+        with ThreadPoolExecutor(
+            max_workers=self.config.num_workers
+        ) as pool:
+            return list(pool.map(fn, items))
+
+    def _partition_external_detection(
+        self,
+        detection: NDArray,
+        regions: list,
+        pixel_scale: float,
+    ) -> tuple[dict, dict]:
+        """Split an external detection catalog into per-region groups.
+
+        ``regions`` is a list of ``(key, x0, y0, x1, y1)`` half-open
+        rectangles in GLOBAL pixel units -- the same inner regions
+        (cells for patch coadds, cells for cell coadds) that internal
+        detection uses, so ``_force`` sees the identical per-group
+        interface either way.  A row belongs to the region whose
+        rectangle contains it; rows contained by NO region -- outside
+        the tiling, or over a hole in a region list that omits cells
+        with no input data -- are DROPPED (no coadd data at that
+        position means no measurement), mirroring internal detection,
+        which can only ever find sources inside existing regions.
+
+        Returns ``(det_cats, order)``: per-key sub-catalogs (non-empty
+        only) and each key's original row indices, so callers can
+        restore the input row order after per-group results are merged.
+        """
+        px = np.asarray(detection["x1_det"], float) / pixel_scale
+        py = np.asarray(detection["x2_det"], float) / pixel_scale
+        det_cats: dict = {}
+        order: dict = {}
+        assigned = np.zeros(len(px), dtype=bool)
+        for key, x0, y0, x1, y1 in regions:
+            sel = (
+                ~assigned
+                & (px >= x0) & (px < x1)
+                & (py >= y0) & (py < y1)
+            )
+            if not np.any(sel):
+                continue
+            assigned |= sel
+            idx = np.flatnonzero(sel)
+            det_cats[key] = detection[idx]
+            order[key] = idx
+        n_left = int((~assigned).sum())
+        if n_left:
+            self.log.info(
+                "%d external detections fall in no region "
+                "(outside the tiling or over a missing cell); dropped.",
+                n_left,
+            )
+        return det_cats, order
+
+    def _stamp_external_mask_value(
+        self,
+        detection: NDArray,
+        mask_array: NDArray,
+        mask_origin: tuple,
+        pixel_scale: float,
+        sigma_arcsec: float,
+    ) -> NDArray:
+        """Return a copy of ``detection`` with ``mask_value`` stamped.
+
+        Delegates to the C++ ``anacal.mask.add_pixel_mask_column`` --
+        the same smoothing and sampling internal detections get
+        (mask_value = int(1000 * Gaussian-smoothed 0/1 mask) at the
+        source centre, sigma = sigma_arcsec * sqrt(2) * 1.5).  The C++
+        samples at the model centre in the MASK's pixel frame, so the
+        positions are shifted by the mask origin for the call; the
+        returned catalog keeps the original coordinates.  Positions
+        outside the mask keep their input mask_value.
+        """
+        shifted = detection.copy()
+        dx = float(mask_origin[0]) * pixel_scale
+        dy = float(mask_origin[1]) * pixel_scale
+        shifted["x1"] = shifted["x1"] - dx
+        shifted["x2"] = shifted["x2"] - dy
+        stamped = anacal.mask.add_pixel_mask_column(
+            shifted,
+            (np.asarray(mask_array) > 0).astype(np.int16),
+            float(sigma_arcsec) * np.sqrt(2.0) * 1.5,
+            pixel_scale,
+        )
+        out = detection.copy()
+        out["mask_value"] = stamped["mask_value"]
+        return out
+
+    def _restore_input_order(
+        self,
+        catalog: NDArray,
+        force_keys: list,
+        order: dict,
+    ) -> NDArray:
+        """Reorder per-group concatenated rows back to input row order."""
+        orig = np.concatenate([order[key] for key in force_keys])
+        assert len(orig) == len(catalog)
+        return catalog[np.argsort(orig, kind="stable")]
 
     def _make_measure_subtasks(self) -> None:
         """anacal + fpfs subtasks, plus the PSF-HSM subtask when enabled."""
@@ -266,11 +403,11 @@ class AnacalMeasureTaskBase(PipelineTask):
         psf_moments = measure_psf_hsm_moments(
             self._psfHsmCtx, self.psfHsmMeasurement, hsm_exposure,
         )
-        psf_block = broadcast_psf_hsm_moments(
+        psf_cols = broadcast_psf_hsm_moments(
             psf_moments, band, n=len(cat),
             survey=self.config.survey,
         )
-        return np.asarray(rfn.merge_arrays([cat, psf_block], flatten=True))
+        return np.asarray(rfn.merge_arrays([cat, psf_cols], flatten=True))
 
     def _finalize_catalog(
         self,

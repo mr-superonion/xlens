@@ -108,7 +108,6 @@ def _measure_coadd(outcome, skymap, tract_id, patch_id, band):
     config.anacal.validate_psf = False
     config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
     config.fpfs.do_noise_bias_correction = False
-    config.fpfs.return_only_linear_modes = False
     config.doPsfHsmMoments = True
 
     pipe = MeasureCoaddsPipe(config=config)

@@ -125,13 +125,17 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
     Each SingleCellCoadd has a 250x250 outer region and a 150x150 inner
     region with 50px padding on all sides. Detection and measurement are
     performed on the full outer region so that objects near inner-region
-    boundaries have complete pixel context. The anacal block inner region
+    boundaries have complete pixel context. The anacal cell inner region
     (pad=50) keeps only objects whose centers fall within the 150x150
     inner region, preventing double-counting across neighboring cells.
 
     The noise realization stored in each cell coadd is passed directly
     to anacal for noise bias correction. The noise image is rotated by
     90 degrees inside ``prepare_data`` to remove anisotropy.
+
+    The per-cell loops run through a thread pool of ``num_workers``
+    threads (default 1, a plain serial loop), sharing the dispatch point
+    with the per-cell loops of :class:`MeasureCoaddsPipe`.
     """
 
     _DefaultName = "MeasureCellCoaddsPipe"
@@ -174,20 +178,20 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         butlerQC.put(outputs, outputRefs)
 
     @staticmethod
-    def _build_cell_block(cell):
-        """Build a single anacal block covering the full cell outer region.
+    def _build_anacal_cell(cell):
+        """Build a single anacal cell covering the full cell outer region.
 
-        The block inner region is set with pad=50, matching the cell's
+        The cell inner region is set with pad=50, matching the cell's
         inner/outer structure (250x250 outer, 150x150 inner, 50px on
         each side). Anacal only keeps detections whose centers fall
-        within the block inner region [50, 200) x [50, 200).
+        within the cell inner region [50, 200) x [50, 200).
         """
         bbox = cell.outer.bbox
         width = bbox.getWidth()
         height = bbox.getHeight()
         pixel_scale = float(cell.wcs.getPixelScale().asArcseconds())
         pad = 50
-        bb = anacal.geometry.block(
+        bb = anacal.geometry.cell(
             int(width // 2),  # xcen
             int(height // 2),  # ycen
             0,
@@ -247,7 +251,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         """Build the data dict for a single cell via prepare_data_one_cell."""
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         npix = self.config.anacal.npix
-        blocks = self._build_cell_block(cell)
+        cells = self._build_anacal_cell(cell)
         noise_correction = self.config.anacal.do_noise_bias_correction
         data = prepare_data_one_cell(
             cell=cell,
@@ -261,16 +265,16 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             tract=tract,
             patch=patch,
             detection=detection,
-            blocks=blocks,
+            cells=cells,
             mask_array=mask_array,
         )
-        # Update block PSF with the actual computed PSF
-        data["blocks"][0].psf_array = data["psf_array"].copy()
+        # Update cell PSF with the actual computed PSF
+        data["cells"][0].psf_array = data["psf_array"].copy()
         return data
 
     def _prepare_cell_multiband(
         self,
-        cells: dict,
+        lsst_cells: dict,
         *,
         bands: list[str],
         seed: int,
@@ -282,15 +286,16 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
     ) -> dict:
         """Build the data dict for one cell across several bands.
 
-        ``cells`` maps band to that band's ``SingleCellCoadd`` for the same
-        cell id.  The cells share a pixel grid, so one block covers them all.
+        ``lsst_cells`` maps band to that band's ``SingleCellCoadd`` for
+        the same cell id.  They share a pixel grid, so one AnaCal cell
+        covers them all.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         npix = self.config.anacal.npix
-        blocks = self._build_cell_block(cells[bands[0]])
+        cells = self._build_anacal_cell(lsst_cells[bands[0]])
         noise_correction = self.config.anacal.do_noise_bias_correction
         data = prepare_data_one_cell_multiband(
-            cells=cells,
+            lsst_cells=lsst_cells,
             bands=bands,
             survey=self.config.survey,
             seed=seed,
@@ -300,11 +305,11 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             skyMap=skyMap,
             tract=tract,
             patch=patch,
-            blocks=blocks,
+            cells=cells,
             mask_array=mask_array,
         )
         # One PSF stamp per band, in the order the images were stacked.
-        data["blocks"][0].psf_array = data["psf_array"].copy()
+        data["cells"][0].psf_array = data["psf_array"].copy()
         return data
 
     def _cell_mask(
@@ -355,8 +360,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         mag_zeros = {b: self._coadd_mag_zero(c) for b, c in det_coadds.items()}
         det_cells = {b: dict(c.cells) for b, c in det_coadds.items()}
 
-        det_cats: dict = {}
-        for cell_id, det_cell in det_cells[bands[0]].items():
+        def _detect_one(item):
+            cell_id, det_cell = item
             cell_mask = self._cell_mask(
                 stitched_mask_array,
                 mask_origin,
@@ -385,10 +390,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         patch=patch,
                         mask_array=cell_mask,
                     )
-                cat = self.anacal.run(**data)
-                del data
-                if len(cat) > 0:
-                    det_cats[cell_id] = cat
+                return self.anacal.run(**data)
             except Exception as e:
                 ix, iy = int(cell_id.x), int(cell_id.y)
                 self.log.error(
@@ -399,7 +401,16 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                     iy,
                     e,
                 )
-        del det_coadds, det_cells
+                return None
+
+        items = list(det_cells[bands[0]].items())
+        det_cats: dict = {}
+        for (cell_id, _), cat in zip(
+            items, self._map_parallel(_detect_one, items)
+        ):
+            if cat is not None and len(cat) > 0:
+                det_cats[cell_id] = cat
+        del det_coadds
 
         if not det_cats:
             # Edge-of-tract patches whose every cell fails noise estimation
@@ -445,7 +456,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             self.log.debug("Measuring band %s", band)
             band_coadd = coadd_handles_dict[band].get()
             mag_zero = self._coadd_mag_zero(band_coadd)
-            for cell_id in active_cell_ids:
+
+            def _force_one(cell_id):
                 cell = band_coadd.cells[cell_id]
                 cell_mask = self._cell_mask(
                     stitched_mask_array,
@@ -470,7 +482,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                     )
                     if self.config.doPsfHsmMoments:
                         # HSM measures the cell PSF stamp (the synthetic
-                        # ExposureF is released as this iteration exits).
+                        # ExposureF is released as this call exits).
                         cat = self._append_psf_hsm_moments(
                             cat,
                             band=band,
@@ -478,7 +490,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                                 cell.psf_image
                             ),
                         )
-                    cell_force_parts[cell_id].append(cat)
+                    return cat
                 except Exception as e:
                     ix, iy = int(cell_id.x), int(cell_id.y)
                     self.log.error(
@@ -490,7 +502,17 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         band,
                         e,
                     )
-            del band_coadd
+                    return None
+
+            for cell_id, cat in zip(
+                active_cell_ids,
+                self._map_parallel(_force_one, active_cell_ids),
+            ):
+                if cat is not None:
+                    cell_force_parts[cell_id].append(cat)
+            # Release this band's coadd before loading the next one
+            # (rebinding, not `del`: the closure above still names it).
+            band_coadd = None
 
         nbands = len(bands)
         force_cats: dict = {}
@@ -508,9 +530,17 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         tract: int,
         patch: int,
         mask=None,
+        detection: NDArray | None = None,
         **kwargs,
     ):
         """Run detection and forced measurement on cell-based coadds.
+
+        When an external ``detection`` catalog is given, the internal
+        detection step is skipped and the catalog is partitioned into
+        the same per-cell groups internal detection would produce (cell
+        inner regions tile the patch), so forced measurement runs -- and
+        threads -- identically either way.  The output preserves the
+        input row order; rows whose cell failed in any band are dropped.
 
         Detection is performed using i-band only. Forced measurement
         processes one band at a time to minimize memory usage: each
@@ -562,15 +592,60 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                 patch,
             )
 
-        det_cats = self._detect(
-            coadd_handles_dict=coadd_handles_dict,
-            seed=seed,
-            skyMap=skyMap,
-            tract=tract,
-            patch=patch,
-            stitched_mask_array=stitched_mask_array,
-            mask_origin=mask_origin,
-        )
+        order: dict | None = None
+        if detection is not None:
+            # External catalog: partition into the SAME per-cell groups
+            # internal detection would produce (cell inner regions tile
+            # the patch), so _force sees one interface and its cell loop
+            # threads either way.  Input row order restored below.
+            first_band = next(iter(coadd_handles_dict))
+            mca = coadd_handles_dict[first_band].get()
+            pixel_scale = float(
+                skyMap[tract].getWcs().getPixelScale().asArcseconds()
+            )
+            regions = []
+            for cell_id, cell in dict(mca.cells).items():
+                ib = cell.inner.bbox
+                regions.append(
+                    (cell_id, ib.getBeginX(), ib.getBeginY(),
+                     ib.getEndX(), ib.getEndY())
+                )
+            del mca
+            det_use = detection
+            if stitched_mask_array is not None:
+                # Stamp mask_value from the systematics mask (same C++
+                # smoothing/sampling internal detections get).  The
+                # mask_value cut itself happens in C++ (ForceTask /
+                # process_image) via the fpfs/anacal mask_value_max
+                # configs -- Python only stamps and partitions.
+                det_use = self._stamp_external_mask_value(
+                    det_use,
+                    stitched_mask_array,
+                    mask_origin,
+                    pixel_scale,
+                    float(self.config.anacal.sigma_arcsec),
+                )
+            # Basic geometric selection only: rows in no existing cell's
+            # inner region (outside the coadd, patch border, or holes)
+            # are dropped by the partition.
+            det_cats, order = self._partition_external_detection(
+                det_use, regions, pixel_scale,
+            )
+            if not det_cats:
+                raise NoWorkFound(
+                    f"External detection catalog is empty "
+                    f"(tract={tract}, patch={patch}); skipping this patch."
+                )
+        else:
+            det_cats = self._detect(
+                coadd_handles_dict=coadd_handles_dict,
+                seed=seed,
+                skyMap=skyMap,
+                tract=tract,
+                patch=patch,
+                stitched_mask_array=stitched_mask_array,
+                mask_origin=mask_origin,
+            )
 
         force_cats = self._force(
             detection_dict=det_cats,
@@ -600,6 +675,12 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             )
 
         output = np.concatenate(cell_results)
+        if order is not None:
+            # External catalogs are row-aligned to their producer; undo
+            # the per-cell grouping.
+            output = self._restore_input_order(
+                output, list(force_cats.keys()), order,
+            )
         output = self._finalize_catalog(
             output, seed=seed, skyMap=skyMap, tract=tract, patch=patch,
         )

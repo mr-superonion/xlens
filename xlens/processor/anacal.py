@@ -85,8 +85,18 @@ class AnacalConfig(Config):
         doc="rotation id",
         default=0,
     )
+    mask_value_max = Field[int](
+        doc=(
+            "Skip measurement of sources whose mask_value exceeds this "
+            "(rows kept with default values; applied in C++ inside "
+            "process_image). None disables the cut."
+        ),
+        default=None,
+        optional=True,
+    )
+
     psf_model_type = Field[str](
-        doc="type of psf model (choose from object, block, patch)",
+        doc="type of psf model (choose from object, cell, patch)",
         default="patch",
     )
 
@@ -159,7 +169,7 @@ class AnacalTask(Task):
         patchInfo=None,
         detection: NDArray | None,
         lsst_psf=None,
-        blocks,
+        cells,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
@@ -197,11 +207,12 @@ class AnacalTask(Task):
             gal_array,
             psf_array,
             variance=noise_variance,
-            block_list=blocks,
+            cell_list=cells,
             detection=det,
             noise_array=noise_array,
             mask_array=mask_array,
             do_fpfs=self.config.do_fpfs,
+            mask_value_max=self.config.mask_value_max,
         )
         catalog["x1"] = catalog["x1"] + begin_x * pixel_scale
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
@@ -256,7 +267,8 @@ class AnacalTask(Task):
         mask_array: NDArray | None = None,
         noise_array: NDArray | None = None,
         detection: astropy.table.Table | None = None,
-        blocks: list | None = None,
+        cells: list | None = None,
+        num_workers: int = 1,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -272,13 +284,14 @@ class AnacalTask(Task):
         """
         assert isinstance(self.config, AnacalConfig)
         pixel_scale = float(exposure.wcs.getPixelScale().asArcseconds())
-        if blocks is None:
-            blocks = utils.image.get_blocks(
+        if cells is None:
+            cells = utils.image.get_cells(
                 lsst_psf=exposure.getPsf(),
                 lsst_bbox=exposure.getBBox(),
                 pixel_scale=pixel_scale,
                 npix=self.config.npix,
                 psf_array=psf_array,
+                num_workers=num_workers,
             )
         data = utils.image.prepare_data(
             exposure=exposure,
@@ -298,7 +311,7 @@ class AnacalTask(Task):
             detection=detection,
             band=band,
             survey=survey,
-            blocks=blocks,
+            cells=cells,
         )
         if self.config.validate_psf:
             data["lsst_psf"] = exposure.getPsf()
@@ -311,8 +324,8 @@ class AnacalTask(Task):
         else:
             data["base_column_name"] = band + "_"
         if self.config.psf_model_type == "object":
-            data["psf_object"] = utils.image.LsstPsf(
-                psf=exposure.getPsf(),
+            data["psf_object"] = utils.image.make_object_psf(
+                exposure.getPsf(),
                 npix=self.config.npix,
                 lsst_bbox=exposure.getBBox(),
             )
@@ -334,7 +347,8 @@ class AnacalTask(Task):
         star_cat: NDArray | None = None,
         mask_array: NDArray | None = None,
         detection: astropy.table.Table | None = None,
-        blocks: list | None = None,
+        cells: list | None = None,
+        num_workers: int = 1,
         **kwargs,
     ):
         """Prepare a stack of bands as one anacal detection input.
@@ -359,12 +373,13 @@ class AnacalTask(Task):
 
         exps = [exposures[b] for b in bands]
         pixel_scale = float(exps[0].wcs.getPixelScale().asArcseconds())
-        if blocks is None:
-            blocks = utils.image.get_blocks_multiband(
+        if cells is None:
+            cells = utils.image.get_cells_multiband(
                 lsst_psfs=[e.getPsf() for e in exps],
                 lsst_bbox=exps[0].getBBox(),
                 pixel_scale=pixel_scale,
                 npix=self.config.npix,
+                num_workers=num_workers,
             )
         data = utils.image.prepare_data_multiband(
             bands=bands,
@@ -381,7 +396,7 @@ class AnacalTask(Task):
             star_cat=star_cat,
             mask_array=mask_array,
             detection=detection,
-            blocks=blocks,
+            cells=cells,
             survey=survey,
         )
         # The detection image belongs to no single band, so it carries no

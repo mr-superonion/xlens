@@ -92,7 +92,6 @@ def _measure(skymap, exposures: dict):
     cfg.anacal.validate_psf = False
     cfg.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
     cfg.fpfs.do_noise_bias_correction = True
-    cfg.fpfs.return_only_linear_modes = False
     pipe = MeasureCoaddsPipe(config=cfg)
     handles = make_exposure_handles(
         exposures, tract=TRACT_ID, patch=PATCH_ID,
