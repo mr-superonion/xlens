@@ -111,6 +111,57 @@ _NATIVE_MODEL_LOCK = threading.Lock()
 _PERMANENT_LOAD_ERRORS = (NotImplementedError, ValueError, TypeError)
 
 
+def _scan_coadd_psf_config(source):
+    """(warpingKernelName, cacheSize) from a persisted CoaddPsf.
+
+    ``source`` is a FITS path or file-like object.  The values live in
+    the one-row catalog HDU with ``AR_NAME == 'CoaddPsf'``, as columns
+    ``warpingkernelname`` and ``cachesize`` -- the same HDU and the
+    same two columns DM itself reads when it restores the PSF
+    (``CoaddPsfFactory::read``).
+    """
+    import astropy.io.fits as pyfits
+
+    with pyfits.open(source) as hdus:
+        for hdu in hdus:
+            if hdu.header.get("AR_NAME") != "CoaddPsf":
+                continue
+            cols = getattr(hdu, "columns", None)
+            if cols is None or "warpingkernelname" not in cols.names:
+                continue
+            row = hdu.data[0]
+            return str(row["warpingkernelname"]), int(row["cachesize"])
+    raise RuntimeError(
+        f"no persisted CoaddPsf configuration found in {source}"
+    )
+
+
+def _coadd_psf_config(lsst_psf):
+    """(warpingKernelName, cacheSize) of a live DM ``CoaddPsf``.
+
+    Those two values are private members of CoaddPsf with no accessor
+    (DM ticket #2949), so the only way to read them back is the
+    persisted form.  DM is serialized into afw's in-memory FITS buffer
+    -- NOT a temporary file: under bps/parsl a temp file would mean an
+    18 MB write per band per quantum, sensitivity to TMPDIR pointing at
+    shared scratch, and an orphaned directory whenever a job is killed.
+
+    All of this lives in xlens, not anacal: it is DM-archive-format
+    knowledge, and anacal depends on neither the LSST stack nor
+    astropy.  Reading the ORIGINAL coadd file with
+    :func:`_scan_coadd_psf_config` costs ~9 ms against the ~140 ms
+    spent here re-encoding every component; prefer it when the path is
+    known.
+    """
+    import io
+
+    from lsst.afw.fits import MemFileManager
+
+    manager = MemFileManager()
+    lsst_psf.writeFits(manager)
+    return _scan_coadd_psf_config(io.BytesIO(manager.getData()))
+
+
 def _native_coadd_model_cached(lsst_psf, lsst_bbox):
     """Native model for a DM PSF, loaded once per (PSF, bbox).
 
@@ -128,7 +179,7 @@ def _native_coadd_model_cached(lsst_psf, lsst_bbox):
     from anacal import psf as apsf
 
     try:
-        name, cache = apsf.read_coadd_psf_config(lsst_psf)
+        name, cache = _coadd_psf_config(lsst_psf)
         model = apsf.load_coadd_psf_model(
             lsst_psf, lsst_bbox, name, cache
         )
