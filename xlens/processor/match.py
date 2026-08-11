@@ -49,6 +49,13 @@ from scipy.spatial.distance import cdist
 
 from ..wcs import sky_to_pixel
 
+from ..simulator.galaxies import (
+    CatSim2017Catalog,
+    DiffskyCatalog,
+    Flagship2025Catalog,
+    BaseGalaxyCatalog
+)
+
 # dm_colnames = [
 #     "base_SdssCentroid_x",
 #     "base_SdssCentroid_y",
@@ -145,6 +152,10 @@ class matchPipeConfig(
     catsim_dir = Field[str](
         doc="Directory containing input galaxy catalogs.",
         default=os.environ.get("CATSIM_DIR", "."),
+    )
+    galaxy_type = Field[str](
+        doc="Galaxy type. One of [catsim2017, flagship2025, diffsky]",
+        default='catsim2017',
     )
     band_column_names = DictField(
         keytype=str,
@@ -317,21 +328,25 @@ class matchPipe(PipelineTask):
         self,
         src: np.ndarray,
         mrc: np.ndarray,
+        gal_type: BaseGalaxyCatalog,
         pixel_scale=0.168,
         catsim_dir: str | None = None,
         wcs=None,
     ):
         assert isinstance(self.config, matchPipeConfig)
+        i_mag = gal_type.mag_format.format(sname='lsst', band='i')
         if self._cat_ref is None:
             catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
-            path = os.path.join(catsim_dir, "OneDegSq.fits")
+            path = os.path.join(catsim_dir, gal_type.catalog_filename)
+
+
             self.log.info("Caching truth catalog reference from %s", path)
             self._cat_ref = fitsio.read(
                 path,
-                columns=["i_ab"],
+                columns=[i_mag],
             )
         assert self._cat_ref is not None
-        mag_mrc = self._cat_ref[mrc["indices"]]["i_ab"]
+        mag_mrc = self._cat_ref[mrc["indices"]][i_mag]
         mrc = mrc[mag_mrc < self.config.mag_max_truth]
         assert wcs is not None, "wcs is required for merge_truth"
         x_mrc, y_mrc = sky_to_pixel(
@@ -374,6 +389,13 @@ class matchPipe(PipelineTask):
         assert isinstance(self.config, matchPipeConfig)
         pixel_scale = skyMap[tract][patch].getWcs().getPixelScale().asDegrees() * 3600
 
+        if self.config.galaxy_type == "catsim2017":
+            GalClass = CatSim2017Catalog
+        elif self.config.galaxy_type == "flagship2025":
+            GalClass = Flagship2025Catalog
+        elif self.config.galaxy_type == "diffsky":
+            GalClass = DiffskyCatalog
+
         if dm_catalog is not None:
             catalog = self.merge_dm(catalog, dm_catalog, pixel_scale)
 
@@ -382,8 +404,9 @@ class matchPipe(PipelineTask):
             catalog = self.merge_truth(
                 catalog,
                 truth_catalog,
-                pixel_scale,
-                catsim_dir=catsim_dir,
+                gal_type=GalClass,
+                pixel_scale=pixel_scale,
+                catsim_dir=self.config.catsim_dir,
                 wcs=wcs,
             )
 

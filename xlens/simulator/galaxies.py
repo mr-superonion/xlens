@@ -246,6 +246,9 @@ class BaseGalaxyCatalog(ABC):
     # Basename of the catalog file under ``catsim_dir``. Subclasses MUST
     # set this; ``_read_catalog`` resolves it against ``self.catsim_dir``.
     catalog_filename: ClassVar[str]
+    ra_col: ClassVar[str]
+    dec_col: ClassVar[str]
+    mag_format: ClassVar[str]
 
     def _load_catalog_file(self, fname: str) -> Any:
         """Load the raw catalog from ``fname``.
@@ -588,6 +591,9 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
     """
 
     catalog_filename = "OneDegSq.fits"
+    ra_col = "ra"
+    dec_col = "dec"
+    mag_format = "{band}_ab"
 
     def _compute_density(self, cat) -> float:
         """Return density in objects/arcmin^2 for a 1-deg^2 catalog."""
@@ -623,7 +629,7 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
         dd = entry.copy()
         if not include_point_source:
             dd["fluxnorm_agn"] = 0.0
-        ab_magnitude = dd[band + "_ab"]
+        ab_magnitude = dd[band + '_ab']
         total_flux = 10 ** ((mag_zero - ab_magnitude) / 2.5)
 
         # split flux among components
@@ -690,6 +696,9 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
     """
 
     catalog_filename = "flagship_cosmos.fits"
+    ra_col = "ra_gal"
+    dec_col = "dec_gal"
+    mag_format = "{sname}_{band}"
 
     def _compute_density(self, cat) -> float:
         """Return density (objects/arcmin^2) from the sky footprint."""
@@ -786,6 +795,9 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
     # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
     catalog_filename = "diffsky_arr.parquet"
+    ra_col = "ra_gal" # Not sure if this is the correct column name
+    dec_col = "dec_gal" # Not sure if this is the correct column name
+    mag_format = "{sname}_{band}_bulge" # Not sure which one to use for matching
 
     def _load_catalog_file(self, fname: str):
         return pq.read_table(fname).to_pandas().to_records(index=False)
