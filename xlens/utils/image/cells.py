@@ -86,7 +86,7 @@ def prepare_data_one_cell(
     else:
         mask_array = np.array(mask_array, dtype=np.int16)
 
-    anacal.mask.mask_galaxy_image(gal_array, mask_array, False, star_cat)
+    anacal.mask.mask_galaxy_image(gal_array, mask_array, star_cat)
 
     noise_variance = estimate_noise_variance(
         outer.variance.array,

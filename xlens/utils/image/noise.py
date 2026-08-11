@@ -212,7 +212,6 @@ def prepare_noise_array(
     anacal.mask.mask_galaxy_image(
         noise_array,
         mask_array,
-        False,
         star_cat,
     )
     return noise_array
