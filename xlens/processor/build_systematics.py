@@ -21,43 +21,25 @@
 
 from typing import Any
 
-import anacal
 import numpy as np
-from lsst.afw.image import ExposureF, MaskX
+from lsst.afw.image import MaskX
 from lsst.geom import Box2I, Extent2I, Point2D, Point2I
-from lsst.meas.algorithms import (
-    LoadReferenceObjectsConfig,
-    ReferenceObjectLoader,
-)
-from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import (
-    ChoiceField,
-    ConfigField,
-    Field,
-    FieldValidationError,
-    ListField,
-)
+from lsst.meas.algorithms import ReferenceObjectLoader
+from lsst.pex.config import Field
 from lsst.pipe.base import (
-    PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
     Struct,
 )
 from lsst.pipe.base import connectionTypes as cT
 
-from xlens.utils.image import (
-    badMaskDefault,
-    prepare_mask,
-    resize_array,
-    subpixel_shift,
-)
-from xlens.utils.mask import (
-    STAR_MASK_RADIUS_FUNCS,
-    build_gaia_xyr,
-    get_gaia_table,
-)
+from xlens.utils.image import resize_array, subpixel_shift
 
-band_order = "ugrizy"
+from .systematics_base import (
+    BuildSystematicsConfigBase,
+    BuildSystematicsTaskBase,
+    band_order,
+)
 
 
 class BuildSystematicsConnections(
@@ -120,21 +102,13 @@ class BuildSystematicsConnections(
         super().__init__(config=config)
 
 
-class BuildSystematicsConfig(PipelineTaskConfig, pipelineConnections=BuildSystematicsConnections):
+class BuildSystematicsConfig(
+    BuildSystematicsConfigBase,
+    PipelineTaskConfig,
+    pipelineConnections=BuildSystematicsConnections,
+):
     """Configuration for :class:`BuildSystematicsTask`."""
 
-    npix = Field[int](
-        doc="number of pixels in stamp",
-        default=49,
-    )
-    badMaskPlanes = ListField[str](
-        doc="Mask planes used to reject bad pixels.",
-        default=badMaskDefault,
-    )
-    gaiaPadding = Field[int](
-        doc="Padding (pixels) when selecting GAIA sources around the patch.",
-        default=300,
-    )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
@@ -143,34 +117,9 @@ class BuildSystematicsConfig(PipelineTaskConfig, pipelineConnections=BuildSystem
         doc="minimum (aperture) snr threshold of stars",
         default=150.0,
     )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
-    gaiaLoader = ConfigField(
-        dtype=LoadReferenceObjectsConfig,
-        doc="Reference catalog loader",
-    )
-    starMaskType = ChoiceField[str](
-        doc=(
-            "Name of the GAIA halo-radius model in "
-            "xlens.utils.mask.STAR_MASK_RADIUS_FUNCS. 'default' = "
-            "450/200/100 px step for mag <= 11/14/20; 'no_mask' = "
-            "flat 10 px for every GAIA star with mag <= 20."
-        ),
-        allowed={k: k for k in STAR_MASK_RADIUS_FUNCS},
-        default="default",
-    )
-
-    def setDefaults(self):
-        super().setDefaults()
-        self.gaiaLoader.requireProperMotion = False
-        self.gaiaLoader.anyFilterMapsToThis = "phot_g_mean"
-
-    def validate(self):
-        super().validate()
-        if self.npix % 2 == 0:
-            raise FieldValidationError(self.__class__.npix, self, "npix should be odd number")
 
 
-class BuildSystematicsTask(PipelineTask):
+class BuildSystematicsTask(BuildSystematicsTaskBase):
     """Collect mask information from exposures, including bright star
     masking.
     """
@@ -250,9 +199,7 @@ class BuildSystematicsTask(PipelineTask):
                 template_wcs = exp.getWcs()
                 template_bbox = exp.getBBox()
 
-            band_mask = self._build_mask_band(
-                exposure=exp,
-            )
+            band_mask = self._build_mask_band(exp, band)
             mask_array = self._merge_mask(mask_array, band_mask)
 
             if band in band_order:
@@ -269,22 +216,13 @@ class BuildSystematicsTask(PipelineTask):
                     if star_array is not None:
                         star_centered_array[i] = star_array
             del exp, band_mask
-        if template_wcs is not None and template_bbox is not None and gaia_loader is not None:
-            gaia = gaia_loader.loadPixelBox(
-                bbox=template_bbox,
-                filterName="phot_g_mean",
-                wcs=template_wcs,
-                bboxToSpherePadding=self.config.gaiaPadding,
-            ).refCat
-            gaia_table = get_gaia_table(gaia_catalog=gaia, wcs=template_wcs)
-            gaia_array = build_gaia_xyr(
-                gaia_table,
-                bbox=template_bbox,
-                star_mask_type=self.config.starMaskType,
-            )
-            if gaia_array is not None:
-                anacal.mask.add_bright_star_mask(mask_array=mask_array, star_array=gaia_array)
         assert mask_array is not None
+        self._apply_gaia_mask(
+            mask_array=mask_array,
+            bbox=template_bbox,
+            wcs=template_wcs,
+            gaia_loader=gaia_loader,
+        )
         h, w = mask_array.shape
         output_msk = MaskX(width=w, height=h)
         output_msk.getArray()[:, :] = mask_array.astype(output_msk.getArray().dtype, copy=False)
@@ -304,30 +242,14 @@ class BuildSystematicsTask(PipelineTask):
             outputStarCentered=star_centered_array,
         )
 
-    def _merge_mask(
-        self,
-        global_mask: np.ndarray | None,
-        band_mask: np.ndarray,
-    ):
-        if global_mask is None:
-            return band_mask.astype(np.int16)
-        return (global_mask | band_mask).astype(np.int16)
-
-    def _build_mask_band(self, *, exposure: ExposureF) -> np.ndarray:
-        """Bad-pixel mask for one band: the configured mask planes plus the
-        image < -6 sigma negative-outlier guard.  This is the ONLY place a
-        mask is built for the patch-coadd shear path; the measurement tasks
-        consume the union across bands (plus bright stars) as-is.
-        """
-        assert isinstance(self.config, BuildSystematicsConfig)
-        return prepare_mask(
-            exposure.image.array,
-            exposure.mask,
-            exposure.variance.array,
-            self.config.badMaskPlanes,
-        )
-
     def get_noise_corr(self, exposure, mask_array):
+        """Noise correlation from a fixed central [1000:3000] window.
+
+        NOTE the window's plane list below is hardcoded and does NOT
+        follow ``badMaskPlanes``; ``BuildCellSystematicsTask`` derives
+        its own window from the config instead.  Left as-is so this
+        refactor does not silently change the patch-path numerics.
+        """
         assert isinstance(self.config, BuildSystematicsConfig)
         mask = exposure.mask
 
@@ -358,36 +280,7 @@ class BuildSystematicsTask(PipelineTask):
         if noise_variance < 1e-20:
             raise ValueError("the estimated image noise variance should be positive.")
 
-        pad_width = ((10, 10), (10, 10))  # ((top, bottom), (left, right))
-        window_array = np.pad(
-            window_array,
-            pad_width=pad_width,
-            mode="constant",
-            constant_values=0.0,
-        )
-        noise_array = np.pad(
-            noise_array,
-            pad_width=pad_width,
-            mode="constant",
-            constant_values=0.0,
-        )
-        ny, nx = window_array.shape
-
-        npixl = int(self.config.npix // 2)
-        npixr = int(self.config.npix // 2 + 1)
-        noise_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(noise_array)) ** 2.0)).real[
-            ny // 2 - npixl : ny // 2 + npixr,
-            nx // 2 - npixl : nx // 2 + npixr,
-        ]
-        window_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(window_array)) ** 2.0)).real[
-            ny // 2 - npixl : ny // 2 + npixr,
-            nx // 2 - npixl : nx // 2 + npixr,
-        ]
-        good = window_corr > 0
-        noise_corr2 = np.zeros_like(window_corr, dtype=np.float32)
-        noise_corr2[good] = noise_corr[good] / window_corr[good]
-        del window_array, noise_array, window_corr
-        return noise_corr2
+        return self._correlate(noise_array, window_array, self.config.npix)
 
     def get_psf_systematics(self, exposure, catalog, seed, band):
         assert isinstance(self.config, BuildSystematicsConfig)

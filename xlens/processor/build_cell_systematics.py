@@ -31,23 +31,11 @@ __all__ = [
     "BuildCellSystematicsConnections",
 ]
 
-import anacal
 import numpy as np
 from lsst.afw.image import MaskX
-from lsst.meas.algorithms import (
-    LoadReferenceObjectsConfig,
-    ReferenceObjectLoader,
-)
-from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import (
-    ChoiceField,
-    ConfigField,
-    Field,
-    FieldValidationError,
-    ListField,
-)
+from lsst.meas.algorithms import ReferenceObjectLoader
+from lsst.pex.config import ListField
 from lsst.pipe.base import (
-    PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
     Struct,
@@ -55,15 +43,13 @@ from lsst.pipe.base import (
 from lsst.pipe.base import connectionTypes as cT
 from lsst.skymap import BaseSkyMap
 
-from xlens.utils.image import badMaskDefault, prepare_mask, stack_psfs_cells
-from xlens.utils.mask import (
-    GAIA_TABLE_DTYPE,
-    STAR_MASK_RADIUS_FUNCS,
-    build_gaia_xyr,
-    get_gaia_table,
-)
+from xlens.utils.image import stack_psfs_cells
 
-band_order = "ugrizy"
+from .systematics_base import (
+    BuildSystematicsConfigBase,
+    BuildSystematicsTaskBase,
+    band_order,
+)
 
 
 class BuildCellSystematicsConnections(
@@ -129,21 +115,10 @@ class BuildCellSystematicsConnections(
 
 
 class BuildCellSystematicsConfig(
+    BuildSystematicsConfigBase,
     PipelineTaskConfig,
     pipelineConnections=BuildCellSystematicsConnections,
 ):
-    npix = Field[int](
-        doc="Size of noise correlation and PSF stamps (must be odd).",
-        default=49,
-    )
-    badMaskPlanes = ListField[str](
-        doc="Mask planes used to reject bad pixels.",
-        default=badMaskDefault,
-    )
-    gaiaPadding = Field[int](
-        doc="Padding (pixels) when selecting GAIA sources around the patch.",
-        default=300,
-    )
     bands = ListField[str](
         doc=(
             "Bands required to be present in the input cell coadd dict. "
@@ -152,38 +127,9 @@ class BuildCellSystematicsConfig(
         ),
         default=["g", "r", "i", "z"],
     )
-    gaiaLoader = ConfigField(
-        dtype=LoadReferenceObjectsConfig,
-        doc="Reference catalog loader for GAIA",
-    )
-    starMaskType = ChoiceField[str](
-        doc=(
-            "Name of the GAIA halo-radius model in "
-            "xlens.utils.mask.STAR_MASK_RADIUS_FUNCS. 'default' = "
-            "450/200/100 px step for mag <= 11/14/20; 'no_mask' = "
-            "flat 10 px for every GAIA star with mag <= 20."
-        ),
-        allowed={k: k for k in STAR_MASK_RADIUS_FUNCS},
-        default="default",
-    )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
-
-    def setDefaults(self):
-        super().setDefaults()
-        self.gaiaLoader.requireProperMotion = False
-        self.gaiaLoader.anyFilterMapsToThis = "phot_g_mean"
-
-    def validate(self):
-        super().validate()
-        if self.npix % 2 == 0:
-            raise FieldValidationError(
-                self.__class__.npix,
-                self,
-                "npix should be odd number",
-            )
 
 
-class BuildCellSystematicsTask(PipelineTask):
+class BuildCellSystematicsTask(BuildSystematicsTaskBase):
     """Build noise correlation and PSF systematics from cell-based coadds.
 
     For each band, the task stitches the full-patch cell coadd into a
@@ -285,38 +231,7 @@ class BuildCellSystematicsTask(PipelineTask):
             noise_array -= noise_array[window_bool].mean()
         noise_array[~window_bool] = 0.0
 
-        # Pad to avoid FFT wrap-around
-        pad_width = ((10, 10), (10, 10))
-        window_array = np.pad(
-            window_array,
-            pad_width=pad_width,
-            mode="constant",
-            constant_values=0.0,
-        )
-        noise_array = np.pad(
-            noise_array,
-            pad_width=pad_width,
-            mode="constant",
-            constant_values=0.0,
-        )
-        pny, pnx = window_array.shape
-
-        npixl = npix // 2
-        npixr = npix // 2 + 1
-
-        noise_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(noise_array)) ** 2.0)).real[
-            pny // 2 - npixl : pny // 2 + npixr,
-            pnx // 2 - npixl : pnx // 2 + npixr,
-        ]
-        window_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(window_array)) ** 2.0)).real[
-            pny // 2 - npixl : pny // 2 + npixr,
-            pnx // 2 - npixl : pnx // 2 + npixr,
-        ]
-
-        good = window_corr > 0
-        noise_corr2 = np.zeros_like(window_corr, dtype=np.float32)
-        noise_corr2[good] = noise_corr[good] / window_corr[good]
-        return noise_corr2
+        return self._correlate(noise_array, window_array, npix)
 
     def run(
         self,
@@ -395,11 +310,8 @@ class BuildCellSystematicsTask(PipelineTask):
                 stitched_bbox = exp.getBBox()
                 stitched_wcs = exp.getWcs()
 
-            band_mask = self._build_mask_band(exp)
-            if mask_array is None:
-                mask_array = band_mask.astype(np.int16)
-            else:
-                mask_array = (mask_array | band_mask).astype(np.int16)
+            band_mask = self._build_mask_band(exp, band)
+            mask_array = self._merge_mask(mask_array, band_mask)
 
             # Critical: drop the heavy stitched coadd before the next band.
             del cell_coadd, exp, stitched, band_mask
@@ -408,29 +320,12 @@ class BuildCellSystematicsTask(PipelineTask):
         # noise-correlation pass, so the bright-star halos don't leak
         # correlated power into the per-band estimate.
         assert mask_array is not None
-        gaia_table = np.empty(0, dtype=GAIA_TABLE_DTYPE)
-        if gaia_loader is not None and stitched_wcs is not None and stitched_bbox is not None:
-            gaia = gaia_loader.loadPixelBox(
-                bbox=stitched_bbox,
-                filterName="phot_g_mean",
-                wcs=stitched_wcs,
-                bboxToSpherePadding=self.config.gaiaPadding,
-            ).refCat
-            gaia_table = get_gaia_table(gaia_catalog=gaia, wcs=stitched_wcs)
-            gaia_array = build_gaia_xyr(
-                gaia_table,
-                bbox=stitched_bbox,
-                star_mask_type=self.config.starMaskType,
-            )
-            if gaia_array is not None:
-                self.log.info(
-                    "Adding bright star mask for %d GAIA sources (starMaskType=%s)",
-                    len(gaia_array), self.config.starMaskType,
-                )
-                anacal.mask.add_bright_star_mask(
-                    mask_array=mask_array,
-                    star_array=gaia_array,
-                )
+        gaia_table = self._apply_gaia_mask(
+            mask_array=mask_array,
+            bbox=stitched_bbox,
+            wcs=stitched_wcs,
+            gaia_loader=gaia_loader,
+        )
 
         # Pass 2: re-stitch ONE BAND AT A TIME and compute its noise
         # correlation against the augmented mask. Doubles the stitching
@@ -449,7 +344,7 @@ class BuildCellSystematicsTask(PipelineTask):
             noise_corr_array[i] = self.get_noise_corr(
                 stitched,
                 mask_array,
-                self.config.badMaskPlanes,
+                self.config.mask_planes(band),
             )
             del cell_coadd, stitched
 
@@ -468,19 +363,4 @@ class BuildCellSystematicsTask(PipelineTask):
             outputNoiseCorr=noise_corr_array,
             outputPsf=psf_array,
             outputGaiaCatalog=gaia_table,
-        )
-
-    def _build_mask_band(self, exposure) -> np.ndarray:
-        """Bad-pixel mask for one band from a stitched exposure: the
-        configured mask planes plus the image < -6 sigma negative-outlier
-        guard.  This is the ONLY place a mask is built for the cell-coadd
-        shear path; the measurement tasks consume the union across bands
-        (plus bright stars) as-is.
-        """
-        assert isinstance(self.config, BuildCellSystematicsConfig)
-        return prepare_mask(
-            exposure.image.array,
-            exposure.mask,
-            exposure.variance.array,
-            self.config.badMaskPlanes,
         )

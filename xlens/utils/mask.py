@@ -146,6 +146,7 @@ def build_gaia_xyr(
     bbox: Any,
     *,
     star_mask_type: str = "default",
+    mag_max: float | None = None,
 ) -> NDArray | None:
     """Wide ``gaia_table`` + bbox → ``(x, y, r)`` structured array for
     :func:`anacal.mask.add_bright_star_mask`.
@@ -157,6 +158,11 @@ def build_gaia_xyr(
     ``r <= 0`` are dropped, so each radius function can encode its
     own magnitude cut by returning ``0`` for stars it does not want to
     mask.
+
+    ``mag_max`` tightens that cut without touching the radius model:
+    stars fainter than it are dropped whatever radius the model gave
+    them. ``None`` (the default) leaves the model's own limit in force
+    -- 20 for ``'default'``.
 
     Returns ``None`` when no stars pass the radius cut.
     """
@@ -170,6 +176,8 @@ def build_gaia_xyr(
 
     mag = gaia_table["gaia_g_mag"]
     r = radius_func(mag)
+    if mag_max is not None:
+        r = np.where(mag > mag_max, 0.0, r)
     keep = r > 0
     if not np.any(keep):
         return None
