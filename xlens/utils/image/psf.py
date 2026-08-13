@@ -162,6 +162,35 @@ def _coadd_psf_config(lsst_psf):
     return _scan_coadd_psf_config(io.BytesIO(manager.getData()))
 
 
+def _constant_psf_model(lsst_psf):
+    """Native model for a spatially CONSTANT DM PSF, or None.
+
+    The simulator attaches a ``KernelPsf`` wrapping a ``FixedKernel``
+    (one stamp for the whole exposure); anacal's ``GridPsfModel`` with
+    a single 1x1 cell IS that model, so such PSFs draw natively -- in
+    the cell thread pools and per source inside the C++ ForceTask --
+    exactly like a real CoaddPsf.  Only a provably constant kernel
+    qualifies: anything spatially varying must go through the CoaddPsf
+    loader rather than be silently frozen at one position.
+    """
+    try:
+        from lsst.meas.algorithms import KernelPsf
+    except ImportError:
+        return None
+    if not isinstance(lsst_psf, KernelPsf):
+        return None
+    kernel = lsst_psf.getKernel()
+    if kernel is None or kernel.isSpatiallyVarying():
+        return None
+    from anacal import psf as apsf
+
+    stamp = lsst_psf.computeKernelImage(
+        lsst_psf.getAveragePosition()
+    ).getArray()
+    stamps = np.ascontiguousarray(stamp, dtype=np.float64)[None, None]
+    return apsf.GridPsfModel(stamps=stamps, dx=1.0, dy=1.0)
+
+
 def _native_coadd_model_cached(lsst_psf, lsst_bbox):
     """Native model for a DM PSF, loaded once per (PSF, bbox).
 
@@ -179,10 +208,12 @@ def _native_coadd_model_cached(lsst_psf, lsst_bbox):
     from anacal import psf as apsf
 
     try:
-        name, cache = _coadd_psf_config(lsst_psf)
-        model = apsf.load_coadd_psf_model(
-            lsst_psf, lsst_bbox, name, cache
-        )
+        model = _constant_psf_model(lsst_psf)
+        if model is None:
+            name, cache = _coadd_psf_config(lsst_psf)
+            model = apsf.load_coadd_psf_model(
+                lsst_psf, lsst_bbox, name, cache
+            )
     except _PERMANENT_LOAD_ERRORS as err:
         model = err
     with _NATIVE_MODEL_LOCK:
@@ -195,11 +226,13 @@ def _native_coadd_model_cached(lsst_psf, lsst_bbox):
 
 
 def try_native_coadd_model(lsst_psf, lsst_bbox):
-    """Native CoaddPsfModel for a DM CoaddPsf, or None if unsupported.
+    """Native model for a DM PSF, or None if unsupported.
 
     Used by the cell-stamp builders: native draws replace the DM
-    ``computeImage`` calls when possible (PSFEx/PIFF coadds); anything
-    else (e.g. simulated PSFs) keeps the DM path.
+    ``computeImage`` calls when possible -- PSFEx/PIFF coadds via the
+    CoaddPsf loader, spatially constant PSFs (the simulator's
+    KernelPsf/FixedKernel) via a 1x1 GridPsfModel.  Anything else
+    keeps the DM path.
     """
     try:
         return _native_coadd_model_cached(lsst_psf, lsst_bbox)
@@ -238,10 +271,12 @@ def make_object_psf(psf, npix, lsst_bbox):
 
     The parameters of a DM CoaddPsf (PSFEx or PIFF inputs) are
     extracted once and every evaluation runs in AnaCal C++
-    (``anacal.psf``), reproducing the DM pipeline to float
-    precision.  There is NO fallback to Python-side per-galaxy drawing:
-    a PSF the native loader cannot handle is an error -- use the
-    per-cell PSF mode instead for such data.
+    (``anacal.psf``), reproducing the DM pipeline to float precision;
+    a spatially constant PSF (the simulator's KernelPsf/FixedKernel)
+    becomes a 1x1 GridPsfModel instead.  There is NO fallback to
+    Python-side per-galaxy drawing: a PSF the native loader cannot
+    handle is an error -- use the per-cell PSF mode instead for such
+    data.
     """
     from anacal import psf as apsf
 

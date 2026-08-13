@@ -44,7 +44,12 @@ from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
 from ..utils.columns import select_detection_columns
+import lsst.geom as lsst_geom
+from lsst.afw.image import MaskX
+
 from ..utils.image import (
+    rle_table_origin,
+    rle_table_to_mask,
     make_psf_stamp_exposure,
     prepare_data_one_cell,
     prepare_data_one_cell_multiband,
@@ -72,9 +77,16 @@ class MeasureCellCoaddsPipeConnections(
         deferLoad=True,
     )
     mask = cT.Input(
-        doc="Combined mask from cell-based systematics.",
-        name="{inputName}_systematics_mask",
-        storageClass="Mask",
+        doc=(
+            "Combined mask from cell-based systematics, run-length "
+            "encoded with a value column (decode with "
+            "xlens.utils.image.rle_table_to_mask; bit 0 = masked/cut, "
+            "bit 1 = discontinuity, stamped per source as "
+            "discontinuity_mask_value, never cut; "
+            "origin in MASK_X0/MASK_Y0)."
+        ),
+        name="{inputName}_systematics_mask_rle",
+        storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
         minimum=0,
         multiple=False,
@@ -167,6 +179,19 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
 
         coadd_handles = inputs["cellCoadd"]
         coadd_handles_dict = {h.dataId["band"]: h for h in coadd_handles}
+
+        # The combined bitmask arrives run-length encoded; decode to
+        # pixels once (preserving the bit values 0..3), restoring the
+        # stitched origin the cell chain relies on.
+        if inputs.get("mask", None) is not None:
+            tab = inputs["mask"]
+            arr = rle_table_to_mask(tab)
+            msk = MaskX(width=arr.shape[1], height=arr.shape[0])
+            msk.getArray()[:, :] = arr.astype(
+                msk.getArray().dtype, copy=False
+            )
+            msk.setXY0(lsst_geom.Point2I(*rle_table_origin(tab)))
+            inputs["mask"] = msk
 
         outputs = self.run(
             coadd_handles_dict=coadd_handles_dict,
@@ -556,8 +581,11 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         tract, patch : int
             Tract and patch identifiers.
         mask : MaskX or None
-            Combined stitched mask from BuildCellSystematicsTask.
-            If provided, per-cell masks are extracted by slicing.
+            Combined stitched anacal bitmask from
+            BuildCellSystematicsTask (bit 0 = masked/cut, bit 1 =
+            discontinuity, stamped per source as
+            discontinuity_mask_value). If provided, per-cell masks are
+            extracted by slicing.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
 
@@ -575,8 +603,11 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         first_handle = next(iter(coadd_handles_dict.values()))
         seed = self._seed_from_handle(first_handle)
 
+        # The mask already carries the anacal uint8 bit convention:
+        # bit 0 = masked (cut), bit 1 = discontinuity (kept but stamped
+        # into discontinuity_mask_value per source).
         if mask is not None:
-            stitched_mask_array = mask.getArray()
+            stitched_mask_array = mask.getArray().astype(np.uint8)
             mask_origin = (mask.getX0(), mask.getY0())
         else:
             stitched_mask_array = None

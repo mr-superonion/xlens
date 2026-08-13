@@ -63,6 +63,7 @@ from ..utils.image import (
     default_psf_hsm_plugin_config,
     measure_psf_hsm_moments,
 )
+from ..utils.image.hsm import make_psf_stamp_exposure, psf_array_to_image
 from .anacal import AnacalTask
 from .fpfs import FpfsMeasurementTask
 
@@ -382,6 +383,58 @@ class AnacalMeasureTaskBase(PipelineTask):
             survey=self.config.survey,
         )
         return np.asarray(rfn.merge_arrays([cat, gauss_cat], flatten=True))
+
+    def _psf_hsm_moments_per_cell(self, cells, band: str) -> dict:
+        """PSF HSM moments for every cell, measured SERIALLY.
+
+        The HSM plugins are Python + pybind11 without a GIL release, so
+        running them inside the ``_map_parallel`` cell loop serialises
+        the threads that AnaCal's GIL-free C++ was overlapping. They also
+        do not depend on the sources -- only on the cell's PSF stamp --
+        so they belong outside the parallel section entirely.
+
+        Returns ``{cell index: moments dict}``; empty when the option is
+        off, so the caller can treat "no entry" as "nothing to attach".
+        """
+        if not self.config.doPsfHsmMoments:
+            return {}
+        out = {}
+        for bb in cells:
+            psf = getattr(bb, "psf_image", None)
+            if psf is None:
+                arr = getattr(bb, "psf_array", None)
+                if arr is None:
+                    continue
+                arr = np.asarray(arr)
+                if arr.ndim != 2:      # multiband stack: this band's slice
+                    continue
+                psf = psf_array_to_image(arr)
+            try:
+                out[bb.index] = measure_psf_hsm_moments(
+                    self._psfHsmCtx, self.psfHsmMeasurement,
+                    make_psf_stamp_exposure(psf),
+                )
+            except Exception as exc:
+                self.log.warning(
+                    "PSF HSM failed for cell %s band %s: %s",
+                    bb.index, band, exc,
+                )
+        return out
+
+    def _attach_psf_hsm_moments(
+        self,
+        cat: NDArray,
+        *,
+        band: str,
+        moments: dict | None,
+    ) -> NDArray:
+        """Broadcast one cell's pre-measured PSF moments onto its rows."""
+        if not self.config.doPsfHsmMoments or not moments:
+            return cat
+        psf_cols = broadcast_psf_hsm_moments(
+            moments, band, n=len(cat), survey=self.config.survey,
+        )
+        return np.asarray(rfn.merge_arrays([cat, psf_cols], flatten=True))
 
     def _append_psf_hsm_moments(
         self,

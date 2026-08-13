@@ -79,12 +79,12 @@ def prepare_data_one_cell(
     if psf_array is None:
         psf_array = prepare_psf_array_cell(cell, npix)
 
-    # Private int16 copy: mask_galaxy_image can write bright-star halos into
+    # Private uint8 copy: mask_galaxy_image can write bright-star halos into
     # the mask it is given, and the caller's array must not be mutated.
     if mask_array is None:
-        mask_array = np.zeros(gal_array.shape, dtype=np.int16)
+        mask_array = np.zeros(gal_array.shape, dtype=np.uint8)
     else:
-        mask_array = np.array(mask_array, dtype=np.int16)
+        mask_array = np.array(mask_array, dtype=np.uint8)
 
     anacal.mask.mask_galaxy_image(gal_array, mask_array, star_cat)
 

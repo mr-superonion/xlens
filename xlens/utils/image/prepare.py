@@ -62,10 +62,11 @@ def get_cells(
         cell_overlap=80,
         scale=pixel_scale,
     )
-    # Native model when the PSF supports it: cell stamps are then drawn
-    # by AnaCal C++ (~4x faster than DM CoaddPsf on DP1 PIFF coadds, and
-    # GIL-free, hence threadable below); unsupported PSFs (e.g.
-    # simulations) keep the DM path.
+    # Native model when the PSF supports it (CoaddPsf, or a constant
+    # KernelPsf as in simulations): cell stamps are then drawn by
+    # AnaCal C++ (~4x faster than DM CoaddPsf on DP1 PIFF coadds, and
+    # GIL-free, hence threadable below); unsupported PSFs keep the DM
+    # path.
     native = try_native_coadd_model(lsst_psf, lsst_bbox)
 
     def draw_one(bb):
@@ -339,13 +340,13 @@ def prepare_data(
     # ``np.array`` (not ``asarray``) because the masking below writes into it.
     gal_array = np.array(exposure.image.array, dtype=np.float32)
 
-    # Private int16 copy: mask_galaxy_image can write bright-star halos into
+    # Private uint8 copy: mask_galaxy_image can write bright-star halos into
     # the mask it is given, and the caller's array (the stitched systematics
     # mask, shared across bands) must not be mutated.
     if mask_array is None:
-        mask_array = np.zeros(gal_array.shape, dtype=np.int16)
+        mask_array = np.zeros(gal_array.shape, dtype=np.uint8)
     else:
-        mask_array = np.array(mask_array, dtype=np.int16)
+        mask_array = np.array(mask_array, dtype=np.uint8)
 
     anacal.mask.mask_galaxy_image(gal_array, mask_array, star_cat)
 

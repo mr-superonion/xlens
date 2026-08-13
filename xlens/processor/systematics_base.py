@@ -127,13 +127,38 @@ class BuildSystematicsConfigBase(Config):
         allowed={k: k for k in STAR_MASK_RADIUS_FUNCS},
         default="default",
     )
+    discontinuityMaskPlanes = ListField[str](
+        doc=(
+            "Mask planes unioned into the DISCONTINUITY mask -- pixels "
+            "holding real data that was not built from the visit set "
+            "CoaddPsf assumes (chip gaps, clipped artifacts, rejected "
+            "inputs), so the PSF model there is wrong by an unknown "
+            "amount. Kept separate from badMaskPlanes because it flags "
+            "a model error, not a bad pixel: masking it would cost a "
+            "quarter of a typical patch. Downstream it becomes the "
+            "per-source ``discontinuity_mask_value`` column instead."
+        ),
+        default=["INEXACT_PSF"],
+    )
+    discontinuityMaskBands = ListField[str](
+        doc=(
+            "Bands unioned into the discontinuity mask. Empty (the "
+            "default) means every band the task receives; a subset "
+            "(e.g. the detection bands) restricts it."
+        ),
+        default=[],
+    )
     starMaskMagMax = Field[float](
         doc=(
             "Drop GAIA stars fainter than this g magnitude, on top of "
             "the radius model's own cut. None leaves the model's limit "
-            "in force (20 for 'default')."
+            "in force (20 for 'default'). The default 18 is tighter "
+            "than that on purpose: the model gives every star from 14 "
+            "to 20 the same 100 px halo, so the 18-20 stars cost more "
+            "masked area than any other magnitude bin while being the "
+            "least contaminating."
         ),
-        default=None,
+        default=18.0,
         optional=True,
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
@@ -191,6 +216,35 @@ class BuildSystematicsTaskBase(PipelineTask):
             self.config.mask_planes(band),
         )
 
+    def _plane_union_mask(self, exposure, band: str) -> NDArray:
+        """One band's discontinuity-plane union, as a 0/1 uint8 array.
+
+        Unlike :meth:`_build_mask_band` this applies NO -6 sigma image
+        guard: the discontinuity mask is a statement about the PSF
+        model, not about outlier pixels. Planes absent from the
+        exposure are logged and skipped.
+        """
+        mask = exposure.mask
+        planes = list(self.config.discontinuityMaskPlanes)
+        avail = set(mask.getMaskPlaneDict())
+        missing = [p for p in planes if p not in avail]
+        if missing:
+            self.log.info(
+                "band %s: discontinuity plane(s) %s absent; skipped",
+                band, missing,
+            )
+        use = [p for p in planes if p in avail]
+        if not use:
+            return np.zeros(mask.array.shape, dtype=np.uint8)
+        return (
+            (mask.array & mask.getPlaneBitMask(use)) != 0
+        ).astype(np.uint8)
+
+    def _discontinuity_band_selected(self, band: str) -> bool:
+        """Whether ``band`` contributes to the discontinuity mask."""
+        sel = list(self.config.discontinuityMaskBands)
+        return not sel or band in sel
+
     @staticmethod
     def _merge_mask(
         global_mask: NDArray | None,
@@ -198,8 +252,8 @@ class BuildSystematicsTaskBase(PipelineTask):
     ) -> NDArray:
         """OR one band's mask into the running cross-band union."""
         if global_mask is None:
-            return band_mask.astype(np.int16)
-        return (global_mask | band_mask).astype(np.int16)
+            return band_mask.astype(np.uint8)
+        return (global_mask | band_mask).astype(np.uint8)
 
     def _apply_gaia_mask(
         self,
@@ -243,6 +297,26 @@ class BuildSystematicsTaskBase(PipelineTask):
                 star_array=gaia_array,
             )
         return gaia_table
+
+    # 5 sigma of the ROBUST noise level. The previous per-pixel form,
+    # ``image**2 < 9 * variance``, defeats itself exactly where it
+    # matters: the variance plane is inflated on a bright star's wings,
+    # so those pixels pass a cut that is relative to their own variance.
+    # On GAMA15H 9370 patch 6,4 a single pixel at 3007 counts survived
+    # (variance 3.8e6 there) and drove the i-band correlation peak to
+    # 3.79 against a tract median of 0.003, imprinting the star's shape
+    # as a 0.73 ellipticity. A scalar threshold from
+    # ``estimate_noise_variance`` -- median-based, and the same estimator
+    # the measurement path already uses -- has no such blind spot.
+    NOISE_CLIP_NSIGMA2 = 25.0
+
+    @classmethod
+    def _noise_window(cls, noise_array, variance_array, noise_variance):
+        """Pixels of the cut-out that count as noise, as a float32 mask."""
+        return (
+            (noise_array ** 2.0 < cls.NOISE_CLIP_NSIGMA2 * noise_variance)
+            & (~np.isnan(variance_array))
+        ).astype(np.float32)
 
     @staticmethod
     def _correlate(

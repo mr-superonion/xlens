@@ -54,7 +54,7 @@ from numpy.typing import NDArray
 from ..simulator.sim import MultibandSimTask
 from ..utils.columns import select_detection_columns
 from ..utils.handle import SimulatedExposureHandle
-from ..utils.image import make_object_psf
+from ..utils.image import make_object_psf, rle_table_to_mask
 from .measure_base import AnacalMeasureTaskBase, MeasureBandsConfigBase
 
 band_order = "ugrizy"
@@ -106,9 +106,16 @@ class MeasureCoaddsPipeConnections(
         multiple=False,
     )
     mask = cT.Input(
-        doc="Combined mask from bad pixels and bright stars across all bands.",
-        name="{inputName}_systematics_mask",
-        storageClass="Mask",
+        doc=(
+            "Combined anacal bitmask from BuildSystematicsTask, "
+            "run-length encoded with a value column (decode with "
+            "xlens.utils.image.rle_table_to_mask). Bit 0 = masked "
+            "(bad pixels / bright stars; cut), bit 1 = discontinuity "
+            "(INEXACT_PSF union; stamped per source as "
+            "discontinuity_mask_value, never cut)."
+        ),
+        name="{inputName}_systematics_mask_rle",
+        storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
     )
@@ -219,6 +226,16 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         inputs = butlerQC.get(inputRefs)
         tract = int(butlerQC.quantum.dataId["tract"])
         patch = int(butlerQC.quantum.dataId["patch"])
+
+        # The combined bitmask arrives run-length encoded; decode to
+        # pixels once, preserving the bit values (0..3).
+        if inputs.get("mask", None) is not None:
+            arr = rle_table_to_mask(inputs["mask"])
+            msk = MaskX(width=arr.shape[1], height=arr.shape[0])
+            msk.getArray()[:, :] = arr.astype(
+                msk.getArray().dtype, copy=False
+            )
+            inputs["mask"] = msk
 
         seed: int | None = None
         if self.config.use_sim:
@@ -345,9 +362,6 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 bdata["base_column_name"] = f"{self.config.survey}_{band}_"
             else:
                 bdata["base_column_name"] = band + "_"
-            bdata["lsst_psf"] = (
-                exposure.getPsf() if acfg.validate_psf else None
-            )
             if acfg.psf_model_type == "object":
                 bdata["psf_object"] = make_object_psf(
                     exposure.getPsf(),
@@ -554,6 +568,17 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 data.pop("detection")
                 cell_map = {bb.index: bb for bb in data.pop("cells")}
 
+            # PSF HSM moments per cell, measured SERIALLY here rather
+            # than inside _force_one: the plugins hold the GIL, so in the
+            # thread pool they would serialise the AnaCal work they are
+            # meant to overlap. They depend only on the cell's PSF stamp,
+            # not on the sources, so one pass over the cells is enough --
+            # the previous code re-measured the SAME patch-centre PSF
+            # once per cell and threw the spatial variation away.
+            psf_hsm = self._psf_hsm_moments_per_cell(
+                list(cell_map.values()), band,
+            )
+
             def _force_one(key):
                 det = detection_dict[key]
                 try:
@@ -577,11 +602,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                         data={**data, "detection": det, "cells": cells},
                         band=band,
                     )
-                    # HSM measures the PSF model at the exposure bbox
-                    # centre (HsmPsfMomentsPlugin uses computeKernelImage,
-                    # no subpixel offset).
-                    return self._append_psf_hsm_moments(
-                        cat, band=band, hsm_exposure=exposure,
+                    # Pure lookup + column merge: no HSM call, no GIL.
+                    return self._attach_psf_hsm_moments(
+                        cat, band=band, moments=psf_hsm.get(key),
                     )
                 except Exception as e:
                     self.log.error(
@@ -634,7 +657,12 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         tract, patch : int
             Tract and patch identifiers.
         mask : MaskX or None
-            Combined bad-pixel / bright-star mask.
+            Combined anacal bitmask: bit 0 = masked (bad pixels /
+            bright stars; zeroed, extended, cut), bit 1 = discontinuity
+            (INEXACT_PSF union; never cut, but detection stamps every
+            source with ``discontinuity_mask_value``, the
+            Gaussian-smoothed bit-1 density x1000, same kernel as
+            ``mask_value``).
         detection : NDArray or None
             External detection catalog.  When provided the internal
             detection step is skipped; the catalog is partitioned into
@@ -649,8 +677,12 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         if seed is None:
             first_handle = next(iter(exposure_handles_dict.values()))
             seed = self._seed_from_handle(first_handle)
+        # The mask already carries the anacal uint8 bit convention:
+        # bit 0 = masked (cut), bit 1 = discontinuity (kept but stamped
+        # into discontinuity_mask_value). anacal only zeroes / extends /
+        # cuts on bit 0; bit 1 rides along for the column.
         if mask is not None:
-            mask_array = mask.getArray()
+            mask_array = mask.getArray().astype(np.uint8)
         else:
             mask_array = None
             if not self.config.use_sim:

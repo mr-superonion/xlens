@@ -43,7 +43,11 @@ from lsst.pipe.base import (
 from lsst.pipe.base import connectionTypes as cT
 from lsst.skymap import BaseSkyMap
 
-from xlens.utils.image import stack_psfs_cells
+from xlens.utils.image import (
+    estimate_noise_variance,
+    mask_to_rle_table,
+    stack_psfs_cells,
+)
 
 from .systematics_base import (
     BuildSystematicsConfigBase,
@@ -81,9 +85,18 @@ class BuildCellSystematicsConnections(
         minimum=0,
     )
     outputMask = cT.Output(
-        doc="Combined mask from bad pixels across all bands on stitched image.",
-        name="deep_coadd_cell_systematics_mask",
-        storageClass="Mask",
+        doc=(
+            "Combined anacal bitmask on the stitched image, run-length "
+            "encoded (y, x_start, x_end, value; x_end exclusive; shape "
+            "in MASK_NY/MASK_NX -- decode with "
+            "xlens.utils.image.rle_table_to_mask). Bit 0 (value 1): bad "
+            "pixels across all bands, the only bit that cuts pixels. "
+            "Bit 1 (value 2): union of the discontinuity planes "
+            "(default INEXACT_PSF), stamped per source as "
+            "discontinuity_mask_value, never cut."
+        ),
+        name="deep_coadd_cell_systematics_mask_rle",
+        storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
     outputNoiseCorr = cT.Output(
@@ -172,6 +185,19 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
             patch=patch,
             gaia_loader=gaia_loader,
         )
+        # run() returns the two masks as pixel arrays (script-friendly);
+        # the butler stores ONE combined bitmask (bit 0 = masked, bit 1
+        # = discontinuity), run-length encoded with a value column.
+        msk = outputs.outputMask
+        combined = (msk.getArray() != 0).astype(np.uint8)
+        combined |= (
+            (np.asarray(outputs.outputDiscontinuityMask) != 0).astype(np.uint8)
+            << 1
+        )
+        outputs.outputMask = mask_to_rle_table(
+            combined, x0=msk.getX0(), y0=msk.getY0()
+        )
+        del outputs.outputDiscontinuityMask
         butlerQC.put(outputs, outputRefs)
 
     def get_noise_corr(self, stitched_coadd, mask_array, badMaskPlanes):
@@ -221,7 +247,8 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
         window_array = (((mask.array[y0:y1, x0:x1] & bits) == 0) & (mask_array[y0:y1, x0:x1] == 0)).astype(
             np.float32
         )
-        window_array *= (noise_array**2.0 < variance_sub * 9) & (~np.isnan(variance_sub))
+        noise_variance = estimate_noise_variance(variance_array, mask, mask_array)
+        window_array *= self._noise_window(noise_array, variance_sub, noise_variance)
 
         # Mean-subtract over the kept pixels before zeroing the masked ones.
         # A nonzero DC offset would otherwise spread to a flat μ² pedestal
@@ -283,6 +310,7 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
         noise_corr_array = np.zeros((6, npix, npix))
         psf_array = np.zeros((6, npix, npix))
         mask_array: np.ndarray | None = None
+        disc_array: np.ndarray | None = None
         stitched_bbox = None
         stitched_wcs = None
 
@@ -312,6 +340,14 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
 
             band_mask = self._build_mask_band(exp, band)
             mask_array = self._merge_mask(mask_array, band_mask)
+
+            if self._discontinuity_band_selected(band):
+                disc_band = self._plane_union_mask(exp, band)
+                disc_array = (
+                    disc_band if disc_array is None
+                    else self._merge_mask(disc_array, disc_band)
+                )
+                del disc_band
 
             # Critical: drop the heavy stitched coadd before the next band.
             del cell_coadd, exp, stitched, band_mask
@@ -358,8 +394,11 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
         if stitched_bbox is not None:
             output_msk.setXY0(stitched_bbox.getMin())
 
+        if disc_array is None:
+            disc_array = np.zeros_like(mask_array)
         return Struct(
             outputMask=output_msk,
+            outputDiscontinuityMask=disc_array,
             outputNoiseCorr=noise_corr_array,
             outputPsf=psf_array,
             outputGaiaCatalog=gaia_table,

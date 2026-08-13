@@ -165,6 +165,26 @@ def make_psf_stamp_exposure(psf_image) -> Any:
     return exp
 
 
+def psf_array_to_image(psf_array) -> Any:
+    """Numpy PSF stamp -> centred ``ImageD``, ready for
+    :func:`make_psf_stamp_exposure`.
+
+    Patch-coadd cells carry their PSF as a plain array
+    (``cell.psf_array``), while cell coadds carry an ``ImageD``
+    (``cell.psf_image``). Centring the bbox on (0, 0) matches the
+    cell-coadd stamps, so HSM measures at the stamp centre either way.
+    """
+    arr = np.asarray(psf_array, dtype=np.float64)
+    ny, nx = arr.shape
+    bbox = lsst_geom.Box2I(
+        lsst_geom.Point2I(-(nx // 2), -(ny // 2)),
+        lsst_geom.Extent2I(nx, ny),
+    )
+    img = afwImage.ImageD(bbox)
+    img.array[:, :] = arr
+    return img
+
+
 def measure_psf_hsm_moments(
     ctx: PsfHsmContext,
     measurement_subtask,

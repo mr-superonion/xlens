@@ -48,7 +48,12 @@ from .hsm import (  # noqa: F401
 )
 from .masks import (  # noqa: F401
     badMaskDefault,
+    mask_to_rle,
+    mask_to_rle_table,
     prepare_mask,
+    rle_table_origin,
+    rle_table_to_mask,
+    rle_to_mask,
 )
 from .noise import (  # noqa: F401
     estimate_noise_variance,

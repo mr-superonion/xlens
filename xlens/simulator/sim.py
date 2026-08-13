@@ -546,7 +546,10 @@ class MultibandSimTask(PipelineTask):
 
         if mask is not None:
             self.log.debug("Using the real pixel mask")
-            mask_array = mask.getArray()
+            # Bit 0 only: bit 1 (discontinuity) tags real-data pixels
+            # whose CoaddPsf is wrong; the simulation has no such
+            # pixels, so it must not inherit them as masked.
+            mask_array = mask.getArray() & 1
         else:
             self.log.debug("Do not use the real pixel mask")
             mask_array = 0.0

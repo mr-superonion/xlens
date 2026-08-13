@@ -23,10 +23,8 @@ from typing import Any, Sequence
 
 import anacal
 import astropy
-import numpy as np
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
-from lsst.geom import Point2D
 from lsst.pex.config import Config, Field, FieldValidationError
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
@@ -64,10 +62,6 @@ class AnacalConfig(Config):
     force_center = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
         default=True,
-    )
-    validate_psf = Field[bool](
-        doc="Whether validating PSF",
-        default=False,
     )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
@@ -168,7 +162,6 @@ class AnacalTask(Task):
         tractInfo=None,
         patchInfo=None,
         detection: NDArray | None,
-        lsst_psf=None,
         cells,
         **kwargs,
     ):
@@ -218,27 +211,6 @@ class AnacalTask(Task):
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
         catalog["x1_det"] = catalog["x1_det"] + begin_x * pixel_scale
         catalog["x2_det"] = catalog["x2_det"] + begin_y * pixel_scale
-        if self.config.validate_psf and (lsst_psf is not None):
-            indexes = []
-            for ic, cc in enumerate(catalog):
-                try:
-                    ep = np.abs(
-                        1
-                        - np.sum(
-                            lsst_psf.computeImage(
-                                Point2D(
-                                    cc["x1"] / pixel_scale,
-                                    cc["x2"] / pixel_scale,
-                                )
-                            ).getArray()
-                        )
-                    )
-                    if ep < 1e-1:
-                        indexes.append(ic)
-                except Exception:
-                    pass
-            catalog = catalog[indexes]
-
         if wcs is not None:
             # catalog x1/x2 are already global (parent) pixels here, since
             # begin_x/begin_y were added back above -> no XY0 offset needed.
@@ -313,10 +285,6 @@ class AnacalTask(Task):
             survey=survey,
             cells=cells,
         )
-        if self.config.validate_psf:
-            data["lsst_psf"] = exposure.getPsf()
-        else:
-            data["lsst_psf"] = None
         if band is None:
             data["base_column_name"] = None
         elif survey is not None:
@@ -400,9 +368,8 @@ class AnacalTask(Task):
             survey=survey,
         )
         # The detection image belongs to no single band, so it carries no
-        # band prefix, and PSF validation / per-object PSFs -- both defined
-        # against one exposure -- do not apply.
-        data["lsst_psf"] = None
+        # band prefix, and per-object PSFs -- defined against one
+        # exposure -- do not apply.
         data["base_column_name"] = None
         data["psf_object"] = None
         return data

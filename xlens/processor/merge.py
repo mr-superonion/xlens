@@ -364,6 +364,19 @@ class MergePipe(PipelineTask):
             f"{p}dm20_dg1",
             f"{p}dm20_dg2",
         ]
+        # Per-source PSF-quality columns, carried through when the
+        # measurement produced them. discontinuity_mask_value counts
+        # INEXACT_PSF pixels in a box around the source (current
+        # schema); psf_mask_value/psf_mask_frac are the older pair the
+        # HSC scripts appended before the column moved into the
+        # measurement task.
+        for col in (
+            "discontinuity_mask_value",
+            "psf_mask_value",
+            "psf_mask_frac",
+        ):
+            if col in catalog.colnames:
+                keep.append(col)
         for b in bands:
             keep.extend(
                 [

@@ -33,7 +33,12 @@ from lsst.pipe.base import (
 )
 from lsst.pipe.base import connectionTypes as cT
 
-from xlens.utils.image import resize_array, subpixel_shift
+from xlens.utils.image import (
+    estimate_noise_variance,
+    mask_to_rle_table,
+    resize_array,
+    subpixel_shift,
+)
 
 from .systematics_base import (
     BuildSystematicsConfigBase,
@@ -74,9 +79,21 @@ class BuildSystematicsConnections(
         minimum=0,
     )
     outputMask = cT.Output(
-        doc="Combined mask from bad pixels and bright stars across all bands.",
-        name="deep_coadd_systematics_mask",
-        storageClass="Mask",
+        doc=(
+            "Combined anacal bitmask, run-length encoded (y, x_start, "
+            "x_end, value; x_end exclusive; shape in MASK_NY/MASK_NX -- "
+            "decode with xlens.utils.image.rle_table_to_mask). Bit 0 "
+            "(value 1): bad pixels and bright stars across all bands, "
+            "the only bit that cuts pixels. Bit 1 (value 2): union of "
+            "the discontinuity planes (default INEXACT_PSF) -- real "
+            "data with a wrong CoaddPsf model (chip gaps, clipped or "
+            "rejected inputs), stamped per source as "
+            "discontinuity_mask_value, never cut. RLE because the mask "
+            "is a few bits per pixel: the int32 image form was 67 MB "
+            "per patch, ~50x the encoded size."
+        ),
+        name="deep_coadd_systematics_mask_rle",
+        storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
     outputNoiseCorr = cT.Output(
@@ -95,6 +112,17 @@ class BuildSystematicsConnections(
         doc="Stacked star image array (6 x npix x npix).",
         name="deep_coadd_systematics_starcentered_6bands",
         storageClass="NumpyArray",
+        dimensions=("skymap", "tract", "patch"),
+    )
+    outputGaiaCatalog = cT.Output(
+        doc=(
+            "GAIA sources covering this patch. Columns: x_in_tract, "
+            "y_in_tract (tract-pixel coordinates), gaia_g_mag, "
+            "gaia_source_id (Gaia DR3 source_id, int64), ra, dec (deg). "
+            "Empty when no GAIA refcat is in the inputs."
+        ),
+        name="deep_coadd_systematics_gaia",
+        storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
 
@@ -153,6 +181,19 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
             catalog=inputs["catalog"],
             seed=seed,
         )
+        # run() returns the two masks as pixel arrays (script-friendly);
+        # the butler stores ONE combined bitmask (bit 0 = masked, bit 1
+        # = discontinuity), run-length encoded with a value column.
+        msk = outputs.outputMask
+        combined = (msk.getArray() != 0).astype(np.uint8)
+        combined |= (
+            (np.asarray(outputs.outputDiscontinuityMask) != 0).astype(np.uint8)
+            << 1
+        )
+        outputs.outputMask = mask_to_rle_table(
+            combined, x0=msk.getX0(), y0=msk.getY0()
+        )
+        del outputs.outputDiscontinuityMask
         butlerQC.put(outputs, outputRefs)
         return
 
@@ -170,6 +211,7 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
         assert isinstance(self.config, BuildSystematicsConfig)
 
         mask_array: np.ndarray | None = None
+        disc_array: np.ndarray | None = None
         template_wcs = None
         template_bbox = None
 
@@ -202,6 +244,14 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
             band_mask = self._build_mask_band(exp, band)
             mask_array = self._merge_mask(mask_array, band_mask)
 
+            if self._discontinuity_band_selected(band):
+                disc_band = self._plane_union_mask(exp, band)
+                disc_array = (
+                    disc_band if disc_array is None
+                    else self._merge_mask(disc_array, disc_band)
+                )
+                del disc_band
+
             if band in band_order:
                 i = band_order.index(band)
                 if catalog is not None:
@@ -217,7 +267,7 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
                         star_centered_array[i] = star_array
             del exp, band_mask
         assert mask_array is not None
-        self._apply_gaia_mask(
+        gaia_table = self._apply_gaia_mask(
             mask_array=mask_array,
             bbox=template_bbox,
             wcs=template_wcs,
@@ -226,6 +276,8 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
         h, w = mask_array.shape
         output_msk = MaskX(width=w, height=h)
         output_msk.getArray()[:, :] = mask_array.astype(output_msk.getArray().dtype, copy=False)
+        if template_bbox is not None:
+            output_msk.setXY0(template_bbox.getMin())
 
         # noise correlation
         for band, exp_handle in exposure_handles_dict.items():
@@ -235,11 +287,15 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
                 noise_corr_array[i] = self.get_noise_corr(exp, mask_array)
             del exp
 
+        if disc_array is None:
+            disc_array = np.zeros_like(mask_array)
         return Struct(
             outputMask=output_msk,
+            outputDiscontinuityMask=disc_array,
             outputNoiseCorr=noise_corr_array,
             outputPsfCentered=psf_centered_array,
             outputStarCentered=star_centered_array,
+            outputGaiaCatalog=gaia_table,
         )
 
     def get_noise_corr(self, exposure, mask_array):
@@ -247,8 +303,7 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
 
         NOTE the window's plane list below is hardcoded and does NOT
         follow ``badMaskPlanes``; ``BuildCellSystematicsTask`` derives
-        its own window from the config instead.  Left as-is so this
-        refactor does not silently change the patch-path numerics.
+        its own window from the config instead.
         """
         assert isinstance(self.config, BuildSystematicsConfig)
         mask = exposure.mask
@@ -259,7 +314,7 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
 
         bits = mask.getPlaneBitMask(planes)
         variance_array = exposure.getMaskedImage().variance.array[1000:3000, 1000:3000]
-        window_array = (((mask.array & bits) == 0) & (mask_array == 0)).astype(np.float32)[
+        window_array = (((mask.array & bits) == 0) & ((mask_array & 1) == 0)).astype(np.float32)[
             1000:3000, 1000:3000
         ]
 
@@ -273,13 +328,14 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
             exposure.getMaskedImage().image.array[1000:3000, 1000:3000],
             dtype=np.float32,
         )
-        window_array = window_array * (noise_array**2.0 < variance_array * 9) * (~np.isnan(variance_array))
+        noise_variance = estimate_noise_variance(
+            exposure.getMaskedImage().variance.array,
+            mask,
+            mask_array,
+        )
+        window_array = window_array * self._noise_window(noise_array, variance_array, noise_variance)
 
         noise_array[~window_array.astype(bool)] = 0.0
-        noise_variance = np.average(variance_array[window_array.astype(bool)])
-        if noise_variance < 1e-20:
-            raise ValueError("the estimated image noise variance should be positive.")
-
         return self._correlate(noise_array, window_array, self.config.npix)
 
     def get_psf_systematics(self, exposure, catalog, seed, band):
@@ -299,42 +355,48 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
         )
         catalog = catalog[msk]
         nstars = len(catalog)
+        if nstars < 1:
+            return None, None
 
-        if nstars >= 1:
-            rng = np.random.RandomState(seed)
-            ind = rng.randint(0, nstars)
+        xn = f"{band}_centroid_x"
+        yn = f"{band}_centroid_y"
+        lsst_psf = exposure.getPsf()
+
+        # A CoaddPsf raises InvalidPsfError wherever no input exposure
+        # covers the point -- chip gaps, the patch rim. That is a
+        # property of the position, not of the catalog, so walk a random
+        # permutation and take the first star the PSF can be drawn at
+        # instead of failing the whole patch on one unlucky draw.
+        # (prepare.get_cells drops such positions for the same reason.)
+        order = np.random.RandomState(seed).permutation(nstars)
+        for ind in order:
             src = catalog[ind]
-            # Collect the PSF image
-            lsst_psf = exposure.getPsf()
-            psf_array = lsst_psf.computeImage(
-                Point2D(
-                    int(src[f"{band}_centroid_x"]),
-                    int(src[f"{band}_centroid_y"]),
-                )
-            ).getArray()
+            x0, y0 = int(src[xn]), int(src[yn])
+            try:
+                psf_array = lsst_psf.computeImage(Point2D(x0, y0)).getArray()
+            except Exception:
+                continue
             psf_array = resize_array(
                 psf_array,
                 (self.config.npix, self.config.npix),
             )
 
-            bbox = Box2I(
-                Point2I(
-                    int(src[f"{band}_centroid_x"]) - npixl,
-                    int(src[f"{band}_centroid_y"]) - npixl,
-                ),
+            stamp_bbox = Box2I(
+                Point2I(x0 - npixl, y0 - npixl),
                 Extent2I(self.config.npix, self.config.npix),
             )
-            # Collect the star image
-            # Extract the sub-image using the BBox
-            star_image = exposure.Factory(exposure, bbox).getImage()
-            # Get the image component and convert to a NumPy array
-            star_array = star_image.getArray()
-            xn = f"{band}_centroid_x"
-            yn = f"{band}_centroid_y"
-            offset_x = src[xn] - int(src[xn])
-            offset_y = src[yn] - int(src[yn])
-            star_array = subpixel_shift(star_array, -offset_x, -offset_y)
-        else:
-            psf_array = None
-            star_array = None
-        return psf_array, star_array
+            # Collect the star image: extract the sub-image using the BBox
+            star_array = exposure.Factory(
+                exposure, stamp_bbox
+            ).getImage().getArray()
+            star_array = subpixel_shift(
+                star_array, -(src[xn] - x0), -(src[yn] - y0)
+            )
+            return psf_array, star_array
+
+        self.log.warning(
+            "band %s: none of the %d candidate stars has a computable PSF; "
+            "no PSF/star stamp for this band",
+            band, nstars,
+        )
+        return None, None

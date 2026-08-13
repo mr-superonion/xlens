@@ -222,8 +222,8 @@ class FpfsMeasurementTask(Task):
         # Native per-source PSF: hand the C++ ForceTask the model
         # itself -- every stamp is drawn inside its GIL-released loop
         # (no Python per-galaxy drawing), and sources outside the
-        # model's coverage get mask_value = 414 written back in place.
-        # The 414 sentinel is always skipped by the C++ measurement,
+        # model's coverage get mask_value = 404 written back in place.
+        # The 404 sentinel is always skipped by the C++ measurement,
         # with or without a configured mask_value_max cut.
         psf_model = getattr(psf_object, "native_model", None)
         psf_offset = (
@@ -265,7 +265,7 @@ class FpfsMeasurementTask(Task):
             and detection is not None
             and has_mask_col
         ):
-            # propagate 414 sentinels the C++ wrote into the caller's
+            # propagate 404 sentinels the C++ wrote into the caller's
             # catalog, so later bands skip the same sources and the
             # output rows carry the flag
             detection["mask_value"] = mask_value
