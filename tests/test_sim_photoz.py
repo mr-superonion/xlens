@@ -89,7 +89,6 @@ def _measure(skymap, exposures: dict):
     cfg.anacal.sigma_arcsec = 0.38
     cfg.anacal.num_epochs = 0
     cfg.anacal.do_noise_bias_correction = True
-    cfg.anacal.validate_psf = False
     cfg.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
     cfg.fpfs.do_noise_bias_correction = True
     pipe = MeasureCoaddsPipe(config=cfg)

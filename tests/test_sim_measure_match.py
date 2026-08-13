@@ -105,7 +105,6 @@ def _measure_coadd(outcome, skymap, tract_id, patch_id, band):
     config.anacal.sigma_arcsec = 0.38
     config.anacal.num_epochs = 0
     config.anacal.do_noise_bias_correction = False
-    config.anacal.validate_psf = False
     config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
     config.fpfs.do_noise_bias_correction = False
     config.doPsfHsmMoments = True
