@@ -25,10 +25,12 @@ from . import (
     selbias,
     selbias_ranforest,
     selbias_redshift,
+    shear_diagnostics,
 )
 
 __all__ = [
     "cluster",
+    "shear_diagnostics",
     "selbias",
     "selbias_ranforest",
     "selbias_redshift",
