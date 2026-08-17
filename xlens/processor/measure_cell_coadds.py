@@ -82,7 +82,7 @@ class MeasureCellCoaddsPipeConnections(
             "encoded with a value column (decode with "
             "xlens.utils.image.rle_table_to_mask; bit 0 = masked/cut, "
             "bit 1 = discontinuity, stamped per source as "
-            "discontinuity_mask_value, never cut; "
+            "n_mask_discontinuity, never cut; "
             "origin in MASK_X0/MASK_Y0)."
         ),
         name="{inputName}_systematics_mask_rle",
@@ -415,7 +415,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         patch=patch,
                         mask_array=cell_mask,
                     )
-                return self.anacal.run(**data)
+                return self._run_anacal(**data)
             except Exception as e:
                 ix, iy = int(cell_id.x), int(cell_id.y)
                 self.log.error(
@@ -481,6 +481,10 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             self.log.debug("Measuring band %s", band)
             band_coadd = coadd_handles_dict[band].get()
             mag_zero = self._coadd_mag_zero(band_coadd)
+            # Per-cell visit count for THIS band, straight from the
+            # coadd's own provenance -- DP2 persists no nImage, and each
+            # band has its own visit set (u can be 1 visit where i is 9).
+            n_image_cells = self.n_image_per_cell(band_coadd)
 
             def _force_one(cell_id):
                 cell = band_coadd.cells[cell_id]
@@ -501,19 +505,34 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         detection=detection_dict[cell_id],
                         mask_array=cell_mask,
                     )
-                    cat = self.fpfs.run(**data)
+                    cat = self._run_fpfs(**data)
                     cat = self._append_gauss_fluxes(
                         cat, data=data, band=band,
                     )
                     if self.config.doPsfHsmMoments:
-                        # HSM measures the cell PSF stamp (the synthetic
-                        # ExposureF is released as this call exits).
+                        # HSM on the COADD PSF model stamp. The
+                        # provenance table's psf_shape_* are per-visit
+                        # ADAPTIVE moments; adaptive moments are not
+                        # linear in the profile, so a weighted mean of
+                        # them is not the coadd PSF's moments -- and the
+                        # per-visit spread within one cell reaches 167%.
+                        # Measure the actual coadd PSF instead. (The
+                        # synthetic ExposureF is released as this call
+                        # exits.)
                         cat = self._append_psf_hsm_moments(
                             cat,
                             band=band,
                             hsm_exposure=make_psf_stamp_exposure(
                                 cell.psf_image
                             ),
+                        )
+                    if n_image_cells is not None:
+                        n_vis = n_image_cells.get(
+                            (int(cell_id.x), int(cell_id.y)), 0
+                        )
+                        cat = self.attach_n_inputs_column(
+                            cat, np.full(len(cat), n_vis, dtype=np.int32),
+                            band,
                         )
                     return cat
                 except Exception as e:
@@ -584,7 +603,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             Combined stitched anacal bitmask from
             BuildCellSystematicsTask (bit 0 = masked/cut, bit 1 =
             discontinuity, stamped per source as
-            discontinuity_mask_value). If provided, per-cell masks are
+            n_mask_discontinuity). If provided, per-cell masks are
             extracted by slicing.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
@@ -605,7 +624,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
 
         # The mask already carries the anacal uint8 bit convention:
         # bit 0 = masked (cut), bit 1 = discontinuity (kept but stamped
-        # into discontinuity_mask_value per source).
+        # into n_mask_discontinuity per source).
         if mask is not None:
             stitched_mask_array = mask.getArray().astype(np.uint8)
             mask_origin = (mask.getX0(), mask.getY0())
@@ -644,12 +663,13 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             del mca
             det_use = detection
             if stitched_mask_array is not None:
-                # Stamp mask_value from the systematics mask (same C++
-                # smoothing/sampling internal detections get).  The
-                # mask_value cut itself happens in C++ (ForceTask /
-                # process_image) via the fpfs/anacal mask_value_max
-                # configs -- Python only stamps and partitions.
-                det_use = self._stamp_external_mask_value(
+                # Stamp n_mask_base / n_mask_discontinuity from the
+                # systematics mask (same C++ smoothing/sampling internal
+                # detections get).  The n_mask_base cut itself happens
+                # in C++ (ForceTask / process_image) via the fpfs/anacal
+                # n_mask_base_max configs -- Python only stamps and
+                # partitions.
+                det_use = self._stamp_external_mask_fractions(
                     det_use,
                     stitched_mask_array,
                     mask_origin,

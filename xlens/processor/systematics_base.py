@@ -136,7 +136,7 @@ class BuildSystematicsConfigBase(Config):
             "amount. Kept separate from badMaskPlanes because it flags "
             "a model error, not a bad pixel: masking it would cost a "
             "quarter of a typical patch. Downstream it becomes the "
-            "per-source ``discontinuity_mask_value`` column instead."
+            "per-source ``n_mask_discontinuity`` column instead."
         ),
         default=["INEXACT_PSF"],
     )

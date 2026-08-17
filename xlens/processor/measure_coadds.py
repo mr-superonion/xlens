@@ -84,6 +84,20 @@ class MeasureCoaddsPipeConnections(
         deferLoad=True,
         minimum=0,
     )
+    nImage = cT.Input(
+        doc=(
+            "Per-band coadd visit-count map (nImage). Optional: DP1 "
+            "registers it as deep_coadd_n_image, DP2 does not persist "
+            "it at all, so the task runs without it. Used for the "
+            "config.n_image_min coverage cut."
+        ),
+        name="{inputName}_n_image",
+        storageClass="ImageU",
+        dimensions=("skymap", "tract", "patch", "band"),
+        multiple=True,
+        deferLoad=True,
+        minimum=0,
+    )
     truthCatalog = cT.Input(
         doc="Truth catalog used to drive image simulation.",
         name="{catName}_truthCatalog",
@@ -112,7 +126,7 @@ class MeasureCoaddsPipeConnections(
             "xlens.utils.image.rle_table_to_mask). Bit 0 = masked "
             "(bad pixels / bright stars; cut), bit 1 = discontinuity "
             "(INEXACT_PSF union; stamped per source as "
-            "discontinuity_mask_value, never cut)."
+            "n_mask_discontinuity, never cut)."
         ),
         name="{inputName}_systematics_mask_rle",
         storageClass="ArrowAstropy",
@@ -273,6 +287,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             tract=tract,
             patch=patch,
             mask=inputs.get("mask", None),
+            n_image_handles=self.n_image_handles_dict(inputs),
             seed=seed,
         )
         butlerQC.put(outputs, outputRefs)
@@ -485,7 +500,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
 
         def _detect_one(cell):
             try:
-                return self.anacal.run(**data, cells=[cell])
+                return self._run_anacal(**data, cells=[cell])
             except Exception as e:
                 self.log.error(
                     "Detection failed tract=%d patch=%d cell=%d: %s",
@@ -522,6 +537,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         patch: int,
         mask_array: NDArray | None = None,
         band_cache: dict | None = None,
+        n_image_handles: dict | None = None,
     ) -> dict:
         """Force-measure each detection group across all bands.
 
@@ -579,6 +595,18 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 list(cell_map.values()), band,
             )
 
+            # Per-band coverage map, sampled per source below. Optional:
+            # a repo without nImage simply gets no column.
+            n_image_band = None
+            handle = (n_image_handles or {}).get(band)
+            if handle is not None:
+                n_image_band = np.asarray(handle.get().array)
+            begin_x = int(data.get("begin_x", 0))
+            begin_y = int(data.get("begin_y", 0))
+            pixel_scale = float(
+                exposure.getWcs().getPixelScale().asArcseconds()
+            )
+
             def _force_one(key):
                 det = detection_dict[key]
                 try:
@@ -596,16 +624,33 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                             f"cell {key} has no PSF in band {band}"
                         )
                     cells = [cell]
-                    cat = self.fpfs.run(**data, detection=det)
+                    cat = self._run_fpfs(**data, detection=det)
                     cat = self._append_gauss_fluxes(
                         cat,
                         data={**data, "detection": det, "cells": cells},
                         band=band,
                     )
                     # Pure lookup + column merge: no HSM call, no GIL.
-                    return self._attach_psf_hsm_moments(
+                    cat = self._attach_psf_hsm_moments(
                         cat, band=band, moments=psf_hsm.get(key),
                     )
+                    if n_image_band is not None:
+                        # det positions are arcsec in the parent frame;
+                        # the nImage shares the exposure's pixel grid.
+                        cat = self.attach_n_inputs_column(
+                            cat,
+                            self.n_inputs_at(
+                                n_image_band,
+                                np.asarray(det["x1_det"]) / pixel_scale
+                                - begin_x,
+                                np.asarray(det["x2_det"]) / pixel_scale
+                                - begin_y,
+                                sigma=self.config.anacal.sigma_arcsec * 1.5,
+                                scale=pixel_scale,
+                            ),
+                            band,
+                        )
+                    return cat
                 except Exception as e:
                     self.log.error(
                         "Measurement failed tract=%d patch=%d cell=%s "
@@ -639,6 +684,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         patch: int,
         mask: MaskX | None = None,
         detection: NDArray | None = None,
+        n_image_handles: dict | None = None,
         seed: int | None = None,
         **kwargs,
     ):
@@ -660,9 +706,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             Combined anacal bitmask: bit 0 = masked (bad pixels /
             bright stars; zeroed, extended, cut), bit 1 = discontinuity
             (INEXACT_PSF union; never cut, but detection stamps every
-            source with ``discontinuity_mask_value``, the
-            Gaussian-smoothed bit-1 density x1000, same kernel as
-            ``mask_value``).
+            source with ``n_mask_discontinuity``, the
+            Gaussian-weighted bit-1 fraction in [0, 1], same kernel as
+            ``n_mask_base``).
         detection : NDArray or None
             External detection catalog.  When provided the internal
             detection step is skipped; the catalog is partitioned into
@@ -679,7 +725,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             seed = self._seed_from_handle(first_handle)
         # The mask already carries the anacal uint8 bit convention:
         # bit 0 = masked (cut), bit 1 = discontinuity (kept but stamped
-        # into discontinuity_mask_value). anacal only zeroes / extends /
+        # into n_mask_discontinuity). anacal only zeroes / extends /
         # cuts on bit 0; bit 1 rides along for the column.
         if mask is not None:
             mask_array = mask.getArray().astype(np.uint8)
@@ -696,6 +742,10 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                     tract,
                     patch,
                 )
+        # Coverage cut: low-visit pixels are where coadd outlier
+        # rejection is weakest, so artefacts survive there.
+        mask_array = self.apply_n_image_cut(mask_array, n_image_handles or {})
+
         order: dict | None = None
         if detection is not None:
             # External catalog: partition it into the SAME per-cell
@@ -751,6 +801,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             patch=patch,
             mask_array=mask_array,
             band_cache=band_cache,
+            n_image_handles=n_image_handles,
         )
         cell_results = []
         for key, force_cat in force_cats.items():

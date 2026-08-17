@@ -119,14 +119,80 @@ def test_forced_measurement_matches_constant_psf_array(psf_and_bbox):
     )
     cat_const = anacal.fpfs.process_image(**common)
     obj = make_object_psf(psf, npix=NPIX, lsst_bbox=bbox)
-    mask_value = np.zeros(len(det), dtype=np.int32)
+    n_mask_base = np.zeros(len(det), dtype=np.float32)
     cat_native = anacal.fpfs.process_image(
-        **common, psf_object=obj, mask_value=mask_value,
+        **common, psf_object=obj, n_mask_base=n_mask_base,
     )
 
-    assert (mask_value == 0).all()   # constant model covers everything
+    assert (n_mask_base == 0).all()   # constant model covers everything
     for name in cat_const.dtype.names:
         np.testing.assert_allclose(
             cat_const[name], cat_native[name],
             rtol=1e-9, atol=1e-11, err_msg=name,
         )
+
+
+def test_sentinel_skips_without_a_configured_threshold(psf_and_bbox):
+    """A PSF-invalid source is skipped in EVERY band, cut or no cut.
+
+    ``n_mask_base == 1.0`` means "no usable PSF in some band", which is
+    a property of the source rather than of the band that found out.
+    ForceTask therefore zero-fills the row whether or not an
+    ``n_mask_base_max`` threshold is configured -- otherwise a source
+    flagged while measuring z would still be measured in the bands
+    that ran before z.
+    """
+    psf, stamp, bbox = psf_and_bbox
+    rng = np.random.RandomState(5)
+    scale = 0.168
+    ny = nx = 200
+    psf_use = resize_array(stamp, (NPIX, NPIX))
+
+    gal = rng.normal(0, 0.1, size=(ny, nx)).astype(np.float32)
+    positions = [(60.0, 70.0), (130.0, 120.0)]
+    for x, y in positions:
+        gal[int(y) - 22:int(y) + 23, int(x) - 22:int(x) + 23] += (
+            200.0 * _gauss_stamp(45, 4.0)
+        ).astype(np.float32)
+
+    det = np.zeros(len(positions), dtype=[("y", "f8"), ("x", "f8")])
+    det["x"] = [p[0] for p in positions]
+    det["y"] = [p[1] for p in positions]
+    config = anacal.fpfs.FpfsConfig(
+        npix=NPIX, sigma_shapelets1=0.52, sigma_shapelets2=-1
+    )
+    common = dict(
+        fpfs_config=config,
+        pixel_scale=scale,
+        mag_zero=27.0,
+        noise_variance=0.01,
+        gal_array=gal,
+        psf_array=psf_use,
+        detection=det,
+    )
+    obj = make_object_psf(psf, npix=NPIX, lsst_bbox=bbox)
+
+    # Source 0 carries the sentinel another band would have written.
+    flagged = np.zeros(len(det), dtype=np.float32)
+    flagged[0] = 1.0
+    cat = anacal.fpfs.process_image(
+        **common,
+        psf_object=obj,
+        n_mask_base=flagged,
+        n_mask_base_max=None,   # no threshold configured at all
+    )
+    # Row 0 zero-filled, row 1 measured normally.
+    assert cat["fpfs1_m00"][0] == 0.0
+    assert cat["fpfs1_m00"][1] != 0.0
+
+    # Same result with a threshold the sentinel exceeds -- it is not
+    # the threshold that drives the skip.
+    flagged2 = np.zeros(len(det), dtype=np.float32)
+    flagged2[0] = 1.0
+    cat2 = anacal.fpfs.process_image(
+        **common,
+        psf_object=obj,
+        n_mask_base=flagged2,
+        n_mask_base_max=0.035,
+    )
+    np.testing.assert_array_equal(cat["fpfs1_m00"], cat2["fpfs1_m00"])

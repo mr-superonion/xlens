@@ -88,7 +88,7 @@ class BuildSystematicsConnections(
             "the discontinuity planes (default INEXACT_PSF) -- real "
             "data with a wrong CoaddPsf model (chip gaps, clipped or "
             "rejected inputs), stamped per source as "
-            "discontinuity_mask_value, never cut. RLE because the mask "
+            "n_mask_discontinuity, never cut. RLE because the mask "
             "is a few bits per pixel: the int32 image form was 67 MB "
             "per patch, ~50x the encoded size."
         ),

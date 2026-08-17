@@ -93,7 +93,7 @@ class BuildCellSystematicsConnections(
             "pixels across all bands, the only bit that cuts pixels. "
             "Bit 1 (value 2): union of the discontinuity planes "
             "(default INEXACT_PSF), stamped per source as "
-            "discontinuity_mask_value, never cut."
+            "n_mask_discontinuity, never cut."
         ),
         name="deep_coadd_cell_systematics_mask_rle",
         storageClass="ArrowAstropy",

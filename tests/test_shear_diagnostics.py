@@ -22,14 +22,19 @@ def _make_catalog(n=1000, seed=3):
         "fpfs1_de1_dg1": rng.uniform(0.5, 1.5, n),
         "fpfs1_de2_dg2": rng.uniform(0.5, 1.5, n),
         "esq": rng.uniform(0, 0.3, n),
+        "fpfs1_m00": rng.uniform(1.0, 2.0, n),
+        "hsc_i_ext_shapeHSM_HsmPsfMoments_xx": np.full(n, 3.24),
+        "hsc_i_ext_shapeHSM_HsmPsfMoments_yy": np.full(n, 3.24),
+        "hsc_i_ext_shapeHSM_HsmPsfMoments_xy": np.zeros(n),
+        "fpfs1_m20": rng.uniform(-0.5, 2.0, n),
         "hsc_i_mag_gauss2": rng.uniform(20, 26.5, n),
         "hsc_i_s2n_fpfs1": rng.uniform(5, 100, n),
         "hsc_g_mag_gauss2": rng.uniform(20, 27, n),
         "hsc_r_mag_gauss2": rng.uniform(20, 26.5, n),
         "hsc_z_mag_gauss2": rng.uniform(20, 26, n),
         "hsc_y_mag_gauss2": rng.uniform(20, 26, n),
-        "mask_value": rng.randint(0, 300, n).astype(float),
-        "discontinuity_mask_value": rng.randint(0, 1200, n).astype(float),
+        "n_mask_base": rng.uniform(0.0, 0.3, n),
+        "n_mask_discontinuity": rng.uniform(0.0, 1.0, n),
     }
     cat = np.zeros(n, dtype=[(k, "f8") for k in cols])
     for k, v in cols.items():
@@ -42,6 +47,9 @@ def _selected(cat, config):
         (cat["hsc_i_mag_gauss2"] < config.mag_max)
         & (cat["hsc_i_s2n_fpfs1"] > config.snr_min)
         & (cat["esq"] < config.esq_max)
+        & (cat["n_mask_base"] < config.n_mask_base_max)
+        & ((cat["fpfs1_m00"] + cat["fpfs1_m20"]) / cat["fpfs1_m00"]
+           > config.trace_min)
     ]
 
 
@@ -152,6 +160,6 @@ def test_default_registries_on_full_columns():
     out = task.run(catalog=cat)
     props = set(out.meanShearStats["property"])
     assert "i_mag" in props and "gmr_color" in props
-    assert "psf_e1" not in props
+    assert "psf_e1_i" in props and "psf_e2_i" in props
     names = set(out.histStats["name"])
     assert {"i_mag", "abs_we1", "abs_we2", "response", "cmd_i_rmi"} <= names

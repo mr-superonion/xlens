@@ -121,7 +121,12 @@ class MergePipeConfig(
         doc=(
             "Optional fixed band weights matching ``bands`` (need not be "
             "normalised). When empty, weights are derived from the median "
-            "1/(``{band}_flux_fpfs1_err``)**2 of the stacked catalog."
+            "1/(``{band}_flux_fpfs1_err``)**2 of the stacked catalog.\n\n"
+            "PREFER fixed weights for production: a derived weight "
+            "makes the estimator differ from tract to tract, and any "
+            "weight built from the data carries a shear dependence "
+            "that the response does not account for. Derive them once "
+            "with the HSC compute script and pass the numbers here."
         ),
         default=[],
     )
@@ -225,7 +230,12 @@ class MergePipe(PipelineTask):
         """
         if not srcList:
             raise RuntimeError(f"No source catalogs for tract {tract}")
-        catalog = self._collect_src_tables(srcList)
+        try:
+            n_patch_x = int(skymap[tract].getNumPatches()[0])
+        except Exception:
+            n_patch_x = None
+        catalog = self._collect_src_tables(
+            srcList, tract=tract, n_patch_x=n_patch_x)
 
         weights = self._derive_band_weights(catalog)
         catalog = self._combine_band_moments(catalog, weights)
@@ -271,7 +281,9 @@ class MergePipe(PipelineTask):
 
         - Detection / position / selection: ``ra``, ``dec``, ``x1``,
           ``x2``, ``x1_det``, ``x2_det``, ``wsel``, ``dwsel_dg1``,
-          ``dwsel_dg2``, ``mask_value``, ``is_primary``, ``object_id``.
+          ``dwsel_dg2``, ``n_mask_base``, ``bkg``, ``dbkg_dg1``,
+          ``dbkg_dg2``, ``tract_id``, ``patch_x``, ``patch_y``,
+          ``is_primary``, ``object_id``.
         - Band-combined ellipticity and full shear response (already
           WCS-corrected): ``fpfs1_e1``, ``fpfs1_e2``, ``fpfs1_de1_dg1``,
           ``fpfs1_de1_dg2``, ``fpfs1_de2_dg1``, ``fpfs1_de2_dg2``.
@@ -346,7 +358,21 @@ class MergePipe(PipelineTask):
             "wsel",
             "dwsel_dg1",
             "dwsel_dg2",
-            "mask_value",
+            "n_mask_base",
+            "tract_id",
+            "patch_x",
+            "patch_y",
+            # Local background under the source, from the detection
+            # image (AnaCal detector::measure_pixel), with its shear
+            # response so a cut on it can be de-biased like any other
+            # selection. Carried because a coherent background offset
+            # -- scattered light, a sky-subtraction failure in one
+            # visit -- is not caught by n_mask_base or by the coadd
+            # mask planes, but does show up here: on such a region the
+            # median bkg runs ~7x the surrounding value.
+            "bkg",
+            "dbkg_dg1",
+            "dbkg_dg2",
             "object_id",
             f"{p}e1",
             f"{p}e2",
@@ -365,13 +391,13 @@ class MergePipe(PipelineTask):
             f"{p}dm20_dg2",
         ]
         # Per-source PSF-quality columns, carried through when the
-        # measurement produced them. discontinuity_mask_value counts
+        # measurement produced them. n_mask_discontinuity counts
         # INEXACT_PSF pixels in a box around the source (current
         # schema); psf_mask_value/psf_mask_frac are the older pair the
         # HSC scripts appended before the column moved into the
         # measurement task.
         for col in (
-            "discontinuity_mask_value",
+            "n_mask_discontinuity",
             "psf_mask_value",
             "psf_mask_frac",
         ):
@@ -415,6 +441,14 @@ class MergePipe(PipelineTask):
                 f"{b}_mag_gauss2_err",
                 f"{b}_dmag_gauss2_err_dg1",
                 f"{b}_dmag_gauss2_err_dg2",
+                # Coadd depth at the source: the Gaussian-weighted mean
+                # of this band's nImage (visit-count map) over the
+                # source footprint, so a source straddling a chip-gap
+                # edge reports the blend rather than its centre pixel.
+                # Present only when the measurement was given an
+                # nImage for this band -- DP2 persists none, and the
+                # HSC maps are a separate download.
+                f"{b}_n_inputs",
             ):
                 if col in catalog.colnames:
                     keep.append(col)
@@ -444,14 +478,36 @@ class MergePipe(PipelineTask):
             raise RuntimeError(f"merge finalize: missing expected columns: {missing}")
         return catalog[keep]
 
-    def _collect_src_tables(self, srcList) -> Table:
+    def _collect_src_tables(self, srcList, tract=None,
+                            n_patch_x=None) -> Table:
         """Materialise per-patch anacal catalogs and stack them into one
-        tract-level table.
+        tract-level table, stamping where each row came from.
+
+        ``tract_id`` / ``patch_x`` / ``patch_y`` are added HERE because
+        this is the last point at which the per-patch identity exists:
+        after the vstack a row is just a row, and any later attempt to
+        recover its patch has to reverse-engineer it from ``object_id``.
+        Downstream work needs them constantly -- inspecting an artefact,
+        dropping one patch, splitting a field by region.
+
+        The patch index is the butler's sequential id; it is unpacked
+        with the skymap's own patches-per-row so this stays correct for
+        a skymap that is not 9x9.
         """
-        return vstack(
-            [h.get() if hasattr(h, "get") else h for h in srcList],
-            metadata_conflicts="silent",
-        )
+        tables = []
+        for h in srcList:
+            t = h.get() if hasattr(h, "get") else h
+            data_id = getattr(h, "dataId", None)
+            if data_id is not None and tract is not None \
+                    and n_patch_x is not None and len(t):
+                seq = int(data_id["patch"])
+                t["tract_id"] = np.full(len(t), int(tract), dtype=np.int32)
+                t["patch_x"] = np.full(len(t), seq % n_patch_x,
+                                       dtype=np.int32)
+                t["patch_y"] = np.full(len(t), seq // n_patch_x,
+                                       dtype=np.int32)
+            tables.append(t)
+        return vstack(tables, metadata_conflicts="silent")
 
     def _join_photoz(self, catalog: Table, pzList) -> Table:
         """Join the photo-z columns onto ``catalog`` matched by
@@ -502,7 +558,16 @@ class MergePipe(PipelineTask):
                 w[i] = 1.0 / med**2 if med > 0 else 0.0
         if w.sum() <= 0.0:
             raise RuntimeError("All band weights are zero or negative.")
-        return w / w.sum()
+        w = w / w.sum()
+        # Provenance: which band actually carries the shear is not
+        # obvious from the mode alone, so record it per tract.
+        self.log.info(
+            "band weights (%s): %s",
+            "fixed" if len(self.config.band_weights) == len(bands)
+            else "derived 1/median(flux_fpfs1_err)**2",
+            ", ".join("%s=%.1f%%" % (b, 100 * x) for b, x in zip(bands, w)),
+        )
+        return w
 
     def _combine_band_moments(
         self,

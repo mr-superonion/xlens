@@ -79,16 +79,6 @@ class AnacalConfig(Config):
         doc="rotation id",
         default=0,
     )
-    mask_value_max = Field[int](
-        doc=(
-            "Skip measurement of sources whose mask_value exceeds this "
-            "(rows kept with default values; applied in C++ inside "
-            "process_image). None disables the cut."
-        ),
-        default=None,
-        optional=True,
-    )
-
     psf_model_type = Field[str](
         doc="type of psf model (choose from object, cell, patch)",
         default="patch",
@@ -163,6 +153,7 @@ class AnacalTask(Task):
         patchInfo=None,
         detection: NDArray | None,
         cells,
+        n_mask_base_max: float | None = None,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
@@ -205,7 +196,7 @@ class AnacalTask(Task):
             noise_array=noise_array,
             mask_array=mask_array,
             do_fpfs=self.config.do_fpfs,
-            mask_value_max=self.config.mask_value_max,
+            n_mask_base_max=n_mask_base_max,
         )
         catalog["x1"] = catalog["x1"] + begin_x * pixel_scale
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
