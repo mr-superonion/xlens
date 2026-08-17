@@ -62,7 +62,7 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.pex.config import DictField, Field, ListField
+from lsst.pex.config import DictField, Field
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,

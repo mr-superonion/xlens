@@ -585,6 +585,10 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         inner regions tile the patch), so forced measurement runs -- and
         threads -- identically either way.  The output preserves the
         input row order; rows whose cell failed in any band are dropped.
+        That catalog must carry ``ra``/``dec`` and ``wsel``/
+        ``dwsel_dg1``/``dwsel_dg2``; pixel positions are derived from
+        the sky coordinates and any it carries are ignored.  See
+        :meth:`_ingest_external_detection` for why.
 
         Detection is performed using i-band only. Forced measurement
         processes one band at a time to minimize memory usage: each
@@ -661,7 +665,13 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                      ib.getEndX(), ib.getEndY())
                 )
             del mca
-            det_use = detection
+            # Pixel positions come from ra/dec through the tract WCS
+            # (cell inner bboxes are in that frame); whatever the
+            # catalog carried is overwritten.  This runs BEFORE the mask
+            # stamping below, which samples at x1/x2.
+            det_use = self._ingest_external_detection(
+                detection, skyMap[tract].getWcs(), pixel_scale,
+            )
             if stitched_mask_array is not None:
                 # Stamp n_mask_base / n_mask_discontinuity from the
                 # systematics mask (same C++ smoothing/sampling internal

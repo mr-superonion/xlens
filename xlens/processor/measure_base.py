@@ -378,6 +378,101 @@ class AnacalMeasureTaskBase(PipelineTask):
         ) as pool:
             return list(pool.map(fn, items))
 
+    def _ingest_external_detection(
+        self,
+        detection: NDArray,
+        wcs,
+        pixel_scale: float,
+    ) -> NDArray:
+        """Return ``detection`` with its pixel positions rebuilt from sky.
+
+        THE CONTRACT for an external detection catalog is sky
+        coordinates plus a selection weight:
+
+        - ``ra``, ``dec`` (degrees) -- the positions.  They are the only
+          frame-independent identity a catalog can carry: ``x1``/``x2``
+          are pixels of ONE exposure (scaled by that exposure's pixel
+          scale, offset by its bbox origin), so a catalog forced onto
+          several bands, patches or surveys cannot carry meaningful
+          ones.  Whatever pixel columns arrive are therefore OVERWRITTEN
+          here, never trusted.
+        - ``wsel``, ``dwsel_dg1``, ``dwsel_dg2`` -- the selection weight
+          and its shear derivatives.  Nothing downstream recomputes
+          them: the merged output takes them straight from this catalog,
+          and ``_select_rows`` drops every row with ``wsel <= 1e-5``.
+          There is deliberately NO default, because both plausible ones
+          are wrong.  Zero silently empties the output (a catalog that
+          measured perfectly well disappears in finalization), and 1.0
+          asserts a shear-INDEPENDENT selection, which almost never
+          holds: a detection made in another band or another survey
+          still looks at the same sheared sky, so its selection responds
+          to shear just as this band's would.  Only a selection made on
+          PRE-LENSED properties -- truth-catalog quantities in a
+          simulation -- may set ``wsel = 1, dwsel_dg = 0``.  The caller
+          has to state which case it is.
+
+        Everything else (fluxes, moments, mask fractions) is filled by
+        measurement downstream.
+        """
+        names = set(detection.dtype.names or ())
+        missing = [
+            c for c in ("ra", "dec", "wsel", "dwsel_dg1", "dwsel_dg2")
+            if c not in names
+        ]
+        if missing:
+            raise ValueError(
+                f"External detection catalog is missing required "
+                f"column(s) {missing}. It must carry sky positions "
+                "(ra, dec) and the selection weight with its shear "
+                "derivatives (wsel, dwsel_dg1, dwsel_dg2); pixel "
+                "positions are derived here and never read from the "
+                "input."
+            )
+        ra = np.asarray(detection["ra"], dtype=np.float64)
+        dec = np.asarray(detection["dec"], dtype=np.float64)
+        if not np.any(ra != 0.0) and not np.any(dec != 0.0):
+            raise ValueError(
+                "External detection catalog has ra = dec = 0 for every "
+                "row. Sky positions are required: pixel positions are "
+                "derived from them, and is_primary is decided by which "
+                "tract contains them."
+            )
+        # The position columns are OUTPUTS of this step, so a catalog
+        # that never had them (a survey catalog carries sky coordinates,
+        # not another instrument's pixels) is as valid an input as one
+        # whose values we are about to discard.
+        out = detection.copy()
+        absent = [
+            c for c in ("x1", "x2", "x1_det", "x2_det")
+            if c not in names
+        ]
+        if absent:
+            out = rfn.append_fields(
+                out,
+                absent,
+                [np.zeros(len(out), dtype=np.float64) for _ in absent],
+                usemask=False,
+            )
+        px, py = wcs.skyToPixelArray(ra, dec, degrees=True)
+        # x1/x2 are pixels scaled to arcsec in the exposure's own frame,
+        # which is what anacal's catalog and the region partition below
+        # both expect.  x1_det/x2_det are the detection positions; for
+        # an external catalog they are the same points, and forced
+        # measurement is what may move x1/x2 away from them.
+        out["x1"] = px * pixel_scale
+        out["x2"] = py * pixel_scale
+        out["x1_det"] = out["x1"]
+        out["x2_det"] = out["x2"]
+        n_bad = int(np.sum(~np.isfinite(px) | ~np.isfinite(py)))
+        if n_bad:
+            self.log.warning(
+                "%d external detections have sky positions the WCS "
+                "cannot map to pixels; they fall in no region and are "
+                "dropped by the partition.",
+                n_bad,
+            )
+        return out
+
     def _partition_external_detection(
         self,
         detection: NDArray,

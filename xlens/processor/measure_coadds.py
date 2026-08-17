@@ -716,6 +716,12 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             so forced measurement runs (and threads) identically either
             way.  The output preserves the input row order; rows whose
             cell failed in any band are dropped.
+
+            It must carry ``ra``/``dec`` and ``wsel``/``dwsel_dg1``/
+            ``dwsel_dg2``; pixel positions are derived from the sky
+            coordinates and any the catalog carries are ignored.  See
+            :meth:`_ingest_external_detection` for why those are
+            required and why neither has a default.
         """
         # Seed is band-independent under the default
         # SkyMapIdGeneratorConfig (n_bands=0), so any handle in the dict
@@ -772,8 +778,13 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                  x0 + bb.xmax_in, y0 + bb.ymax_in)
                 for bb in geo
             ]
+            # Pixel positions come from ra/dec through THIS exposure's
+            # WCS; whatever the catalog carried is overwritten.
+            det_use = self._ingest_external_detection(
+                detection, exposure.getWcs(), pixel_scale,
+            )
             det_cats, order = self._partition_external_detection(
-                detection, regions, pixel_scale,
+                det_use, regions, pixel_scale,
             )
             if not det_cats:
                 raise NoWorkFound(
