@@ -188,7 +188,9 @@ class MeasureBandsConfigBase(AnacalMeasureConfigBase):
             "+ HigherOrderMomentsPSFPlugin (the same plugins DRP uses) once "
             "per (exposure or cell, band) on the PSF model, and broadcast "
             "the resulting PSF moments to every source. Adds "
-            "{band}_ext_shapeHSM_HsmPsfMoments_{xx,yy,xy,flag,...} and "
+            "{band}_ext_shapeHSM_HsmPsfMoments_{xx,yy,xy,flag,...} "
+            "(second moments in ARCSEC**2, converted from the plugin's "
+            "pixel**2 using the coadd WCS) and "
             "{band}_ext_shapeHSM_HigherOrderMomentsPSF_{pq,flag} columns "
             "to the per-source anacal catalog."
         ),
@@ -659,7 +661,9 @@ class AnacalMeasureTaskBase(PipelineTask):
         )
         return np.asarray(rfn.merge_arrays([cat, gauss_cat], flatten=True))
 
-    def _psf_hsm_moments_per_cell(self, cells, band: str) -> dict:
+    def _psf_hsm_moments_per_cell(
+        self, cells, band: str, *, pixel_scale: float,
+    ) -> dict:
         """PSF HSM moments for every cell, measured SERIALLY.
 
         The HSM plugins are Python + pybind11 without a GIL release, so
@@ -688,6 +692,7 @@ class AnacalMeasureTaskBase(PipelineTask):
                 out[bb.index] = measure_psf_hsm_moments(
                     self._psfHsmCtx, self.psfHsmMeasurement,
                     make_psf_stamp_exposure(psf),
+                    pixel_scale=pixel_scale,
                 )
             except Exception as exc:
                 self.log.warning(
@@ -717,6 +722,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         *,
         band: str,
         hsm_exposure,
+        pixel_scale: float,
     ) -> NDArray:
         """Merge the broadcast PSF HSM moments into a forced catalog.
 
@@ -730,6 +736,7 @@ class AnacalMeasureTaskBase(PipelineTask):
             return cat
         psf_moments = measure_psf_hsm_moments(
             self._psfHsmCtx, self.psfHsmMeasurement, hsm_exposure,
+            pixel_scale=pixel_scale,
         )
         psf_cols = broadcast_psf_hsm_moments(
             psf_moments, band, n=len(cat),

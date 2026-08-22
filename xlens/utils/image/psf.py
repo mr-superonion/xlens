@@ -463,14 +463,37 @@ def get_psf_array(
     return out
 
 
+def _iter_cell_psf_arrays(cell_coadd):
+    """Every cell's PSF stamp, whichever coadd flavour this is.
+
+    ``lsst.cell_coadds.MultipleCellCoadd`` (DP1) carries a ``cells``
+    mapping whose entries hold a ``psf_image``.  ``lsst.images.cells.
+    CellCoadd`` (DP2) has no per-cell objects at all: the PSF is one
+    grid-indexed container.  Both are per cell, only the accessor
+    differs.
+    """
+    cells = getattr(cell_coadd, "cells", None)
+    if cells is not None:
+        for cell in cells.values():
+            psf_image = getattr(cell, "psf_image", None)
+            yield None if psf_image is None else getattr(psf_image, "array", None)
+        return
+    from lsst.images._cell_grid import CellIJ
+
+    psf = cell_coadd.psf
+    size = psf.grid.grid_size
+    for i in range(size.i):
+        for j in range(size.j):
+            try:
+                yield np.asarray(psf[CellIJ(i=i, j=j)].array)
+            except Exception:
+                yield None
+
+
 def stack_psfs_cells(*, cell_coadd, npix):
     psf_array = np.zeros((npix, npix))
     npsf = 0.0
-    for cell in cell_coadd.cells.values():
-        p0 = None
-        psf_image = getattr(cell, "psf_image", None)
-        if psf_image is not None:
-            p0 = getattr(psf_image, "array", None)
+    for p0 in _iter_cell_psf_arrays(cell_coadd):
         if (p0 is not None) and np.isfinite(p0).all():
             psf_array = psf_array + resize_array(
                 p0,

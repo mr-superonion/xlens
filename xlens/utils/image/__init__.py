@@ -51,7 +51,6 @@ from .masks import (  # noqa: F401
     mask_to_rle,
     mask_to_rle_table,
     prepare_mask,
-    rle_table_origin,
     rle_table_to_mask,
     rle_to_mask,
 )

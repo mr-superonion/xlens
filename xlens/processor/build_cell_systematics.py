@@ -36,6 +36,7 @@ from lsst.afw.image import MaskX
 from lsst.meas.algorithms import ReferenceObjectLoader
 from lsst.pex.config import ListField
 from lsst.pipe.base import (
+    NoWorkFound,
     PipelineTaskConfig,
     PipelineTaskConnections,
     Struct,
@@ -70,7 +71,14 @@ class BuildCellSystematicsConnections(
     cellCoadd = cT.Input(
         doc="Input cell-based coadd image",
         name="{coaddName}_coadd_cell_predetection",
-        storageClass="MultipleCellCoadd",
+        # Read the NATIVE cell coadd. Declaring MultipleCellCoadd makes
+        # butler run the CellCoadd -> MultipleCellCoadd converter, which
+        # raises "MultipleCellCoadd requires its bounding box to lie on
+        # the cell grid" for patches whose bbox is not a whole number of
+        # cells -- 36 hard failures in the first DP2 systematics run.
+        # Nothing here needs per-cell image objects: the mask comes from
+        # the full-patch exposure and the PSF from the cell grid.
+        storageClass="CellCoadd",
         dimensions=("skymap", "tract", "patch", "band"),
         multiple=True,
         deferLoad=True,
@@ -88,7 +96,7 @@ class BuildCellSystematicsConnections(
         doc=(
             "Combined anacal bitmask on the stitched image, run-length "
             "encoded (y, x_start, x_end, value; x_end exclusive; shape "
-            "in MASK_NY/MASK_NX -- decode with "
+            "decode with "
             "xlens.utils.image.rle_table_to_mask). Bit 0 (value 1): bad "
             "pixels across all bands, the only bit that cuts pixels. "
             "Bit 1 (value 2): union of the discontinuity planes "
@@ -125,6 +133,13 @@ class BuildCellSystematicsConnections(
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
+        if config is not None and not config.do_noise_corr_estimation:
+            # Do not advertise -- or write -- a product we did not
+            # compute. Writing it as zeros would look like a real
+            # estimate to anything that read it later; dropping the
+            # connection makes the absence explicit, and the quantum
+            # graph then simply has no such dataset.
+            self.outputs.remove("outputNoiseCorr")
 
 
 class BuildCellSystematicsConfig(
@@ -194,10 +209,12 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
             (np.asarray(outputs.outputDiscontinuityMask) != 0).astype(np.uint8)
             << 1
         )
-        outputs.outputMask = mask_to_rle_table(
-            combined, x0=msk.getX0(), y0=msk.getY0()
-        )
+        outputs.outputMask = mask_to_rle_table(combined)
         del outputs.outputDiscontinuityMask
+        if not self.config.do_noise_corr_estimation:
+            # matches the connection dropped in
+            # BuildCellSystematicsConnections.__init__
+            del outputs.outputNoiseCorr
         butlerQC.put(outputs, outputRefs)
 
     def get_noise_corr(self, stitched_coadd, mask_array, badMaskPlanes):
@@ -221,7 +238,10 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
         assert isinstance(self.config, BuildCellSystematicsConfig)
         npix = self.config.npix
 
-        exp = stitched_coadd.asExposure()
+        # Accepts either an afw Exposure (native CellCoadd via
+        # to_legacy) or a StitchedCoadd (the legacy path).
+        exp = (stitched_coadd if hasattr(stitched_coadd, "image")
+               else stitched_coadd.asExposure())
         mask = exp.mask
         image_array = np.asarray(exp.image.array, dtype=np.float32)
         variance_array = exp.variance.array
@@ -296,18 +316,35 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
 
         expected = set(self.config.bands)
         provided = set(cell_handles_dict.keys())
-        if provided != expected:
+        missing = sorted(expected - provided)
+        extra = sorted(provided - expected)
+        if missing:
+            # Incomplete coverage is data, not a mistake: a patch the
+            # survey has not finished in every band simply has no work
+            # here. NoWorkFound makes the executor SKIP the quantum
+            # (and its downstream) instead of failing the run, so one
+            # missing band does not take a whole submission down.
+            raise NoWorkFound(
+                f"tract={tract} patch={patch} is missing band(s) "
+                f"{missing}; skipping (have {sorted(provided)})"
+            )
+        if extra:
+            # Extra bands ARE a mistake: `bands` and the data query
+            # disagree, and every patch would be measured with a
+            # different band set. Fail loudly.
             raise RuntimeError(
                 f"band mismatch for tract={tract} patch={patch}: "
-                f"expected {sorted(expected)}, "
-                f"got {sorted(provided)} "
-                f"(missing={sorted(expected - provided)}, "
-                f"extra={sorted(provided - expected)})"
+                f"expected {sorted(expected)}, got {sorted(provided)} "
+                f"(extra={extra}). Constrain the data query, e.g. "
+                f"-d \"... AND band IN ('r','i','z')\"."
             )
 
         npix = self.config.npix
 
-        noise_corr_array = np.zeros((6, npix, npix))
+        noise_corr_array = (
+            np.zeros((6, npix, npix))
+            if self.config.do_noise_corr_estimation else None
+        )
         psf_array = np.zeros((6, npix, npix))
         mask_array: np.ndarray | None = None
         disc_array: np.ndarray | None = None
@@ -331,8 +368,11 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
             cell_coadd = handle.get()
             psf_array[i] = stack_psfs_cells(cell_coadd=cell_coadd, npix=npix)
 
-            stitched = cell_coadd.stitch()
-            exp = stitched.asExposure()
+            # to_legacy() gives the whole patch as an afw Exposure --
+            # image, variance, mask planes and WCS -- with no stitching
+            # and no cell-grid constraint.
+            exp = cell_coadd.to_legacy()
+            stitched = None
 
             if stitched_bbox is None:
                 stitched_bbox = exp.getBBox()
@@ -367,7 +407,16 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
         # correlation against the augmented mask. Doubles the stitching
         # work vs. caching, but keeps peak memory at ~1 stitched coadd
         # instead of nbands.
-        for band, handle in cell_handles_dict.items():
+        if not self.config.do_noise_corr_estimation:
+            self.log.info(
+                "noise correlation estimation disabled; outputNoiseCorr "
+                "stays zero for tract=%d patch=%d", tract, patch,
+            )
+        pass2 = (
+            cell_handles_dict.items()
+            if self.config.do_noise_corr_estimation else ()
+        )
+        for band, handle in pass2:
             if band not in band_order:
                 continue
             i = band_order.index(band)
@@ -376,7 +425,7 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
                 band, tract, patch,
             )
             cell_coadd = handle.get()
-            stitched = cell_coadd.stitch()
+            stitched = cell_coadd.to_legacy()
             noise_corr_array[i] = self.get_noise_corr(
                 stitched,
                 mask_array,

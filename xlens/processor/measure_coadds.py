@@ -244,7 +244,12 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         # The combined bitmask arrives run-length encoded; decode to
         # pixels once, preserving the bit values (0..3).
         if inputs.get("mask", None) is not None:
-            arr = rle_table_to_mask(inputs["mask"])
+            # The RLE table does not describe its own geometry; the
+            # mask covers the patch's outer bbox by construction.
+            _bbox = inputs["skyMap"][tract][patch].getOuterBBox()
+            arr = rle_table_to_mask(
+                inputs["mask"], (_bbox.getHeight(), _bbox.getWidth())
+            )
             msk = MaskX(width=arr.shape[1], height=arr.shape[0])
             msk.getArray()[:, :] = arr.astype(
                 msk.getArray().dtype, copy=False
@@ -591,8 +596,14 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             # not on the sources, so one pass over the cells is enough --
             # the previous code re-measured the SAME patch-centre PSF
             # once per cell and threw the spatial variation away.
+            # Hoisted above the HSM call: the PSF second moments are
+            # converted to arcsec**2 with this scale, so it has to exist
+            # before the measurement, not only before _force_one.
+            pixel_scale = float(
+                exposure.getWcs().getPixelScale().asArcseconds()
+            )
             psf_hsm = self._psf_hsm_moments_per_cell(
-                list(cell_map.values()), band,
+                list(cell_map.values()), band, pixel_scale=pixel_scale,
             )
 
             # Per-band coverage map, sampled per source below. Optional:
@@ -603,9 +614,6 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 n_image_band = np.asarray(handle.get().array)
             begin_x = int(data.get("begin_x", 0))
             begin_y = int(data.get("begin_y", 0))
-            pixel_scale = float(
-                exposure.getWcs().getPixelScale().asArcseconds()
-            )
 
             def _force_one(key):
                 det = detection_dict[key]

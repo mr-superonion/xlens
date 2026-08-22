@@ -97,6 +97,21 @@ class BuildSystematicsConfigBase(Config):
         ),
         default=badMaskDefault,
     )
+    do_noise_corr_estimation = Field[bool](
+        doc=(
+            "Estimate the per-band noise correlation function. Pass 2 "
+            "stitches every band's coadd again purely for this, so "
+            "turning it off is a large saving. Safe to disable on the "
+            "CELL path: MeasureCellCoaddsPipe has no noiseCorr input "
+            "at all (the cell coadds carry their own noise "
+            "realisations). NOT safe on the patch path, where "
+            "MeasureCoaddsPipe consumes it -- the product is written "
+            "as zeros when disabled, which fails loudly in "
+            "rotate_noise_corr rather than biasing anything quietly."
+        ),
+        default=True,
+    )
+
     badMaskPlanesPerBand = ConfigDictField(
         doc=(
             "Per-band override of ``badMaskPlanes``, keyed by PHYSICAL "

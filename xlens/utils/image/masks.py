@@ -37,6 +37,12 @@ import lsst.pex.exceptions as pexExcept
 import numpy as np
 from numpy.typing import NDArray
 
+# A pixel is only usable where the variance plane says how noisy it is.
+# Two ways it fails to: the huge-variance sentinel the stack writes for
+# no-data pixels, and NaN. Written as `not (var < MAX)` on purpose --
+# every comparison with NaN is False, so the negation catches NaN too.
+MAX_VALID_VARIANCE = 1e5
+
 badMaskDefault = [
     "BAD",
     "SAT",
@@ -77,7 +83,9 @@ def prepare_mask(
         Mask object exposing ``.array`` and ``getPlaneBitMask(plane)``.
         Plane names absent from this mask are silently skipped.
     variance_array : NDArray
-        Variance plane.
+        Variance plane. Pixels that are NaN or at/above
+        ``MAX_VALID_VARIANCE`` are flagged: without a variance there is
+        no noise level, so the pixel cannot be measured on.
     badMaskPlanes : list of str
         Mask plane names to flag.
     original_mask_array : NDArray or None, optional
@@ -97,8 +105,16 @@ def prepare_mask(
         except pexExcept.InvalidParameterError:
             pass
     mask_array_raw = mask_object.array
+    # The -6 sigma guard is silently INERT where the variance is NaN
+    # (image < NaN is always False), which is how DP2 patches with a
+    # NaN variance block ended up with unflagged pixels carrying finite
+    # image values. The variance-validity term below is what catches
+    # them, and it uses the same threshold as
+    # `estimate_noise_variance`, so a pixel this mask keeps is exactly
+    # a pixel that estimator will accept.
     new_mask = (
         ((mask_array_raw & bitv) != 0)
+        | ~(variance_array < MAX_VALID_VARIANCE)
         | (image_array < (-6.0 * np.sqrt(np.where(variance_array < 0, 0, variance_array))))
     ).astype(np.uint8)
     if original_mask_array is None:
@@ -194,42 +210,36 @@ def rle_to_mask(rle: NDArray, shape, dtype=np.uint8) -> NDArray:
     return np.cumsum(diff[:-1]).reshape(ny, nx).astype(dtype)
 
 
-def mask_to_rle_table(mask_array: NDArray, x0: int = 0, y0: int = 0):
-    """RLE-encode into an ``astropy`` Table carrying shape and origin.
+def mask_to_rle_table(mask_array: NDArray):
+    """RLE-encode a mask into an ``astropy`` Table of runs.
 
-    ``meta['MASK_NY'] / meta['MASK_NX']`` record the shape and
-    ``meta['MASK_X0'] / meta['MASK_Y0']`` the pixel origin (XY0 of the
-    source ``MaskX``; the cell-coadd chain needs it to place the
-    stitched mask on the tract grid), so :func:`rle_table_to_mask` and
-    :func:`rle_table_origin` can reconstruct everything without
-    external knowledge. This is the payload of the
-    ``*_systematics_mask_rle`` butler datasets and of the file-based
-    mask products.
+    The table carries the runs and NOTHING else. Shape and origin are
+    deliberately not stored: they are a property of the patch the mask
+    belongs to (its outer bbox), which every caller already knows.
+
+    They used to travel in ``meta['MASK_NY'/'MASK_NX'/'MASK_X0'/
+    'MASK_Y0']``, but the butler's ArrowAstropy read path returns the
+    table with ``meta`` stripped (the keys reach the parquet file, and
+    ``butler.get`` drops them), so a mask written by one task came back
+    undecodable in the next. Decode with :func:`rle_table_to_mask`,
+    passing the patch outer bbox.
     """
     from astropy.table import Table
 
-    rle = mask_to_rle(mask_array)
-    tab = Table(rle)
-    tab.meta["MASK_NY"] = int(mask_array.shape[0])
-    tab.meta["MASK_NX"] = int(mask_array.shape[1])
-    tab.meta["MASK_X0"] = int(x0)
-    tab.meta["MASK_Y0"] = int(y0)
-    return tab
+    return Table(mask_to_rle(mask_array))
 
 
-def rle_table_origin(table) -> tuple[int, int]:
-    """(x0, y0) origin stored by :func:`mask_to_rle_table` (0,0 if absent)."""
-    meta = {k.upper(): v for k, v in table.meta.items()}
-    return int(meta.get("MASK_X0", 0)), int(meta.get("MASK_Y0", 0))
-
-
-def rle_table_to_mask(table, dtype=np.uint8) -> NDArray:
+def rle_table_to_mask(table, shape, dtype=np.uint8) -> NDArray:
     """Decode a :func:`mask_to_rle_table` Table back to a mask image.
 
-    Tables written before the ``value`` column existed decode as 0/1.
+    ``shape`` is ``(ny, nx)`` -- normally the dimensions of the patch's
+    outer bbox. It is required: the table itself does not describe its
+    geometry (see :func:`mask_to_rle_table`).
+
+    Tables written before the ``value`` column existed decode as 0/1;
+    any ``MASK_*`` metadata left on older tables is ignored.
     """
-    meta = {k.upper(): v for k, v in table.meta.items()}
-    shape = (int(meta["MASK_NY"]), int(meta["MASK_NX"]))
+    shape = (int(shape[0]), int(shape[1]))
     if len(table) == 0:
         return np.zeros(shape, dtype=dtype)
     rle = np.empty(len(table), dtype=RLE_DTYPE)

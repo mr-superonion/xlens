@@ -76,17 +76,17 @@ from numpy.typing import NDArray
 # numpy expression over catalog columns (``np.`` allowed).  Entries with
 # missing columns are skipped at run time with a warning.
 # ----------------------------------------------------------------------
-_XX = "hsc_i_ext_shapeHSM_HsmPsfMoments_xx"
-_YY = "hsc_i_ext_shapeHSM_HsmPsfMoments_yy"
-_XY = "hsc_i_ext_shapeHSM_HsmPsfMoments_xy"
+_XX = "SURVEY_i_ext_shapeHSM_HsmPsfMoments_xx"
+_YY = "SURVEY_i_ext_shapeHSM_HsmPsfMoments_yy"
+_XY = "SURVEY_i_ext_shapeHSM_HsmPsfMoments_xy"
 
 # Mean-shear null-test properties.
 PROPERTY_BINS = {
-    "i_mag": ("hsc_i_mag_gauss2", 20.0, 25.0, 10, False),
-    "gmr_color": ("hsc_g_mag_gauss2 - hsc_r_mag_gauss2", -0.5, 2.5, 12, False),
-    "rmi_color": ("hsc_r_mag_gauss2 - hsc_i_mag_gauss2", -0.5, 2.0, 12, False),
-    "imz_color": ("hsc_i_mag_gauss2 - hsc_z_mag_gauss2", -0.5, 1.5, 12, False),
-    "zmy_color": ("hsc_z_mag_gauss2 - hsc_y_mag_gauss2", -0.5, 1.0, 12, False),
+    "i_mag": ("SURVEY_i_mag_gauss2", 20.0, 25.0, 10, False),
+    "gmr_color": ("SURVEY_g_mag_gauss2 - SURVEY_r_mag_gauss2", -0.5, 2.5, 12, False),
+    "rmi_color": ("SURVEY_r_mag_gauss2 - SURVEY_i_mag_gauss2", -0.5, 2.0, 12, False),
+    "imz_color": ("SURVEY_i_mag_gauss2 - SURVEY_z_mag_gauss2", -0.5, 1.5, 12, False),
+    "zmy_color": ("SURVEY_z_mag_gauss2 - SURVEY_y_mag_gauss2", -0.5, 1.0, 12, False),
     "n_mask_base": ("n_mask_base", 0.0, 0.035, 10, False),
     # Local background under the source, from the detection image. The
     # coadd mask planes miss a coherent background offset -- scattered
@@ -102,15 +102,15 @@ PROPERTY_BINS = {
     "bkg": ("bkg", -0.6, 1.0, 5, False),
     "discontinuity": ("n_mask_discontinuity", 0.0, 1.0, 10, False),
 
-    "g_flux_err": ("hsc_g_flux_gauss2_err", 22.0, 32.0, 10, False),
-    "r_flux_err": ("hsc_r_flux_gauss2_err", 37.0, 52.0, 10, False),
-    "i_flux_err": ("hsc_i_flux_gauss2_err", 46.0, 82.0, 10, False),
-    "z_flux_err": ("hsc_z_flux_gauss2_err", 95.0, 130.0, 10, False),
-    "y_flux_err": ("hsc_y_flux_gauss2_err", 200.0, 275.0, 10, False),
-    "g_mag": ("hsc_g_mag_gauss2", 21.0, 27.0, 12, False),
-    "r_mag": ("hsc_r_mag_gauss2", 20.0, 25.5, 11, False),
-    "z_mag": ("hsc_z_mag_gauss2", 19.5, 25.0, 11, False),
-    "y_mag": ("hsc_y_mag_gauss2", 19.0, 25.5, 13, False),
+    "g_flux_err": ("SURVEY_g_flux_gauss2_err", 22.0, 32.0, 10, False),
+    "r_flux_err": ("SURVEY_r_flux_gauss2_err", 37.0, 52.0, 10, False),
+    "i_flux_err": ("SURVEY_i_flux_gauss2_err", 46.0, 82.0, 10, False),
+    "z_flux_err": ("SURVEY_z_flux_gauss2_err", 95.0, 130.0, 10, False),
+    "y_flux_err": ("SURVEY_y_flux_gauss2_err", 200.0, 275.0, 10, False),
+    "g_mag": ("SURVEY_g_mag_gauss2", 21.0, 27.0, 12, False),
+    "r_mag": ("SURVEY_r_mag_gauss2", 20.0, 25.5, 11, False),
+    "z_mag": ("SURVEY_z_mag_gauss2", 19.5, 25.0, 11, False),
+    "y_mag": ("SURVEY_y_mag_gauss2", 19.0, 25.5, 13, False),
     "trace": ("(fpfs1_m00 + fpfs1_m20) / fpfs1_m00", 0.1, 1.6, 12, False),
     "abs_e": ("np.sqrt(esq)", 0.0, 0.4, 10, False),
     # sky position: wide ranges covering all fields; bins outside the
@@ -119,7 +119,7 @@ PROPERTY_BINS = {
     "dec": ("dec", -8.0, 46.0, 27, False),
 }
 
-# Per-band flux S/N (hsc_<b>_s2n_fpfs1). The selection cuts on the
+# Per-band flux S/N (SURVEY_<b>_s2n_fpfs1). The selection cuts on the
 # i-band S/N only, so the other bands still reach low values -- a shear
 # trend against them is the test for noise-driven shape bias in the
 # bands that were never cut on. Log-spaced like the i-band entry;
@@ -131,11 +131,11 @@ _SNR_RANGE = {
 for _b in "grizy":
     _lo, _hi = _SNR_RANGE[_b]
     PROPERTY_BINS["%s_snr" % _b] = (
-        "hsc_%s_s2n_fpfs1" % _b, _lo, _hi, 10, True,
+        "SURVEY_%s_s2n_fpfs1" % _b, _lo, _hi, 10, True,
     )
 
 # Per-band coadd depth: the Gaussian-weighted mean of that band's
-# nImage over the source footprint (hsc_<b>_n_inputs, written by the
+# nImage over the source footprint (SURVEY_<b>_n_inputs, written by the
 # measurement when the visit-count maps are supplied). Ranges are the
 # observed 1-99 percentiles over 24 tracts spanning all six fields;
 # g,r are shallower than i,z,y, matching HSC's full-depth criterion of
@@ -149,27 +149,28 @@ _N_INPUTS_RANGE = {
 for _b in "grizy":
     _lo, _hi = _N_INPUTS_RANGE[_b]
     PROPERTY_BINS["%s_n_inputs" % _b] = (
-        "hsc_%s_n_inputs" % _b, _lo, _hi, int(_hi - _lo), False,
+        "SURVEY_%s_n_inputs" % _b, _lo, _hi, int(_hi - _lo), False,
     )
 
 # Per-band PSF properties from the HSM moment columns. FWHM [arcsec] =
-# 2*sqrt(2 ln 2) * sigma [pixel] * 0.168; ranges from the observed
+# 2*sqrt(2 ln 2) * sigma [pixel] * the pixel scale; ranges from the
+# observed
 # 1-99 percentiles per band (i is tightened by the FWHM < 0.8 cut).
 _PSF_FWHM_RANGE = {
     "g": (0.55, 1.15), "r": (0.45, 1.05), "i": (0.55, 0.8),
     "z": (0.45, 0.9), "y": (0.5, 0.9),
 }
 for _b in "grizy":
-    _bxx = f"hsc_{_b}_ext_shapeHSM_HsmPsfMoments_xx"
-    _byy = f"hsc_{_b}_ext_shapeHSM_HsmPsfMoments_yy"
-    _bxy = f"hsc_{_b}_ext_shapeHSM_HsmPsfMoments_xy"
+    _bxx = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_xx"
+    _byy = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_yy"
+    _bxy = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_xy"
     PROPERTY_BINS[f"psf_e1_{_b}"] = (
         f"({_bxx} - {_byy}) / ({_bxx} + {_byy})", -0.1, 0.1, 12, False)
     PROPERTY_BINS[f"psf_e2_{_b}"] = (
         f"2.0 * {_bxy} / ({_bxx} + {_byy})", -0.1, 0.1, 12, False)
     _lo, _hi = _PSF_FWHM_RANGE[_b]
     PROPERTY_BINS[f"psf_fwhm_{_b}"] = (
-        f"2.3548200 * 0.168 * np.sqrt(0.5 * ({_bxx} + {_byy}))",
+        f"2.3548200 * np.sqrt(0.5 * ({_bxx} + {_byy}))",
         _lo, _hi, 12, False)
 
 # Shear response per object, R = (R_1 + R_2)/2, the denominator of
@@ -190,11 +191,11 @@ _RESOLUTION_EXPR = "(fpfs1_m00 + fpfs1_m20) / fpfs1_m00"
 # tracts spanning all six fields, so the tails are visible without the
 # bulk being squeezed into two bins.
 HIST_BINS = {
-    "g_mag": ("hsc_g_mag_gauss2", 18.0, 27.0, 90, False),
-    "r_mag": ("hsc_r_mag_gauss2", 18.0, 27.0, 90, False),
-    "i_mag": ("hsc_i_mag_gauss2", 18.0, 27.0, 90, False),
-    "z_mag": ("hsc_z_mag_gauss2", 18.0, 27.0, 90, False),
-    "y_mag": ("hsc_y_mag_gauss2", 18.0, 27.0, 90, False),
+    "g_mag": ("SURVEY_g_mag_gauss2", 18.0, 27.0, 90, False),
+    "r_mag": ("SURVEY_r_mag_gauss2", 18.0, 27.0, 90, False),
+    "i_mag": ("SURVEY_i_mag_gauss2", 18.0, 27.0, 90, False),
+    "z_mag": ("SURVEY_z_mag_gauss2", 18.0, 27.0, 90, False),
+    "y_mag": ("SURVEY_y_mag_gauss2", 18.0, 27.0, 90, False),
     "abs_we1": ("np.abs(wsel * fpfs1_e1)", 0.0, 0.4, 80, False),
     "abs_we2": ("np.abs(wsel * fpfs1_e2)", 0.0, 0.4, 80, False),
     "response": (_RESPONSE_EXPR, -1.0, 3.0, 80, False),
@@ -206,24 +207,31 @@ HIST_BINS = {
 # span very different values band to band, which is why S/N and the
 # flux error are log-spaced -- on a linear axis g would collapse onto
 # the origin while y ran off the end.
+#
+# The flux-error and PSF-FWHM ranges span BOTH surveys, which is why
+# they look loose for either one alone: HSC sits at sigma_f 15-330 nJy
+# and FWHM 0.4-1.2", DP2 at 90-870 nJy and 0.9-1.46". Unlike the
+# mean-shear axes, these are not overridden by bin_ranges_file -- the
+# edges are baked into the stored counts, so changing them means
+# rerunning the task.
 for _b in "grizy":
     HIST_BINS["%s_snr" % _b] = (
-        "hsc_%s_s2n_fpfs1" % _b, 1.0, 3000.0, 72, True,
+        "SURVEY_%s_s2n_fpfs1" % _b, 1.0, 3000.0, 72, True,
     )
     HIST_BINS["%s_flux_err" % _b] = (
-        "hsc_%s_flux_gauss2_err" % _b, 15.0, 330.0, 80, True,
+        "SURVEY_%s_flux_gauss2_err" % _b, 15.0, 900.0, 80, True,
     )
-    _bxx = f"hsc_{_b}_ext_shapeHSM_HsmPsfMoments_xx"
-    _byy = f"hsc_{_b}_ext_shapeHSM_HsmPsfMoments_yy"
+    _bxx = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_xx"
+    _byy = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_yy"
     HIST_BINS["%s_psf_fwhm" % _b] = (
-        f"2.3548200 * 0.168 * np.sqrt(0.5 * ({_bxx} + {_byy}))",
-        0.40, 1.20, 80, False,
+        f"2.3548200 * np.sqrt(0.5 * ({_bxx} + {_byy}))",
+        0.40, 1.60, 80, False,
     )
     # Fine bins on purpose: n_inputs is a comb of integer spikes with a
     # continuum between them (sources straddling a coverage step), and
     # a per-visit binning hides that structure.
     HIST_BINS["%s_n_inputs" % _b] = (
-        "hsc_%s_n_inputs" % _b, 0.0, 14.0, 70, False,
+        "SURVEY_%s_n_inputs" % _b, 0.0, 14.0, 70, False,
     )
 
 # 2-D histograms: name -> (x axis, y axis). The four below mirror the
@@ -233,19 +241,19 @@ for _b in "grizy":
 # the notebook's 26, since nothing survives above it.
 HIST2D_BINS = {
     "cmd_i_rmi": (
-        ("hsc_i_mag_gauss2", 20.0, 25.0, 60, False),
-        ("hsc_r_mag_gauss2 - hsc_i_mag_gauss2", -0.2, 1.3, 60, False),
+        ("SURVEY_i_mag_gauss2", 20.0, 25.0, 60, False),
+        ("SURVEY_r_mag_gauss2 - SURVEY_i_mag_gauss2", -0.2, 1.3, 60, False),
     ),
     "cmd_i_imz": (
-        ("hsc_i_mag_gauss2", 20.0, 25.0, 60, False),
-        ("hsc_i_mag_gauss2 - hsc_z_mag_gauss2", -0.5, 1.0, 60, False),
+        ("SURVEY_i_mag_gauss2", 20.0, 25.0, 60, False),
+        ("SURVEY_i_mag_gauss2 - SURVEY_z_mag_gauss2", -0.5, 1.0, 60, False),
     ),
     "mag_response": (
-        ("hsc_i_mag_gauss2", 20.0, 25.0, 60, False),
+        ("SURVEY_i_mag_gauss2", 20.0, 25.0, 60, False),
         (_RESPONSE_EXPR, -0.5, 1.2, 60, False),
     ),
     "mag_resolution": (
-        ("hsc_i_mag_gauss2", 20.0, 25.0, 60, False),
+        ("SURVEY_i_mag_gauss2", 20.0, 25.0, 60, False),
         (_RESOLUTION_EXPR, 0.1, 1.5, 60, False),
     ),
 }
@@ -380,12 +388,22 @@ class ShearStatsPipeConfig(
     PipelineTaskConfig,
     pipelineConnections=ShearStatsPipeConnections,
 ):
+    survey = Field[str](
+        doc=(
+            "Column-name prefix of the per-band measurements: 'hsc' "
+            "reads hsc_i_mag_gauss2, 'lsst' reads lsst_i_mag_gauss2. "
+            "The binning registries are written against a SURVEY_ "
+            "placeholder that this replaces, so one set of definitions "
+            "serves every survey."
+        ),
+        default="hsc",
+    )
     mag_max = Field[float](
-        doc="Basic selection: keep hsc_i_mag_gauss2 < mag_max (finite).",
+        doc="Basic selection: keep {survey}_i_mag_gauss2 < mag_max (finite).",
         default=25.0,
     )
     snr_min = Field[float](
-        doc="Basic selection: keep hsc_i_s2n_fpfs1 > snr_min.",
+        doc="Basic selection: keep {survey}_i_s2n_fpfs1 > snr_min.",
         default=10.0,
     )
     esq_max = Field[float](
@@ -457,6 +475,39 @@ class ShearStatsPipeConfig(
             "cuts only on i -- set that to 0 when using this."
         ),
     )
+    color_abs_max = DictField(
+        keytype=str, itemtype=float, default={},
+        doc=(
+            "Upper limit on |m_b1 - m_b2|, keyed 'b1-b2', e.g. "
+            "{'r-i': 1.3, 'i-z': 1.0}. Empty disables the cut.\n\n"
+            "A colour cut is a crude but effective junk filter: "
+            "flux_to_mag saturates at 40 for a non-detection or a "
+            "negative flux, so a blended or badly deblended source "
+            "lands at an extreme colour rather than a plausible one. "
+            "Absolute value on purpose -- a wildly NEGATIVE colour is "
+            "as unphysical as a wildly positive one."
+        ),
+    )
+    psf_e1_abs_max_bands = DictField(
+        keytype=str, itemtype=float, default={},
+        doc=(
+            "Per-band upper limit on |PSF e1| = |(xx - yy)/(xx + yy)| "
+            "from the ext_shapeHSM PSF moments, e.g. "
+            "{'r': 0.06, 'i': 0.06, 'z': 0.06}. Empty disables it; a "
+            "band whose columns are absent is skipped with a warning "
+            "rather than emptying the selection.\n\n"
+            "This removes the extreme-ellipticity tail of the PSF, "
+            "where the model is least trustworthy and any leakage into "
+            "the galaxy shape is largest."
+        ),
+    )
+    psf_e2_abs_max_bands = DictField(
+        keytype=str, itemtype=float, default={},
+        doc=(
+            "Per-band upper limit on |PSF e2| = |2 xy/(xx + yy)|. "
+            "See psf_e1_abs_max_bands."
+        ),
+    )
     n_inputs_min_bands = DictField(
         keytype=str, itemtype=float, default={},
         doc=(
@@ -526,6 +577,27 @@ class ShearStatsPipe(PipelineTask):
         outputs = self.run(catalog=inputs["mergedCatalog"])
         butlerQC.put(outputs, outputRefs)
 
+    def _col(self, suffix: str) -> str:
+        """``lsst_i_mag_gauss2`` from ``i_mag_gauss2``."""
+        assert isinstance(self.config, ShearStatsPipeConfig)
+        return "%s_%s" % (self.config.survey, suffix)
+
+    def _localize(self, expr: str) -> str:
+        """Bind a registry expression to this survey.
+
+        Registry entries carry one placeholder so the same definitions
+        serve any survey: ``SURVEY_`` for the column prefix (``hsc_``,
+        ``lsst_``).
+
+        There is no pixel-scale placeholder any more: the ext_shapeHSM
+        PSF second moments are recorded in ARCSEC**2 (converted at
+        measurement time from the plugin's pixel**2 using the coadd
+        WCS), so a FWHM is ``2.3548 * sqrt(0.5*(xx+yy))`` with no scale
+        applied. Applying one here would now double-convert.
+        """
+        assert isinstance(self.config, ShearStatsPipeConfig)
+        return expr.replace("SURVEY_", self.config.survey + "_")
+
     def _bin_ranges(self) -> dict:
         """``{property: (lo, hi)}`` from ``config.bin_ranges_file``."""
         assert isinstance(self.config, ShearStatsPipeConfig)
@@ -551,8 +623,8 @@ class ShearStatsPipe(PipelineTask):
     def _select(self, cat: NDArray) -> NDArray:
         """The basic source selection (cluster-test cuts)."""
         assert isinstance(self.config, ShearStatsPipeConfig)
-        mag = np.asarray(cat["hsc_i_mag_gauss2"], dtype=np.float64)
-        snr = np.asarray(cat["hsc_i_s2n_fpfs1"], dtype=np.float64)
+        mag = np.asarray(cat[self._col("i_mag_gauss2")], dtype=np.float64)
+        snr = np.asarray(cat[self._col("i_s2n_fpfs1")], dtype=np.float64)
         esq = np.asarray(cat["esq"], dtype=np.float64)
         mval = np.asarray(cat["n_mask_base"], dtype=np.float64)
         m00 = np.asarray(cat["fpfs1_m00"], dtype=np.float64)
@@ -568,20 +640,22 @@ class ShearStatsPipe(PipelineTask):
             & (trace > self.config.trace_min)
         )
         if self.config.psf_fwhm_max > 0:
-            if _XX in cat.dtype.names and _YY in cat.dtype.names:
-                fwhm = 2.3548200 * 0.168 * np.sqrt(0.5 * (
-                    np.asarray(cat[_XX], dtype=np.float64)
-                    + np.asarray(cat[_YY], dtype=np.float64)
+            xx_col = self._localize(_XX)
+            yy_col = self._localize(_YY)
+            if xx_col in cat.dtype.names and yy_col in cat.dtype.names:
+                fwhm = 2.3548200 * np.sqrt(0.5 * (
+                    np.asarray(cat[xx_col], dtype=np.float64)
+                    + np.asarray(cat[yy_col], dtype=np.float64)
                 ))
                 sel &= fwhm < self.config.psf_fwhm_max
             else:
                 self.log.warning(
-                    "PSF FWHM cut skipped: no %s in the catalog", _XX
+                    "PSF FWHM cut skipped: no %s in the catalog", xx_col
                 )
 
         # Per-band magnitude sanity cut (see mag_max_bands).
         for band, hi in sorted(self.config.mag_max_bands.items()):
-            col = "hsc_%s_mag_gauss2" % band
+            col = self._col("%s_mag_gauss2" % band)
             if col not in (cat.dtype.names or ()):
                 self.log.warning(
                     "magnitude cut skipped for band %s: no %s", band, col
@@ -595,7 +669,7 @@ class ShearStatsPipe(PipelineTask):
             set(self.config.flux_err_min_bands)
             | set(self.config.flux_err_max_bands)
         ):
-            col = "hsc_%s_flux_gauss2_err" % band
+            col = self._col("%s_flux_gauss2_err" % band)
             if col not in (cat.dtype.names or ()):
                 self.log.warning(
                     "flux_err cut skipped for band %s: no %s", band, col
@@ -616,14 +690,14 @@ class ShearStatsPipe(PipelineTask):
         for band in sorted(
             set(self.config.psf_fwhm_min_bands) | set(self.config.psf_fwhm_max_bands)
         ):
-            bxx = "hsc_%s_ext_shapeHSM_HsmPsfMoments_xx" % band
-            byy = "hsc_%s_ext_shapeHSM_HsmPsfMoments_yy" % band
+            bxx = self._col("%s_ext_shapeHSM_HsmPsfMoments_xx" % band)
+            byy = self._col("%s_ext_shapeHSM_HsmPsfMoments_yy" % band)
             if bxx not in names or byy not in names:
                 self.log.warning(
                     "PSF FWHM cut skipped for band %s: no %s", band, bxx
                 )
                 continue
-            fwhm = 2.3548200 * 0.168 * np.sqrt(0.5 * (
+            fwhm = 2.3548200 * np.sqrt(0.5 * (
                 np.asarray(cat[bxx], dtype=np.float64)
                 + np.asarray(cat[byy], dtype=np.float64)
             ))
@@ -634,9 +708,52 @@ class ShearStatsPipe(PipelineTask):
             if hi is not None:
                 sel &= fwhm < hi
 
+        # Colour window, |m_b1 - m_b2| < limit.
+        for pair, hi in sorted(self.config.color_abs_max.items()):
+            try:
+                b1, b2 = pair.split("-")
+            except ValueError:
+                raise ValueError(
+                    "color_abs_max key %r is not of the form 'b1-b2'"
+                    % pair
+                ) from None
+            c1 = self._col("%s_mag_gauss2" % b1)
+            c2 = self._col("%s_mag_gauss2" % b2)
+            if c1 not in names or c2 not in names:
+                self.log.warning(
+                    "colour cut skipped for %s: no %s / %s", pair, c1, c2
+                )
+                continue
+            col = (np.asarray(cat[c1], dtype=np.float64)
+                   - np.asarray(cat[c2], dtype=np.float64))
+            sel &= np.isfinite(col) & (np.abs(col) < hi)
+
+        # PSF ellipticity window, per band and per component.
+        for comp, limits in (("e1", self.config.psf_e1_abs_max_bands),
+                             ("e2", self.config.psf_e2_abs_max_bands)):
+            for band, hi in sorted(limits.items()):
+                bxx = self._col("%s_ext_shapeHSM_HsmPsfMoments_xx" % band)
+                byy = self._col("%s_ext_shapeHSM_HsmPsfMoments_yy" % band)
+                bxy = self._col("%s_ext_shapeHSM_HsmPsfMoments_xy" % band)
+                if bxx not in names or byy not in names or bxy not in names:
+                    self.log.warning(
+                        "PSF %s cut skipped for band %s: no %s",
+                        comp, band, bxx
+                    )
+                    continue
+                xx = np.asarray(cat[bxx], dtype=np.float64)
+                yy = np.asarray(cat[byy], dtype=np.float64)
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    if comp == "e1":
+                        e = (xx - yy) / (xx + yy)
+                    else:
+                        e = 2.0 * np.asarray(cat[bxy], dtype=np.float64) \
+                            / (xx + yy)
+                sel &= np.isfinite(e) & (np.abs(e) < hi)
+
         # Coadd-depth floor, per band (inclusive).
         for band, lo in sorted(self.config.n_inputs_min_bands.items()):
-            col = "hsc_%s_n_inputs" % band
+            col = self._col("%s_n_inputs" % band)
             if col not in names:
                 self.log.warning(
                     "n_inputs cut skipped for band %s: no %s", band, col
@@ -672,6 +789,7 @@ class ShearStatsPipe(PipelineTask):
         spans = self._bin_ranges()
         for name, axis in PROPERTY_BINS.items():
             expr, edges = _axis_edges(axis, spans.get(name))
+            expr = self._localize(expr)
             if len(edges) < 2:
                 continue
             try:
@@ -712,6 +830,7 @@ class ShearStatsPipe(PipelineTask):
         hist_rows = []
         for name, axis in HIST_BINS.items():
             expr, edges = _axis_edges(axis)
+            expr = self._localize(expr)
             try:
                 x = _eval_columns(cat, expr)
             except KeyError as err:
@@ -733,6 +852,8 @@ class ShearStatsPipe(PipelineTask):
         for name, (xaxis, yaxis) in HIST2D_BINS.items():
             xexpr, xedges = _axis_edges(xaxis)
             yexpr, yedges = _axis_edges(yaxis)
+            xexpr = self._localize(xexpr)
+            yexpr = self._localize(yexpr)
             try:
                 x = _eval_columns(cat, xexpr)
                 y = _eval_columns(cat, yexpr)

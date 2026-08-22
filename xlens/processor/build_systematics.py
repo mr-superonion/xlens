@@ -81,7 +81,7 @@ class BuildSystematicsConnections(
     outputMask = cT.Output(
         doc=(
             "Combined anacal bitmask, run-length encoded (y, x_start, "
-            "x_end, value; x_end exclusive; shape in MASK_NY/MASK_NX -- "
+            "x_end, value; x_end exclusive; "
             "decode with xlens.utils.image.rle_table_to_mask). Bit 0 "
             "(value 1): bad pixels and bright stars across all bands, "
             "the only bit that cuts pixels. Bit 1 (value 2): union of "
@@ -190,9 +190,7 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
             (np.asarray(outputs.outputDiscontinuityMask) != 0).astype(np.uint8)
             << 1
         )
-        outputs.outputMask = mask_to_rle_table(
-            combined, x0=msk.getX0(), y0=msk.getY0()
-        )
+        outputs.outputMask = mask_to_rle_table(combined)
         del outputs.outputDiscontinuityMask
         butlerQC.put(outputs, outputRefs)
         return
@@ -280,7 +278,15 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
             output_msk.setXY0(template_bbox.getMin())
 
         # noise correlation
-        for band, exp_handle in exposure_handles_dict.items():
+        if not self.config.do_noise_corr_estimation:
+            self.log.info(
+                "noise correlation estimation disabled; outputNoiseCorr "
+                "stays zero for tract=%d patch=%d", tract, patch,
+            )
+        for band, exp_handle in (
+            exposure_handles_dict.items()
+            if self.config.do_noise_corr_estimation else ()
+        ):
             exp = exp_handle.get()
             if band in band_order:
                 i = band_order.index(band)

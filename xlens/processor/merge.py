@@ -317,23 +317,6 @@ class MergePipe(PipelineTask):
             raise RuntimeError("merge finalize: catalog is missing 'wsel'")
         keep_rows = np.asarray(catalog["is_primary"], dtype=bool) & (np.asarray(catalog["wsel"]) > 1e-5)
         catalog = catalog[keep_rows]
-        # Back-compat shim: rename legacy sigma_mag / dsigma_mag columns
-        # (per-patch catalogs measured before add_magnitude_columns was
-        # updated) so the current keep list finds them under the new
-        # ``mag_err`` / ``dmag_err`` names.  Check ``dsigma_mag`` first
-        # since ``sigma_mag`` is a substring of it.
-        for c in list(catalog.colnames):
-            new = c
-            if "_dsigma_mag_" in c:
-                new = c.replace("_dsigma_mag_", "_dmag_")
-                if new.endswith("_dg1"):
-                    new = new[:-4] + "_err_dg1"
-                elif new.endswith("_dg2"):
-                    new = new[:-4] + "_err_dg2"
-            elif "_sigma_mag_" in c:
-                new = c.replace("_sigma_mag_", "_mag_") + "_err"
-            if new != c:
-                catalog.rename_column(c, new)
         # Band-combined shape magnitude and its first-order shear
         # response. Computed on the already-WCS-corrected (and
         # flipu-corrected, when enabled) fpfs1 shape so downstream
