@@ -478,7 +478,7 @@ def _iter_cell_psf_arrays(cell_coadd):
             psf_image = getattr(cell, "psf_image", None)
             yield None if psf_image is None else getattr(psf_image, "array", None)
         return
-    from lsst.images._cell_grid import CellIJ
+    from lsst.images.cells import CellIJ
 
     psf = cell_coadd.psf
     size = psf.grid.grid_size
