@@ -829,11 +829,12 @@ class AnacalMeasureTaskBase(PipelineTask):
             # Nothing to drop: skip the copy entirely.
             return catalog
         # Per-cut counts, not just the total: the three cuts fire at
-        # different STAGES (is_primary is geometry, wsel is a failed
-        # measurement, n_mask_base is masking), so a bare total gives no
-        # idea which one is responsible. Without this a source that
-        # detected at wdet = 1.0 and then vanished looks like a
-        # detection failure, which is exactly the wrong place to look.
+        # different STAGES (is_primary is geometry, wsel comes from
+        # detection or from the external catalog, n_mask_base is
+        # masking), so a bare total gives no idea which one is
+        # responsible. Without this a source that entered with
+        # wsel = 1.0 and then vanished looks like a detection failure,
+        # which is exactly the wrong place to look.
         parts = []
         for _f, _m in (
             ("is_primary", np.asarray(catalog["is_primary"], dtype=bool)
