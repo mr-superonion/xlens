@@ -62,7 +62,9 @@ def _load_photoz_catalog() -> np.ndarray:
     return catalog
 
 
-def _make_config(*, output_pdfs: bool) -> photoZPipeConfig:
+def _make_config(
+    *, output_pdfs: bool, output_distorted_pdfs: bool = False
+) -> photoZPipeConfig:
     cfg = photoZPipeConfig()
     cfg.model_path = os.fspath(FZB_MODEL)
     cfg.flux_name = "gauss2"
@@ -70,6 +72,7 @@ def _make_config(*, output_pdfs: bool) -> photoZPipeConfig:
     cfg.ref_band = "lsst_i"
     cfg.do_distortions = False  # one undistorted call is enough
     cfg.output_pdfs = output_pdfs
+    cfg.output_distorted_pdfs = output_distorted_pdfs
     return cfg
 
 
@@ -99,19 +102,43 @@ def test_photoz_point_estimates_match_reference():
 
 
 def test_photoz_returns_pdfs_when_requested():
-    """With ``output_pdfs=True`` the result includes a
-    (N, 1, NUM_Z_GRIDS) array of non-negative finite pdfs."""
+    """``output_pdfs=True`` alone gives the UNDISTORTED grid, (N, nzbins).
+
+    The distortion axis is opt-in (``output_distorted_pdfs``): carrying
+    p(z) for every shear distortion multiplies the output size by the
+    number of distortions, which is not what most callers want.
+    """
     if not FZB_MODEL.exists() or not PHOTOZ_CATALOG.exists():
         pytest.skip("photo-z fixtures not available")
 
-    from xlens.catalog.redshift import NUM_Z_GRIDS
-
     catalog = _load_photoz_catalog()
-    task = photoZPipe(config=_make_config(output_pdfs=True))
+    config = _make_config(output_pdfs=True)
+    task = photoZPipe(config=config)
     result = task.run(catalog=catalog)
     pdfs = result.redshiftPdfs
 
-    assert pdfs.shape == (len(catalog), 1, NUM_Z_GRIDS)
+    assert pdfs.shape == (len(catalog), config.nzbins)
+    assert np.all(pdfs >= 0)
+    assert np.all(np.isfinite(pdfs))
+
+
+def test_photoz_distorted_pdfs_add_a_distortion_axis():
+    """``output_distorted_pdfs=True`` gives (N, ndist, nzbins).
+
+    ``do_distortions=False`` leaves a single ("0") distortion, so the
+    extra axis has length one here -- but it is present, which is the
+    difference from the default above.
+    """
+    if not FZB_MODEL.exists() or not PHOTOZ_CATALOG.exists():
+        pytest.skip("photo-z fixtures not available")
+
+    catalog = _load_photoz_catalog()
+    config = _make_config(output_pdfs=True, output_distorted_pdfs=True)
+    task = photoZPipe(config=config)
+    result = task.run(catalog=catalog)
+    pdfs = result.redshiftPdfs
+
+    assert pdfs.shape == (len(catalog), 1, config.nzbins)
     assert np.all(pdfs >= 0)
     assert np.all(np.isfinite(pdfs))
 

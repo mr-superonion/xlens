@@ -90,12 +90,19 @@ def test_rejects_bad_values():
         mask_to_rle(np.full((4, 4), -1, dtype=np.int32))
 
 
-def test_table_roundtrip_carries_shape():
+def test_table_roundtrip_needs_the_shape_from_the_caller():
+    """The table carries runs only; geometry comes from the caller.
+
+    Shape used to travel in ``meta['MASK_NY'/'MASK_NX']``, but the
+    butler's ArrowAstropy read path strips ``meta``, so a mask written
+    by one task came back undecodable in the next. ``rle_table_to_mask``
+    therefore takes the patch outer bbox shape as an argument.
+    """
     rng = np.random.RandomState(3)
     m = (rng.uniform(size=(31, 45)) < 0.2).astype(np.int32) * 2
     tab = mask_to_rle_table(m)
-    assert tab.meta["MASK_NY"] == 31 and tab.meta["MASK_NX"] == 45
-    back = rle_table_to_mask(tab)
+    assert "MASK_NY" not in tab.meta and "MASK_NX" not in tab.meta
+    back = rle_table_to_mask(tab, m.shape)
     np.testing.assert_array_equal(back, m)
 
 
@@ -106,14 +113,14 @@ def test_table_without_value_column_decodes_binary():
     m[4, 0:2] = 1
     tab = mask_to_rle_table(m)
     tab.remove_column("value")
-    back = rle_table_to_mask(tab)
+    back = rle_table_to_mask(tab, m.shape)
     np.testing.assert_array_equal(back, m)
 
 
 def test_table_empty_mask():
     tab = mask_to_rle_table(np.zeros((5, 9), dtype=np.int32))
     assert len(tab) == 0
-    back = rle_table_to_mask(tab)
+    back = rle_table_to_mask(tab, (5, 9))
     assert back.shape == (5, 9) and not back.any()
 
 

@@ -232,17 +232,20 @@ def test_psf_hsm_moments_isotropic_zero_spin2(measured):
     np.testing.assert_array_equal(ixy, ixy[0])
 
     # Spin-2 of the 2nd-order adaptive moments vanishes for an
-    # isotropic PSF. Tolerance is loose vs. Ixx ~ a few px² because
-    # the Moffat is sampled on a square pixel grid.
+    # isotropic PSF. The moments are ARCSEC**2 (hsm.py converts from
+    # the plugin's pixel**2 with the coadd WCS), so Ixx is ~0.1 rather
+    # than the few px**2 it reads as on the raw plugin output; the
+    # tolerance is still loose against that, the residual coming from
+    # sampling the Moffat on a square pixel grid.
     atol_2nd = 1e-3
     np.testing.assert_allclose(
         ixy[0], 0.0, atol=atol_2nd,
-        err_msg=(f"Ixy = {ixy[0]:.6e} px^2; expected 0 for isotropic "
+        err_msg=(f"Ixy = {ixy[0]:.6e} arcsec^2; expected 0 for isotropic "
                  f"PSF (Ixx = {ixx[0]:.4f}, Iyy = {iyy[0]:.4f})"),
     )
     np.testing.assert_allclose(
         ixx[0], iyy[0], atol=atol_2nd,
-        err_msg=(f"Ixx - Iyy = {ixx[0]-iyy[0]:+.6e} px^2; expected 0 "
+        err_msg=(f"Ixx - Iyy = {ixx[0]-iyy[0]:+.6e} arcsec^2; expected 0 "
                  "for isotropic PSF"),
     )
 

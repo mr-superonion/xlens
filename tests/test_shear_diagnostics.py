@@ -23,8 +23,13 @@ def _make_catalog(n=1000, seed=3):
         "fpfs1_de2_dg2": rng.uniform(0.5, 1.5, n),
         "esq": rng.uniform(0, 0.3, n),
         "fpfs1_m00": rng.uniform(1.0, 2.0, n),
-        "hsc_i_ext_shapeHSM_HsmPsfMoments_xx": np.full(n, 3.24),
-        "hsc_i_ext_shapeHSM_HsmPsfMoments_yy": np.full(n, 3.24),
+        # ARCSEC**2, not pixel**2: the ext_shapeHSM PSF moments are
+        # converted at measurement time, so psf_fwhm_max compares a
+        # FWHM in arcsec directly. 0.09 -> 2.3548*sqrt(0.09) = 0.71",
+        # inside the 0.8" default cut. (The old 3.24 was pixel**2 and
+        # now reads as a 4.2" PSF, which empties the selection.)
+        "hsc_i_ext_shapeHSM_HsmPsfMoments_xx": np.full(n, 0.09),
+        "hsc_i_ext_shapeHSM_HsmPsfMoments_yy": np.full(n, 0.09),
         "hsc_i_ext_shapeHSM_HsmPsfMoments_xy": np.zeros(n),
         "fpfs1_m20": rng.uniform(-0.5, 2.0, n),
         "hsc_i_mag_gauss2": rng.uniform(20, 26.5, n),
@@ -43,6 +48,10 @@ def _make_catalog(n=1000, seed=3):
 
 
 def _selected(cat, config):
+    fwhm = 2.3548200 * np.sqrt(0.5 * (
+        cat["hsc_i_ext_shapeHSM_HsmPsfMoments_xx"]
+        + cat["hsc_i_ext_shapeHSM_HsmPsfMoments_yy"]
+    ))
     return cat[
         (cat["hsc_i_mag_gauss2"] < config.mag_max)
         & (cat["hsc_i_s2n_fpfs1"] > config.snr_min)
@@ -50,6 +59,7 @@ def _selected(cat, config):
         & (cat["n_mask_base"] < config.n_mask_base_max)
         & ((cat["fpfs1_m00"] + cat["fpfs1_m20"]) / cat["fpfs1_m00"]
            > config.trace_min)
+        & (fwhm < config.psf_fwhm_max)
     ]
 
 
