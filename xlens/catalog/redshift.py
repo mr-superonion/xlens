@@ -39,16 +39,25 @@ INV1PZ = 1.0 / (1.0 + Z_GRIDS)  # precompute once
 GAMMA_RISK = 0.15
 
 
-def risk(zx: float, p_norm: np.ndarray) -> float:
+def risk(
+    zx: float,
+    p_norm: np.ndarray,
+    z_grids: np.ndarray = Z_GRIDS,
+    inv1pz: np.ndarray = INV1PZ,
+) -> float:
     # loss = 1 - 1/(1 + (( (zx-z)/(1+z) )/gamma)^2)
-    dz = (zx - Z_GRIDS) * INV1PZ
+    dz = (zx - z_grids) * inv1pz
     t = dz / GAMMA_RISK
     t2 = t * t
     loss_vec = t2 / (1.0 + t2)  # same as 1 - 1/(1+t2)
-    return float(simpson(y=p_norm * loss_vec, x=Z_GRIDS))
+    return float(simpson(y=p_norm * loss_vec, x=z_grids))
 
 
-def get_point_estimate(p):
+def get_point_estimate(
+    p,
+    z_grids: np.ndarray = Z_GRIDS,
+    inv1pz: np.ndarray = INV1PZ,
+):
     total = float(np.sum(p))
     if (not np.isfinite(total)) or total <= 0.0:
         return (np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
@@ -57,10 +66,14 @@ def get_point_estimate(p):
     # mode (peak on grid)
     # percentiles (CDF from discrete sum)
     cdf = np.cumsum(p, dtype=float) / total
-    zqs = np.interp(PROBS, cdf, Z_GRIDS)
+    zqs = np.interp(PROBS, cdf, z_grids)
     # minimize risk
-    res = minimize_scalar(lambda zx: risk(zx, p_norm), bounds=(Z_MIN, Z_MAX), method="bounded")
-    zmode = Z_GRIDS[int(np.argmax(p))]
+    res = minimize_scalar(
+        lambda zx: risk(zx, p_norm, z_grids, inv1pz),
+        bounds=(z_grids[0], z_grids[-1]),
+        method="bounded",
+    )
+    zmode = z_grids[int(np.argmax(p))]
     z025, z160, z500, z840, z975 = zqs
     zbest = res.x
     return (zmode, z025, z160, z500, z840, z975, zbest)
@@ -68,9 +81,13 @@ def get_point_estimate(p):
 
 def get_point_estimates_from_pdfs(
     pdfs: np.ndarray,
+    z_grids: np.ndarray = Z_GRIDS,
 ):
     """
     Compute point estimates from PDF samples on a redshift grid.
+
+    ``z_grids`` is the redshift grid the ``pdfs`` columns live on; it must have
+    the same length as ``pdfs.shape[1]``. Defaults to the module ``Z_GRIDS``.
 
     Returns dict of arrays (shape (N,)):
       - zmode : z_grid[argmax p(z)]
@@ -81,6 +98,11 @@ def get_point_estimates_from_pdfs(
     """
     if pdfs.ndim != 2:
         raise ValueError(f"pdfs must be 2D (N, M); got {pdfs.shape}")
+    if pdfs.shape[1] != len(z_grids):
+        raise ValueError(
+            f"pdfs has {pdfs.shape[1]} grid points but z_grids has {len(z_grids)}"
+        )
+    inv1pz = 1.0 / (1.0 + z_grids)
 
     N = pdfs.shape[0]
     zbest = np.full(N, np.nan, dtype=float)
@@ -91,7 +113,9 @@ def get_point_estimates_from_pdfs(
     z840 = np.full(N, np.nan, dtype=float)
     z975 = np.full(N, np.nan, dtype=float)
     for i, p in enumerate(pdfs):
-        zmode[i], z025[i], z160[i], z500[i], z840[i], z975[i], zbest[i] = get_point_estimate(p)
+        zmode[i], z025[i], z160[i], z500[i], z840[i], z975[i], zbest[i] = get_point_estimate(
+            p, z_grids, inv1pz
+        )
     return {
         "zmode": zmode,
         "z025": z025,
@@ -230,9 +254,13 @@ class flexzboostEstimator(zEstimator):
     def __init__(
         self,
         pz_obj,
+        z_max: float = Z_MAX,
+        nzbins: int = NUM_Z_GRIDS,
     ):
         self.pz_obj = pz_obj
         self.pz_obj.model.models.n_jobs = 1
+        self.nzbins = int(nzbins)
+        self.z_grids = np.linspace(Z_MIN, float(z_max), self.nzbins)
 
     def get_z(
         self,
@@ -262,8 +290,8 @@ class flexzboostEstimator(zEstimator):
             include_mag_err=include_mag_err,
             extinction=extinction,
         )
-        pdfs, _ = self.pz_obj.predict(colors, n_grid=NUM_Z_GRIDS)
-        points = get_point_estimates_from_pdfs(pdfs)
+        pdfs, _ = self.pz_obj.predict(colors, n_grid=self.nzbins)
+        points = get_point_estimates_from_pdfs(pdfs, z_grids=self.z_grids)
         if return_pdfs:
             points["pdfs"] = pdfs
         return points
