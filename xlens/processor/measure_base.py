@@ -808,6 +808,13 @@ class AnacalMeasureTaskBase(PipelineTask):
           is fixed, so this is the only term that catches it.
         """
         names = catalog.dtype.names or ()
+        # TEMPORARY DEBUG: dump the pre-cut catalog when asked.
+        import os as _os
+        _dump = _os.environ.get("XLENS_DUMP_PRECUT")
+        if _dump:
+            np.save(_dump, catalog)
+            self.log.info("pre-cut catalog dumped to %s (%d rows)",
+                          _dump, len(catalog))
         keep = np.ones(len(catalog), dtype=bool)
         if "is_primary" in names:
             keep &= np.asarray(catalog["is_primary"], dtype=bool)
@@ -821,9 +828,29 @@ class AnacalMeasureTaskBase(PipelineTask):
         if keep.all():
             # Nothing to drop: skip the copy entirely.
             return catalog
+        # Per-cut counts, not just the total: the three cuts fire at
+        # different STAGES (is_primary is geometry, wsel is a failed
+        # measurement, n_mask_base is masking), so a bare total gives no
+        # idea which one is responsible. Without this a source that
+        # detected at wdet = 1.0 and then vanished looks like a
+        # detection failure, which is exactly the wrong place to look.
+        parts = []
+        for _f, _m in (
+            ("is_primary", np.asarray(catalog["is_primary"], dtype=bool)
+             if "is_primary" in names else None),
+            ("wsel<=1e-5", ~(np.asarray(catalog["wsel"]) > 1e-5)
+             if "wsel" in names else None),
+            ("n_mask_base", ~(np.asarray(catalog["n_mask_base"])
+                              < self.config.n_mask_base_max)
+             if "n_mask_base" in names else None),
+        ):
+            if _m is None:
+                continue
+            _drop = int((~_m).sum()) if _f == "is_primary" else int(_m.sum())
+            parts.append("%s drops %d" % (_f, _drop))
         self.log.info(
-            "Row cut: keeping %d of %d sources (is_primary, wsel, "
-            "n_mask_base < %g).",
-            int(keep.sum()), len(catalog), self.config.n_mask_base_max,
+            "Row cut: keeping %d of %d sources (%s; n_mask_base_max=%g).",
+            int(keep.sum()), len(catalog), ", ".join(parts),
+            self.config.n_mask_base_max,
         )
         return catalog[keep]
