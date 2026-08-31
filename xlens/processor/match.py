@@ -315,7 +315,13 @@ class matchPipe(PipelineTask):
         else:
             return ana_idx, mrc_idx
 
-    def merge_dm(self, src: np.ndarray, mrc: np.ndarray, pixel_scale=0.168):
+    # ``pixel_scale`` [arcsec/pix] is REQUIRED, not defaulted: it
+    # converts x1_det/x2_det (arcsec) to the DM catalog's pixel
+    # positions, and a wrong value shifts every source before matching
+    # -- an HSC default silently misplaces DP2 (0.2"/pix) by 19%,
+    # which reads as a matching failure rather than a unit bug. ``run``
+    # takes it from the patch WCS.
+    def merge_dm(self, src: np.ndarray, mrc: np.ndarray, pixel_scale: float):
         assert isinstance(self.config, matchPipeConfig)
         magz = self.config.mag_zero
         mag_mrc = magz - 2.5 * np.log10(mrc["i_base_GaussianFlux_instFlux"])
@@ -374,11 +380,12 @@ class matchPipe(PipelineTask):
         )
         return -2.5 * np.log10(flux)
 
+    # pixel_scale is required here for the same reason as in merge_dm.
     def merge_truth(
         self,
         src: np.ndarray,
         mrc: np.ndarray,
-        pixel_scale=0.168,
+        pixel_scale: float,
         wcs=None,
     ):
         assert isinstance(self.config, matchPipeConfig)
