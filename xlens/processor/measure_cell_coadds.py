@@ -649,13 +649,13 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                     )
                 return self._run_anacal(**data)
             except Exception as e:
-                ix, iy = int(cell_id.x), int(cell_id.y)
+                ci, cj = int(cell_id.y), int(cell_id.x)  # (cell_i, cell_j)
                 self.log.error(
-                    "Detection failed tract=%d patch=%d cell=(%d, %d): %s",
+                    "Detection failed tract=%d patch=%d cell=(i=%d, j=%d): %s",
                     tract,
                     patch,
-                    ix,
-                    iy,
+                    ci,
+                    cj,
                     e,
                 )
                 return None
@@ -777,8 +777,14 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                             ),
                         )
                     if n_image_cells is not None:
+                        # n_image_per_cell keys by (cell_i, cell_j) from the
+                        # coadd provenance; the cell is stored as
+                        # _CellId(x=cell_j, y=cell_i), so the provenance key
+                        # is (cell_id.y, cell_id.x) -- NOT (x, y), which
+                        # transposes the index and yields spurious 0s /
+                        # neighbour-cell counts off the diagonal.
                         n_vis = n_image_cells.get(
-                            (int(cell_id.x), int(cell_id.y)), 0
+                            (int(cell_id.y), int(cell_id.x)), 0
                         )
                         cat = self.attach_n_inputs_column(
                             cat, np.full(len(cat), n_vis, dtype=np.int32),
@@ -786,13 +792,13 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         )
                     return cat
                 except Exception as e:
-                    ix, iy = int(cell_id.x), int(cell_id.y)
+                    ci, cj = int(cell_id.y), int(cell_id.x)  # (cell_i, cell_j)
                     self.log.error(
-                        "Measurement failed tract=%d patch=%d " "cell=(%d, %d) band=%s: %s",
+                        "Measurement failed tract=%d patch=%d " "cell=(i=%d, j=%d) band=%s: %s",
                         tract,
                         patch,
-                        ix,
-                        iy,
+                        ci,
+                        cj,
                         band,
                         e,
                     )
