@@ -84,6 +84,7 @@ from .galaxies import (
     Flagship2025Catalog,
 )
 from .noise import get_noise_array
+from ..foreground.star import bright_star
 
 SIM_INCLUSION_PADDING = 200  # pixels
 DEFAULT_BAT_STAMP_SIZE = 64
@@ -170,6 +171,10 @@ class MultibandSimConfig(
     galaxy_type = Field[str](
         doc="galaxy type",
         default="catsim2017",
+    )
+    foreground_model = Field[str](
+        doc='Foreground model type',
+        default="None"
     )
     survey_name = Field[str](
         doc="Name of the survey",
@@ -301,6 +306,31 @@ class MultibandSimTask(PipelineTask):
         self.rotate_list = [np.pi / num_rot * i for i in range(num_rot)]
         pass
 
+    def simulate_foreground(self, pixel_scale, model, psf_obj, bbox_outer, band, mag_zero, draw_method, **kwargs):
+        assert isinstance(self.config, MultibandSimConfig)
+        xmin = bbox_outer.getMinX()
+        ymin = bbox_outer.getMinY()
+        width = bbox_outer.getWidth()
+        height = bbox_outer.getHeight()
+
+        pix_x = xmin + width//2 #center pix +- sub pixel shift
+        pix_y = ymin + height//2 #center pix +- sub pixel shift
+
+        image_pos = galsim.PositionD(x=pix_x, y=pix_y)
+        foreground_obj = bright_star(model=model, mag_zero=mag_zero, band=band)
+        convolved_object = galsim.Convolve([foreground_obj, psf_obj])
+
+        stamp = convolved_object.drawImage(
+            center=image_pos,
+            wcs=None,
+            method=draw_method,
+            scale=pixel_scale,
+            nx=width,
+            ny=height,
+        )
+
+        return stamp.array
+    
     def simulate_images(
         self,
         *,
@@ -672,6 +702,26 @@ class MultibandSimTask(PipelineTask):
             del noise_array
         exp_out.getMaskedImage().mask.array[:, :] = mask_array
         del mask_array, galaxy_array
+
+        if self.config.foreground_model != 'None':
+            foreground_array = self.simulate_foreground(
+                galaxy_catalog.pixel_scale, 
+                self.config.foreground_model, 
+                psf_galsim,
+                boundary_box,
+                band,
+                mag_zero,
+                draw_method
+            )
+            exp_fore = exp_out.clone()
+            exp_fore.getMaskedImage().image.array[:, :] = (
+                exp_fore.getMaskedImage().image.array[:, :] + foreground_array
+            )
+            outputs = Struct(
+                simExposure=exp_out,
+                foreExposure = exp_fore
+            )
+            return outputs
 
         outputs = Struct(
             simExposure=exp_out,

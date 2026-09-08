@@ -64,6 +64,7 @@ from numpy.typing import NDArray
 __all__ = [
     "GAIA_TABLE_DTYPE",
     "default_gaia_radius",
+    "DP2_nosim_gaia_radius",
     "no_mask_gaia_radius",
     "STAR_MASK_RADIUS_FUNCS",
     "get_gaia_table",
@@ -97,6 +98,20 @@ def default_gaia_radius(mag: NDArray) -> NDArray:
         default=0.0,
     )
 
+def DP2_nosim_gaia_radius(mag: NDArray) -> NDArray:
+    """Piecewise linear fits to DP2 data ``r(mag)`` in pixels.
+
+    ``r = 450`` for ``mag <= 11``, ``200`` for ``11 < mag <= 14``,
+    ``100`` for ``14 < mag <= 20``, ``0`` otherwise (those stars are
+    dropped by :func:`build_gaia_xyr`).
+    """
+    mag = np.asarray(mag, dtype=np.float64)
+    return np.select(
+        [mag <= 15.5, mag <= 20.0],
+        [10**(-0.12 * mag + 3.8389), 10**(-0.0767 * mag + 2.772)],
+        default=0.0,
+    )
+
 
 def no_mask_gaia_radius(mag: NDArray) -> NDArray:
     """Flat ``r = 10`` px for every GAIA star with ``mag <= 20``;
@@ -111,6 +126,7 @@ def no_mask_gaia_radius(mag: NDArray) -> NDArray:
 
 STAR_MASK_RADIUS_FUNCS: dict[str, Callable[[NDArray], NDArray]] = {
     "default": default_gaia_radius,
+    "DP2_nosim": DP2_nosim_gaia_radius,
     "no_mask": no_mask_gaia_radius,
 }
 
