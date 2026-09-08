@@ -21,24 +21,12 @@
 
 from typing import Any
 
-import anacal
 import numpy as np
-from lsst.afw.image import ExposureF, MaskX
+from lsst.afw.image import MaskX
 from lsst.geom import Box2I, Extent2I, Point2D, Point2I
-from lsst.meas.algorithms import (
-    LoadReferenceObjectsConfig,
-    ReferenceObjectLoader,
-)
-from lsst.meas.base import SkyMapIdGeneratorConfig
-from lsst.pex.config import (
-    ChoiceField,
-    ConfigField,
-    Field,
-    FieldValidationError,
-    ListField,
-)
+from lsst.meas.algorithms import ReferenceObjectLoader
+from lsst.pex.config import Field
 from lsst.pipe.base import (
-    PipelineTask,
     PipelineTaskConfig,
     PipelineTaskConnections,
     Struct,
@@ -46,18 +34,17 @@ from lsst.pipe.base import (
 from lsst.pipe.base import connectionTypes as cT
 
 from xlens.utils.image import (
-    badMaskDefault,
-    prepare_mask,
+    estimate_noise_variance,
+    mask_to_rle_table,
     resize_array,
     subpixel_shift,
 )
-from xlens.utils.mask import (
-    STAR_MASK_RADIUS_FUNCS,
-    build_gaia_xyr,
-    get_gaia_table,
-)
 
-band_order = "ugrizy"
+from .systematics_base import (
+    BuildSystematicsConfigBase,
+    BuildSystematicsTaskBase,
+    band_order,
+)
 
 
 class BuildSystematicsConnections(
@@ -92,9 +79,21 @@ class BuildSystematicsConnections(
         minimum=0,
     )
     outputMask = cT.Output(
-        doc="Combined mask from bad pixels and bright stars across all bands.",
-        name="deep_coadd_systematics_mask",
-        storageClass="Mask",
+        doc=(
+            "Combined anacal bitmask, run-length encoded (y, x_start, "
+            "x_end, value; x_end exclusive; "
+            "decode with xlens.utils.image.rle_table_to_mask). Bit 0 "
+            "(value 1): bad pixels and bright stars across all bands, "
+            "the only bit that cuts pixels. Bit 1 (value 2): union of "
+            "the discontinuity planes (default INEXACT_PSF) -- real "
+            "data with a wrong CoaddPsf model (chip gaps, clipped or "
+            "rejected inputs), stamped per source as "
+            "n_mask_discontinuity, never cut. RLE because the mask "
+            "is a few bits per pixel: the int32 image form was 67 MB "
+            "per patch, ~50x the encoded size."
+        ),
+        name="deep_coadd_systematics_mask_rle",
+        storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
     )
     outputNoiseCorr = cT.Output(
@@ -115,26 +114,29 @@ class BuildSystematicsConnections(
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
     )
+    outputGaiaCatalog = cT.Output(
+        doc=(
+            "GAIA sources covering this patch. Columns: x_in_tract, "
+            "y_in_tract (tract-pixel coordinates), gaia_g_mag, "
+            "gaia_source_id (Gaia DR3 source_id, int64), ra, dec (deg). "
+            "Empty when no GAIA refcat is in the inputs."
+        ),
+        name="deep_coadd_systematics_gaia",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap", "tract", "patch"),
+    )
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
 
 
-class BuildSystematicsConfig(PipelineTaskConfig, pipelineConnections=BuildSystematicsConnections):
+class BuildSystematicsConfig(
+    BuildSystematicsConfigBase,
+    PipelineTaskConfig,
+    pipelineConnections=BuildSystematicsConnections,
+):
     """Configuration for :class:`BuildSystematicsTask`."""
 
-    npix = Field[int](
-        doc="number of pixels in stamp",
-        default=49,
-    )
-    badMaskPlanes = ListField[str](
-        doc="Mask planes used to reject bad pixels.",
-        default=badMaskDefault,
-    )
-    gaiaPadding = Field[int](
-        doc="Padding (pixels) when selecting GAIA sources around the patch.",
-        default=300,
-    )
     psfCache = Field[int](
         doc="Size of PSF cache",
         default=100,
@@ -143,34 +145,9 @@ class BuildSystematicsConfig(PipelineTaskConfig, pipelineConnections=BuildSystem
         doc="minimum (aperture) snr threshold of stars",
         default=150.0,
     )
-    idGenerator = SkyMapIdGeneratorConfig.make_field()
-    gaiaLoader = ConfigField(
-        dtype=LoadReferenceObjectsConfig,
-        doc="Reference catalog loader",
-    )
-    starMaskType = ChoiceField[str](
-        doc=(
-            "Name of the GAIA halo-radius model in "
-            "xlens.utils.mask.STAR_MASK_RADIUS_FUNCS. 'default' = "
-            "450/200/100 px step for mag <= 11/14/20; 'no_mask' = "
-            "flat 10 px for every GAIA star with mag <= 20."
-        ),
-        allowed={k: k for k in STAR_MASK_RADIUS_FUNCS},
-        default="default",
-    )
-
-    def setDefaults(self):
-        super().setDefaults()
-        self.gaiaLoader.requireProperMotion = False
-        self.gaiaLoader.anyFilterMapsToThis = "phot_g_mean"
-
-    def validate(self):
-        super().validate()
-        if self.npix % 2 == 0:
-            raise FieldValidationError(self.__class__.npix, self, "npix should be odd number")
 
 
-class BuildSystematicsTask(PipelineTask):
+class BuildSystematicsTask(BuildSystematicsTaskBase):
     """Collect mask information from exposures, including bright star
     masking.
     """
@@ -204,6 +181,17 @@ class BuildSystematicsTask(PipelineTask):
             catalog=inputs["catalog"],
             seed=seed,
         )
+        # run() returns the two masks as pixel arrays (script-friendly);
+        # the butler stores ONE combined bitmask (bit 0 = masked, bit 1
+        # = discontinuity), run-length encoded with a value column.
+        msk = outputs.outputMask
+        combined = (msk.getArray() != 0).astype(np.uint8)
+        combined |= (
+            (np.asarray(outputs.outputDiscontinuityMask) != 0).astype(np.uint8)
+            << 1
+        )
+        outputs.outputMask = mask_to_rle_table(combined)
+        del outputs.outputDiscontinuityMask
         butlerQC.put(outputs, outputRefs)
         return
 
@@ -221,6 +209,7 @@ class BuildSystematicsTask(PipelineTask):
         assert isinstance(self.config, BuildSystematicsConfig)
 
         mask_array: np.ndarray | None = None
+        disc_array: np.ndarray | None = None
         template_wcs = None
         template_bbox = None
 
@@ -250,10 +239,16 @@ class BuildSystematicsTask(PipelineTask):
                 template_wcs = exp.getWcs()
                 template_bbox = exp.getBBox()
 
-            band_mask = self._build_mask_band(
-                exposure=exp,
-            )
+            band_mask = self._build_mask_band(exp, band)
             mask_array = self._merge_mask(mask_array, band_mask)
+
+            if self._discontinuity_band_selected(band):
+                disc_band = self._plane_union_mask(exp, band)
+                disc_array = (
+                    disc_band if disc_array is None
+                    else self._merge_mask(disc_array, disc_band)
+                )
+                del disc_band
 
             if band in band_order:
                 i = band_order.index(band)
@@ -269,70 +264,55 @@ class BuildSystematicsTask(PipelineTask):
                     if star_array is not None:
                         star_centered_array[i] = star_array
             del exp, band_mask
-        if template_wcs is not None and template_bbox is not None and gaia_loader is not None:
-            gaia = gaia_loader.loadPixelBox(
-                bbox=template_bbox,
-                filterName="phot_g_mean",
-                wcs=template_wcs,
-                bboxToSpherePadding=self.config.gaiaPadding,
-            ).refCat
-            gaia_table = get_gaia_table(gaia_catalog=gaia, wcs=template_wcs)
-            gaia_array = build_gaia_xyr(
-                gaia_table,
-                bbox=template_bbox,
-                star_mask_type=self.config.starMaskType,
-            )
-            if gaia_array is not None:
-                anacal.mask.add_bright_star_mask(mask_array=mask_array, star_array=gaia_array)
         assert mask_array is not None
+        gaia_table = self._apply_gaia_mask(
+            mask_array=mask_array,
+            bbox=template_bbox,
+            wcs=template_wcs,
+            gaia_loader=gaia_loader,
+        )
         h, w = mask_array.shape
         output_msk = MaskX(width=w, height=h)
         output_msk.getArray()[:, :] = mask_array.astype(output_msk.getArray().dtype, copy=False)
+        if template_bbox is not None:
+            output_msk.setXY0(template_bbox.getMin())
 
         # noise correlation
-        for band, exp_handle in exposure_handles_dict.items():
+        if not self.config.do_noise_corr_estimation:
+            self.log.info(
+                "noise correlation estimation disabled; outputNoiseCorr "
+                "stays zero for tract=%d patch=%d", tract, patch,
+            )
+        for band, exp_handle in (
+            exposure_handles_dict.items()
+            if self.config.do_noise_corr_estimation else ()
+        ):
             exp = exp_handle.get()
             if band in band_order:
                 i = band_order.index(band)
                 noise_corr_array[i] = self.get_noise_corr(exp, mask_array)
             del exp
 
+        if disc_array is None:
+            disc_array = np.zeros_like(mask_array)
         return Struct(
             outputMask=output_msk,
+            outputDiscontinuityMask=disc_array,
             outputNoiseCorr=noise_corr_array,
             outputPsfCentered=psf_centered_array,
             outputStarCentered=star_centered_array,
-        )
-
-    def _merge_mask(
-        self,
-        global_mask: np.ndarray | None,
-        band_mask: np.ndarray,
-    ):
-        if global_mask is None:
-            return band_mask.astype(np.int16)
-        return (global_mask | band_mask).astype(np.int16)
-
-    def _build_mask_band(self, *, exposure: ExposureF) -> np.ndarray:
-        """Bad-pixel mask for one band: the configured mask planes plus the
-        image < -6 sigma negative-outlier guard.  This is the ONLY place a
-        mask is built for the patch-coadd shear path; the measurement tasks
-        consume the union across bands (plus bright stars) as-is.
-        """
-        assert isinstance(self.config, BuildSystematicsConfig)
-        return prepare_mask(
-            exposure.image.array,
-            exposure.mask,
-            exposure.variance.array,
-            self.config.badMaskPlanes,
+            outputGaiaCatalog=gaia_table,
         )
 
     def get_noise_corr(self, exposure, mask_array):
+        """Noise correlation from a fixed central [1000:3000] window.
+
+        NOTE the window's plane list below is hardcoded and does NOT
+        follow ``badMaskPlanes``; ``BuildCellSystematicsTask`` derives
+        its own window from the config instead.
+        """
         assert isinstance(self.config, BuildSystematicsConfig)
         mask = exposure.mask
-
-        # Always check what planes exist in this exposure:
-        print(mask.getMaskPlaneDict().keys())
 
         planes = ["BAD", "CR", "NO_DATA", "SAT", "UNMASKEDNAN", "DETECTED", "DETECTED_NEGATIVE"]
         avail = set(mask.getMaskPlaneDict().keys())
@@ -340,51 +320,29 @@ class BuildSystematicsTask(PipelineTask):
 
         bits = mask.getPlaneBitMask(planes)
         variance_array = exposure.getMaskedImage().variance.array[1000:3000, 1000:3000]
-        window_array = (((mask.array & bits) == 0) & (mask_array == 0)).astype(np.float32)[
+        window_array = (((mask.array & bits) == 0) & ((mask_array & 1) == 0)).astype(np.float32)[
             1000:3000, 1000:3000
         ]
 
-        noise_array = np.asarray(
-            exposure.getMaskedImage().image.array,
+        # ``.copy()`` is load-bearing: the exposure image is already
+        # float32, so np.asarray returns a VIEW and the zeroing below
+        # would write through into the CALLER's pixels -- blanking every
+        # DETECTED source in the central window of an exposure the
+        # caller still intends to measure.  (build_cell_systematics
+        # copies here for the same reason.)
+        noise_array = np.array(
+            exposure.getMaskedImage().image.array[1000:3000, 1000:3000],
             dtype=np.float32,
-        )[1000:3000, 1000:3000]
-        window_array = window_array * (noise_array**2.0 < variance_array * 9) * (~np.isnan(variance_array))
+        )
+        noise_variance = estimate_noise_variance(
+            exposure.getMaskedImage().variance.array,
+            mask,
+            mask_array,
+        )
+        window_array = window_array * self._noise_window(noise_array, variance_array, noise_variance)
 
         noise_array[~window_array.astype(bool)] = 0.0
-        noise_variance = np.average(variance_array[window_array.astype(bool)])
-        if noise_variance < 1e-20:
-            raise ValueError("the estimated image noise variance should be positive.")
-
-        pad_width = ((10, 10), (10, 10))  # ((top, bottom), (left, right))
-        window_array = np.pad(
-            window_array,
-            pad_width=pad_width,
-            mode="constant",
-            constant_values=0.0,
-        )
-        noise_array = np.pad(
-            noise_array,
-            pad_width=pad_width,
-            mode="constant",
-            constant_values=0.0,
-        )
-        ny, nx = window_array.shape
-
-        npixl = int(self.config.npix // 2)
-        npixr = int(self.config.npix // 2 + 1)
-        noise_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(noise_array)) ** 2.0)).real[
-            ny // 2 - npixl : ny // 2 + npixr,
-            nx // 2 - npixl : nx // 2 + npixr,
-        ]
-        window_corr = np.fft.fftshift(np.fft.ifft2(np.abs(np.fft.fft2(window_array)) ** 2.0)).real[
-            ny // 2 - npixl : ny // 2 + npixr,
-            nx // 2 - npixl : nx // 2 + npixr,
-        ]
-        good = window_corr > 0
-        noise_corr2 = np.zeros_like(window_corr, dtype=np.float32)
-        noise_corr2[good] = noise_corr[good] / window_corr[good]
-        del window_array, noise_array, window_corr
-        return noise_corr2
+        return self._correlate(noise_array, window_array, self.config.npix)
 
     def get_psf_systematics(self, exposure, catalog, seed, band):
         assert isinstance(self.config, BuildSystematicsConfig)
@@ -403,42 +361,48 @@ class BuildSystematicsTask(PipelineTask):
         )
         catalog = catalog[msk]
         nstars = len(catalog)
+        if nstars < 1:
+            return None, None
 
-        if nstars >= 1:
-            rng = np.random.RandomState(seed)
-            ind = rng.randint(0, nstars)
+        xn = f"{band}_centroid_x"
+        yn = f"{band}_centroid_y"
+        lsst_psf = exposure.getPsf()
+
+        # A CoaddPsf raises InvalidPsfError wherever no input exposure
+        # covers the point -- chip gaps, the patch rim. That is a
+        # property of the position, not of the catalog, so walk a random
+        # permutation and take the first star the PSF can be drawn at
+        # instead of failing the whole patch on one unlucky draw.
+        # (prepare.get_cells drops such positions for the same reason.)
+        order = np.random.RandomState(seed).permutation(nstars)
+        for ind in order:
             src = catalog[ind]
-            # Collect the PSF image
-            lsst_psf = exposure.getPsf()
-            psf_array = lsst_psf.computeImage(
-                Point2D(
-                    int(src[f"{band}_centroid_x"]),
-                    int(src[f"{band}_centroid_y"]),
-                )
-            ).getArray()
+            x0, y0 = int(src[xn]), int(src[yn])
+            try:
+                psf_array = lsst_psf.computeImage(Point2D(x0, y0)).getArray()
+            except Exception:
+                continue
             psf_array = resize_array(
                 psf_array,
                 (self.config.npix, self.config.npix),
             )
 
-            bbox = Box2I(
-                Point2I(
-                    int(src[f"{band}_centroid_x"]) - npixl,
-                    int(src[f"{band}_centroid_y"]) - npixl,
-                ),
+            stamp_bbox = Box2I(
+                Point2I(x0 - npixl, y0 - npixl),
                 Extent2I(self.config.npix, self.config.npix),
             )
-            # Collect the star image
-            # Extract the sub-image using the BBox
-            star_image = exposure.Factory(exposure, bbox).getImage()
-            # Get the image component and convert to a NumPy array
-            star_array = star_image.getArray()
-            xn = f"{band}_centroid_x"
-            yn = f"{band}_centroid_y"
-            offset_x = src[xn] - int(src[xn])
-            offset_y = src[yn] - int(src[yn])
-            star_array = subpixel_shift(star_array, -offset_x, -offset_y)
-        else:
-            psf_array = None
-            star_array = None
-        return psf_array, star_array
+            # Collect the star image: extract the sub-image using the BBox
+            star_array = exposure.Factory(
+                exposure, stamp_bbox
+            ).getImage().getArray()
+            star_array = subpixel_shift(
+                star_array, -(src[xn] - x0), -(src[yn] - y0)
+            )
+            return psf_array, star_array
+
+        self.log.warning(
+            "band %s: none of the %d candidate stars has a computable PSF; "
+            "no PSF/star stamp for this band",
+            band, nstars,
+        )
+        return None, None

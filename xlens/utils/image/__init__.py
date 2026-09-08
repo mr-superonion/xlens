@@ -48,7 +48,11 @@ from .hsm import (  # noqa: F401
 )
 from .masks import (  # noqa: F401
     badMaskDefault,
+    mask_to_rle,
+    mask_to_rle_table,
     prepare_mask,
+    rle_table_to_mask,
+    rle_to_mask,
 )
 from .noise import (  # noqa: F401
     estimate_noise_variance,
@@ -59,8 +63,8 @@ from .noise import (  # noqa: F401
 from .prepare import (  # noqa: F401
     _stack_bands,
     combine_sim_exposures,
-    get_blocks,
-    get_blocks_multiband,
+    get_cells,
+    get_cells_multiband,
     prepare_data,
     prepare_data_multiband,
     prepare_detection,
@@ -68,6 +72,7 @@ from .prepare import (  # noqa: F401
 from .psf import (  # noqa: F401
     GridPsf,
     LsstPsf,
+    make_object_psf,
     get_psf_array,
     prepare_psf_array,
     prepare_psf_array_cell,

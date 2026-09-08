@@ -75,12 +75,8 @@ class FpfsMeasurementConfig(Config):
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
     )
-    return_only_linear_modes = Field[bool](
-        doc="whether only return linear modes",
-        default=False,
-    )
     psf_model_type = Field[str](
-        doc="type of psf model (choose from object, block, patch)",
+        doc="type of psf model (choose from object, cell, patch)",
         default="patch",
     )
     noiseId = Field[int](
@@ -161,6 +157,7 @@ class FpfsMeasurementTask(Task):
         base_column_name: str | None = None,
         begin_x: int = 0,
         begin_y: int = 0,
+        n_mask_base_max: float | None = None,
         **kwargs,
     ):
         """Run FPFS measurement on image arrays.
@@ -192,6 +189,14 @@ class FpfsMeasurementTask(Task):
             Prefix prepended to all output column names.
         begin_x, begin_y : int
             Pixel origin offset for sub-images.
+        n_mask_base_max : float or None
+            Skip measurement of sources whose ``n_mask_base`` exceeds
+            this masked FRACTION in [0, 1] (their output rows are
+            zero-filled; applied in C++ inside ForceTask).  None
+            disables the cut.  Passed in rather than configured, so
+            detection and forced measurement cannot be given two
+            different thresholds: the caller hands both stages the one
+            value from ``config.anacal.n_mask_base_max``.
 
         Returns
         -------
@@ -211,6 +216,28 @@ class FpfsMeasurementTask(Task):
             det["y"] = detection["x2_det"] / pixel_scale - begin_y
         else:
             det = None
+        # Native per-source PSF: hand the C++ ForceTask the model
+        # itself -- every stamp is drawn inside its GIL-released loop
+        # (no Python per-galaxy drawing), and sources outside the
+        # model's coverage get n_mask_base = 1.0 written back in place.
+        # The 1.0 sentinel is always skipped by the C++ measurement,
+        # with or without a configured n_mask_base_max cut.
+        psf_model = getattr(psf_object, "native_model", None)
+        psf_offset = (
+            float(getattr(psf_object, "x_min", 0.0)),
+            float(getattr(psf_object, "y_min", 0.0)),
+        )
+        n_mask_base = None
+        has_mask_col = detection is not None and "n_mask_base" in (
+            detection.dtype.names or ()
+        )
+        if has_mask_col:
+            n_mask_base = np.ascontiguousarray(
+                detection["n_mask_base"], dtype=np.float32
+            )
+        elif psf_model is not None and detection is not None:
+            # writable sentinel target even without a systematics mask
+            n_mask_base = np.zeros(len(detection), dtype=np.float32)
         catalog = anacal.fpfs.process_image(
             fpfs_config=self.fpfs_config,
             pixel_scale=pixel_scale,
@@ -223,7 +250,27 @@ class FpfsMeasurementTask(Task):
             detection=det,
             psf_object=psf_object,
             base_column_name=base_column_name,
-            return_only_linear_modes=self.config.return_only_linear_modes,
-            pack_linear_modes=True,
+            n_mask_base=n_mask_base,
+            n_mask_base_max=n_mask_base_max,
+            psf_model=psf_model,
+            psf_offset=psf_offset,
         )
+        if (
+            psf_model is not None
+            and n_mask_base is not None
+            and detection is not None
+            and has_mask_col
+        ):
+            # Propagate the 1.0 sentinels the C++ wrote back into the
+            # caller's catalog: no usable PSF in one band means the
+            # SOURCE is unusable, so every band that runs after this
+            # one skips it too.
+            #
+            # Bands measured BEFORE the failing one keep the values
+            # they already produced -- the band loop cannot know a
+            # later band will fail.  That is harmless because the
+            # sentinel persists in the output ``n_mask_base`` column,
+            # and any selection (config.n_mask_base_max, the analysis
+            # cut at 0.035) drops the whole row on it.
+            detection["n_mask_base"] = n_mask_base
         return catalog

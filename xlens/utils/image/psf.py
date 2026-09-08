@@ -21,13 +21,15 @@
 
 """PSF models and PSF-stamp utilities: array helpers, the
 ``anacal.psf.BasePsf`` wrappers, and per-patch / per-cell PSF
-stamp preparation (including block construction inputs).
+stamp preparation (including cell construction inputs).
 
 Split out of ``xlens.utils.image``, which re-exports every public name here
 for backward compatibility.
 """
 
-from typing import Any
+import logging
+import threading
+from collections import OrderedDict
 
 import anacal
 import lsst.geom as lsst_geom
@@ -82,61 +84,160 @@ def subpixel_shift(image: NDArray, shift_x: float, shift_y: float) -> NDArray:
     return shifted_image
 
 
-def resize_array(
-    array: NDArray[Any],
-    target_shape: tuple[int, int] = (64, 64),
-):
-    """Resize an image-like array to a square target shape.
+# Centre crop / zero-pad to (height, width).  Re-exported rather than
+# wrapped: the single implementation of this convention is the C++
+# ``anacal.psf.resize_array``, which forcecasts any dtype and returns
+# float64, so a python-side copy would buy nothing.
+resize_array = anacal.psf.resize_array
 
-    The function first crops the array symmetrically if it is larger than the
-    requested output size and then applies zero-padding when the array is too
-    small.
 
-    Parameters
-    ----------
-    array
-        Input array to resize.  The array is assumed to be two-dimensional.
-    target_shape
-        Tuple of ``(height, width)`` describing the requested output shape.
+# One native model per (DM PSF object, bbox), shared by every consumer
+# (get_cells, get_cells_multiband, make_object_psf): loading costs
+# ~0.5-2 s per exposure (persisted-config round trip + per-visit WCS
+# fits), and without sharing it would run ~13x per patch.  Entries hold
+# a strong reference to the PSF so the id() key cannot be recycled
+# while the entry lives.  The bbox is part of the key because the
+# per-visit WCS polynomials are fitted OVER it -- a model fitted for
+# one bbox must not be handed out for another.  Bounded FIFO so
+# long-lived processes cannot grow it, and lock-guarded because the
+# tasks may call this from their cell thread pools.
+_NATIVE_MODEL_CACHE: "OrderedDict" = OrderedDict()
+_NATIVE_MODEL_CACHE_MAX = 64
+_NATIVE_MODEL_LOCK = threading.Lock()
 
-    Returns
-    -------
-    numpy.ndarray
-        The resized array.
+# Only these mean "this PSF can never be loaded natively"; anything else
+# (I/O while reading the persisted config, transient allocation errors)
+# is NOT cached, so a blip cannot poison a PSF for the whole process.
+_PERMANENT_LOAD_ERRORS = (NotImplementedError, ValueError, TypeError)
+
+
+def _scan_coadd_psf_config(source):
+    """(warpingKernelName, cacheSize) from a persisted CoaddPsf.
+
+    ``source`` is a FITS path or file-like object.  The values live in
+    the one-row catalog HDU with ``AR_NAME == 'CoaddPsf'``, as columns
+    ``warpingkernelname`` and ``cachesize`` -- the same HDU and the
+    same two columns DM itself reads when it restores the PSF
+    (``CoaddPsfFactory::read``).
     """
-    target_height, target_width = target_shape
-    input_height, input_width = array.shape
+    import astropy.io.fits as pyfits
 
-    # Crop if larger
-    if input_height > target_height:
-        start_h = (input_height - target_height) // 2
-        array = array[start_h : start_h + target_height, :]
-    if input_width > target_width:
-        start_w = (input_width - target_width) // 2
-        array = array[:, start_w : start_w + target_width]
+    with pyfits.open(source) as hdus:
+        for hdu in hdus:
+            if hdu.header.get("AR_NAME") != "CoaddPsf":
+                continue
+            cols = getattr(hdu, "columns", None)
+            if cols is None or "warpingkernelname" not in cols.names:
+                continue
+            row = hdu.data[0]
+            return str(row["warpingkernelname"]), int(row["cachesize"])
+    raise RuntimeError(
+        f"no persisted CoaddPsf configuration found in {source}"
+    )
 
-    # Pad with zeros if smaller
-    if input_height < target_height:
-        pad_height = target_height - input_height
-        pad_top = pad_height // 2
-        pad_bottom = pad_height - pad_top
-        array = np.pad(
-            array,
-            ((pad_bottom, pad_top), (0, 0)),
-            mode="constant",
-            constant_values=0.0,
-        )
 
-    if input_width < target_width:
-        pad_width = target_width - input_width
-        pad_right = pad_width // 2
-        pad_left = pad_width - pad_right
-        array = np.pad(
-            array,
-            ((0, 0), (pad_left, pad_right)),
-            mode="constant",
-        )
-    return array
+def _coadd_psf_config(lsst_psf):
+    """(warpingKernelName, cacheSize) of a live DM ``CoaddPsf``.
+
+    Those two values are private members of CoaddPsf with no accessor
+    (DM ticket #2949), so the only way to read them back is the
+    persisted form.  DM is serialized into afw's in-memory FITS buffer
+    -- NOT a temporary file: under bps/parsl a temp file would mean an
+    18 MB write per band per quantum, sensitivity to TMPDIR pointing at
+    shared scratch, and an orphaned directory whenever a job is killed.
+
+    All of this lives in xlens, not anacal: it is DM-archive-format
+    knowledge, and anacal depends on neither the LSST stack nor
+    astropy.  Reading the ORIGINAL coadd file with
+    :func:`_scan_coadd_psf_config` costs ~9 ms against the ~140 ms
+    spent here re-encoding every component; prefer it when the path is
+    known.
+    """
+    import io
+
+    from lsst.afw.fits import MemFileManager
+
+    manager = MemFileManager()
+    lsst_psf.writeFits(manager)
+    return _scan_coadd_psf_config(io.BytesIO(manager.getData()))
+
+
+def _constant_psf_model(lsst_psf):
+    """Native model for a spatially CONSTANT DM PSF, or None.
+
+    The simulator attaches a ``KernelPsf`` wrapping a ``FixedKernel``
+    (one stamp for the whole exposure); anacal's ``GridPsfModel`` with
+    a single 1x1 cell IS that model, so such PSFs draw natively -- in
+    the cell thread pools and per source inside the C++ ForceTask --
+    exactly like a real CoaddPsf.  Only a provably constant kernel
+    qualifies: anything spatially varying must go through the CoaddPsf
+    loader rather than be silently frozen at one position.
+    """
+    try:
+        from lsst.meas.algorithms import KernelPsf
+    except ImportError:
+        return None
+    if not isinstance(lsst_psf, KernelPsf):
+        return None
+    kernel = lsst_psf.getKernel()
+    if kernel is None or kernel.isSpatiallyVarying():
+        return None
+    from anacal import psf as apsf
+
+    stamp = lsst_psf.computeKernelImage(
+        lsst_psf.getAveragePosition()
+    ).getArray()
+    stamps = np.ascontiguousarray(stamp, dtype=np.float64)[None, None]
+    return apsf.GridPsfModel(stamps=stamps, dx=1.0, dy=1.0)
+
+
+def _native_coadd_model_cached(lsst_psf, lsst_bbox):
+    """Native model for a DM PSF, loaded once per (PSF, bbox).
+
+    Returns the model, or raises the loader error (permanent failures
+    are remembered so an unsupported PSF is only attempted once).
+    """
+    key = (id(lsst_psf), tuple(lsst_bbox.getBegin()),
+           tuple(lsst_bbox.getEnd()))
+    with _NATIVE_MODEL_LOCK:
+        hit = _NATIVE_MODEL_CACHE.get(key)
+    if hit is not None and hit[0] is lsst_psf:
+        if isinstance(hit[1], Exception):
+            raise hit[1]
+        return hit[1]
+    from anacal import psf as apsf
+
+    try:
+        model = _constant_psf_model(lsst_psf)
+        if model is None:
+            name, cache = _coadd_psf_config(lsst_psf)
+            model = apsf.load_coadd_psf_model(
+                lsst_psf, lsst_bbox, name, cache
+            )
+    except _PERMANENT_LOAD_ERRORS as err:
+        model = err
+    with _NATIVE_MODEL_LOCK:
+        _NATIVE_MODEL_CACHE[key] = (lsst_psf, model)
+        while len(_NATIVE_MODEL_CACHE) > _NATIVE_MODEL_CACHE_MAX:
+            _NATIVE_MODEL_CACHE.popitem(last=False)
+    if isinstance(model, Exception):
+        raise model
+    return model
+
+
+def try_native_coadd_model(lsst_psf, lsst_bbox):
+    """Native model for a DM PSF, or None if unsupported.
+
+    Used by the cell-stamp builders: native draws replace the DM
+    ``computeImage`` calls when possible -- PSFEx/PIFF coadds via the
+    CoaddPsf loader, spatially constant PSFs (the simulator's
+    KernelPsf/FixedKernel) via a 1x1 GridPsfModel.  Anything else
+    keeps the DM path.
+    """
+    try:
+        return _native_coadd_model_cached(lsst_psf, lsst_bbox)
+    except Exception:
+        return None
 
 
 class LsstPsf(anacal.psf.BasePsf):
@@ -158,9 +259,38 @@ class LsstPsf(anacal.psf.BasePsf):
 
     def draw(self, x, y):
         """Evaluate the PSF image centered on the requested pixel position."""
-        this_psf = self.psf.computeImage(lsst_geom.Point2D(x + self.x_min, y + self.y_min)).getArray()
+        this_psf = self.psf.computeImage(
+            lsst_geom.Point2D(x + self.x_min, y + self.y_min)
+        ).getArray()
         this_psf = resize_array(this_psf, self.shape)
         return this_psf
+
+
+def make_object_psf(psf, npix, lsst_bbox):
+    """Per-source PSF adapter backed by the native GIL-free model.
+
+    The parameters of a DM CoaddPsf (PSFEx or PIFF inputs) are
+    extracted once and every evaluation runs in AnaCal C++
+    (``anacal.psf``), reproducing the DM pipeline to float precision;
+    a spatially constant PSF (the simulator's KernelPsf/FixedKernel)
+    becomes a 1x1 GridPsfModel instead.  There is NO fallback to
+    Python-side per-galaxy drawing: a PSF the native loader cannot
+    handle is an error -- use the per-cell PSF mode instead for such
+    data.
+    """
+    from anacal import psf as apsf
+
+    try:
+        model = _native_coadd_model_cached(psf, lsst_bbox)
+    except Exception as err:
+        logging.error(
+            "native PSF model unavailable (%s: %s); per-source PSF "
+            "mode requires it -- use psf_model_type='cell' for this "
+            "data.",
+            type(err).__name__, err,
+        )
+        raise
+    return apsf.NativeCoaddPsf(model, npix=npix, lsst_bbox=lsst_bbox)
 
 
 class GridPsf(anacal.psf.BasePsf):
@@ -203,6 +333,20 @@ class GridPsf(anacal.psf.BasePsf):
         j = int(np.clip(x // self.dx, 0, nx - 1))
         i = int(np.clip(y // self.dy, 0, ny - 1))
         return np.ascontiguousarray(self.model[i, j])
+
+    @property
+    def native_model(self):
+        """C++ PerSourcePsf handle: the stamp grid evaluated natively
+        inside the ForceTask loop (no Python per-galaxy drawing)."""
+        if getattr(self, "_native_model", None) is None:
+            from anacal import psf as apsf
+
+            self._native_model = apsf.GridPsfModel(
+                stamps=np.ascontiguousarray(self.model, dtype=np.float64),
+                dx=float(self.dx),
+                dy=float(self.dy),
+            )
+        return self._native_model
 
     @property
     def average(self) -> NDArray:
@@ -319,14 +463,37 @@ def get_psf_array(
     return out
 
 
+def _iter_cell_psf_arrays(cell_coadd):
+    """Every cell's PSF stamp, whichever coadd flavour this is.
+
+    ``lsst.cell_coadds.MultipleCellCoadd`` (DP1) carries a ``cells``
+    mapping whose entries hold a ``psf_image``.  ``lsst.images.cells.
+    CellCoadd`` (DP2) has no per-cell objects at all: the PSF is one
+    grid-indexed container.  Both are per cell, only the accessor
+    differs.
+    """
+    cells = getattr(cell_coadd, "cells", None)
+    if cells is not None:
+        for cell in cells.values():
+            psf_image = getattr(cell, "psf_image", None)
+            yield None if psf_image is None else getattr(psf_image, "array", None)
+        return
+    from lsst.images.cells import CellIJ
+
+    psf = cell_coadd.psf
+    size = psf.grid.grid_size
+    for i in range(size.i):
+        for j in range(size.j):
+            try:
+                yield np.asarray(psf[CellIJ(i=i, j=j)].array)
+            except Exception:
+                yield None
+
+
 def stack_psfs_cells(*, cell_coadd, npix):
     psf_array = np.zeros((npix, npix))
     npsf = 0.0
-    for cell in cell_coadd.cells.values():
-        p0 = None
-        psf_image = getattr(cell, "psf_image", None)
-        if psf_image is not None:
-            p0 = getattr(psf_image, "array", None)
+    for p0 in _iter_cell_psf_arrays(cell_coadd):
         if (p0 is not None) and np.isfinite(p0).all():
             psf_array = psf_array + resize_array(
                 p0,

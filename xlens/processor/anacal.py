@@ -23,10 +23,8 @@ from typing import Any, Sequence
 
 import anacal
 import astropy
-import numpy as np
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
-from lsst.geom import Point2D
 from lsst.pex.config import Config, Field, FieldValidationError
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
@@ -65,10 +63,6 @@ class AnacalConfig(Config):
         doc="Whether forcing the size and shape of galaxies",
         default=True,
     )
-    validate_psf = Field[bool](
-        doc="Whether validating PSF",
-        default=False,
-    )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
@@ -86,7 +80,7 @@ class AnacalConfig(Config):
         default=0,
     )
     psf_model_type = Field[str](
-        doc="type of psf model (choose from object, block, patch)",
+        doc="type of psf model (choose from object, cell, patch)",
         default="patch",
     )
 
@@ -158,8 +152,8 @@ class AnacalTask(Task):
         tractInfo=None,
         patchInfo=None,
         detection: NDArray | None,
-        lsst_psf=None,
-        blocks,
+        cells,
+        n_mask_base_max: float | None = None,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
@@ -197,37 +191,17 @@ class AnacalTask(Task):
             gal_array,
             psf_array,
             variance=noise_variance,
-            block_list=blocks,
+            cell_list=cells,
             detection=det,
             noise_array=noise_array,
             mask_array=mask_array,
             do_fpfs=self.config.do_fpfs,
+            n_mask_base_max=n_mask_base_max,
         )
         catalog["x1"] = catalog["x1"] + begin_x * pixel_scale
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
         catalog["x1_det"] = catalog["x1_det"] + begin_x * pixel_scale
         catalog["x2_det"] = catalog["x2_det"] + begin_y * pixel_scale
-        if self.config.validate_psf and (lsst_psf is not None):
-            indexes = []
-            for ic, cc in enumerate(catalog):
-                try:
-                    ep = np.abs(
-                        1
-                        - np.sum(
-                            lsst_psf.computeImage(
-                                Point2D(
-                                    cc["x1"] / pixel_scale,
-                                    cc["x2"] / pixel_scale,
-                                )
-                            ).getArray()
-                        )
-                    )
-                    if ep < 1e-1:
-                        indexes.append(ic)
-                except Exception:
-                    pass
-            catalog = catalog[indexes]
-
         if wcs is not None:
             # catalog x1/x2 are already global (parent) pixels here, since
             # begin_x/begin_y were added back above -> no XY0 offset needed.
@@ -256,7 +230,8 @@ class AnacalTask(Task):
         mask_array: NDArray | None = None,
         noise_array: NDArray | None = None,
         detection: astropy.table.Table | None = None,
-        blocks: list | None = None,
+        cells: list | None = None,
+        num_workers: int = 1,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -272,13 +247,14 @@ class AnacalTask(Task):
         """
         assert isinstance(self.config, AnacalConfig)
         pixel_scale = float(exposure.wcs.getPixelScale().asArcseconds())
-        if blocks is None:
-            blocks = utils.image.get_blocks(
+        if cells is None:
+            cells = utils.image.get_cells(
                 lsst_psf=exposure.getPsf(),
                 lsst_bbox=exposure.getBBox(),
                 pixel_scale=pixel_scale,
                 npix=self.config.npix,
                 psf_array=psf_array,
+                num_workers=num_workers,
             )
         data = utils.image.prepare_data(
             exposure=exposure,
@@ -298,12 +274,8 @@ class AnacalTask(Task):
             detection=detection,
             band=band,
             survey=survey,
-            blocks=blocks,
+            cells=cells,
         )
-        if self.config.validate_psf:
-            data["lsst_psf"] = exposure.getPsf()
-        else:
-            data["lsst_psf"] = None
         if band is None:
             data["base_column_name"] = None
         elif survey is not None:
@@ -311,8 +283,8 @@ class AnacalTask(Task):
         else:
             data["base_column_name"] = band + "_"
         if self.config.psf_model_type == "object":
-            data["psf_object"] = utils.image.LsstPsf(
-                psf=exposure.getPsf(),
+            data["psf_object"] = utils.image.make_object_psf(
+                exposure.getPsf(),
                 npix=self.config.npix,
                 lsst_bbox=exposure.getBBox(),
             )
@@ -334,7 +306,8 @@ class AnacalTask(Task):
         star_cat: NDArray | None = None,
         mask_array: NDArray | None = None,
         detection: astropy.table.Table | None = None,
-        blocks: list | None = None,
+        cells: list | None = None,
+        num_workers: int = 1,
         **kwargs,
     ):
         """Prepare a stack of bands as one anacal detection input.
@@ -359,12 +332,13 @@ class AnacalTask(Task):
 
         exps = [exposures[b] for b in bands]
         pixel_scale = float(exps[0].wcs.getPixelScale().asArcseconds())
-        if blocks is None:
-            blocks = utils.image.get_blocks_multiband(
+        if cells is None:
+            cells = utils.image.get_cells_multiband(
                 lsst_psfs=[e.getPsf() for e in exps],
                 lsst_bbox=exps[0].getBBox(),
                 pixel_scale=pixel_scale,
                 npix=self.config.npix,
+                num_workers=num_workers,
             )
         data = utils.image.prepare_data_multiband(
             bands=bands,
@@ -381,13 +355,12 @@ class AnacalTask(Task):
             star_cat=star_cat,
             mask_array=mask_array,
             detection=detection,
-            blocks=blocks,
+            cells=cells,
             survey=survey,
         )
         # The detection image belongs to no single band, so it carries no
-        # band prefix, and PSF validation / per-object PSFs -- both defined
-        # against one exposure -- do not apply.
-        data["lsst_psf"] = None
+        # band prefix, and per-object PSFs -- defined against one
+        # exposure -- do not apply.
         data["base_column_name"] = None
         data["psf_object"] = None
         return data

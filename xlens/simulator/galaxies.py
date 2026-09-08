@@ -34,7 +34,6 @@ import fitsio
 import galsim
 import lsst
 import numpy as np
-import pyarrow.parquet as pq
 from numpy.lib import recfunctions as rfn
 
 from .layout import Layout
@@ -116,11 +115,15 @@ class BaseGalaxyCatalog(ABC):
 
     Subclasses must implement:
       - _read_catalog(...)
-      - _compute_density(cat)
       - _generate_galaxy(entry, mag_zero, band, **kwargs)
     Optionally override:
       - _probabilities_for_sampling(cat) -> Optional[np.ndarray]
     """
+
+    # Sky-position columns, used to measure the footprint the density is
+    # computed over.  All three catalogs fill an RA/Dec box, so naming
+    # the columns is the only thing that varies between them.
+    radec_columns: ClassVar[tuple[str, str]] = ("ra", "dec")
 
     def __init__(
         self,
@@ -447,9 +450,80 @@ class BaseGalaxyCatalog(ABC):
             select_upper_limit=select_upper_limit,
         )
 
-    @abstractmethod
     def _compute_density(self, cat: Any) -> float:
-        """Return object surface density in objects / arcmin^2."""
+        """Return object surface density in objects / arcmin^2.
+
+        ``cat`` is the catalog *after* the ``select_*`` cuts, so a cut
+        thins the simulated field rather than resampling the same field
+        from a smaller pool.  The denominator is the footprint of the
+        input file, which the cuts in practice do not change: every
+        current use of ``select_observable`` is photometric.  A cut on
+        ``ra``/``dec`` would shrink the measured box along with the
+        count, which is also right.
+        """
+        ra_col, dec_col = self.radec_columns
+        return len(cat) / self._radec_box_area_arcmin2(
+            cat[ra_col], cat[dec_col]
+        )
+
+    @staticmethod
+    def _radec_box_area_arcmin2(ra, dec) -> float:
+        """Solid angle (arcmin^2) of the RA/Dec bounding box of the input.
+
+        Two details make this safe on the real input files, and both are
+        wrong in the naive ``(ra.max() - ra.min()) * cos(dec) *
+        (dec.max() - dec.min())`` form:
+
+        * **RA wrap.**  ``OneDegSq.fits`` is a 1 deg^2 field centred on
+          RA = 0, so its RA values are 0..0.5 and 359.5..360 with
+          nothing between: ``max - min`` reads 360 instead of 1 and the
+          density comes out 360x too low.  These catalogs are all small
+          regions so a span of very nearly 360 deg cannot be a real extent
+          and means the field straddles RA = 0.  It is then split at 180,
+          which separates the two clusters of a field this narrow exactly,
+          and the high one is re-expressed as negative RA so that
+          ``max - min`` works again.
+        * **Dec convergence.**  The solid angle of a lon/lat box is
+          exactly ``dRA * (sin dec_max - sin dec_min)``; the
+          ``cos(mean dec)`` version is a small-box approximation that
+          degrades towards the poles.
+
+        This is a *bounding box*, so it is the footprint only for a
+        catalog that fills one.  All three input catalogs do -- Diffsky
+        is cut to a box for exactly this reason, see
+        :class:`DiffskyCatalog`, whose parent cone its own bounding box
+        would overestimate by 22%.  A catalog of some other shape needs
+        more than a new ``radec_columns``: it has to override
+        :meth:`_compute_density` outright.
+        """
+        ra = np.asarray(ra, dtype=float)
+        dec = np.asarray(dec, dtype=float)
+        if ra.size < 2:
+            raise ValueError(
+                "cannot measure a footprint from fewer than 2 objects"
+            )
+        ra = np.mod(ra, 360.0)
+        if ra.max() - ra.min() > 359.5:
+            ra = np.where(ra >= 180.0, ra - 360.0, ra)
+        ra_extent = ra.max() - ra.min()
+        if ra_extent > 180.0:
+            raise ValueError(
+                f"RA extent {ra_extent} deg exceeds 180: this estimator "
+                "assumes a field small enough that an unwrapped span can "
+                "only mean it straddles RA = 0"
+            )
+        dec_extent = np.sin(np.radians(dec.max())) - np.sin(
+            np.radians(dec.min())
+        )
+        # dRA[deg] * dsin(dec) * (180/pi) converts the steradian
+        # expression to deg^2; * 3600 to arcmin^2
+        area = ra_extent * dec_extent * (180.0 / np.pi) * 3600.0
+        if not area > 0.0:
+            raise ValueError(
+                f"degenerate footprint: RA extent {ra_extent} deg, "
+                f"Dec extent {dec_extent} in sin(dec)"
+            )
+        return float(area)
 
     @abstractmethod
     def _generate_galaxy(
@@ -717,9 +791,17 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
     catalog_filename = "OneDegSq.fits"
 
     # ``prob`` drives sampling, ``a_*``/``b_*``/``pa_*``/``fluxnorm_*``
-    # the profile, ``*_ab`` the photometry.  ``ra``/``dec``/``galtileid``
-    # are unused: positions come from the layout, not the input file.
+    # the profile, ``*_ab`` the photometry.  ``ra``/``dec`` are read only
+    # to measure the footprint -- the galaxies are placed by the layout,
+    # not at their input-file positions -- and never reach the truth
+    # catalog, whose own ``ra``/``dec`` columns take precedence in the
+    # merge.  That footprint is the 1 deg^2 of the name, centred on
+    # RA = 0, so it is the wrap handling in
+    # ``_radec_box_area_arcmin2`` that keeps it from reading 360 deg^2.
+    # ``galtileid`` is unused.
     required_columns: ClassVar[tuple[str, ...] | None] = (
+        "ra",
+        "dec",
         "prob",
         "redshift",
         "a_d",
@@ -748,10 +830,6 @@ class CatSim2017Catalog(BaseGalaxyCatalog):
                 "surveys are ['lsst', 'hsc', 'des']"
             )
         return (f"{band}_ab",)
-
-    def _compute_density(self, cat) -> float:
-        """Return density in objects/arcmin^2 for a 1-deg^2 catalog."""
-        return cat.size / (60.0 * 60.0)
 
     def _probabilities_for_sampling(self, cat):
         if "prob" in cat.dtype.names and cat.size > 0:
@@ -855,8 +933,11 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
 
     catalog_filename = "flagship_cosmos.fits"
 
+    radec_columns: ClassVar[tuple[str, str]] = ("ra_gal", "dec_gal")
+
     # Survey-independent columns: ``ra_gal``/``dec_gal`` set the density
-    # footprint and the disk/bulge columns the profile.  Photometry is
+    # footprint -- a filled 1.4 x 1.4 deg box in COSMOS -- and the
+    # disk/bulge columns the profile.  Photometry is
     # survey-prefixed and added by ``_required_columns`` below, so a run
     # never loads the bands of a survey it is not simulating.  Dropping
     # those plus the unused ``decam_*``, ``disk_nsersic`` and halo columns
@@ -914,17 +995,6 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
                 if name not in cols:
                     cols.append(name)
         return tuple(cols)
-
-    def _compute_density(self, cat) -> float:
-        """Return density (objects/arcmin^2) from the sky footprint."""
-        ra = cat["ra_gal"]
-        dec = cat["dec_gal"]
-        ra_range = ra.max() - ra.min()
-        dec_range = dec.max() - dec.min()
-        cos_dec = np.cos(np.radians(np.mean(dec)))
-        area_deg2 = ra_range * cos_dec * dec_range
-        area_arcmin2 = area_deg2 * 3600.0
-        return len(cat) / area_arcmin2
 
     def _half_light_radius(self, catalog) -> np.ndarray:
         return catalog["disk_r50"]
@@ -1019,8 +1089,7 @@ class DiffskyCatalog(BaseGalaxyCatalog):
     from Diffsky mock catalog.
     """
 
-    # diffsky_arr.parquet from "hltds_cosmos_260215_04_07_2026"
-    catalog_filename = "diffsky_arr.parquet"
+    catalog_filename = "diffsky2026.fits"
 
     @classmethod
     def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
@@ -1032,18 +1101,6 @@ class DiffskyCatalog(BaseGalaxyCatalog):
                 "surveys are ['lsst', 'hsc']"
             )
         return (f"{sname}_{band}_disk", f"{sname}_{band}_bulge")
-
-    def _load_catalog_file(self, fname: str, columns=None):
-        return (
-            pq.read_table(fname, columns=columns)
-            .to_pandas()
-            .to_records(index=False)
-        )
-
-    def _compute_density(self, cat) -> float:
-        """Return density in objects/arcmin^2 for a cone with a 1 deg radius"""
-        area_tot_arcmin = 2 * np.pi * (1 - np.cos(np.radians(1))) * (180 * 60 / np.pi) ** 2
-        return len(cat) / area_tot_arcmin
 
     def _half_light_radius(self, catalog) -> np.ndarray:
         return catalog["r50_disk_as"]

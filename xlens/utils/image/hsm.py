@@ -66,6 +66,7 @@ from numpy.typing import NDArray
 #   # in the per-cell / per-exposure loop:
 #   moments = measure_psf_hsm_moments(
 #       self._psfHsmCtx, self.psfHsmMeasurement, exposure,
+#       pixel_scale=wcs.getPixelScale().asArcseconds(),
 #   )
 #   block = broadcast_psf_hsm_moments(moments, band, n=len(cat))
 #   cat = np.asarray(rfn.merge_arrays([cat, block], flatten=True))
@@ -165,11 +166,32 @@ def make_psf_stamp_exposure(psf_image) -> Any:
     return exp
 
 
+def psf_array_to_image(psf_array) -> Any:
+    """Numpy PSF stamp -> centred ``ImageD``, ready for
+    :func:`make_psf_stamp_exposure`.
+
+    Patch-coadd cells carry their PSF as a plain array
+    (``cell.psf_array``), while cell coadds carry an ``ImageD``
+    (``cell.psf_image``). Centring the bbox on (0, 0) matches the
+    cell-coadd stamps, so HSM measures at the stamp centre either way.
+    """
+    arr = np.asarray(psf_array, dtype=np.float64)
+    ny, nx = arr.shape
+    bbox = lsst_geom.Box2I(
+        lsst_geom.Point2I(-(nx // 2), -(ny // 2)),
+        lsst_geom.Extent2I(nx, ny),
+    )
+    img = afwImage.ImageD(bbox)
+    img.array[:, :] = arr
+    return img
+
+
 def measure_psf_hsm_moments(
     ctx: PsfHsmContext,
     measurement_subtask,
     exposure,
     *,
+    pixel_scale: float,
     center: lsst_geom.Point2D | None = None,
 ) -> dict[str, float | bool]:
     """Run ``HsmPsfMoments + HigherOrderMomentsPSF`` once on
@@ -179,6 +201,22 @@ def measure_psf_hsm_moments(
     ``exposure.getPsf().computeKernelImage(center)``
     by default (``useSourceCentroidOffset=False``), so the PSF is sampled
     on the pixel grid with no subpixel shift — one exposure, one PSF.
+
+    UNITS: the plugin returns the second moments in PIXELS**2; they are
+    converted here to ARCSEC**2 using ``pixel_scale``, so the catalog
+    means the same thing whoever reads it and no consumer has to be
+    told which survey produced it. ``pixel_scale`` is required and has
+    no default on purpose -- a wrong or defaulted scale silently
+    rescales every PSF size, and it cannot be recovered from
+    ``exposure`` on the cell path, where ``make_psf_stamp_exposure``
+    builds a bare ``ExposureF`` with NO WCS. Callers take it from the
+    coadd/cell WCS, which is real provenance rather than configuration.
+
+    The HIGHER-ORDER moments are left alone: they are computed in
+    coordinates whitened by the source's own second-moment matrix
+    (``std_pos = M**-0.5 @ pos``, Hirata & Seljak 2003 Eq. 6), so they
+    are dimensionless and invariant under a change of pixel scale --
+    the two scale factors cancel exactly.
 
     Returns a flat ``dict`` keyed by the raw plugin field names (no band
     prefix); call :func:`broadcast_psf_hsm_moments` to attach a band-
@@ -220,10 +258,13 @@ def measure_psf_hsm_moments(
 
     flag = bool(rec.get(ctx.key_flag))
     ho_flag = bool(rec.get(ctx.higher_order_flag_key))
+    # pixel**2 -> arcsec**2. Second moments are quadratic in length, so
+    # the factor is the scale SQUARED, not the scale.
+    _p2 = float(pixel_scale) ** 2
     out: dict[str, float | bool] = {
-        "ext_shapeHSM_HsmPsfMoments_xx": float(rec.get(ctx.key_ixx)),
-        "ext_shapeHSM_HsmPsfMoments_yy": float(rec.get(ctx.key_iyy)),
-        "ext_shapeHSM_HsmPsfMoments_xy": float(rec.get(ctx.key_ixy)),
+        "ext_shapeHSM_HsmPsfMoments_xx": float(rec.get(ctx.key_ixx)) * _p2,
+        "ext_shapeHSM_HsmPsfMoments_yy": float(rec.get(ctx.key_iyy)) * _p2,
+        "ext_shapeHSM_HsmPsfMoments_xy": float(rec.get(ctx.key_ixy)) * _p2,
         "ext_shapeHSM_HsmPsfMoments_flag": flag,
         "ext_shapeHSM_HigherOrderMomentsPSF_flag": ho_flag,
     }

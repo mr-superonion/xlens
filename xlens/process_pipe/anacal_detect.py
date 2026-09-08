@@ -163,11 +163,11 @@ class AnacalDetectPipe(AnacalMeasureTaskBase):
     def run_measure(self, data):
         assert isinstance(self.config, AnacalDetectPipeConfig)
         out = []
-        catalog = self.anacal.run(**data)
+        catalog = self._run_anacal(**data)
         out.append(catalog)
         if self.config.do_fpfs:
             data["detection"] = catalog
-            out.append(self.fpfs.run(**data))
+            out.append(self._run_fpfs(**data))
         return rfn.merge_arrays(out, flatten=True)
 
     def run(

@@ -11,7 +11,6 @@ import os
 import fitsio
 import galsim
 import numpy as np
-import pyarrow.parquet as pq
 import pytest
 from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 
@@ -41,10 +40,8 @@ def _read_flagship():
 
 
 def _read_diffsky():
-    return (
-        pq.read_table(
-            os.path.join(os.environ["CATSIM_DIR"], "diffsky_arr.parquet")
-        ).to_pandas().to_records(index=False)
+    return fitsio.read(
+        os.path.join(os.environ["CATSIM_DIR"], "diffsky2026.fits")
     )
 
 
@@ -165,6 +162,58 @@ def test_density_and_hlr(name):
     hlr = inst._half_light_radius(cat[:5])
     assert hlr.shape == (5,)
     assert np.all(hlr > 0)
+
+
+def test_radec_box_area_handles_the_ra_wrap():
+    """A field straddling RA = 0 must not read as a 360-deg-wide one.
+
+    ``OneDegSq.fits`` is exactly this case, and a naive
+    ``ra.max() - ra.min()`` puts its density 360x too low.
+    """
+    Base = xlens.simulator.galaxies.BaseGalaxyCatalog
+    rng = np.random.RandomState(42)
+    dec = rng.uniform(-0.5, 0.5, 20000)
+    # 1 deg of RA centred on 0, i.e. 359.5..360 and 0..0.5
+    ra = np.mod(rng.uniform(-0.5, 0.5, 20000), 360.0)
+    assert ra.max() - ra.min() > 359.0, "test data must straddle RA=0"
+
+    area = Base._radec_box_area_arcmin2(ra, dec)
+    assert area == pytest.approx(3600.0, rel=2e-3)
+
+    # the same field away from the meridian gives the same area
+    shifted = Base._radec_box_area_arcmin2(np.mod(ra + 180.0, 360.0), dec)
+    assert shifted == pytest.approx(area, rel=1e-6)
+
+
+def test_radec_box_area_is_the_exact_solid_angle_near_the_pole():
+    """``cos(mean dec)`` is a small-box approximation; this is not."""
+    Base = xlens.simulator.galaxies.BaseGalaxyCatalog
+    ra = np.array([100.0, 110.0])
+    dec = np.array([83.5, 85.5])
+    exact = 10.0 * (np.sin(np.radians(85.5)) - np.sin(np.radians(83.5)))
+    exact *= (180.0 / np.pi) * 3600.0
+    assert Base._radec_box_area_arcmin2(ra, dec) == pytest.approx(exact)
+
+
+def test_radec_box_area_refuses_a_field_wider_than_180_deg():
+    """The wrap fix assumes a small field; say so rather than guess.
+
+    At more than 180 deg wide, a wrapped span is no longer proof that
+    the field straddles RA = 0, and there is no way to tell which of
+    the two readings was meant.
+    """
+    Base = xlens.simulator.galaxies.BaseGalaxyCatalog
+    ra = np.linspace(0.0, 300.0, 500)
+    with pytest.raises(ValueError, match="exceeds 180"):
+        Base._radec_box_area_arcmin2(ra, np.zeros_like(ra))
+
+
+def test_footprint_area_rejects_a_degenerate_input():
+    Base = xlens.simulator.galaxies.BaseGalaxyCatalog
+    with pytest.raises(ValueError, match="fewer than 2"):
+        Base._radec_box_area_arcmin2(np.array([1.0]), np.array([1.0]))
+    with pytest.raises(ValueError, match="degenerate footprint"):
+        Base._radec_box_area_arcmin2(np.zeros(5), np.zeros(5))
 
 
 @pytest.mark.parametrize("name", ALL_CATALOGS)

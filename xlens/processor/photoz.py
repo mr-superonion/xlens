@@ -43,7 +43,7 @@ from lsst.pipe.base import (
 from lsst.utils.logging import LsstLogAdapter
 from numpy.typing import NDArray
 
-from ..catalog.redshift import NUM_Z_GRIDS, flexzboostEstimator
+from ..catalog.redshift import flexzboostEstimator
 
 POINT_KEYS = ("zmode", "z025", "z160", "z500", "z840", "z975", "zbest")
 
@@ -89,7 +89,10 @@ class photoZPipeConnections(
         storageClass="ArrowAstropy",
     )
     redshiftPdfs = cT.Output(
-        doc="FlexZBoost p(z) grids with shape (N, ndist, nz).",
+        doc=(
+            "FlexZBoost p(z) grids. Shape (N, nz) when output_distorted_pdfs "
+            "is False (undistorted only), else (N, ndist, nz)."
+        ),
         name="{inputName}_anacal_fzb_pdfs",
         dimensions=("skymap", "tract", "patch"),
         storageClass="NumpyArray",
@@ -129,8 +132,24 @@ class photoZPipeConfig(
         default=True,
     )
     output_pdfs = Field[bool](
-        doc="If True also write the full p(z) grid as a second output.",
+        doc="If True also write the p(z) grid as a second output.",
         default=False,
+    )
+    output_distorted_pdfs = Field[bool](
+        doc=(
+            "Only used when output_pdfs is True. If True, save p(z) for all "
+            "shear distortions -> shape (N, ndist, nz); if False (default), "
+            "save only the undistorted p(z) -> shape (N, nz)."
+        ),
+        default=False,
+    )
+    z_max = Field[float](
+        doc="Maximum redshift of the p(z) grid (grid runs 0..z_max).",
+        default=5.0,
+    )
+    nzbins = Field[int](
+        doc="Number of points on the p(z) redshift grid.",
+        default=501,
     )
     include_mag_err = Field[bool](
         doc="If True include color errors as additional features.",
@@ -172,7 +191,11 @@ class photoZPipe(PipelineTask):
         assert isinstance(self.config, photoZPipeConfig)
         with open(self.config.model_path, "rb") as f:
             pz_obj = pickle.load(f)
-        self.zobj = flexzboostEstimator(pz_obj=pz_obj)
+        self.zobj = flexzboostEstimator(
+            pz_obj=pz_obj,
+            z_max=self.config.z_max,
+            nzbins=self.config.nzbins,
+        )
         return
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
@@ -215,7 +238,6 @@ class photoZPipe(PipelineTask):
             ref_band=cfg.ref_band,
             extinction=extinction,
             include_mag_err=cfg.include_mag_err,
-            return_pdfs=cfg.output_pdfs,
         )
 
         dtype: list = [("object_id", catalog.dtype["object_id"])]
@@ -223,12 +245,25 @@ class photoZPipe(PipelineTask):
         points = np.empty(n, dtype=dtype)
         points["object_id"] = catalog["object_id"]
 
+        # p(z) grids: all distortions only when output_distorted_pdfs is set,
+        # otherwise just the undistorted ("0") grid.  "0" is always
+        # distortions[0], so its p(z) is filled on the i == 0 iteration.
         pdfs: NDArray | None = None
         if cfg.output_pdfs:
-            pdfs = np.empty(
-                (n, len(distortions), NUM_Z_GRIDS),
-                dtype=np.float32,
-            )
+            if cfg.output_distorted_pdfs:
+                pdfs = np.empty((n, len(distortions), cfg.nzbins), dtype=np.float32)
+            else:
+                pdfs = np.empty((n, cfg.nzbins), dtype=np.float32)
+
+        # Empty patch (no detections): the measure step still writes a 0-row
+        # anacal catalog for edge/low-coverage patches.  FlexZBoost's predict
+        # cannot run on 0 rows (apply_along_axis over an empty axis), so return
+        # the already-empty outputs with the full column schema instead.
+        if n == 0:
+            result = Struct(redshiftCatalog=astropy.table.Table(points))
+            if cfg.output_pdfs:
+                result.redshiftPdfs = pdfs
+            return result
 
         for i, (suf, comp, dg) in enumerate(distortions):
             self.log.info(
@@ -237,16 +272,21 @@ class photoZPipe(PipelineTask):
                 comp,
                 dg,
             )
+            want_pdf = cfg.output_pdfs and (cfg.output_distorted_pdfs or i == 0)
             res = self.zobj.get_z(
                 src=catalog,
                 comp=comp,
                 dg=dg,
+                return_pdfs=want_pdf,
                 **common_kwargs,
             )
             for key in POINT_KEYS:
                 points[f"{key}_{suf}"] = res[key]
-            if pdfs is not None:
-                pdfs[:, i, :] = res["pdfs"].astype(np.float32)
+            if want_pdf:
+                if cfg.output_distorted_pdfs:
+                    pdfs[:, i, :] = res["pdfs"].astype(np.float32)
+                else:
+                    pdfs[:] = res["pdfs"].astype(np.float32)
             del res
             gc.collect()
 

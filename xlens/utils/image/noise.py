@@ -32,6 +32,8 @@ import anacal
 import numpy as np
 from numpy.typing import NDArray
 
+from .masks import MAX_VALID_VARIANCE
+
 
 def rotate_noise_corr(noise_corr):
     noise_max = np.amax(noise_corr)
@@ -123,9 +125,12 @@ def estimate_noise_variance(
     """
     detect_bits = mask.getPlaneBitMask(["DETECTED", "DETECTED_NEGATIVE"])
     mask_raw = mask.array
-    mm = (variance_array < 1e5) & ((mask_raw & detect_bits) == 0)
+    mm = (variance_array < MAX_VALID_VARIANCE) & ((mask_raw & detect_bits) == 0)
     if mask_array is not None:
-        mm &= mask_array == 0
+        # Bit 0 only: bit 1 (discontinuity) pixels hold real data and
+        # belong in the variance estimate -- excluding them would shift
+        # the noise realisation and, through it, the detection itself.
+        mm &= (np.asarray(mask_array) & 1) == 0
     if np.sum(mm) < 10:
         raise ValueError("Not enough valid pixels for noise estimation")
     noise_variance = float(np.nanmedian(variance_array[mm]))
@@ -212,7 +217,6 @@ def prepare_noise_array(
     anacal.mask.mask_galaxy_image(
         noise_array,
         mask_array,
-        False,
         star_cat,
     )
     return noise_array
