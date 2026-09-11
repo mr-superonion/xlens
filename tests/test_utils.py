@@ -4,6 +4,7 @@ from lsst.afw.image import ExposureF
 from lsst.geom import Box2I, Extent2I, Point2I
 from lsst.meas.base import SkyMapIdGeneratorConfig
 
+from xlens.utils.catalog import rotate_ra_dec
 from xlens.utils.handle import make_data_id
 from xlens.utils.image import (
     _stack_bands,
@@ -198,3 +199,26 @@ def test_prepare_mask_planes_negative_pixels_and_original():
     expected[1, 1] = 1  # negative-pixel guard
     expected[1, 2] = 1  # carried over from original
     np.testing.assert_array_equal(mask, expected)
+
+
+def test_rotate_ra_dec_round_trip():
+    """forward rotation then inverse returns the original (ra, dec)."""
+    rng = np.random.default_rng(42)
+    ra = rng.uniform(0.0, 360.0, size=500)
+    dec = np.degrees(np.arcsin(rng.uniform(-1.0, 1.0, size=500)))  # uniform on sphere
+    # a general ZYZ rotation (incl. the DP2 obs->input angles) plus edge cases
+    for alpha, beta, gamma in [(237.0, 61.5, 180.0), (30.0, 0.0, 0.0),
+                               (0.0, 90.0, 0.0), (-12.3, 45.6, 78.9)]:
+        ra_r, dec_r = rotate_ra_dec(ra, dec, alpha, beta, gamma)
+        ra_b, dec_b = rotate_ra_dec(ra_r, dec_r, alpha, beta, gamma, inverse=True)
+        dra = (ra_b - ra + 180.0) % 360.0 - 180.0  # wrap-safe RA residual
+        # cos(dec) weight so the RA residual is a real angular distance
+        np.testing.assert_allclose(dra * np.cos(np.radians(dec)), 0.0, atol=1e-9)
+        np.testing.assert_allclose(dec_b, dec, atol=1e-9)
+
+
+def test_rotate_ra_dec_single_angle_is_ra_shift():
+    """With beta=gamma=0 the rotation is a pure RA shift about the pole."""
+    ra_r, dec_r = rotate_ra_dec([100.0, 355.0], [20.0, -5.0], 30.0)
+    np.testing.assert_allclose(ra_r, [130.0, 25.0], atol=1e-9)  # 355+30 wraps to 25
+    np.testing.assert_allclose(dec_r, [20.0, -5.0], atol=1e-9)  # dec unchanged

@@ -19,6 +19,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import numpy as np
+
 
 def getPatchInner(sources, patchInfo, pixel_scale):
     """Check if each source centroid is in the inner bbox of a patch.
@@ -111,3 +113,66 @@ def set_isPrimary(sources, skyMap, tractInfo, patchInfo, pixel_scale):
     isTractInner = getTractInner(sources, tractInfo, skyMap)
     sources["is_primary"] = isTractInner & isPatchInner
     return
+
+
+def euler_rotation_matrix(alpha, beta, gamma):
+    """Intrinsic ZYZ Euler rotation matrix ``R = Rz(alpha) Ry(beta) Rz(gamma)``.
+
+    Parameters
+    ----------
+    alpha, beta, gamma : float
+        Euler angles in **degrees** (Z, Y, Z respectively).
+
+    Returns
+    -------
+    R : `numpy.ndarray`, shape (3, 3)
+        Rotation matrix acting on unit column vectors: ``v_rot = R @ v``.
+    """
+    a, b, g = np.radians([alpha, beta, gamma])
+    ca, sa = np.cos(a), np.sin(a)
+    cb, sb = np.cos(b), np.sin(b)
+    cg, sg = np.cos(g), np.sin(g)
+    rz1 = np.array([[ca, -sa, 0.0], [sa, ca, 0.0], [0.0, 0.0, 1.0]])
+    ry = np.array([[cb, 0.0, sb], [0.0, 1.0, 0.0], [-sb, 0.0, cb]])
+    rz2 = np.array([[cg, -sg, 0.0], [sg, cg, 0.0], [0.0, 0.0, 1.0]])
+    return rz1 @ ry @ rz2
+
+
+def rotate_ra_dec(ra, dec, alpha, beta=0.0, gamma=0.0, inverse=False):
+    """Rotate sky coordinates by ZYZ Euler angles.
+
+    Converts ``(ra, dec)`` to unit vectors, applies the rotation
+    ``R = Rz(alpha) Ry(beta) Rz(gamma)`` (``v_rot = R @ v``), and converts
+    back. With a single angle (``beta = gamma = 0``) this is a rotation about
+    the pole by ``alpha`` in RA. Pass ``inverse=True`` to apply ``R.T`` (the
+    exact inverse of the same angles), so
+    ``rotate_ra_dec(*rotate_ra_dec(ra, dec, a, b, g), a, b, g, inverse=True)``
+    returns the input.
+
+    Parameters
+    ----------
+    ra, dec : array-like or float
+        Sky coordinates in **degrees**.
+    alpha, beta, gamma : float
+        ZYZ Euler angles in **degrees** (``beta``, ``gamma`` default to 0).
+    inverse : bool, optional
+        If True apply the inverse rotation (``R.T``).
+
+    Returns
+    -------
+    ra_rot, dec_rot : `numpy.ndarray`
+        Rotated coordinates in degrees; ``ra_rot`` in ``[0, 360)``.
+    """
+    ra = np.atleast_1d(np.asarray(ra, dtype=float))
+    dec = np.atleast_1d(np.asarray(dec, dtype=float))
+    lon, lat = np.radians(ra), np.radians(dec)
+    cd = np.cos(lat)
+    # unit vectors (same convention as healpy ang2vec(..., lonlat=True))
+    v = np.stack([cd * np.cos(lon), cd * np.sin(lon), np.sin(lat)], axis=-1)
+    R = euler_rotation_matrix(alpha, beta, gamma)
+    if inverse:
+        R = R.T
+    w = v @ R.T  # rotate each row vector: w_row = R @ v_row
+    ra_rot = np.degrees(np.arctan2(w[..., 1], w[..., 0])) % 360.0
+    dec_rot = np.degrees(np.arcsin(np.clip(w[..., 2], -1.0, 1.0)))
+    return ra_rot, dec_rot
