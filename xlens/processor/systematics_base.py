@@ -69,6 +69,7 @@ from ..utils.mask import (
     build_gaia_xyr,
     get_gaia_table,
 )
+from ..wcs import pixel_scale_arcsec
 
 # Slot order of every stacked per-band output (noise correlation, PSF).
 band_order = "ugrizy"
@@ -135,9 +136,11 @@ class BuildSystematicsConfigBase(Config):
     starMaskType = ChoiceField[str](
         doc=(
             "Name of the GAIA halo-radius model in "
-            "xlens.utils.mask.STAR_MASK_RADIUS_FUNCS. 'default' = "
-            "450/200/100 px step for mag <= 11/14/20; 'no_mask' = "
-            "flat 10 px for every GAIA star with mag <= 20."
+            "xlens.utils.mask.STAR_MASK_RADIUS_FUNCS; radii are in "
+            "arcsec and divided by the image pixel scale. 'default' = "
+            "75.6/33.6/16.8 arcsec step for mag <= 11/14/20 (450/200/100 "
+            "HSC px); 'DP2_nosim' = power-law fit to DP2; 'no_mask' = "
+            "flat 2 arcsec for every GAIA star with mag <= 20."
         ),
         allowed={k: k for k in STAR_MASK_RADIUS_FUNCS},
         default="default",
@@ -295,6 +298,7 @@ class BuildSystematicsTaskBase(PipelineTask):
         gaia_array = build_gaia_xyr(
             gaia_table,
             bbox=bbox,
+            pixel_scale=pixel_scale_arcsec(wcs),
             star_mask_type=self.config.starMaskType,
             mag_max=self.config.starMaskMagMax,
         )

@@ -22,8 +22,11 @@ from lsst.afw.geom import makeSkyWcs
 
 from xlens.utils.mask import (
     GAIA_TABLE_DTYPE,
+    DP2_nosim_gaia_radius,
     build_gaia_xyr,
+    default_gaia_radius,
     get_gaia_table,
+    no_mask_gaia_radius,
 )
 
 PIXEL_SCALE_ARCSEC = 0.2  # ComCam DP1 cell-coadd pixel scale
@@ -108,14 +111,17 @@ def test_get_gaia_table_dtype_and_columns():
 
 def test_build_gaia_xyr_default_radius_per_bin():
     """``starMaskType='default'`` reproduces the step function
-    450/200/100 px for mag ≤ 11/14/20 and drops mag > 20."""
+    450/200/100 HSC px (75.6/33.6/16.8 arcsec) for mag ≤ 11/14/20,
+    rescaled to this image's 0.2"/px grid, and drops mag > 20."""
     refcat, _, _, mag, ids = _make_test_inputs()
     wcs = _make_wcs()
     bbox = lsst_geom.Box2I(lsst_geom.Point2I(1000, 2000),
                            lsst_geom.Extent2I(3000, 3000))
 
     table = get_gaia_table(refcat, wcs)
-    xyr = build_gaia_xyr(table, bbox, star_mask_type="default")
+    xyr = build_gaia_xyr(
+        table, bbox, pixel_scale=PIXEL_SCALE_ARCSEC, star_mask_type="default"
+    )
 
     assert xyr is not None
     assert xyr.dtype.names == ("x", "y", "r")
@@ -129,24 +135,75 @@ def test_build_gaia_xyr_default_radius_per_bin():
     np.testing.assert_allclose(xyr["y"], expected_y, atol=1e-10)
 
     # Each surviving star sits in its expected mag bin.
-    # mags [8, 12, 16, 19]  ->  r [450, 200, 100, 100]
-    np.testing.assert_array_equal(xyr["r"], [450.0, 200.0, 100.0, 100.0])
+    # mags [8, 12, 16, 19]  ->  r [450, 200, 100, 100] HSC px, so
+    # x 0.168 / 0.2 on this grid
+    np.testing.assert_allclose(
+        xyr["r"],
+        np.array([450.0, 200.0, 100.0, 100.0]) * 0.168 / PIXEL_SCALE_ARCSEC,
+    )
 
 
 def test_build_gaia_xyr_no_mask_flat_radius():
-    """``starMaskType='no_mask'`` puts a flat r=10 px halo on every
-    GAIA star with mag ≤ 20 and drops anything fainter."""
+    """``starMaskType='no_mask'`` puts a flat r = 2 arcsec halo (10 px
+    at 0.2"/px) on every GAIA star with mag ≤ 20 and drops anything
+    fainter."""
     refcat, _, _, mag, ids = _make_test_inputs()
     wcs = _make_wcs()
     bbox = lsst_geom.Box2I(lsst_geom.Point2I(1000, 2000),
                            lsst_geom.Extent2I(3000, 3000))
 
     table = get_gaia_table(refcat, wcs)
-    xyr = build_gaia_xyr(table, bbox, star_mask_type="no_mask")
+    xyr = build_gaia_xyr(
+        table, bbox, pixel_scale=PIXEL_SCALE_ARCSEC, star_mask_type="no_mask"
+    )
 
     assert xyr is not None
     assert len(xyr) == 4  # mag=23 dropped
-    np.testing.assert_array_equal(xyr["r"], [10.0, 10.0, 10.0, 10.0])
+    np.testing.assert_allclose(xyr["r"], [10.0, 10.0, 10.0, 10.0])
+
+
+def test_radius_models_return_arcsec():
+    """The r(mag) models are in arcsec, tuned on their native grids."""
+    mags = np.array([8.0, 12.0, 16.0, 19.0, 23.0])
+    np.testing.assert_allclose(
+        default_gaia_radius(mags),
+        np.array([450.0, 200.0, 100.0, 100.0, 0.0]) * 0.168,
+    )
+    np.testing.assert_allclose(
+        DP2_nosim_gaia_radius(mags),
+        [
+            10 ** (-0.12 * 8.0 + 3.8389) * 0.2,
+            10 ** (-0.12 * 12.0 + 3.8389) * 0.2,
+            10 ** (-0.0767 * 16.0 + 2.772) * 0.2,
+            10 ** (-0.0767 * 19.0 + 2.772) * 0.2,
+            0.0,
+        ],
+    )
+    np.testing.assert_array_equal(
+        no_mask_gaia_radius(mags), [2.0, 2.0, 2.0, 2.0, 0.0]
+    )
+
+
+def test_build_gaia_xyr_scales_radius_with_pixel_scale():
+    """The same star gets twice the halo in pixels on a 0.1"/px grid
+    as on 0.2"/px; positions do not change."""
+    refcat, _, _, mag, ids = _make_test_inputs()
+    wcs = _make_wcs()
+    bbox = lsst_geom.Box2I(lsst_geom.Point2I(1000, 2000),
+                           lsst_geom.Extent2I(3000, 3000))
+    table = get_gaia_table(refcat, wcs)
+    coarse = build_gaia_xyr(
+        table, bbox, pixel_scale=0.2, star_mask_type="DP2_nosim"
+    )
+    fine = build_gaia_xyr(
+        table, bbox, pixel_scale=0.1, star_mask_type="DP2_nosim"
+    )
+    assert coarse is not None and fine is not None
+    np.testing.assert_allclose(fine["r"], 2.0 * coarse["r"])
+    np.testing.assert_array_equal(fine["x"], coarse["x"])
+    np.testing.assert_array_equal(fine["y"], coarse["y"])
+    with pytest.raises(ValueError, match="pixel_scale"):
+        build_gaia_xyr(table, bbox, pixel_scale=0.0)
 
 
 if __name__ == "__main__":

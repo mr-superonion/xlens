@@ -37,10 +37,12 @@ bright-star halo mask into an ``anacal.mask`` mask plane:
    :func:`anacal.mask.add_bright_star_mask` expects: pixel coordinates
    are made bbox-local and the halo radius per star comes from a
    pluggable ``r(mag)`` model selected by name from
-   :data:`STAR_MASK_RADIUS_FUNCS`.
+   :data:`STAR_MASK_RADIUS_FUNCS`.  The models return radii in
+   **arcsec** so that one model serves surveys with different pixel
+   scales; :func:`build_gaia_xyr` divides by the image's pixel scale.
 
 Adding a new model means defining a function ``f(mag_array) ->
-radius_array`` and registering it::
+radius_arcsec_array`` and registering it::
 
     from xlens.utils.mask import STAR_MASK_RADIUS_FUNCS
 
@@ -85,43 +87,48 @@ GAIA_TABLE_DTYPE = np.dtype(
 
 
 def default_gaia_radius(mag: NDArray) -> NDArray:
-    """Step function ``r(mag)`` in pixels.
+    """Step function ``r(mag)`` in arcsec, tuned on HSC (0.168"/px).
 
-    ``r = 450`` for ``mag <= 11``, ``200`` for ``11 < mag <= 14``,
-    ``100`` for ``14 < mag <= 20``, ``0`` otherwise (those stars are
-    dropped by :func:`build_gaia_xyr`).
+    ``r = 450`` px for ``mag <= 11``, ``200`` px for ``11 < mag <= 14``,
+    ``100`` px for ``14 < mag <= 20`` on the HSC grid, i.e. 75.6, 33.6
+    and 16.8 arcsec; ``0`` otherwise (those stars are dropped by
+    :func:`build_gaia_xyr`).
     """
     mag = np.asarray(mag, dtype=np.float64)
-    return np.select(
+    # step defined in HSC pixels (0.168 arcsec/pixel) -> arcsec
+    return 0.168 * np.select(
         [mag <= 11.0, mag <= 14.0, mag <= 20.0],
         [450.0, 200.0, 100.0],
         default=0.0,
     )
 
-def DP2_nosim_gaia_radius(mag: NDArray) -> NDArray:
-    """Piecewise linear fits to DP2 data ``r(mag)`` in pixels.
 
-    ``r = 450`` for ``mag <= 11``, ``200`` for ``11 < mag <= 14``,
-    ``100`` for ``14 < mag <= 20``, ``0`` otherwise (those stars are
-    dropped by :func:`build_gaia_xyr`).
+def DP2_nosim_gaia_radius(mag: NDArray) -> NDArray:
+    """Piecewise power-law fit to DP2 data, ``r(mag)`` in arcsec.
+
+    Fitted in LSST pixels (0.2"/px): ``log10 r = -0.12 mag + 3.8389``
+    for ``mag <= 15.5``, ``-0.0767 mag + 2.772`` for
+    ``15.5 < mag <= 20``, ``0`` otherwise (those stars are dropped by
+    :func:`build_gaia_xyr`).
     """
     mag = np.asarray(mag, dtype=np.float64)
-    return np.select(
+    # fit defined in LSST pixels (0.2 arcsec/pixel) -> arcsec
+    return 0.2 * np.select(
         [mag <= 15.5, mag <= 20.0],
-        [10**(-0.12 * mag + 3.8389), 10**(-0.0767 * mag + 2.772)],
+        [10 ** (-0.12 * mag + 3.8389), 10 ** (-0.0767 * mag + 2.772)],
         default=0.0,
     )
 
 
 def no_mask_gaia_radius(mag: NDArray) -> NDArray:
-    """Flat ``r = 10`` px for every GAIA star with ``mag <= 20``;
-    ``0`` otherwise (those stars are dropped).
+    """Flat ``r = 2`` arcsec (10 LSST px) for every GAIA star with
+    ``mag <= 20``; ``0`` otherwise (those stars are dropped).
 
     Practically disables bright-star wing masking but still drops a
     small placeholder halo at every star position.
     """
     mag = np.asarray(mag, dtype=np.float64)
-    return np.where(mag <= 20.0, 10.0, 0.0)
+    return np.where(mag <= 20.0, 2.0, 0.0)
 
 
 STAR_MASK_RADIUS_FUNCS: dict[str, Callable[[NDArray], NDArray]] = {
@@ -161,6 +168,7 @@ def build_gaia_xyr(
     gaia_table: NDArray,
     bbox: Any,
     *,
+    pixel_scale: float,
     star_mask_type: str = "default",
     mag_max: float | None = None,
 ) -> NDArray | None:
@@ -169,8 +177,9 @@ def build_gaia_xyr(
 
     Pixel coordinates are made bbox-local (``bbox.getBeginX/Y`` is
     subtracted from ``x_in_tract`` / ``y_in_tract``). The per-star
-    halo radius comes from
-    ``STAR_MASK_RADIUS_FUNCS[star_mask_type](mag)``; rows with
+    halo radius is ``STAR_MASK_RADIUS_FUNCS[star_mask_type](mag)``,
+    which is in arcsec, divided by ``pixel_scale`` (arcsec/pixel) so
+    that ``r`` is in pixels of the image being masked; rows with
     ``r <= 0`` are dropped, so each radius function can encode its
     own magnitude cut by returning ``0`` for stars it does not want to
     mask.
@@ -190,8 +199,10 @@ def build_gaia_xyr(
             f"available: {sorted(STAR_MASK_RADIUS_FUNCS)}"
         ) from exc
 
+    if not pixel_scale > 0.0:
+        raise ValueError(f"pixel_scale must be positive, got {pixel_scale}")
     mag = gaia_table["gaia_g_mag"]
-    r = radius_func(mag)
+    r = radius_func(mag) / float(pixel_scale)
     if mag_max is not None:
         r = np.where(mag > mag_max, 0.0, r)
     keep = r > 0
