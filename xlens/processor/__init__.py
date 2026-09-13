@@ -28,6 +28,7 @@ from . import (
     measure_cell_coadds,
     measure_coadds,
     merge,
+    merge_systematics,
     photoz,
 )
 
@@ -40,5 +41,6 @@ __all__ = [
     "measure_coadds",
     "measure_cell_coadds",
     "merge",
+    "merge_systematics",
     "photoz",
 ]

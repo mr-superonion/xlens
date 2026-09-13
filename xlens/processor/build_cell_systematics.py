@@ -34,7 +34,7 @@ __all__ = [
 import numpy as np
 from lsst.afw.image import MaskX
 from lsst.meas.algorithms import ReferenceObjectLoader
-from lsst.pex.config import ListField
+from lsst.pex.config import Field, ListField
 from lsst.pipe.base import (
     NoWorkFound,
     PipelineTaskConfig,
@@ -155,6 +155,20 @@ class BuildCellSystematicsConfig(
         ),
         default=["g", "r", "i", "z"],
     )
+    minNoiseWindowPixels = Field[int](
+        doc=(
+            "Minimum number of clean (unmasked, noise-window) pixels the "
+            "central cut-out must have for the noise-correlation estimate to "
+            "be trusted. Below this the window autocorrelation has too few "
+            "overlapping pixel pairs per lag, so noise_corr / window_corr "
+            "blows up into a garbage, asymmetric, off-centre-peaked array -- "
+            "the failure mode of heavily masked patches (bright stars). Such "
+            "a band returns a zero array instead, so mergeSystematics drops "
+            "it from the tract stack (a normal patch has ~1e6 clean pixels; "
+            "the pathological ones had ~1e2). Set to 0 to disable the guard."
+        ),
+        default=10000,
+    )
 
 
 class BuildCellSystematicsTask(BuildSystematicsTaskBase):
@@ -269,6 +283,23 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
         )
         noise_variance = estimate_noise_variance(variance_array, mask, mask_array)
         window_array *= self._noise_window(noise_array, variance_sub, noise_variance)
+
+        # Guard against near-empty windows. A heavily masked patch (e.g. a
+        # bright star wiping ~80-95% of the pixels) leaves only a handful of
+        # scattered clean pixels; _correlate then divides by a window
+        # autocorrelation that is ~1-2 pairs at most lags, and the estimate
+        # explodes into a garbage, asymmetric, off-centre array. Return zeros
+        # so mergeSystematics excludes this band (a normal patch has ~1e6
+        # clean pixels; the pathological ones ~1e2).
+        n_clean = int(window_array.sum())
+        if n_clean < self.config.minNoiseWindowPixels:
+            self.log.warning(
+                "noise window has only %d clean pixel(s) (< %d); returning a "
+                "zero noise-correlation for this band -- heavily masked patch "
+                "(likely a bright star). It is excluded from the tract stack.",
+                n_clean, self.config.minNoiseWindowPixels,
+            )
+            return np.zeros((npix, npix), dtype=np.float32)
 
         # Mean-subtract over the kept pixels before zeroing the masked ones.
         # A nonzero DC offset would otherwise spread to a flat μ² pedestal
