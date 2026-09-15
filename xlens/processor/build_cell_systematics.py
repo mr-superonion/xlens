@@ -309,7 +309,15 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
             noise_array -= noise_array[window_bool].mean()
         noise_array[~window_bool] = 0.0
 
-        return self._correlate(noise_array, window_array, npix)
+        noise_corr = self._correlate(noise_array, window_array, npix)
+
+        # Renormalise the corr[0, 0] to the median of variance plane.
+        center = float(noise_corr[npix // 2, npix // 2])
+        if center > 0.0:
+            noise_corr = (
+                noise_corr * np.float32(noise_variance / center)
+            ).astype(np.float32)
+        return noise_corr
 
     def run(
         self,
