@@ -1079,6 +1079,174 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
 
 
 # ---------------------------------------------------------
+# Concrete implementation: COSMOS2025 synthetic LSST catalog
+# ---------------------------------------------------------
+class Cosmos2025Catalog(BaseGalaxyCatalog):
+    """COSMOS2025 catalog (``cosmos2025_lsst_synth.fits``).
+
+    COSMOS2025 (arXiv:2506.03243)
+    **every source with two independent SourceXtractor++ runs** -- a single
+    Sersic model and a Bulge+Disk model (exponential disk n=1 + de Vaucouleurs
+    bulge n=4) -- so both descriptions exist for each galaxy.
+    """
+
+    catalog_filename = "cosmos2025_lsst_synth.fits"
+    radec_columns: ClassVar[tuple[str, str]] = ("ra", "dec")
+    #: "bulge_disk" (exponential disk + Sersic bulge) or "sersic" (single Sersic)
+    morphology_model: ClassVar[str] = "bulge_disk"
+    #: Sersic index used for the bulge component in the bulge_disk model.
+    #: Set to a column name string to read it per-object instead.
+    bulge_sersic_index: ClassVar[float] = 4.0
+    #: Column giving the bulge flux fraction (B/T) for the bulge_disk model.
+    bulge_fraction_column: ClassVar[str] = "bulge_fraction"
+    # ---------------------------------------------------------------------
+    required_columns: ClassVar[tuple[str, ...] | None] = (
+        "ra",
+        "dec",
+        # single-Sersic model
+        "sersic_n",
+        "sersic_hlr",
+        "sersic_beta",
+        "sersic_q",
+        # bulge+disk model
+        "disk_hlr",
+        "disk_q",
+        "bulge_disk_beta",
+        "bulge_hlr",
+        "bulge_q",
+    )
+
+    #: Bands carried per survey prefix by the catalog
+    survey_bands: ClassVar[dict[str, tuple[str, ...]]] = {
+        "lsst": ("u", "g", "r", "i", "z", "y"),
+    }
+
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """``{survey}_{band}`` total magnitude (CONFIRM the exact naming)."""
+        sname = _survey_prefix(survey_name)
+        bands = cls.survey_bands.get(sname)
+        if bands is None:
+            raise ValueError(
+                f"cosmos2025 has no {survey_name!r} photometry; supported "
+                f"surveys are {sorted(cls.survey_bands)}"
+            )
+        if band not in bands:
+            raise ValueError(
+                f"cosmos2025 has no {band!r} band for survey {survey_name!r}; "
+                f"available bands are {list(bands)}"
+            )
+        return (f"{sname}_{band}",)
+
+    def _required_columns(self) -> tuple[str, ...] | None:
+        """Morphology columns plus the ``{survey}_{band}`` magnitudes, and the
+        bulge-fraction column when the bulge_disk model is in use."""
+        assert self.required_columns is not None
+        cols = list(self.required_columns)
+        if self.morphology_model == "bulge_disk":
+            if self.bulge_fraction_column not in cols:
+                cols.append(self.bulge_fraction_column)
+            if isinstance(self.bulge_sersic_index, str):
+                cols.append(self.bulge_sersic_index)
+        for survey in self.survey_name_list:
+            sname = _survey_prefix(survey)
+            bands = self.survey_bands.get(sname)
+            if bands is None:
+                # unknown survey: read every column rather than silently
+                # dropping the magnitudes the renderer needs
+                return None
+            for band in bands:
+                name = f"{sname}_{band}"
+                if name not in cols:
+                    cols.append(name)
+        return tuple(cols)
+
+    def _half_light_radius(self, catalog) -> np.ndarray:
+        col = "disk_hlr" if self.morphology_model == "bulge_disk" else "sersic_hlr"
+        return catalog[col]
+
+    @staticmethod
+    def _circularized_hlr(semi_major_hlr: float, q: float) -> float:
+        """GalSim half_light_radius = semi-major hlr * sqrt(q) (>0)."""
+        return max(float(semi_major_hlr), 1e-4) * np.sqrt(max(float(q), 1e-4))
+
+    def _generate_galaxy(
+        self,
+        *,
+        entry,
+        mag_zero,
+        band,
+        survey_name,
+        force_isotropic=False,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
+        **kwargs,
+    ) -> galsim.GSObject:
+        """Build a GalSim galaxy from a COSMOS2025 catalog row."""
+        sname = _survey_prefix(survey_name)
+        mag = entry[f"{sname}_{band}"]
+        flux = 10 ** ((mag_zero - mag) / 2.5)
+
+        def _clamp_q(q):
+            return 1.0 if force_isotropic else min(max(float(q), 0.0), 1.0)
+
+        if self.morphology_model == "sersic":
+            q = _clamp_q(entry["sersic_q"])
+            hlr = self._circularized_hlr(entry["sersic_hlr"], q)
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                gal = _forced_profile(
+                    force_galaxy_profile, flux=flux, half_light_radius=hlr
+                )
+            else:
+                n = _galsim_round_sersic(float(entry["sersic_n"]), 0.1)
+                n = min(max(n, 0.3), 6.2)  # GalSim's supported Sersic range
+                gal = galsim.Sersic(n=n, flux=flux, half_light_radius=hlr)
+            if q < 1.0:
+                gal = gal.shear(q=q, beta=float(entry["sersic_beta"]) * galsim.degrees)
+            return gal
+
+        # --- bulge + disk model ---
+        bulge_frac = float(entry[self.bulge_fraction_column])
+        bulge_frac = min(max(bulge_frac, 0.0), 1.0)
+        pa = float(entry["bulge_disk_beta"]) * galsim.degrees
+        components = []
+
+        disk_flux = flux * (1.0 - bulge_frac)
+        if disk_flux > 0:
+            q_d = _clamp_q(entry["disk_q"])
+            hlr_d = self._circularized_hlr(entry["disk_hlr"], q_d)
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                disk = _forced_profile(
+                    force_galaxy_profile, flux=disk_flux, half_light_radius=hlr_d
+                )
+            else:
+                disk = galsim.Exponential(flux=disk_flux, half_light_radius=hlr_d)
+            if q_d < 1.0:
+                disk = disk.shear(q=q_d, beta=pa)
+            components.append(disk)
+
+        bulge_flux = flux * bulge_frac
+        if bulge_flux > 0:
+            q_b = _clamp_q(entry["bulge_q"])
+            hlr_b = self._circularized_hlr(entry["bulge_hlr"], q_b)
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                bulge = _forced_profile(
+                    force_galaxy_profile, flux=bulge_flux, half_light_radius=hlr_b
+                )
+            else:
+                bn = self.bulge_sersic_index
+                bn = float(entry[bn]) if isinstance(bn, str) else float(bn)
+                bn = min(max(_galsim_round_sersic(bn, 0.1), 0.3), 6.2)
+                bulge = galsim.Sersic(n=bn, flux=bulge_flux, half_light_radius=hlr_b)
+            if q_b < 1.0:
+                bulge = bulge.shear(q=q_b, beta=pa)
+            components.append(bulge)
+
+        if not components:
+            return galsim.Gaussian(flux=flux, sigma=1e-4)
+        return galsim.Add(components)
+
+
+# ---------------------------------------------------------
 # Concrete implementation: Diffsky Simulation
 # ---------------------------------------------------------
 class DiffskyCatalog(BaseGalaxyCatalog):

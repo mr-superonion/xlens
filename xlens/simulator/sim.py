@@ -80,6 +80,7 @@ from .defaults import (
 )
 from .galaxies import (
     CatSim2017Catalog,
+    Cosmos2025Catalog,
     DiffskyCatalog,
     Flagship2025Catalog,
 )
@@ -626,6 +627,8 @@ class MultibandSimTask(PipelineTask):
             GalClass = Flagship2025Catalog
         elif self.config.galaxy_type == "diffsky":
             GalClass = DiffskyCatalog
+        elif self.config.galaxy_type == "cosmos2025":
+            GalClass = Cosmos2025Catalog
         else:
             raise ValueError("invalid galaxy_type")
         galaxy_catalog = GalClass.from_array(
