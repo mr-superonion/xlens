@@ -21,6 +21,7 @@
 
 from . import (
     cluster,
+    compare_sim_obs,
     neff,
     selbias,
     selbias_ranforest,
@@ -31,6 +32,7 @@ from . import (
 __all__ = [
     "cluster",
     "shear_diagnostics",
+    "compare_sim_obs",
     "selbias",
     "selbias_ranforest",
     "selbias_redshift",
