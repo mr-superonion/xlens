@@ -602,9 +602,23 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             pixel_scale = float(
                 exposure.getWcs().getPixelScale().asArcseconds()
             )
-            psf_hsm = self._psf_hsm_moments_per_cell(
-                list(cell_map.values()), band, pixel_scale=pixel_scale,
+            # PSF-HSM sampling locus: per anacal cell (default -- keeps the
+            # patch's spatial PSF variation) or once at the patch centre,
+            # broadcast to every source. The simulated PSF is uniform across
+            # the patch, so use_sim forces the patch-centre path.
+            psf_hsm_center = (
+                self.config.psfHsmAtPatchCenter or self.config.use_sim
             )
+            if psf_hsm_center:
+                center_moments = self._psf_hsm_moments_at_center(
+                    exposure, pixel_scale=pixel_scale,
+                )
+                psf_hsm = {}
+            else:
+                center_moments = None
+                psf_hsm = self._psf_hsm_moments_per_cell(
+                    list(cell_map.values()), band, pixel_scale=pixel_scale,
+                )
 
             # Per-band coverage map, sampled per source below. Optional:
             # a repo without nImage simply gets no column.
@@ -640,7 +654,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                     )
                     # Pure lookup + column merge: no HSM call, no GIL.
                     cat = self._attach_psf_hsm_moments(
-                        cat, band=band, moments=psf_hsm.get(key),
+                        cat, band=band,
+                        moments=(center_moments if psf_hsm_center
+                                 else psf_hsm.get(key)),
                     )
                     if n_image_band is not None:
                         # det positions are arcsec in the parent frame;
