@@ -204,6 +204,21 @@ class MeasureBandsConfigBase(AnacalMeasureConfigBase):
             "True."
         ),
     )
+    psfHsmAtPatchCenter = Field[bool](
+        doc=(
+            "PSF-HSM sampling locus when doPsfHsmMoments is True. False "
+            "(default): measure PER ANACAL CELL, so each source picks up its "
+            "cell's PSF and the patch's spatial PSF variation is kept. True: "
+            "measure ONCE at the patch centre and broadcast the same moments "
+            "to every source on the patch -- appropriate when the PSF is "
+            "uniform across the patch (e.g. simulated coadds). "
+            "MeasureCoaddsPipe forces this on automatically when use_sim is "
+            "set. There is no per-source HSM PSF option: the fpfs/anacal "
+            "shapes are per-source, but the PSF HSM moments are only measured "
+            "per-cell or per-patch."
+        ),
+        default=False,
+    )
     num_workers = Field[int](
         doc="Worker threads for the per-cell loops. 1 means a plain "
             "serial Python loop. Values >1 use a thread pool: AnaCal "
@@ -700,6 +715,39 @@ class AnacalMeasureTaskBase(PipelineTask):
                     bb.index, band, exc,
                 )
         return out
+
+    def _psf_hsm_moments_at_center(
+        self, exposure, *, pixel_scale: float,
+    ) -> dict | None:
+        """PSF HSM moments at the PATCH CENTRE, to broadcast to all sources.
+
+        The per-patch-centre alternative to :meth:`_psf_hsm_moments_per_cell`:
+        one HSM measurement of the exposure's PSF evaluated at the patch
+        centre, returned as a single moments dict (attach it with
+        :meth:`_attach_psf_hsm_moments`, which broadcasts it to every row).
+        Appropriate when the PSF is uniform across the patch (e.g. simulated
+        coadds). Returns ``None`` when disabled or the PSF cannot be
+        evaluated, so the caller treats it as "nothing to attach".
+        """
+        if not self.config.doPsfHsmMoments:
+            return None
+        psf = exposure.getPsf()
+        if psf is None:
+            return None
+        center = exposure.getBBox().getCenter()
+        try:
+            try:
+                img = psf.computeKernelImage(center)
+            except Exception:
+                img = psf.computeImage(center)
+            return measure_psf_hsm_moments(
+                self._psfHsmCtx, self.psfHsmMeasurement,
+                make_psf_stamp_exposure(psf_array_to_image(np.asarray(img.array))),
+                pixel_scale=pixel_scale,
+            )
+        except Exception as exc:
+            self.log.warning("PSF HSM (patch centre) failed: %s", exc)
+            return None
 
     def _attach_psf_hsm_moments(
         self,
