@@ -1027,13 +1027,18 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
 
         # Disk (nsersic is always 1.0 in this catalog)
         if disk_flux > 0:
-            disk_hlr = max(float(entry["disk_r50"]), 1e-4)
-            if force_isotropic:
-                q_d = 1.0
-            else:
-                q_d = float(entry["disk_axis_ratio"])
-                # axis ratio is minor/major; clamp to valid range
-                q_d = min(max(q_d, 0.00), 1.0)
+            # axis ratio is minor/major (b/a); clamp to valid range
+            q_d_cat = min(max(float(entry["disk_axis_ratio"]), 0.0), 1.0)
+            # disk_r50 is the SEMI-MAJOR half-light radius: Flagship assigns
+            # it from magnitude before applying inclination (Miller+13 /
+            # GALFIT convention).  GalSim's .shear(q=) is area-preserving, so
+            # half_light_radius is the circularized radius and the drawn
+            # semi-major axis is hlr/sqrt(q).  Pass r50*sqrt(q) so the drawn
+            # semi-major axis equals r50 -- the same as CatSim's sqrt(a*b).
+            # Circularize with the catalog q even when forcing isotropy, so
+            # force_isotropic rounds the shape without changing the size.
+            disk_hlr = max(float(entry["disk_r50"]) * np.sqrt(q_d_cat), 1e-4)
+            q_d = 1.0 if force_isotropic else q_d_cat
             if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
                 disk = _forced_profile(
                     force_galaxy_profile, flux=disk_flux, half_light_radius=disk_hlr
@@ -1048,17 +1053,18 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
 
         # Bulge
         if bulge_flux > 0:
+            q_b_cat = min(max(float(entry["bulge_axis_ratio"]), 0.0), 1.0)
+            # bulge_r50 is the semi-major half-light radius too (calibrated
+            # to CANDELS GALFIT r_e); circularize as for the disk.  The
+            # memory cap applies to the drawn (circularized) radius, which
+            # is what sets the stamp / FFT size.
             bulge_hlr = min(
-                max(float(entry["bulge_r50"]), 1e-4),
+                max(float(entry["bulge_r50"]) * np.sqrt(q_b_cat), 1e-4),
                 self.max_bulge_hlr_arcsec,
             )
             bulge_n = float(entry["bulge_nsersic"])
             bulge_n = _galsim_round_sersic(bulge_n, 0.1)
-            if force_isotropic:
-                q_b = 1.0
-            else:
-                q_b = float(entry["bulge_axis_ratio"])
-                q_b = min(max(q_b, 0.00), 1.0)
+            q_b = 1.0 if force_isotropic else q_b_cat
             if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
                 bulge = _forced_profile(
                     force_galaxy_profile, flux=bulge_flux, half_light_radius=bulge_hlr
