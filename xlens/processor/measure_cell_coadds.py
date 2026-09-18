@@ -340,7 +340,13 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
 
         border = int(self.config.cell_border)
-        exposure = coadd.to_legacy()
+        # to_legacy() now returns a MultipleCellCoadd (no getBBox/getWcs);
+        # to_legacy_exposure() is the afw Exposure this code needs.
+        exposure = (
+            coadd.to_legacy_exposure()
+            if hasattr(coadd, "to_legacy_exposure")
+            else coadd.stitch().asExposure()
+        )
         ebox = exposure.getBBox()
         noise = [np.asarray(n.array) for n in
                  (getattr(coadd, "noise_realizations", None) or [])]
@@ -690,7 +696,11 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
 
     def _coadd_mag_zero(self, mca) -> float:
         """Photometric zeropoint, from either coadd flavour."""
-        if hasattr(mca, "stitch"):
+        if hasattr(mca, "to_legacy_exposure"):
+            # native CellCoadd: to_legacy() returns a MultipleCellCoadd
+            # (no getPhotoCalib); to_legacy_exposure() is the afw Exposure.
+            photoCalib = mca.to_legacy_exposure().getPhotoCalib()
+        elif hasattr(mca, "stitch"):
             photoCalib = mca.stitch().asExposure().getPhotoCalib()
         else:
             photoCalib = mca.to_legacy().getPhotoCalib()
