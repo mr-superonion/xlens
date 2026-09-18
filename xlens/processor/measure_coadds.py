@@ -258,9 +258,16 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
 
         seed: int | None = None
         if self.config.use_sim:
+            # truthCatalog is optional (connection minimum=0): when a tract
+            # has no per-tract truth catalog, the simulator falls back to
+            # sampling galaxies from its static catalog file, so a missing
+            # input is passed through as None rather than being an error.
             truthCatalog = inputs.get("truthCatalog", None)
             if truthCatalog is None:
-                raise RuntimeError("use_sim=True requires a truthCatalog input.")
+                self.log.info(
+                    "No truthCatalog input for this tract; the simulator "
+                    "will sample galaxies from its static catalog file."
+                )
             # ``butlerQC.quantum.dataId`` may not carry dimension records,
             # but every input ref's dataId does. ``psfArray`` is a
             # required ``(skymap, tract, patch)`` input under use_sim, so

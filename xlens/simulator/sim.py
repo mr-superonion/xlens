@@ -238,6 +238,14 @@ class MultibandSimConfig(
         doc="truncation size of stamps",
         default=-1,
     )
+    fallback_layout_name = Field[str](
+        doc="Spatial layout used to place galaxies when no per-tract "
+        "truthCatalog is available for a tract: the catalog is then sampled "
+        "at random from the galaxy class's static catalog file (e.g. "
+        "flagship_cosmos.fits for galaxy_type='flagship2025'). One of "
+        "'grid', 'hex', 'random', 'random_disk'.",
+        default="random",
+    )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
 
     def validate(self):
@@ -265,6 +273,18 @@ class MultibandSimConfig(
                 self.__class__.force_galaxy_profile,
                 self,
                 "We require force_galaxy_profile in [0, 1, 2]",
+            )
+        if self.fallback_layout_name not in [
+            "grid",
+            "hex",
+            "random",
+            "random_disk",
+        ]:
+            raise FieldValidationError(
+                self.__class__.fallback_layout_name,
+                self,
+                "fallback_layout_name must be one of grid/hex/random/"
+                "random_disk",
             )
         if self.galaxy_type not in ["catsim2017", "flagship2025", "diffsky"]:
             raise FieldValidationError(
@@ -628,11 +648,36 @@ class MultibandSimTask(PipelineTask):
             GalClass = DiffskyCatalog
         else:
             raise ValueError("invalid galaxy_type")
-        galaxy_catalog = GalClass.from_array(
-            tract_info=tract_info,
-            truthCatalog=truthCatalog,
-            catsim_dir=self.config.catsim_dir,
-        )
+        if truthCatalog is None or len(truthCatalog) == 0:
+            # No per-tract truth catalog for this tract: sample galaxies at
+            # random from the galaxy class's static catalog file (e.g.
+            # flagship_cosmos.fits) instead of placing specific truth
+            # objects.  Seed the layout from the tract so every patch of a
+            # tract draws the same realization (consistent across patch
+            # boundaries).  No cosmological shear is applied in this mode.
+            self.log.info(
+                "No truthCatalog for tract %d; sampling galaxies at random "
+                "from the %s static catalog (layout=%s).",
+                tract_info.getId(),
+                self.config.galaxy_type,
+                self.config.fallback_layout_name,
+            )
+            fallback_seed = (
+                tract_info.getId() * gal_seed_base + self.config.galId
+            ) % (2**32)
+            galaxy_catalog = GalClass(
+                rng=np.random.RandomState(fallback_seed),
+                tract_info=tract_info,
+                layout_name=self.config.fallback_layout_name,
+                catsim_dir=self.config.catsim_dir,
+                survey_name_list=[survey_name],
+            )
+        else:
+            galaxy_catalog = GalClass.from_array(
+                tract_info=tract_info,
+                truthCatalog=truthCatalog,
+                catsim_dir=self.config.catsim_dir,
+            )
 
         galaxy_array = self.simulate_images(
             galaxy_catalog=galaxy_catalog,
