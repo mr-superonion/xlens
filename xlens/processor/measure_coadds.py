@@ -99,10 +99,16 @@ class MeasureCoaddsPipeConnections(
         minimum=0,
     )
     truthCatalog = cT.Input(
-        doc="Truth catalog used to drive image simulation.",
-        name="{catName}_truthCatalog",
+        doc=(
+            "Per-patch truth catalog used to drive image simulation: the "
+            "rows of the tract truth catalog inside the patch outer bbox "
+            "plus a buffer (CatalogTask.patch_buffer_arcsec). Always read "
+            "at patch level so each quantum loads only its own galaxies "
+            "instead of the whole tract."
+        ),
+        name="{catName}_truthCatalog_patch",
         storageClass="ArrowAstropy",
-        dimensions=("skymap", "tract"),
+        dimensions=("skymap", "tract", "patch"),
         minimum=0,
     )
     psfArray = cT.Input(
@@ -258,15 +264,16 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
 
         seed: int | None = None
         if self.config.use_sim:
-            # truthCatalog is optional (connection minimum=0): when a tract
-            # has no per-tract truth catalog, the simulator falls back to
+            # truthCatalog is optional (connection minimum=0): when a patch
+            # has no per-patch truth catalog, the simulator falls back to
             # sampling galaxies from its static catalog file, so a missing
             # input is passed through as None rather than being an error.
             truthCatalog = inputs.get("truthCatalog", None)
             if truthCatalog is None:
                 self.log.info(
-                    "No truthCatalog input for this tract; the simulator "
-                    "will sample galaxies from its static catalog file."
+                    "No per-patch truthCatalog input for this patch; the "
+                    "simulator will sample galaxies from its static catalog "
+                    "file."
                 )
             # ``butlerQC.quantum.dataId`` may not carry dimension records,
             # but every input ref's dataId does. ``psfArray`` is a

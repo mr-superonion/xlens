@@ -75,14 +75,58 @@ class CatalogConnections(
         dimensions=("skymap",),
     )
     truthCatalog = cT.Output(
-        doc="Output truth catalog",
+        doc="Output truth catalog for the whole tract",
         name="{catName}_truthCatalog",
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract"),
     )
+    patchTruthCatalog = cT.Output(
+        doc=(
+            "Per-patch subsets of the tract truth catalog: the rows whose "
+            "position falls inside the patch outer bbox grown by "
+            "``patch_buffer_arcsec``. Same columns as ``truthCatalog``. "
+            "This is what MeasureCoaddsPipe reads, so a patch quantum "
+            "loads only its own galaxies."
+        ),
+        name="{catName}_truthCatalog_patch",
+        storageClass="ArrowAstropy",
+        dimensions=("skymap", "tract", "patch"),
+        multiple=True,
+    )
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
+
+
+def split_truth_by_patch(tract_info, data, buffer_arcsec):
+    """Split a tract truth catalog into per-patch row subsets.
+
+    Selection matches ``MultibandSimTask.simulate_images`` (strict
+    inequalities on the patch OUTER bbox), with the buffer replacing the
+    sim's fixed ``SIM_INCLUSION_PADDING``. The subset keeps every column, so
+    ``from_array`` rebuilds the catalog unchanged.
+
+    Returns
+    -------
+    dict
+        ``{patch_id: rows}`` for every patch of the tract, empty ones
+        included.
+    """
+    wcs = tract_info.getWcs()
+    pad = float(buffer_arcsec) / float(wcs.getPixelScale().asArcseconds())
+    x, y = wcs.skyToPixelArray(data["ra"], data["dec"], degrees=True)
+    npatch = tract_info.getNumPatches()
+    out = {}
+    for patch_id in range(int(npatch.x * npatch.y)):
+        bbox = tract_info[patch_id].getOuterBBox()
+        sel = (
+            (x > bbox.getMinX() - pad)
+            & (x < bbox.getMaxX() + pad)
+            & (y > bbox.getMinY() - pad)
+            & (y < bbox.getMaxY() + pad)
+        )
+        out[patch_id] = data[sel]
+    return out
 
 
 class CatalogConfig(
@@ -144,6 +188,16 @@ class CatalogConfig(
         ),
         default=True,
     )
+    patch_buffer_arcsec = Field[float](
+        doc=(
+            "Margin (arcsec) added on every side of the patch OUTER bbox "
+            "when selecting the rows of the per-patch truth catalog. 30 is "
+            "the patch overlap border; 40 equals the simulator's own "
+            "inclusion padding (200 px) and reproduces the whole-tract draw "
+            "exactly."
+        ),
+        default=30.0,
+    )
     select_observable = ListField[str](
         doc=(
             "Optional catalog observable names used to filter galaxies. "
@@ -180,6 +234,12 @@ class CatalogConfig(
                 self.__class__.rotId,
                 self,
                 f"rotId needs to be smaller than {num_rot}",
+            )
+        if self.patch_buffer_arcsec < 0:
+            raise FieldValidationError(
+                self.__class__.patch_buffer_arcsec,
+                self,
+                "patch_buffer_arcsec must be >= 0",
             )
         if self.galaxy_type not in GALAXY_CATALOG_CLASSES:
             raise FieldValidationError(
@@ -329,7 +389,16 @@ class CatalogTask(PipelineTask):
         skymap = butlerQC.get(inputRefs.skymap)
         inputs["tract_info"] = skymap[butlerQC.quantum.dataId["tract"]]
         outputs = self.run(**inputs)
-        butlerQC.put(outputs, outputRefs)
+        # tract-level catalog, plus one subset per patch (what
+        # MeasureCoaddsPipe reads)
+        butlerQC.put(outputs.truthCatalog, outputRefs.truthCatalog)
+        per_patch = split_truth_by_patch(
+            inputs["tract_info"],
+            outputs.truthCatalog,
+            self.config.patch_buffer_arcsec,
+        )
+        for ref in outputRefs.patchTruthCatalog:
+            butlerQC.put(per_patch[ref.dataId["patch"]], ref)
         return
 
 
