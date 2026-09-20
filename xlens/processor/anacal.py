@@ -63,6 +63,17 @@ class AnacalConfig(Config):
         doc="Whether forcing the size and shape of galaxies",
         default=True,
     )
+    conv_tol = Field[float](
+        doc=(
+            "Convergence tolerance of the Gaussian model fit: a source "
+            "stops iterating once its predicted chi2 decrease over the "
+            "whole step (value and shear/position response slots) drops "
+            "below this; num_epochs is the hard cap. 1e-3 (AnaCal's "
+            "default) with a cap of 10 gave the lowest std(e1)/<R> on the "
+            "DP1 deep patch; 1e-10 runs every real source to the cap."
+        ),
+        default=1.0e-3,
+    )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
         default=True,
@@ -129,6 +140,7 @@ class AnacalTask(Task):
             "num_epochs": self.config.num_epochs,
             "force_size": self.config.force_size,
             "force_center": self.config.force_center,
+            "conv_tol": self.config.conv_tol,
             "prior": prior,
         }
         return
