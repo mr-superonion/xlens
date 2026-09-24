@@ -191,6 +191,10 @@ class AnacalTask(Task):
         # stack -- anacal takes either.
         noise_variance: float | Sequence[float],
         gal_array: NDArray,
+        # (npix, npix), or (nband, npix, npix), centred on pixel
+        # (npix // 2, npix // 2), 0-based: AnaCal shifts that pixel to the
+        # FFT origin, so a PSF centred elsewhere shifts the deconvolved
+        # image, and with it every detection and measured position.
         psf_array: NDArray,
         mask_array: NDArray,
         noise_array: NDArray | None,

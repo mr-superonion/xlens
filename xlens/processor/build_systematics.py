@@ -103,7 +103,10 @@ class BuildSystematicsConnections(
         dimensions=("skymap", "tract", "patch"),
     )
     outputPsfCentered = cT.Output(
-        doc="Stacked PSF image array (6 x npix x npix).",
+        doc=(
+            "Stacked PSF image array (6 x npix x npix), each band centred "
+            "on pixel (npix // 2, npix // 2), 0-based."
+        ),
         name="deep_coadd_systematics_psfcentered_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
