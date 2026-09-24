@@ -173,7 +173,10 @@ class FpfsMeasurementTask(Task):
         gal_array : NDArray
             Galaxy image array.
         psf_array : NDArray
-            PSF image array.
+            PSF image array, centred on pixel ``(npix // 2, npix // 2)``
+            (0-based) -- the pixel AnaCal shifts to the FFT origin.  For an
+            even stamp that is half a pixel off the geometric middle; a PSF
+            centred elsewhere shifts every measured position.
         mask_array : NDArray
             Bad-pixel mask array.
         noise_array : NDArray or None

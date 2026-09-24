@@ -87,7 +87,10 @@ def subpixel_shift(image: NDArray, shift_x: float, shift_y: float) -> NDArray:
 # Centre crop / zero-pad to (height, width).  Re-exported rather than
 # wrapped: the single implementation of this convention is the C++
 # ``anacal.psf.resize_array``, which forcecasts any dtype and returns
-# float64, so a python-side copy would buy nothing.
+# float64, so a python-side copy would buy nothing.  PSF stamps follow
+# the AnaCal convention of being centred on pixel (npix // 2, npix // 2),
+# 0-based, and resize_array maps the input's centre pixel onto the
+# output's for every combination of even and odd sizes.
 resize_array = anacal.psf.resize_array
 
 

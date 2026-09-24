@@ -52,8 +52,24 @@ class AnacalConfig(Config):
         default=5.0,
     )
     num_epochs = Field[int](
-        doc="Number of iterations",
+        doc=(
+            "Maximum number of Gaussian-fit epochs. 0 exports the moment "
+            "initialisation (production)."
+        ),
         default=0,
+    )
+    conv_tol = Field[float](
+        doc=(
+            "Smooth convergence gate of the Gaussian model fit: the step "
+            "of an epoch is scaled by a smoothstep of the chi2 decrease "
+            "the previous step achieved, relative to the source's own "
+            "chi2 scale, exactly 0 below conv_tol (the source stops) and "
+            "1 above 10 x conv_tol. Default 0: gate off, every source "
+            "takes num_epochs epochs. On real coadds the gate's own "
+            "derivative term is heavy-tailed on sources passing through "
+            "the ramp, so leave it off for production."
+        ),
+        default=0.0,
     )
     force_size = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
@@ -62,6 +78,29 @@ class AnacalConfig(Config):
     force_center = Field[bool](
         doc="Whether forcing the size and shape of galaxies",
         default=True,
+    )
+    prior_sigma_T = Field[float](
+        doc=(
+            "Width [arcsec^2] of the Gaussian prior towards 0 on the "
+            "intrinsic size T = mxx + myy of the model fit (T = 2 a^2 for "
+            "a round source of semi-axis a); 0 disables it."
+        ),
+        default=0.07,
+    )
+    prior_sigma_x = Field[float](
+        doc=(
+            "Width [arcsec] of the Gaussian prior on the fitted centre "
+            "towards the detection position; 0 disables it."
+        ),
+        default=0.05,
+    )
+    prior_sigma_e = Field[float](
+        doc=(
+            "Width of the Gaussian prior towards 0 on the ellipticity "
+            "(e1, e2) of the model at the re-smoothing scale; 0 disables "
+            "it."
+        ),
+        default=0.3,
     )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
@@ -118,9 +157,6 @@ class AnacalTask(Task):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         assert isinstance(self.config, AnacalConfig)
-        prior = anacal.ngmix.modelPrior()
-        prior.set_sigma_a(anacal.math.qnumber(0.05))
-        prior.set_sigma_x(anacal.math.qnumber(0.05))
         self.config_kwargs = {
             "sigma_arcsec": self.config.sigma_arcsec,
             "snr_peak_min": self.config.snr_min,
@@ -129,9 +165,22 @@ class AnacalTask(Task):
             "num_epochs": self.config.num_epochs,
             "force_size": self.config.force_size,
             "force_center": self.config.force_center,
-            "prior": prior,
+            "conv_tol": self.config.conv_tol,
         }
         return
+
+    def make_prior(self):
+        """The Gaussian priors of the model fit from the configuration:
+        size T [arcsec^2], centre offset [arcsec], and ellipticity at the
+        re-smoothing scale.  A width of 0 leaves that prior off."""
+        prior = anacal.ngmix.modelPrior()
+        if self.config.prior_sigma_T > 0:
+            prior.set_sigma_T(anacal.math.qnumber(self.config.prior_sigma_T))
+        if self.config.prior_sigma_x > 0:
+            prior.set_sigma_x(anacal.math.qnumber(self.config.prior_sigma_x))
+        if self.config.prior_sigma_e > 0:
+            prior.set_sigma_e(anacal.math.qnumber(self.config.prior_sigma_e))
+        return prior
 
     def run(
         self,
@@ -142,6 +191,10 @@ class AnacalTask(Task):
         # stack -- anacal takes either.
         noise_variance: float | Sequence[float],
         gal_array: NDArray,
+        # (npix, npix), or (nband, npix, npix), centred on pixel
+        # (npix // 2, npix // 2), 0-based: AnaCal shifts that pixel to the
+        # FFT origin, so a PSF centred elsewhere shifts the deconvolved
+        # image, and with it every detection and measured position.
         psf_array: NDArray,
         mask_array: NDArray,
         noise_array: NDArray | None,
@@ -176,6 +229,7 @@ class AnacalTask(Task):
             omega_v=0.011,
             fpfs_c0=FPFS_C0,
             mag_zero=mag_zero,
+            prior=self.make_prior(),
             **self.config_kwargs,
         )
 

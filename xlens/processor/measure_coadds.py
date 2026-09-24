@@ -112,7 +112,10 @@ class MeasureCoaddsPipeConnections(
         minimum=0,
     )
     psfArray = cT.Input(
-        doc="Stacked PSF image array (6 x npix x npix).",
+        doc=(
+            "Stacked PSF image array (6 x npix x npix), each band centred "
+            "on pixel (npix // 2, npix // 2), 0-based."
+        ),
         name="{inputName}_systematics_psfcentered_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
