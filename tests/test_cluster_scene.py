@@ -1,7 +1,7 @@
 """Unit tests for :class:`xlens.simulator.galaxies.ClusterSceneCatalog`.
 
 A scene is a table of objects rendered once each at their own positions,
-with a single-Sersic morphology and per-band magnitudes.  The tests build
+with a bulge + disk or single-Sersic morphology and per-band magnitudes.  The tests build
 a small synthetic scene around the centre of a one-patch tract and check
 the truth-catalog construction, the ``ra``/``dec`` <-> ``dx``/``dy``
 round trip, rotation and halo lensing, the rendering onto an exposure
@@ -402,7 +402,7 @@ def test_from_dp2_objects():
         }
     )
     catalog = ClusterSceneCatalog.from_dp2_objects(
-        objects, tract_info=TRACT_INFO, bands=("r", "i"), default_redshift=Z_CLUSTER
+        objects, tract_info=TRACT_INFO, bands=("r", "i"), default_redshift=Z_CLUSTER, morphology="sersic"
     )
     data = catalog.data
     assert len(catalog) == 3
@@ -430,7 +430,7 @@ def test_from_dp2_objects():
 
     with pytest.raises(ValueError, match="sersic_index"):
         ClusterSceneCatalog.from_dp2_objects(
-            objects.drop(columns=["sersic_index"]), tract_info=TRACT_INFO, bands=("i",)
+            objects.drop(columns=["sersic_index"]), tract_info=TRACT_INFO, bands=("i",), morphology="sersic"
         )
 
 
@@ -470,3 +470,208 @@ def test_load_from_files(tmp_path):
     # a path is also accepted directly as the scene
     catalog = ClusterSceneCatalog(scene=os.path.join(tmp_path, "scene.parquet"), tract_info=TRACT_INFO)
     assert len(catalog) == len(SCENE_ROWS)
+
+
+# --- bulge + disk morphology ---------------------------------------------------
+
+# dx, dy [arcsec], i mag, bulge fraction (i, r), disk (a, b, theta), bulge (a, b, theta)
+BULGE_DISK_ROWS = [
+    # pure disk along +x
+    (-20.0, -15.0, 20.0, 0.0, 0.2, 1.0, 0.5, 0.0, 0.4, 0.4, 0.0),
+    # pure bulge along +y
+    (20.0, -15.0, 20.0, 1.0, 1.0, 0.6, 0.6, 0.0, 1.2, 0.5, 90.0),
+    # half and half, disk at 30 degrees, bulge at 60 degrees
+    (0.0, 20.0, 21.0, 0.5, 0.5, 0.8, 0.4, 30.0, 0.5, 0.4, 60.0),
+]
+
+
+def _bulge_disk_table():
+    rows = np.array(BULGE_DISK_ROWS, dtype=float)
+    return {
+        "dx": rows[:, 0],
+        "dy": rows[:, 1],
+        "redshift": np.full(len(rows), Z_CLUSTER),
+        "lsst_i": rows[:, 2],
+        "lsst_r": rows[:, 2] + 0.5,
+        "lsst_i_bulge_frac": rows[:, 3],
+        "lsst_r_bulge_frac": rows[:, 4],
+        "disk_r50_major": rows[:, 5],
+        "disk_r50_minor": rows[:, 6],
+        "disk_theta": rows[:, 7],
+        "bulge_r50_major": rows[:, 8],
+        "bulge_r50_minor": rows[:, 9],
+        "bulge_theta": rows[:, 10],
+    }
+
+
+def test_bulge_disk_construction():
+    table = _bulge_disk_table()
+    catalog = ClusterSceneCatalog(scene=table, tract_info=TRACT_INFO)
+    data = catalog.data
+    assert len(catalog) == 3
+    for col in ("bulge_r50_major", "disk_theta", "lsst_i_bulge_frac", "lsst_r_bulge_frac"):
+        assert col in data.dtype.names
+    # the disk sets the orientation column and the half-light radius
+    np.testing.assert_allclose(data["angles"], np.radians(table["disk_theta"]))
+    np.testing.assert_allclose(data["hlr"], np.sqrt(table["disk_r50_major"] * table["disk_r50_minor"]))
+    assert ClusterSceneCatalog.magnitude_columns("lsst", "i") == ("lsst_i",)
+
+    # incomplete bulge/disk columns and a missing bulge fraction are reported
+    columns = {name: values for name, values in table.items() if name != "bulge_theta"}
+    with pytest.raises(ValueError, match="bulge_theta"):
+        ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+    columns = {name: values for name, values in table.items() if not name.endswith("_bulge_frac")}
+    with pytest.raises(ValueError, match="bulge_frac"):
+        ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+    # a band-independent bulge fraction is accepted instead
+    columns["bulge_frac"] = table["lsst_i_bulge_frac"]
+    catalog2 = ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+    exposure = _blank_exposure()
+    catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
+    exposure2 = _blank_exposure()
+    catalog2.draw_on_image(exposure2, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
+    np.testing.assert_allclose(
+        exposure.getMaskedImage().image.array, exposure2.getMaskedImage().image.array, rtol=1e-6, atol=1e-6
+    )
+
+
+def test_bulge_disk_render():
+    catalog = ClusterSceneCatalog(scene=_bulge_disk_table(), tract_info=TRACT_INFO)
+    exposure = _blank_exposure()
+    truth = catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
+    array = exposure.getMaskedImage().image.array
+    bbox = exposure.getBBox()
+    assert truth["drawn"].all()
+    expected = sum(_flux(r[2]) for r in BULGE_DISK_ROWS)
+    np.testing.assert_allclose(array.sum(), expected, rtol=2e-2)
+
+    # the pure disk is elongated along x, the pure bulge along y
+    ixx, iyy = _moments(array, truth[0]["image_x"] - bbox.getMinX(), truth[0]["image_y"] - bbox.getMinY())
+    assert ixx > 1.3 * iyy
+    ixx, iyy = _moments(array, truth[1]["image_x"] - bbox.getMinX(), truth[1]["image_y"] - bbox.getMinY())
+    assert iyy > 1.2 * ixx
+
+    # the r band splits the light differently but keeps the total
+    exposure = _blank_exposure()
+    catalog.draw_on_image(exposure, band="r", mag_zero=MAG_ZERO, psf_obj=_psf())
+    expected = sum(_flux(r[2] + 0.5) for r in BULGE_DISK_ROWS)
+    np.testing.assert_allclose(exposure.getMaskedImage().image.array.sum(), expected, rtol=2e-2)
+
+    # isotropic rendering rounds both components; forced profiles keep the flux
+    exposure = _blank_exposure()
+    catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf(), force_isotropic=True)
+    array = exposure.getMaskedImage().image.array
+    ixx, iyy = _moments(array, truth[0]["image_x"] - bbox.getMinX(), truth[0]["image_y"] - bbox.getMinY())
+    np.testing.assert_allclose(ixx, iyy, rtol=0.05)
+    exposure = _blank_exposure()
+    catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf(), force_galaxy_profile=1)
+    expected = sum(_flux(r[2]) for r in BULGE_DISK_ROWS)
+    np.testing.assert_allclose(exposure.getMaskedImage().image.array.sum(), expected, rtol=2e-2)
+
+    # the mixed object is a sum of the two components
+    obj = catalog.get_obj(ind=2, mag_zero=MAG_ZERO, band="i", survey_name="lsst")
+    np.testing.assert_allclose(obj.flux, _flux(21.0))
+    # the pipeline drawing loop renders the same pixels
+    config = MultibandSimConfig()
+    config.galaxy_type = "cluster_scene"
+    config.survey_name = "lsst"
+    task = MultibandSimTask(config=config)
+    pipeline = task.draw_catalog(
+        galaxy_catalog=catalog,
+        wcs=TRACT_INFO.getWcs(),
+        bbox_outer=bbox,
+        psf_obj=_psf(),
+        mag_zero=MAG_ZERO,
+        band="i",
+    )
+    reference = afwImage.ImageF(bbox)
+    catalog.draw_on_image(
+        reference,
+        band="i",
+        mag_zero=MAG_ZERO,
+        psf_obj=_psf(),
+        wcs=TRACT_INFO.getWcs(),
+        use_field_distortion=config.use_field_distortion,
+        nn_trunc=None if config.truncate_stamp_size <= 0 else config.truncate_stamp_size,
+    )
+    np.testing.assert_allclose(reference.array, pipeline, rtol=1e-5, atol=1e-6)
+
+
+def test_from_dp2_objects_bulge_disk():
+    pd = pytest.importorskip("pandas")
+    reference = ClusterSceneCatalog(scene=_bulge_disk_table(), tract_info=TRACT_INFO)
+    # fluxes (nJy) reproducing the magnitudes of the hand-built scene
+    mag_i = np.array([r[2] for r in BULGE_DISK_ROWS])
+    flux_i = 10 ** ((AB_MAG_ZERO_NJY - mag_i) / 2.5)
+    flux_r = 10 ** ((AB_MAG_ZERO_NJY - (mag_i + 0.5)) / 2.5)
+    objects = pd.DataFrame(
+        {
+            "objectId": np.array([1, 2, 3], dtype=np.int64),
+            "coord_ra": reference.data["ra"],
+            "coord_dec": reference.data["dec"],
+            "refExtendedness": [1.0, 1.0, 1.0],
+            "i_cModel_dev_reff_major": [r[8] for r in BULGE_DISK_ROWS],
+            "i_cModel_dev_reff_minor": [r[9] for r in BULGE_DISK_ROWS],
+            "i_cModel_dev_theta": [r[10] for r in BULGE_DISK_ROWS],
+            "i_cModel_exp_reff_major": [r[5] for r in BULGE_DISK_ROWS],
+            "i_cModel_exp_reff_minor": [r[6] for r in BULGE_DISK_ROWS],
+            "i_cModel_exp_theta": [r[7] for r in BULGE_DISK_ROWS],
+            "r_cModel_dev_reff_major": [9.0, 9.0, 9.0],  # another band's shapes: unused
+            "i_cModel_fracDev": [r[3] for r in BULGE_DISK_ROWS],
+            "r_cModel_fracDev": [r[4] for r in BULGE_DISK_ROWS],
+            "i_cModelFlux": flux_i,
+            "r_cModelFlux": flux_r,
+            "i_psfFlux": flux_i * 0.5,
+            "r_psfFlux": flux_r * 0.5,
+            "bpz_z_best": [Z_CLUSTER, Z_CLUSTER, 0.9],
+        }
+    )
+    catalog = ClusterSceneCatalog.from_dp2_objects(objects, tract_info=TRACT_INFO, bands=("r", "i"))
+    data = catalog.data
+    assert "sersic_n" not in data.dtype.names
+    np.testing.assert_allclose(data["bulge_r50_major"], [0.4, 1.2, 0.5])
+    np.testing.assert_allclose(data["disk_theta"], [0.0, 0.0, 30.0])
+    np.testing.assert_allclose(data["bulge_theta"], [0.0, 90.0, 60.0])
+    np.testing.assert_allclose(data["lsst_i_bulge_frac"], [0.0, 1.0, 0.5])
+    np.testing.assert_allclose(data["lsst_r_bulge_frac"], [0.2, 1.0, 0.5])
+    np.testing.assert_allclose(data["angles"], np.radians([0.0, 0.0, 30.0]))
+    assert not data["is_point_source"].any()
+    np.testing.assert_allclose(data["redshift"], [Z_CLUSTER, Z_CLUSTER, 0.9])
+    np.testing.assert_allclose(data["lsst_i"], mag_i)
+    np.testing.assert_allclose(data["lsst_r"], mag_i + 0.5)
+
+    # the converted scene renders exactly as the hand-built bulge/disk scene
+    for band in ("i", "r"):
+        exposure = _blank_exposure()
+        catalog.draw_on_image(exposure, band=band, mag_zero=MAG_ZERO, psf_obj=_psf())
+        handmade = _blank_exposure()
+        reference.draw_on_image(handmade, band=band, mag_zero=MAG_ZERO, psf_obj=_psf())
+        np.testing.assert_allclose(
+            exposure.getMaskedImage().image.array,
+            handmade.getMaskedImage().image.array,
+            rtol=1e-5,
+            atol=1e-4,
+        )
+
+    # a missing bulge fraction renders as a pure disk
+    no_frac = ClusterSceneCatalog.from_dp2_objects(
+        objects.assign(i_cModel_fracDev=np.nan), tract_info=TRACT_INFO, bands=("i",)
+    )
+    assert np.isnan(no_frac.data["lsst_i_bulge_frac"]).all()
+    disk_only = {name: values for name, values in _bulge_disk_table().items() if name != "lsst_r_bulge_frac"}
+    disk_only["lsst_i_bulge_frac"] = np.zeros(3)
+    disk_only = ClusterSceneCatalog(scene=disk_only, tract_info=TRACT_INFO)
+    exposure = _blank_exposure()
+    no_frac.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
+    handmade = _blank_exposure()
+    disk_only.draw_on_image(handmade, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
+    np.testing.assert_allclose(
+        exposure.getMaskedImage().image.array, handmade.getMaskedImage().image.array, rtol=1e-5, atol=1e-4
+    )
+
+    with pytest.raises(ValueError, match="i_cModel_fracDev"):
+        ClusterSceneCatalog.from_dp2_objects(
+            objects.drop(columns=["i_cModel_fracDev"]), tract_info=TRACT_INFO, bands=("i",)
+        )
+    with pytest.raises(ValueError, match="morphology"):
+        ClusterSceneCatalog.from_dp2_objects(objects, tract_info=TRACT_INFO, bands=("i",), morphology="bad")

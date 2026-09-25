@@ -1268,7 +1268,9 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     The other catalogs sample galaxies from a static file and place them
     with a :class:`~xlens.simulator.layout.Layout`.  This one draws a
     *scene*: each row of the input table is rendered exactly once, at its
-    own position, with its own single-Sersic morphology and photometry.
+    own position, with its own morphology and photometry, either a bulge +
+    disk (de Vaucouleurs + exponential, the cModel decomposition of the
+    Rubin object table) or a single Sersic profile.
     It was written to re-simulate real cluster fields from the Rubin DP2
     object table (see :meth:`from_dp2_objects`), but any table with the
     columns below works, for instance a model cluster whose members were
@@ -1291,14 +1293,22 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         Used by the lensing perturbation; objects at or below the lens
         redshift are not lensed, so cluster members should carry the
         cluster redshift and stars ``0``.
+    ``bulge_r50_major``, ``bulge_r50_minor``, ``bulge_theta``,
+    ``disk_r50_major``, ``disk_r50_minor``, ``disk_theta``
+        Bulge + disk morphology: the half-light ellipse of each component,
+        semi-major and semi-minor radii in arcsec and position angle in
+        degrees counter-clockwise from the pixel ``+x`` axis.  The bulge is
+        a de Vaucouleurs and the disk an exponential profile, with the
+        light split by the per-band ``{survey}_{band}_bulge_frac`` (or a
+        band-independent ``bulge_frac``).  The disk position angle
+        becomes the ``angles`` column of the truth catalog, so
+        :meth:`rotate` turns the orientation together with the position.
     ``sersic_n``, ``r50_major``, ``r50_minor``, ``theta``
-        Sersic index, semi-major and semi-minor half-light radii in
-        arcsec, and position angle in degrees counter-clockwise from the
-        pixel ``+x`` axis.  The position angle becomes the ``angles``
-        column of the truth catalog, so :meth:`rotate` turns the
-        orientation together with the position.
+        Single-Sersic morphology, used when the table has no bulge/disk
+        columns: Sersic index, half-light ellipse and position angle as
+        above.
     ``{survey}_{band}``
-        AB magnitudes, e.g. ``lsst_i``; ``hsc`` reuses the ``lsst``
+        Total AB magnitudes, e.g. ``lsst_i``; ``hsc`` reuses the ``lsst``
         columns.  A non-finite magnitude renders nothing.
     ``is_point_source`` (optional)
         Rows flagged ``True`` are rendered as point sources with the same
@@ -1312,12 +1322,15 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     catalog_filename: ClassVar[str] = "cluster_scene.fits"
     required_columns: ClassVar[tuple[str, ...] | None] = None
 
-    scene_columns: ClassVar[tuple[str, ...]] = (
-        "redshift",
-        "sersic_n",
-        "r50_major",
-        "r50_minor",
-        "theta",
+    scene_columns: ClassVar[tuple[str, ...]] = ("redshift",)
+    sersic_columns: ClassVar[tuple[str, ...]] = ("sersic_n", "r50_major", "r50_minor", "theta")
+    bulge_disk_columns: ClassVar[tuple[str, ...]] = (
+        "bulge_r50_major",
+        "bulge_r50_minor",
+        "bulge_theta",
+        "disk_r50_major",
+        "disk_r50_minor",
+        "disk_theta",
     )
     # GalSim's Sersic profile is defined for 0.3 <= n <= 6.2; indices are
     # clipped to this range and rounded to 0.1 so that GalSim can reuse
@@ -1425,7 +1438,8 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         placement["dy"] = dy
         # the position angle is the intrinsic orientation: ``_generate_galaxy``
         # builds every profile along +x and ``get_obj`` rotates it by this
-        placement["angles"] = np.radians(np.nan_to_num(np.asarray(table["theta"], dtype=float), nan=0.0))
+        theta_column = "disk_theta" if self._has_bulge_disk(names) else "theta"
+        placement["angles"] = np.radians(np.nan_to_num(np.asarray(table[theta_column], dtype=float), nan=0.0))
         placement["ra"] = ra
         placement["dec"] = dec
         placement["prelensed_ra"] = ra
@@ -1450,14 +1464,27 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         self.lensed = False
         return
 
+    @classmethod
+    def _has_bulge_disk(cls, names) -> bool:
+        """Whether the table describes a bulge + disk morphology."""
+        return any(name in names for name in cls.bulge_disk_columns)
+
     def _check_scene_columns(self, names: tuple[str, ...]) -> None:
         missing = [name for name in self.scene_columns if name not in names]
         if not ({"ra", "dec"} <= set(names) or {"dx", "dy"} <= set(names)):
             missing.append("ra/dec or dx/dy")
+        bulge_disk = self._has_bulge_disk(names)
+        if bulge_disk:
+            missing += [name for name in self.bulge_disk_columns if name not in names]
+        else:
+            missing += [name for name in self.sersic_columns if name not in names]
         for survey in self.survey_name_list:
             prefix = _survey_prefix(survey) + "_"
-            if not any(name.startswith(prefix) for name in names):
+            if not any(name.startswith(prefix) and not name.endswith("_bulge_frac") for name in names):
                 missing.append(f"{prefix}{{band}} magnitudes")
+            if bulge_disk and "bulge_frac" not in names:
+                if not any(name.startswith(prefix) and name.endswith("_bulge_frac") for name in names):
+                    missing.append(f"{prefix}{{band}}_bulge_frac (or bulge_frac)")
         if missing:
             raise ValueError("scene table is missing columns: " + ", ".join(missing))
 
@@ -1475,11 +1502,21 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         return get_catalog(fname, columns=columns)
 
     def _half_light_radius(self, catalog) -> np.ndarray:
-        """Circularised radius ``sqrt(a * b)`` of the Sersic fit (arcsec)."""
+        """Circularised radius ``sqrt(a * b)`` (arcsec) of the disk, or of the Sersic fit."""
+        prefix = "disk_" if self._has_bulge_disk(catalog.dtype.names) else ""
         return np.sqrt(
-            np.maximum(np.asarray(catalog["r50_major"], dtype=float), 1e-9)
-            * np.maximum(np.asarray(catalog["r50_minor"], dtype=float), 1e-9)
+            np.maximum(np.asarray(catalog[f"{prefix}r50_major"], dtype=float), 1e-9)
+            * np.maximum(np.asarray(catalog[f"{prefix}r50_minor"], dtype=float), 1e-9)
         )
+
+    @staticmethod
+    def _ellipse(entry, prefix: str) -> tuple[float, float]:
+        """Sanitised semi-major and semi-minor half-light radii (arcsec)."""
+        a = float(entry[f"{prefix}r50_major"])
+        b = float(entry[f"{prefix}r50_minor"])
+        if not (np.isfinite(a) and np.isfinite(b)):
+            a = b = 1e-4
+        return max(a, 1e-4), max(b, 1e-4)
 
     def _generate_galaxy(
         self,
@@ -1495,9 +1532,9 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     ) -> galsim.GSObject:
         """Build a GalSim object from one scene row.
 
-        The profile is built with its major axis along ``+x``; the
-        position angle is applied by :meth:`get_obj` through the
-        ``angles`` column.
+        The profile is built relative to the position angle stored in the
+        ``angles`` column (the disk angle for a bulge + disk row), which
+        :meth:`get_obj` applies afterwards.
         """
         sname = _survey_prefix(survey_name or "lsst")
         mag = float(entry[f"{sname}_{band}"])
@@ -1510,12 +1547,16 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
             # same nearly-point-like convention as the CatSim AGN component
             return galsim.Gaussian(flux=flux, sigma=1e-4)
 
-        a = float(entry["r50_major"])
-        b = float(entry["r50_minor"])
-        if not (np.isfinite(a) and np.isfinite(b)):
-            a = b = 1e-4
-        a = max(a, 1e-4)
-        b = max(b, 1e-4)
+        if self._has_bulge_disk(names):
+            return self._bulge_disk_profile(
+                entry,
+                flux=flux,
+                frac_column=f"{sname}_{band}_bulge_frac",
+                force_isotropic=force_isotropic,
+                force_galaxy_profile=force_galaxy_profile,
+            )
+
+        a, b = self._ellipse(entry, "")
         # GalSim's ``shear(q=)`` preserves area, so ``half_light_radius`` is
         # the circularised radius and the drawn semi-major axis is
         # hlr / sqrt(q) = a, as for CatSim's sqrt(a * b).
@@ -1534,15 +1575,71 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
             gal = galsim.Sersic(n=n, flux=flux, half_light_radius=hlr)
         return gal.shear(q=q, beta=0.0 * galsim.radians)
 
+    def _bulge_disk_profile(
+        self,
+        entry,
+        *,
+        flux: float,
+        frac_column: str,
+        force_isotropic: bool,
+        force_galaxy_profile: int,
+    ) -> galsim.GSObject:
+        """de Vaucouleurs bulge + exponential disk, the cModel decomposition.
+
+        The bulge takes the fraction ``frac_column`` of ``flux`` (falling
+        back to a band-independent ``bulge_frac`` column).  Both components
+        are built relative to the disk position angle, which is the
+        ``angles`` column applied by :meth:`get_obj`.
+        """
+        names = entry.dtype.names
+        frac = float(entry[frac_column]) if frac_column in names else float(entry["bulge_frac"])
+        frac = min(max(frac, 0.0), 1.0) if np.isfinite(frac) else 0.0
+        disk_theta = float(entry["disk_theta"])
+        if not np.isfinite(disk_theta):
+            disk_theta = 0.0
+
+        components = []
+        for prefix, weight, cap in (("disk_", 1.0 - frac, None), ("bulge_", frac, self.max_bulge_hlr_arcsec)):
+            component_flux = flux * weight
+            if component_flux <= 0.0:
+                continue
+            a, b = self._ellipse(entry, prefix)
+            hlr = np.sqrt(a * b)
+            if cap is not None:
+                hlr = min(hlr, cap)
+            q = 1.0 if force_isotropic else min(max(b / a, self.min_axis_ratio), 1.0)
+            theta = float(entry[f"{prefix}theta"])
+            if not np.isfinite(theta):
+                theta = disk_theta
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                profile = _forced_profile(force_galaxy_profile, flux=component_flux, half_light_radius=hlr)
+            elif prefix == "disk_":
+                profile = galsim.Exponential(flux=component_flux, half_light_radius=hlr)
+            else:
+                profile = galsim.DeVaucouleurs(flux=component_flux, half_light_radius=hlr)
+            components.append(profile.shear(q=q, beta=(theta - disk_theta) * galsim.degrees))
+        if not components:
+            return galsim.Gaussian(flux=flux, sigma=1e-4)
+        if len(components) == 1:
+            return components[0]
+        return galsim.Add(components)
+
     # ---------- building a scene from the Rubin object table ----------
 
-    dp2_columns: ClassVar[tuple[str, ...]] = (
-        "coord_ra",
-        "coord_dec",
+    # DP2 object-table columns of the two morphology models
+    dp2_sersic_columns: ClassVar[tuple[str, ...]] = (
         "sersic_index",
         "sersic_reff_major",
         "sersic_reff_minor",
         "sersic_theta",
+    )
+    dp2_cmodel_columns: ClassVar[tuple[str, ...]] = (
+        "{band}_cModel_dev_reff_major",
+        "{band}_cModel_dev_reff_minor",
+        "{band}_cModel_dev_theta",
+        "{band}_cModel_exp_reff_major",
+        "{band}_cModel_exp_reff_minor",
+        "{band}_cModel_exp_theta",
     )
 
     @classmethod
@@ -1559,6 +1656,8 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         extendedness_threshold: float = 0.5,
         redshift_column: str | None = "bpz_z_best",
         default_redshift: float = 0.0,
+        morphology: str = "bulge_disk",
+        morphology_band: str = "i",
         **kwargs,
     ) -> "ClusterSceneCatalog":
         """Build a scene from rows of the Rubin DP2 ``Object`` table.
@@ -1568,9 +1667,16 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         around a cluster, or a Parquet file of it.  Column mapping:
 
         * ``coord_ra``, ``coord_dec`` -> ``ra``, ``dec``
-        * ``sersic_index`` -> ``sersic_n``; ``sersic_reff_major``,
-          ``sersic_reff_minor`` (arcsec) -> ``r50_major``, ``r50_minor``;
-          ``sersic_theta`` (deg) -> ``theta``
+        * ``morphology="bulge_disk"`` (default): the cModel ellipses of
+          ``morphology_band`` -- ``{band}_cModel_dev_reff_major``,
+          ``_dev_reff_minor``, ``_dev_theta`` -> ``bulge_r50_major``,
+          ``bulge_r50_minor``, ``bulge_theta`` and the ``_exp_`` columns ->
+          ``disk_*`` -- with ``{band}_cModel_fracDev`` of every band ->
+          ``{survey_name}_{band}_bulge_frac``.  The cModel shapes are
+          fitted per band, so one band has to be chosen for the shapes.
+        * ``morphology="sersic"``: ``sersic_index`` -> ``sersic_n``;
+          ``sersic_reff_major``, ``sersic_reff_minor`` (arcsec) ->
+          ``r50_major``, ``r50_minor``; ``sersic_theta`` (deg) -> ``theta``
         * ``{band}_{flux_column}`` (nJy) -> ``{survey_name}_{band}`` AB
           magnitude; point sources use ``{band}_{point_source_flux_column}``
           instead when that column exists.
@@ -1584,10 +1690,18 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         Remaining keyword arguments go to the constructor (selection cuts,
         ``force_pixel_center``, ...).
         """
+        if morphology not in ("bulge_disk", "sersic"):
+            raise ValueError(f"morphology must be 'bulge_disk' or 'sersic', not {morphology!r}")
         table = scene_to_structured_array(objects)
         names = tuple(table.dtype.names)
         bands = tuple(bands)
-        needed = list(cls.dp2_columns) + [f"{band}_{flux_column}" for band in bands]
+        prefix = _survey_prefix(survey_name)
+        needed = ["coord_ra", "coord_dec"] + [f"{band}_{flux_column}" for band in bands]
+        if morphology == "bulge_disk":
+            needed += [name.format(band=morphology_band) for name in cls.dp2_cmodel_columns]
+            needed += [f"{band}_cModel_fracDev" for band in bands]
+        else:
+            needed += list(cls.dp2_sersic_columns)
         missing = [name for name in needed if name not in names]
         if missing:
             raise ValueError("DP2 object table is missing columns: " + ", ".join(missing))
@@ -1595,11 +1709,26 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         columns: dict[str, np.ndarray] = {
             "ra": np.asarray(table["coord_ra"], dtype=float),
             "dec": np.asarray(table["coord_dec"], dtype=float),
-            "sersic_n": np.asarray(table["sersic_index"], dtype=float),
-            "r50_major": np.asarray(table["sersic_reff_major"], dtype=float),
-            "r50_minor": np.asarray(table["sersic_reff_minor"], dtype=float),
-            "theta": np.asarray(table["sersic_theta"], dtype=float),
         }
+        if morphology == "bulge_disk":
+            for component, cmodel in (("bulge", "dev"), ("disk", "exp")):
+                for quantity, dp2_quantity in (
+                    ("r50_major", "reff_major"),
+                    ("r50_minor", "reff_minor"),
+                    ("theta", "theta"),
+                ):
+                    columns[f"{component}_{quantity}"] = np.asarray(
+                        table[f"{morphology_band}_cModel_{cmodel}_{dp2_quantity}"], dtype=float
+                    )
+            for band in bands:
+                columns[f"{prefix}_{band}_bulge_frac"] = np.asarray(
+                    table[f"{band}_cModel_fracDev"], dtype=float
+                )
+        else:
+            columns["sersic_n"] = np.asarray(table["sersic_index"], dtype=float)
+            columns["r50_major"] = np.asarray(table["sersic_reff_major"], dtype=float)
+            columns["r50_minor"] = np.asarray(table["sersic_reff_minor"], dtype=float)
+            columns["theta"] = np.asarray(table["sersic_theta"], dtype=float)
         if extendedness_column in names:
             ext = np.asarray(table[extendedness_column], dtype=float)
             point = np.isfinite(ext) & (ext < extendedness_threshold)
@@ -1615,7 +1744,6 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         redshift[point] = 0.0
         columns["redshift"] = redshift
 
-        prefix = _survey_prefix(survey_name)
         with np.errstate(divide="ignore", invalid="ignore"):
             for band in bands:
                 flux = np.asarray(table[f"{band}_{flux_column}"], dtype=float)
@@ -1814,9 +1942,7 @@ def _image_target(image, wcs, pixel_scale: float) -> dict[str, Any]:
                 kernel = psf.computeKernelImage(geom.Point2D(image.getBBox().getCenter())).getArray()
                 image_wcs = image.getWcs()
                 scale = (
-                    float(image_wcs.getPixelScale().asArcseconds())
-                    if image_wcs is not None
-                    else pixel_scale
+                    float(image_wcs.getPixelScale().asArcseconds()) if image_wcs is not None else pixel_scale
                 )
                 target["psf_obj"] = galsim.InterpolatedImage(
                     galsim.Image(np.array(kernel, dtype=float)), scale=scale, flux=1.0
