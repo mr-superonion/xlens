@@ -23,11 +23,13 @@
 
 Provides an abstract :class:`BaseGalaxyCatalog` and concrete implementations
 for CatSim 2017, OpenUniverse 2024 Rubin-Roman, and Euclid Flagship 2025
-catalogs.
+catalogs, and :class:`ClusterSceneCatalog`, which renders an object table
+(for instance a real DP2 cluster field) at its own sky positions.
 """
 
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import Any, ClassVar, Iterable
 
 import fitsio
@@ -36,6 +38,7 @@ import lsst
 import numpy as np
 from numpy.lib import recfunctions as rfn
 
+from .defaults import SIM_INCLUSION_PADDING
 from .layout import Layout
 
 
@@ -52,6 +55,25 @@ FORCE_GALAXY_PROFILE_EXPONENTIAL = 2
 # the peak memory of an entire run.  Override per catalog class with the
 # ``max_bulge_hlr_arcsec`` attribute.
 MAX_BULGE_HLR_ARCSEC = 3.0
+
+# Placement and lensing columns every truth catalog carries, ahead of the
+# input-catalog property columns merged in by the constructors.
+PLACEMENT_DTYPE = [
+    ("indices", "i8"),
+    ("redshift", "f8"),
+    ("angles", "f8"),
+    ("gamma1", "f8"),
+    ("gamma2", "f8"),
+    ("kappa", "f8"),
+    ("dx", "f8"),
+    ("dy", "f8"),
+    ("ra", "f8"),
+    ("dec", "f8"),  # post-lensed ra, dec
+    ("prelensed_ra", "f8"),
+    ("prelensed_dec", "f8"),
+    ("has_finite_shear", "bool"),
+    ("hlr", "f8"),
+]
 
 
 def _survey_prefix(survey_name: str) -> str:
@@ -230,23 +252,7 @@ class BaseGalaxyCatalog(ABC):
         # rows of the input galaxy catalog that populate the placed objects
         selected = input_catalog[idx]
 
-        placement_dtype = [
-            ("indices", "i8"),
-            ("redshift", "f8"),
-            ("angles", "f8"),
-            ("gamma1", "f8"),
-            ("gamma2", "f8"),
-            ("kappa", "f8"),
-            ("dx", "f8"),
-            ("dy", "f8"),
-            ("ra", "f8"),
-            ("dec", "f8"),  # post-lensed ra, dec
-            ("prelensed_ra", "f8"),
-            ("prelensed_dec", "f8"),
-            ("has_finite_shear", "bool"),
-            ("hlr", "f8"),
-        ]
-        placement = np.zeros(num, dtype=placement_dtype)
+        placement = np.zeros(num, dtype=PLACEMENT_DTYPE)
         placement["dx"] = shifts_array["dx"]
         placement["dy"] = shifts_array["dy"]
         placement["angles"] = angles
@@ -1170,12 +1176,684 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
 
 # ---------------------------------------------------------
+# Concrete implementation: object-table scene (e.g. a DP2 cluster field)
+# ---------------------------------------------------------
+
+# AB magnitude of 1 nJy; the Rubin object tables report fluxes in nJy.
+AB_MAG_ZERO_NJY = 31.4
+
+
+def _column_to_numpy(column) -> np.ndarray | None:
+    """Numeric or boolean NumPy array for a pandas column; ``None`` for text.
+
+    Handles NumPy-backed, nullable and Arrow-backed dtypes alike: integers
+    with missing values fall back to float with NaN, and booleans with
+    missing values become ``False``.
+    """
+    kind = getattr(getattr(column, "dtype", None), "kind", "O")
+    if kind == "b":
+        try:
+            return column.to_numpy(dtype=bool)
+        except (TypeError, ValueError):
+            return column.fillna(False).to_numpy(dtype=bool)
+    if kind in "iu":
+        try:
+            return column.to_numpy(dtype=np.int64)
+        except (TypeError, ValueError):
+            return column.to_numpy(dtype=float, na_value=np.nan)
+    if kind == "f":
+        return column.to_numpy(dtype=float, na_value=np.nan)
+    if kind in "USO":
+        return None
+    try:
+        return column.to_numpy(dtype=float, na_value=np.nan)
+    except (TypeError, ValueError):
+        return None
+
+
+def _columns_to_structured_array(columns: dict[str, np.ndarray]) -> np.ndarray:
+    """Pack a mapping of equal-length arrays into a structured array."""
+    if not columns:
+        raise ValueError("scene has no usable (numeric or boolean) columns")
+    num = len(next(iter(columns.values())))
+    for name, values in columns.items():
+        if len(values) != num:
+            raise ValueError(f"scene column {name!r} has {len(values)} rows, expected {num}")
+    out = np.empty(num, dtype=[(name, values.dtype) for name, values in columns.items()])
+    for name, values in columns.items():
+        out[name] = values
+    return out
+
+
+def scene_to_structured_array(scene) -> np.ndarray:
+    """Coerce a scene table into a NumPy structured array.
+
+    Accepts a structured array, an ``astropy.table.Table``, a
+    ``pandas.DataFrame`` (Arrow-backed columns included, e.g. the result
+    of an ``lsdb`` cone search), a mapping of column name to array, or the
+    path of a FITS or Parquet file.  Text columns are dropped: the truth
+    catalog only carries numbers.
+    """
+    if isinstance(scene, np.ndarray):
+        if scene.dtype.names is None:
+            raise TypeError("a scene array must be a structured array with named fields")
+        return scene
+    if isinstance(scene, (str, os.PathLike)):
+        fname = os.fspath(scene)
+        if fname.lower().endswith((".parq", ".parquet")):
+            import pyarrow.parquet as pq
+
+            return scene_to_structured_array(pq.read_table(fname).to_pandas())
+        return get_catalog(fname)
+    if hasattr(scene, "as_array"):  # astropy Table
+        arr = scene.as_array()
+        if isinstance(arr, np.ma.MaskedArray):
+            arr = arr.filled()
+        return np.asarray(arr)
+    if hasattr(scene, "columns") and hasattr(scene, "to_numpy"):  # pandas DataFrame
+        columns = {}
+        for name in scene.columns:
+            values = _column_to_numpy(scene[name])
+            if values is not None:
+                columns[str(name)] = values
+        return _columns_to_structured_array(columns)
+    if isinstance(scene, Mapping):
+        return _columns_to_structured_array({str(name): np.asarray(values) for name, values in scene.items()})
+    raise TypeError(f"cannot build a scene from an object of type {type(scene).__name__}")
+
+
+class ClusterSceneCatalog(BaseGalaxyCatalog):
+    """Render every object of an input table at its own sky position.
+
+    The other catalogs sample galaxies from a static file and place them
+    with a :class:`~xlens.simulator.layout.Layout`.  This one draws a
+    *scene*: each row of the input table is rendered exactly once, at its
+    own position, with its own single-Sersic morphology and photometry.
+    It was written to re-simulate real cluster fields from the Rubin DP2
+    object table (see :meth:`from_dp2_objects`), but any table with the
+    columns below works, for instance a model cluster whose members were
+    drawn from an NFW profile.
+
+    The truth catalog it builds has the same columns as the other
+    catalogs, so the scene goes through ``CatalogTask`` (rotation,
+    lensing) and ``MultibandSimTask`` unchanged with
+    ``galaxy_type = "cluster_scene"``; :meth:`draw_on_image` renders it
+    onto an existing image outside the pipeline.
+
+    Input columns
+    -------------
+    position
+        ``ra``, ``dec`` in degrees, **or** ``dx``, ``dy`` in arcsec on the
+        tangent plane relative to the centre of the tract bounding box
+        (``+dx`` along the pixel ``+x`` axis, ``+dy`` along ``+y``).
+        ``ra``/``dec`` win when both are present.
+    ``redshift``
+        Used by the lensing perturbation; objects at or below the lens
+        redshift are not lensed, so cluster members should carry the
+        cluster redshift and stars ``0``.
+    ``sersic_n``, ``r50_major``, ``r50_minor``, ``theta``
+        Sersic index, semi-major and semi-minor half-light radii in
+        arcsec, and position angle in degrees counter-clockwise from the
+        pixel ``+x`` axis.  The position angle becomes the ``angles``
+        column of the truth catalog, so :meth:`rotate` turns the
+        orientation together with the position.
+    ``{survey}_{band}``
+        AB magnitudes, e.g. ``lsst_i``; ``hsc`` reuses the ``lsst``
+        columns.  A non-finite magnitude renders nothing.
+    ``is_point_source`` (optional)
+        Rows flagged ``True`` are rendered as point sources with the same
+        magnitude columns.
+
+    Every other column of the table is carried into the truth catalog.
+    """
+
+    # Read from ``catsim_dir`` when no ``scene`` is given (the pipeline
+    # fallback path); FITS or Parquet.
+    catalog_filename: ClassVar[str] = "cluster_scene.fits"
+    required_columns: ClassVar[tuple[str, ...] | None] = None
+
+    scene_columns: ClassVar[tuple[str, ...]] = (
+        "redshift",
+        "sersic_n",
+        "r50_major",
+        "r50_minor",
+        "theta",
+    )
+    # GalSim's Sersic profile is defined for 0.3 <= n <= 6.2; indices are
+    # clipped to this range and rounded to 0.1 so that GalSim can reuse
+    # its Sersic look-up tables across objects.
+    sersic_n_bounds: ClassVar[tuple[float, float]] = (0.3, 6.2)
+    # Whole-object half-light radius cap (arcsec), for the same memory
+    # reason as :data:`MAX_BULGE_HLR_ARCSEC`: the scene is a single Sersic
+    # per object, and a high-n profile with a large radius makes GalSim
+    # size its stamp at thousands of pixels.
+    max_hlr_arcsec: ClassVar[float] = MAX_BULGE_HLR_ARCSEC
+    min_axis_ratio: ClassVar[float] = 0.05
+
+    def __init__(
+        self,
+        *,
+        tract_info,
+        scene=None,
+        rng: np.random.RandomState | None = None,
+        layout_name: str = "scene",
+        sep_arcsec: float | None = None,
+        indice_group_id: int | None = None,
+        select_observable: list[str] | str | None = None,
+        select_lower_limit: Iterable[float] | None = None,
+        select_upper_limit: Iterable[float] | None = None,
+        extend_ratio: float = 1.08,
+        force_pixel_center: bool = False,
+        catsim_dir: str | None = None,
+        survey_name_list: Iterable[str] | None = None,
+    ):
+        """Build the truth catalog of a scene.
+
+        Parameters
+        ----------
+        tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
+            Provides the WCS and bounding box that define the pixel frame.
+        scene : structured array, Table, DataFrame, mapping or path, optional
+            The object table (see the class docstring for the columns).
+            When *None*, ``catalog_filename`` is read from ``catsim_dir``,
+            which is how the pipeline builds the catalog.
+        rng, layout_name, sep_arcsec, indice_group_id, extend_ratio
+            Accepted so the class can be constructed like the layout-based
+            catalogs; a scene has no random placement, so they are unused.
+        select_observable, select_lower_limit, select_upper_limit
+            Optional per-column cuts, as for the other catalogs.
+        force_pixel_center : bool, optional
+            Snap object centres to pixel centres.
+        catsim_dir : str or None, optional
+            Directory holding ``catalog_filename``; defaults to
+            ``$CATSIM_DIR``.
+        survey_name_list : iterable of str or None, optional
+            Surveys whose ``{survey}_{band}`` magnitudes the table must
+            carry.  Defaults to ``["lsst"]``.
+        """
+        self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
+        if survey_name_list is None:
+            survey_name_list = ["lsst"]
+        self.survey_name_list = tuple(str(name).lower() for name in survey_name_list)
+        self.prepare_tract_info(tract_info)
+        wcs = tract_info.getWcs()
+        ps = float(wcs.getPixelScale().asArcseconds())
+        self.pixel_scale = ps
+
+        if scene is None:
+            table, row_ids = self._read_catalog(
+                select_observable=select_observable,
+                select_lower_limit=select_lower_limit,
+                select_upper_limit=select_upper_limit,
+            )
+        else:
+            table, row_ids = self._apply_selection(
+                scene_to_structured_array(scene),
+                select_observable=select_observable,
+                select_lower_limit=select_lower_limit,
+                select_upper_limit=select_upper_limit,
+            )
+        names = tuple(table.dtype.names)
+        self._check_scene_columns(names)
+        num = len(table)
+
+        # tangent-plane offsets (arcsec) from the tract centre, the frame
+        # ``rotate`` and ``lens`` work in
+        if "ra" in names and "dec" in names:
+            pix_x, pix_y = wcs.skyToPixelArray(
+                np.asarray(table["ra"], dtype=float),
+                np.asarray(table["dec"], dtype=float),
+                degrees=True,
+            )
+            dx = (np.asarray(pix_x) - self.x_center) * ps
+            dy = (np.asarray(pix_y) - self.y_center) * ps
+        else:
+            dx = np.asarray(table["dx"], dtype=float)
+            dy = np.asarray(table["dy"], dtype=float)
+        if force_pixel_center:
+            inv_pixel_scale = 1.0 / ps
+            dx = (np.round(dx * inv_pixel_scale) + 0.5) * ps
+            dy = (np.round(dy * inv_pixel_scale) + 0.5) * ps
+        ra, dec = wcs.pixelToSkyArray(
+            x=self.x_center + dx / ps,
+            y=self.y_center + dy / ps,
+            degrees=True,
+        )
+
+        placement = np.zeros(num, dtype=PLACEMENT_DTYPE)
+        placement["dx"] = dx
+        placement["dy"] = dy
+        # the position angle is the intrinsic orientation: ``_generate_galaxy``
+        # builds every profile along +x and ``get_obj`` rotates it by this
+        placement["angles"] = np.radians(np.nan_to_num(np.asarray(table["theta"], dtype=float), nan=0.0))
+        placement["ra"] = ra
+        placement["dec"] = dec
+        placement["prelensed_ra"] = ra
+        placement["prelensed_dec"] = dec
+        placement["has_finite_shear"] = np.ones(num, dtype=bool)
+        placement["indices"] = row_ids
+        placement["redshift"] = np.asarray(table["redshift"], dtype=float)
+        placement["hlr"] = self._build_hlr_array(table)
+
+        extra = [name for name in names if name not in placement.dtype.names]
+        if extra:
+            self.data = np.asarray(
+                rfn.merge_arrays(
+                    [placement, table[extra]],
+                    flatten=True,
+                    usemask=False,
+                )
+            )
+        else:
+            self.data = placement
+        self.dtype = self.data.dtype
+        self.lensed = False
+        return
+
+    def _check_scene_columns(self, names: tuple[str, ...]) -> None:
+        missing = [name for name in self.scene_columns if name not in names]
+        if not ({"ra", "dec"} <= set(names) or {"dx", "dy"} <= set(names)):
+            missing.append("ra/dec or dx/dy")
+        for survey in self.survey_name_list:
+            prefix = _survey_prefix(survey) + "_"
+            if not any(name.startswith(prefix) for name in names):
+                missing.append(f"{prefix}{{band}} magnitudes")
+        if missing:
+            raise ValueError("scene table is missing columns: " + ", ".join(missing))
+
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """``{survey}_{band}``; ``hsc`` reuses the LSST photometry."""
+        return (f"{_survey_prefix(survey_name)}_{band}",)
+
+    def _load_catalog_file(self, fname: str, columns=None) -> Any:
+        """FITS through :func:`get_catalog`, Parquet through pyarrow."""
+        if fname.lower().endswith((".parq", ".parquet")):
+            import pyarrow.parquet as pq
+
+            return scene_to_structured_array(pq.read_table(fname, columns=columns).to_pandas())
+        return get_catalog(fname, columns=columns)
+
+    def _half_light_radius(self, catalog) -> np.ndarray:
+        """Circularised radius ``sqrt(a * b)`` of the Sersic fit (arcsec)."""
+        return np.sqrt(
+            np.maximum(np.asarray(catalog["r50_major"], dtype=float), 1e-9)
+            * np.maximum(np.asarray(catalog["r50_minor"], dtype=float), 1e-9)
+        )
+
+    def _generate_galaxy(
+        self,
+        *,
+        entry,
+        mag_zero,
+        band,
+        survey_name="lsst",
+        include_point_source=True,
+        force_isotropic=False,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
+        **kwargs,
+    ) -> galsim.GSObject:
+        """Build a GalSim object from one scene row.
+
+        The profile is built with its major axis along ``+x``; the
+        position angle is applied by :meth:`get_obj` through the
+        ``angles`` column.
+        """
+        sname = _survey_prefix(survey_name or "lsst")
+        mag = float(entry[f"{sname}_{band}"])
+        flux = 10 ** ((mag_zero - mag) / 2.5) if np.isfinite(mag) else 0.0
+
+        names = entry.dtype.names
+        if "is_point_source" in names and bool(entry["is_point_source"]):
+            if not include_point_source:
+                flux = 0.0
+            # same nearly-point-like convention as the CatSim AGN component
+            return galsim.Gaussian(flux=flux, sigma=1e-4)
+
+        a = float(entry["r50_major"])
+        b = float(entry["r50_minor"])
+        if not (np.isfinite(a) and np.isfinite(b)):
+            a = b = 1e-4
+        a = max(a, 1e-4)
+        b = max(b, 1e-4)
+        # GalSim's ``shear(q=)`` preserves area, so ``half_light_radius`` is
+        # the circularised radius and the drawn semi-major axis is
+        # hlr / sqrt(q) = a, as for CatSim's sqrt(a * b).
+        hlr = min(np.sqrt(a * b), self.max_hlr_arcsec)
+        q_cat = min(max(b / a, self.min_axis_ratio), 1.0)
+        q = 1.0 if force_isotropic else q_cat
+
+        if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+            gal = _forced_profile(force_galaxy_profile, flux=flux, half_light_radius=hlr)
+        else:
+            n = float(entry["sersic_n"])
+            if not np.isfinite(n):
+                n = 1.0
+            n_min, n_max = self.sersic_n_bounds
+            n = _galsim_round_sersic(min(max(n, n_min), n_max), 0.1)
+            gal = galsim.Sersic(n=n, flux=flux, half_light_radius=hlr)
+        return gal.shear(q=q, beta=0.0 * galsim.radians)
+
+    # ---------- building a scene from the Rubin object table ----------
+
+    dp2_columns: ClassVar[tuple[str, ...]] = (
+        "coord_ra",
+        "coord_dec",
+        "sersic_index",
+        "sersic_reff_major",
+        "sersic_reff_minor",
+        "sersic_theta",
+    )
+
+    @classmethod
+    def from_dp2_objects(
+        cls,
+        objects,
+        *,
+        tract_info,
+        bands: Iterable[str] = ("u", "g", "r", "i", "z", "y"),
+        survey_name: str = "lsst",
+        flux_column: str = "cModelFlux",
+        point_source_flux_column: str = "psfFlux",
+        extendedness_column: str = "refExtendedness",
+        extendedness_threshold: float = 0.5,
+        redshift_column: str | None = "bpz_z_best",
+        default_redshift: float = 0.0,
+        **kwargs,
+    ) -> "ClusterSceneCatalog":
+        """Build a scene from rows of the Rubin DP2 ``Object`` table.
+
+        ``objects`` is anything :func:`scene_to_structured_array` accepts,
+        typically the ``pandas.DataFrame`` of an ``lsdb`` cone search
+        around a cluster, or a Parquet file of it.  Column mapping:
+
+        * ``coord_ra``, ``coord_dec`` -> ``ra``, ``dec``
+        * ``sersic_index`` -> ``sersic_n``; ``sersic_reff_major``,
+          ``sersic_reff_minor`` (arcsec) -> ``r50_major``, ``r50_minor``;
+          ``sersic_theta`` (deg) -> ``theta``
+        * ``{band}_{flux_column}`` (nJy) -> ``{survey_name}_{band}`` AB
+          magnitude; point sources use ``{band}_{point_source_flux_column}``
+          instead when that column exists.
+        * ``{extendedness_column} < extendedness_threshold`` ->
+          ``is_point_source`` (every row is a galaxy when the column is
+          absent).
+        * ``redshift_column`` -> ``redshift``; missing or non-finite
+          values get ``default_redshift``, point sources ``0``.
+        * ``objectId`` is carried through when present.
+
+        Remaining keyword arguments go to the constructor (selection cuts,
+        ``force_pixel_center``, ...).
+        """
+        table = scene_to_structured_array(objects)
+        names = tuple(table.dtype.names)
+        bands = tuple(bands)
+        needed = list(cls.dp2_columns) + [f"{band}_{flux_column}" for band in bands]
+        missing = [name for name in needed if name not in names]
+        if missing:
+            raise ValueError("DP2 object table is missing columns: " + ", ".join(missing))
+        num = len(table)
+        columns: dict[str, np.ndarray] = {
+            "ra": np.asarray(table["coord_ra"], dtype=float),
+            "dec": np.asarray(table["coord_dec"], dtype=float),
+            "sersic_n": np.asarray(table["sersic_index"], dtype=float),
+            "r50_major": np.asarray(table["sersic_reff_major"], dtype=float),
+            "r50_minor": np.asarray(table["sersic_reff_minor"], dtype=float),
+            "theta": np.asarray(table["sersic_theta"], dtype=float),
+        }
+        if extendedness_column in names:
+            ext = np.asarray(table[extendedness_column], dtype=float)
+            point = np.isfinite(ext) & (ext < extendedness_threshold)
+        else:
+            point = np.zeros(num, dtype=bool)
+        columns["is_point_source"] = point
+
+        redshift = np.full(num, float(default_redshift))
+        if redshift_column is not None and redshift_column in names:
+            z_in = np.asarray(table[redshift_column], dtype=float)
+            good = np.isfinite(z_in)
+            redshift[good] = z_in[good]
+        redshift[point] = 0.0
+        columns["redshift"] = redshift
+
+        prefix = _survey_prefix(survey_name)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            for band in bands:
+                flux = np.asarray(table[f"{band}_{flux_column}"], dtype=float)
+                point_flux_column = f"{band}_{point_source_flux_column}"
+                if point.any() and point_flux_column in names:
+                    flux = np.where(point, np.asarray(table[point_flux_column], dtype=float), flux)
+                columns[f"{prefix}_{band}"] = np.where(
+                    flux > 0, -2.5 * np.log10(flux) + AB_MAG_ZERO_NJY, np.nan
+                )
+        if "objectId" in names:
+            columns["objectId"] = np.asarray(table["objectId"])
+        return cls(
+            scene=_columns_to_structured_array(columns),
+            tract_info=tract_info,
+            survey_name_list=[survey_name],
+            **kwargs,
+        )
+
+    # ---------- rendering onto an existing image ----------
+
+    def draw_on_image(
+        self,
+        image,
+        *,
+        band: str,
+        mag_zero: float,
+        psf_obj: galsim.GSObject | None = None,
+        wcs=None,
+        survey_name: str = "lsst",
+        draw_method: str = "auto",
+        nn_trunc: int | None = None,
+        use_field_distortion: bool = True,
+        force_isotropic: bool = False,
+        force_galaxy_profile: int = FORCE_GALAXY_PROFILE_NONE,
+        include_point_source: bool = True,
+        inclusion_padding: float = SIM_INCLUSION_PADDING,
+    ) -> np.ndarray:
+        """Render the scene onto ``image`` in place.
+
+        This is the drawing loop of
+        :meth:`~xlens.simulator.sim.MultibandSimTask.draw_catalog` applied
+        to an image the caller already has, so a cluster can be added to
+        a simulated exposure, or drawn onto a blank one, without running
+        the pipeline.
+
+        Parameters
+        ----------
+        image
+            ``lsst.afw.image.Exposure``, ``MaskedImage`` or ``Image`` (its
+            bounding box sets the pixel coordinates; an ``Exposure`` also
+            supplies the WCS and PSF when ``wcs``/``psf_obj`` are not
+            given), a ``galsim.Image`` (its ``xmin``/``ymin`` and ``wcs``
+            are used), or a C-contiguous float32/float64 2-D NumPy array
+            whose first pixel is ``(0, 0)``.  Pixels are added to it.
+        band : str
+            Photometric band.
+        mag_zero : float
+            Magnitude zero point of the image.
+        psf_obj : galsim.GSObject or None, optional
+            PSF to convolve with.  Defaults to the PSF of an ``Exposure``,
+            evaluated at the image centre.
+        wcs : lsst.afw.geom.SkyWcs or galsim.BaseWCS or None, optional
+            Sky-to-pixel mapping; required unless ``image`` carries one.
+        survey_name : str, optional
+            Survey whose magnitude columns are used.
+        draw_method, nn_trunc, use_field_distortion, force_isotropic,
+        force_galaxy_profile, include_point_source
+            As the same-named ``MultibandSimTask`` configuration fields.
+        inclusion_padding : float, optional
+            Objects centred more than this many pixels outside the image
+            are skipped.
+
+        Returns
+        -------
+        numpy.ndarray
+            Structured array with one row per scene object: ``index`` into
+            :attr:`data`, ``ra``, ``dec``, the image position ``image_x``,
+            ``image_y`` and whether the object was ``drawn``.
+        """
+        from ..wcs import tanwcs_dm2galsim
+
+        target = _image_target(image, wcs, self.pixel_scale)
+        wcs_dm, wcs_gs = target["wcs_dm"], target["wcs_gs"]
+        if wcs_dm is not None:
+            wcs_gs = tanwcs_dm2galsim(wcs_dm)
+            pix_x, pix_y = wcs_dm.skyToPixelArray(self.data["ra"], self.data["dec"], degrees=True)
+        elif wcs_gs is not None:
+            pix_x, pix_y = wcs_gs.radecToxy(self.data["ra"], self.data["dec"], units=galsim.degrees)
+        else:
+            raise ValueError("draw_on_image needs a wcs: pass one or use an image that carries one")
+        pix_x = np.asarray(pix_x, dtype=float)
+        pix_y = np.asarray(pix_y, dtype=float)
+
+        if psf_obj is None:
+            psf_obj = target["psf_obj"]
+        if psf_obj is None:
+            raise ValueError("draw_on_image needs psf_obj unless image is an Exposure with a PSF")
+
+        gs_image = galsim.Image(target["array"], xmin=target["xmin"], ymin=target["ymin"], wcs=wcs_gs)
+        xmin, xmax = gs_image.bounds.xmin, gs_image.bounds.xmax
+        ymin, ymax = gs_image.bounds.ymin, gs_image.bounds.ymax
+
+        truth = np.zeros(
+            len(self.data),
+            dtype=[
+                ("index", "i8"),
+                ("ra", "f8"),
+                ("dec", "f8"),
+                ("image_x", "f8"),
+                ("image_y", "f8"),
+                ("drawn", "bool"),
+            ],
+        )
+        truth["index"] = np.arange(len(self.data))
+        truth["ra"] = self.data["ra"]
+        truth["dec"] = self.data["dec"]
+        truth["image_x"] = pix_x
+        truth["image_y"] = pix_y
+
+        for i, src in enumerate(self.data):
+            ix, iy = pix_x[i], pix_y[i]
+            if not (
+                ((xmin - inclusion_padding) < ix < (xmax + inclusion_padding))
+                and ((ymin - inclusion_padding) < iy < (ymax + inclusion_padding))
+                and src["has_finite_shear"]
+            ):
+                continue
+            image_pos = galsim.PositionD(x=ix, y=iy)
+            gal_obj = self.get_obj(
+                ind=i,
+                mag_zero=mag_zero,
+                band=band,
+                force_isotropic=force_isotropic,
+                force_galaxy_profile=force_galaxy_profile,
+                include_point_source=include_point_source,
+                survey_name=survey_name,
+            )
+            convolved_object = galsim.Convolve([gal_obj, psf_obj])
+            if use_field_distortion:
+                stamp = convolved_object.drawImage(
+                    center=image_pos,
+                    wcs=wcs_gs.local(image_pos=image_pos),
+                    method=draw_method,
+                    nx=nn_trunc,
+                    ny=nn_trunc,
+                )
+            else:
+                stamp = convolved_object.drawImage(
+                    center=image_pos,
+                    wcs=None,
+                    method=draw_method,
+                    scale=self.pixel_scale,
+                    nx=nn_trunc,
+                    ny=nn_trunc,
+                )
+            bounds = stamp.bounds & gs_image.bounds
+            if bounds.isDefined():
+                gs_image[bounds] += stamp[bounds]
+                truth["drawn"][i] = True
+        return truth
+
+
+def _image_target(image, wcs, pixel_scale: float) -> dict[str, Any]:
+    """Resolve the pixel array, origin, WCS and PSF of ``image``.
+
+    See :meth:`ClusterSceneCatalog.draw_on_image` for the accepted types.
+    The returned ``array`` is a view onto the image's pixels, so drawing
+    into it modifies ``image``.  ``pixel_scale`` (arcsec) sizes the PSF of
+    an ``Exposure`` that carries no WCS of its own.
+    """
+    target: dict[str, Any] = {
+        "xmin": 0,
+        "ymin": 0,
+        "wcs_dm": None,
+        "wcs_gs": None,
+        "psf_obj": None,
+    }
+    if isinstance(image, galsim.Image):
+        target["array"] = image.array
+        target["xmin"], target["ymin"] = image.xmin, image.ymin
+        if wcs is None:
+            wcs = image.wcs
+    elif isinstance(image, np.ndarray):
+        if image.ndim != 2:
+            raise TypeError("image array must be 2-D")
+        target["array"] = image
+    elif hasattr(image, "getBBox"):
+        if hasattr(image, "getMaskedImage"):  # Exposure
+            target["array"] = image.getMaskedImage().getImage().getArray()
+            if wcs is None and hasattr(image, "getWcs"):
+                wcs = image.getWcs()
+            psf = image.getPsf() if hasattr(image, "getPsf") else None
+            if psf is not None:
+                import lsst.geom as geom
+
+                kernel = psf.computeKernelImage(geom.Point2D(image.getBBox().getCenter())).getArray()
+                image_wcs = image.getWcs()
+                scale = (
+                    float(image_wcs.getPixelScale().asArcseconds())
+                    if image_wcs is not None
+                    else pixel_scale
+                )
+                target["psf_obj"] = galsim.InterpolatedImage(
+                    galsim.Image(np.array(kernel, dtype=float)), scale=scale, flux=1.0
+                )
+        elif hasattr(image, "getImage"):  # MaskedImage
+            target["array"] = image.getImage().getArray()
+        else:  # Image
+            target["array"] = image.getArray()
+        bbox = image.getBBox()
+        target["xmin"], target["ymin"] = bbox.getMinX(), bbox.getMinY()
+    else:
+        raise TypeError(f"cannot draw on an object of type {type(image).__name__}")
+
+    array = target["array"]
+    if array.dtype not in (np.float32, np.float64) or not array.flags["C_CONTIGUOUS"]:
+        raise TypeError("the image pixels must be a C-contiguous float32 or float64 array")
+    if not array.flags["WRITEABLE"]:
+        raise TypeError("the image pixels are read-only")
+
+    if wcs is not None:
+        if hasattr(wcs, "skyToPixelArray"):
+            target["wcs_dm"] = wcs
+        elif isinstance(wcs, galsim.BaseWCS):
+            target["wcs_gs"] = wcs
+        else:
+            raise TypeError(f"wcs must be an lsst SkyWcs or a galsim WCS, not {type(wcs).__name__}")
+    return target
+
+
+# ---------------------------------------------------------
 # galaxy_type registry
 # ---------------------------------------------------------
 GALAXY_CATALOG_CLASSES: dict[str, type[BaseGalaxyCatalog]] = {
     "catsim2017": CatSim2017Catalog,
     "flagship2025": Flagship2025Catalog,
     "diffsky": DiffskyCatalog,
+    "cluster_scene": ClusterSceneCatalog,
 }
 
 

@@ -73,20 +73,16 @@ from ..utils.random import (
 from ..wcs import tanwcs_dm2galsim
 from .bat import draw_ia
 from .defaults import (
+    SIM_INCLUSION_PADDING,
     mag_zero_defaults,
     noise_variance_defaults,
     psf_fwhm_defaults,
     sys_npix,
 )
-from .galaxies import (
-    CatSim2017Catalog,
-    DiffskyCatalog,
-    Flagship2025Catalog,
-)
+from .galaxies import GALAXY_CATALOG_CLASSES, get_catalog_class
 from .noise import get_noise_array
 from ..foreground.star import bright_star
 
-SIM_INCLUSION_PADDING = 200  # pixels
 DEFAULT_BAT_STAMP_SIZE = 64
 # Band ordering used to index stacked (per-band) PSF / noise-correlation
 # arrays. Ground-based surveys use the 6-band optical order; Euclid uses
@@ -286,11 +282,11 @@ class MultibandSimConfig(
                 "fallback_layout_name must be one of grid/hex/random/"
                 "random_disk",
             )
-        if self.galaxy_type not in ["catsim2017", "flagship2025", "diffsky"]:
+        if self.galaxy_type not in GALAXY_CATALOG_CLASSES:
             raise FieldValidationError(
                 self.__class__.galaxy_type,
                 self,
-                "We require galaxy_type in " "['catsim2017', 'flagship2025', 'diffsky']",
+                "We require galaxy_type in " f"{sorted(GALAXY_CATALOG_CLASSES)}",
             )
         if self.survey_name not in ["lsst", "hsc", "euclid"]:
             raise FieldValidationError(
@@ -640,14 +636,7 @@ class MultibandSimTask(PipelineTask):
         kernel = afwMath.FixedKernel(psfImage.convertD())
         kernel_psf = meaAlg.KernelPsf(kernel)
 
-        if self.config.galaxy_type == "catsim2017":
-            GalClass = CatSim2017Catalog
-        elif self.config.galaxy_type == "flagship2025":
-            GalClass = Flagship2025Catalog
-        elif self.config.galaxy_type == "diffsky":
-            GalClass = DiffskyCatalog
-        else:
-            raise ValueError("invalid galaxy_type")
+        GalClass = get_catalog_class(self.config.galaxy_type)
         if truthCatalog is None or len(truthCatalog) == 0:
             # No per-tract truth catalog for this tract: sample galaxies at
             # random from the galaxy class's static catalog file (e.g.
