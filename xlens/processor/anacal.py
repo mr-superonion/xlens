@@ -23,6 +23,7 @@ from typing import Any, Sequence
 
 import anacal
 import astropy
+import numpy as np
 from lsst.afw.geom import SkyWcs
 from lsst.afw.image import ExposureF
 from lsst.pex.config import Config, Field, FieldValidationError
@@ -43,9 +44,17 @@ class AnacalConfig(Config):
         doc="Sources to be removed if too close to boundary [pixel]",
         default=35,
     )
-    sigma_arcsec = Field[float](
-        doc="Kernel size for re-smoothing",
-        default=0.40,
+    psf_dilation_max = Field[float](
+        doc=(
+            "Cap on the ellipticity dilation d of the re-smoothing kernel. "
+            "The kernel is not set by hand: for every cell its width is "
+            "metadetect's default ``fitgauss`` target, sigma = sqrt(T d / "
+            "2), from the adaptive moments (e1, e2, T) of that cell's PSF "
+            "(anacal.ngmix.fit_psf_gauss) with d = 1 + 2 (sqrt(1 + |e|) - "
+            "1) capped at this value (metadetect: 1.1). See "
+            "AnacalTask.get_sigma_arcsec."
+        ),
+        default=1.1,
     )
     snr_min = Field[float](
         doc="snr min for detection",
@@ -125,11 +134,11 @@ class AnacalConfig(Config):
 
     def validate(self):
         super().validate()
-        if self.sigma_arcsec > 2.0 or self.sigma_arcsec < 0.0:
+        if not self.psf_dilation_max >= 1.0:
             raise FieldValidationError(
-                self.__class__.sigma_arcsec,
+                self.__class__.psf_dilation_max,
                 self,
-                "sigma_arcsec in a wrong range",
+                "psf_dilation_max must be >= 1",
             )
         if self.noiseId < 0:
             raise FieldValidationError(
@@ -158,7 +167,6 @@ class AnacalTask(Task):
         super().__init__(**kwargs)
         assert isinstance(self.config, AnacalConfig)
         self.config_kwargs = {
-            "sigma_arcsec": self.config.sigma_arcsec,
             "snr_peak_min": self.config.snr_min,
             "stamp_size": self.config.npix,
             "image_bound": self.config.bound,
@@ -169,10 +177,50 @@ class AnacalTask(Task):
         }
         return
 
+    def get_sigma_arcsec(
+        self,
+        psf_array: NDArray,
+        pixel_scale: float,
+        noise_variance: float | Sequence[float] | None = None,
+    ) -> float:
+        """Width [arcsec] of the re-smoothing kernel for a PSF.
+
+        metadetect's default ``fitgauss`` reconvolution target (without
+        metacal's separate 1 + 2 step shear-step dilation):
+        sigma = sqrt(T d / 2), with (e1, e2, T) the adaptive moments of
+        the PSF, measured by AnaCal's model fit
+        (``anacal.ngmix.fit_psf_gauss``), and d the ellipticity dilation
+        capped at ``psf_dilation_max``.  For a (nband, npix, npix) stack
+        e1, e2 and T are averaged over the bands with inverse-variance
+        weights before d is taken, as metadetect averages its shear
+        bands.
+        """
+        assert isinstance(self.config, AnacalConfig)
+        psf = np.asarray(psf_array, dtype=np.float64)
+        if psf.ndim == 2:
+            psf = psf[None]
+        if noise_variance is None:
+            wgt = np.ones(len(psf))
+        else:
+            wgt = 1.0 / np.broadcast_to(
+                np.asarray(noise_variance, dtype=np.float64), (len(psf),)
+            )
+        e1 = e2 = T = 0.0
+        for w, p in zip(wgt / np.sum(wgt), psf):
+            r = anacal.ngmix.fit_psf_gauss(np.ascontiguousarray(p), pixel_scale)
+            if not (r.converged and r.T > 0):
+                raise RuntimeError("Gaussian fit to the PSF failed")
+            e1 += w * r.e1
+            e2 += w * r.e2
+            T += w * r.T
+        d = anacal.ngmix.ellip_dilation(e1, e2, self.config.psf_dilation_max)
+        return float(np.sqrt(T * d / 2.0))
+
     def make_prior(self):
         """The Gaussian priors of the model fit from the configuration:
-        size T [arcsec^2], centre offset [arcsec], and ellipticity at the
-        re-smoothing scale.  A width of 0 leaves that prior off."""
+        size T = mxx + myy [arcsec^2], centre offset [arcsec], and the
+        intrinsic ellipticity (mxx - myy, 2 mxy) / T.  A width of 0 leaves
+        that prior off."""
         prior = anacal.ngmix.modelPrior()
         if self.config.prior_sigma_T > 0:
             prior.set_sigma_T(anacal.math.qnumber(self.config.prior_sigma_T))
@@ -223,16 +271,6 @@ class AnacalTask(Task):
         # the "v.003" configuration, which gave the best selection-response
         # conditioning in the blended-simulation scan (values rounded to
         # three decimals).
-        task = anacal.task.Task(
-            scale=pixel_scale,
-            omega_f=0.218,
-            omega_v=0.011,
-            fpfs_c0=FPFS_C0,
-            mag_zero=mag_zero,
-            prior=self.make_prior(),
-            **self.config_kwargs,
-        )
-
         if detection is not None:
             det = detection.copy()
             det["x1"] = det["x1"] - begin_x * pixel_scale
@@ -241,17 +279,54 @@ class AnacalTask(Task):
             det["x2_det"] = det["x2_det"] - begin_y * pixel_scale
         else:
             det = None
-        catalog = task.process_image(
-            gal_array,
-            psf_array,
-            variance=noise_variance,
-            cell_list=cells,
-            detection=det,
-            noise_array=noise_array,
-            mask_array=mask_array,
-            do_fpfs=self.config.do_fpfs,
-            n_mask_base_max=n_mask_base_max,
-        )
+
+        # The re-smoothing kernel follows each cell's PSF
+        # (get_sigma_arcsec), so every cell is its own anacal Task.  An
+        # external catalog is split by the same ownership rule
+        # process_image applies internally.
+        owner = None
+        if det is not None and len(cells) > 1:
+            owner = anacal.task.assign_cell_ids(det, list(cells))
+        prior = self.make_prior()
+        parts = []
+        for cell in cells:
+            cell_det = det
+            if owner is not None:
+                cell_det = det[owner == cell.index]
+                if len(cell_det) == 0:
+                    continue
+            cell_psf = getattr(cell, "psf_array", None)
+            if cell_psf is None or np.size(cell_psf) == 0:
+                cell_psf = psf_array
+            task = anacal.task.Task(
+                scale=pixel_scale,
+                sigma_arcsec=self.get_sigma_arcsec(
+                    cell_psf, pixel_scale, noise_variance
+                ),
+                omega_f=0.218,
+                omega_v=0.011,
+                fpfs_c0=FPFS_C0,
+                mag_zero=mag_zero,
+                prior=prior,
+                **self.config_kwargs,
+            )
+            parts.append(task.process_image(
+                gal_array,
+                psf_array,
+                variance=noise_variance,
+                cell_list=[cell],
+                detection=cell_det,
+                noise_array=noise_array,
+                mask_array=mask_array,
+                do_fpfs=self.config.do_fpfs,
+                n_mask_base_max=n_mask_base_max,
+            ))
+        if parts:
+            catalog = np.concatenate(parts)
+        else:
+            catalog = anacal.table.make_catalog_empty(
+                np.zeros(0), np.zeros(0)
+            )
         catalog["x1"] = catalog["x1"] + begin_x * pixel_scale
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
         catalog["x1_det"] = catalog["x1_det"] + begin_x * pixel_scale

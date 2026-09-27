@@ -102,7 +102,6 @@ def _measure_coadd(outcome, skymap, tract_id, patch_id, band):
     the shear-recovery test ignores those extra columns."""
     config = MeasureCoaddsPipeConfig()
     config.anacal.force_size = False
-    config.anacal.sigma_arcsec = 0.38
     config.anacal.num_epochs = 0
     config.anacal.do_noise_bias_correction = False
     config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)

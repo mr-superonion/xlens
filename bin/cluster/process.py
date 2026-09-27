@@ -150,7 +150,6 @@ if RANK == 0:
 # with the same kernels as examples/cluster/example1_cluster_lensing.ipynb.
 # ------------------------------
 detect_config = MeasureCoaddsPipeConfig()
-detect_config.anacal.sigma_arcsec = 0.52   # detection / e1, e2, w kernel
 detect_config.fpfs.sigma_shapelets1 = 0.45  # kernel 1
 detect_config.fpfs.sigma_shapelets2 = 0.55  # kernel 2
 detect_config.use_sim = False

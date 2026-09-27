@@ -134,7 +134,6 @@ sim_task = MultibandSimTask(config=cfg_sim)
 # Detection + per-band forced measurement (all bands together)
 # ------------------------------
 detect_config = MeasureCoaddsPipeConfig()
-detect_config.anacal.sigma_arcsec = 0.50
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True

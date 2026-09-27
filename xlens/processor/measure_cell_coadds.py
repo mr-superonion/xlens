@@ -938,12 +938,20 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                 skyMap[tract].getWcs().getPixelScale().asArcseconds()
             )
             regions = []
+            # the mask fractions are stamped with each cell's own
+            # re-smoothing kernel, derived from that cell's PSF exactly
+            # as the per-cell measurement derives it
+            cell_sigma = {}
             for cell_id, cell in dict(mca.cells).items():
                 ib = cell.inner.bbox
                 regions.append(
                     (cell_id, ib.getBeginX(), ib.getBeginY(),
                      ib.getEndX(), ib.getEndY())
                 )
+                if stitched_mask_array is not None:
+                    cell_sigma[cell_id] = self.anacal.get_sigma_arcsec(
+                        np.asarray(cell.psf_image.array), pixel_scale,
+                    )
             del mca
             # Pixel positions come from ra/dec through the tract WCS
             # (cell inner bboxes are in that frame); whatever the
@@ -952,26 +960,29 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             det_use = self._ingest_external_detection(
                 detection, skyMap[tract].getWcs(), pixel_scale,
             )
-            if stitched_mask_array is not None:
-                # Stamp n_mask_base / n_mask_discontinuity from the
-                # systematics mask (same C++ smoothing/sampling internal
-                # detections get).  The n_mask_base cut itself happens
-                # in C++ (ForceTask / process_image) via the fpfs/anacal
-                # n_mask_base_max configs -- Python only stamps and
-                # partitions.
-                det_use = self._stamp_external_mask_fractions(
-                    det_use,
-                    stitched_mask_array,
-                    mask_origin,
-                    pixel_scale,
-                    float(self.config.anacal.sigma_arcsec),
-                )
             # Basic geometric selection only: rows in no existing cell's
             # inner region (outside the coadd, patch border, or holes)
             # are dropped by the partition.
             det_cats, order = self._partition_external_detection(
                 det_use, regions, pixel_scale,
             )
+            if stitched_mask_array is not None:
+                # Stamp n_mask_base / n_mask_discontinuity from the
+                # systematics mask (same C++ smoothing/sampling internal
+                # detections get), per cell with that cell's kernel.
+                # The n_mask_base cut itself happens in C++ (ForceTask /
+                # process_image) via the fpfs/anacal n_mask_base_max
+                # configs -- Python only stamps and partitions.
+                det_cats = {
+                    key: self._stamp_external_mask_fractions(
+                        cat,
+                        stitched_mask_array,
+                        mask_origin,
+                        pixel_scale,
+                        cell_sigma[key],
+                    )
+                    for key, cat in det_cats.items()
+                }
             if not det_cats:
                 raise NoWorkFound(
                     f"External detection catalog is empty "

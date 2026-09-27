@@ -89,7 +89,6 @@ def _measure(exposure, skymap):
     the detector's differentiable selection weight ``wsel``.
     """
     config = MeasureCoaddsPipeConfig()
-    config.anacal.sigma_arcsec = 0.52   # detection / e1, e2, w kernel
     config.fpfs.sigma_shapelets1 = 0.45  # kernel 1
     config.fpfs.sigma_shapelets2 = 0.55  # kernel 2
     pipe = MeasureCoaddsPipe(config=config)

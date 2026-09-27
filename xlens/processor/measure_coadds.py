@@ -686,7 +686,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                                 - begin_x,
                                 np.asarray(det["x2_det"]) / pixel_scale
                                 - begin_y,
-                                sigma=self.config.anacal.sigma_arcsec * 1.5,
+                                sigma=self.anacal.get_sigma_arcsec(
+                                    cell.psf_array, pixel_scale,
+                                ) * 1.5,
                                 scale=pixel_scale,
                             ),
                             band,
