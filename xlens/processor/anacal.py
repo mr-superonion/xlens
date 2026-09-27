@@ -71,13 +71,13 @@ class AnacalConfig(Config):
     conv_tol = Field[float](
         doc=(
             "Smooth convergence gate of the Gaussian model fit: the step "
-            "of an epoch is scaled by a smoothstep of the chi2 decrease "
-            "the previous step achieved, relative to the source's own "
-            "chi2 scale, exactly 0 below conv_tol (the source stops) and "
-            "1 above 10 x conv_tol. Default 0: gate off, every source "
-            "takes num_epochs epochs. On real coadds the gate's own "
-            "derivative term is heavy-tailed on sources passing through "
-            "the ramp, so leave it off for production."
+            "of an epoch is scaled by a smoothstep of what the previous "
+            "step achieved -- its chi2 decrease relative to the source's "
+            "own chi2 scale, plus the squared relative covariance step "
+            "(dmxx^2 + dmyy^2 + 2 dmxy^2) / (T + 2 sigma^2)^2 and the "
+            "squared centre step / sigma^2 -- exactly 0 below conv_tol "
+            "(the source stops) and 1 above 10 x conv_tol. Default 0: "
+            "gate off, every source takes num_epochs epochs."
         ),
         default=0.0,
     )
