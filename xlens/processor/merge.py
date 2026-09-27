@@ -58,8 +58,13 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
+from ..utils.columns import MODEL_COLUMNS
 from ..utils.constants import FPFS_C0
 from ..wcs import extract_perturbation_dm_wcs, sky_to_pixel
+
+# The Gaussian model fit (flux and intrinsic covariance, with dg1/dg2
+# shear derivatives) as exported by the measurement tasks.
+MODEL_MERGE_COLUMNS: tuple[str, ...] = tuple(MODEL_COLUMNS.values())
 
 # Photo-z point-estimate columns written per object by photoZPipe: POINT_KEYS
 # times the five shear versions (0, 1p, 1m, 2p, 2m), in the same order the
@@ -505,6 +510,12 @@ class MergePipe(PipelineTask):
           ``{b}_dflux_fpfs1_dg2``, ``{b}_flux_fpfs1_err``, and the flux
           S/N ``{b}_s2n_fpfs1``, ``{b}_ds2n_fpfs1_dg1``,
           ``{b}_ds2n_fpfs1_dg2``.
+        - Gaussian model fit of the detection image, when present:
+          ``model_flux``, ``model_mxx``, ``model_myy``, ``model_mxy`` and
+          their ``_dg1`` / ``_dg2`` shear derivatives.  The spin-2 part
+          of the covariance is WCS-corrected like ``fpfs1_e*``; the model
+          ellipticity and size follow as ``e1 = (mxx - myy) / T``,
+          ``e2 = 2 mxy / T``, ``T = mxx + myy``.
         - Photo-z columns appended by ``_join_photoz`` (when present).
 
         Per-band shapes/moments, the detection-band raw FPFS columns
@@ -588,7 +599,7 @@ class MergePipe(PipelineTask):
             "n_mask_discontinuity",
             "psf_mask_value",
             "psf_mask_frac",
-        ):
+        ) + MODEL_MERGE_COLUMNS:
             if col in catalog.colnames:
                 keep.append(col)
         for b in bands:
@@ -875,6 +886,30 @@ class MergePipe(PipelineTask):
         catalog[f"{p}e1"] = e1_c
         catalog[f"{p}e2"] = e2_c
 
+        # The same two steps on the spin-2 part of the Gaussian model
+        # covariance, (mxx - myy, 2 mxy), whose shear derivatives are the
+        # differences of the moment derivatives.  The trace T = mxx + myy
+        # is spin-0 and stays, like m00 / m20 below; mxx, myy, mxy are
+        # rebuilt from the corrected pair and T.
+        if "model_mxx" in catalog.colnames:
+            mxx = np.asarray(catalog["model_mxx"], dtype=np.float64)
+            myy = np.asarray(catalog["model_myy"], dtype=np.float64)
+            mxy = np.asarray(catalog["model_mxy"], dtype=np.float64)
+            q1 = mxx - myy
+            q2 = 2.0 * mxy
+            dq1_dg1 = np.asarray(catalog["model_dmxx_dg1"]) - np.asarray(catalog["model_dmyy_dg1"])
+            dq1_dg2 = np.asarray(catalog["model_dmxx_dg2"]) - np.asarray(catalog["model_dmyy_dg2"])
+            dq2_dg1 = 2.0 * np.asarray(catalog["model_dmxy_dg1"])
+            dq2_dg2 = 2.0 * np.asarray(catalog["model_dmxy_dg2"])
+            q1_s = q1 - g1_w * dq1_dg1 - g2_w * dq1_dg2
+            q2_s = q2 - g1_w * dq2_dg1 - g2_w * dq2_dg2
+            q1_c = q1_s * cos2 + q2_s * sin2
+            q2_c = -q1_s * sin2 + q2_s * cos2
+            tr = mxx + myy
+            catalog["model_mxx"] = 0.5 * (tr + q1_c)
+            catalog["model_myy"] = 0.5 * (tr - q1_c)
+            catalog["model_mxy"] = 0.5 * q2_c
+
         # NOTE: the shear response (de*_dg*) and the spin-0 quantities (m00,
         # m20, fluxes) are deliberately NOT transformed by the WCS field
         # distortion.  Galaxies are randomly oriented, so the distortion does
@@ -894,7 +929,12 @@ class MergePipe(PipelineTask):
         (band-combined ``dm00_dg2`` / ``dm20_dg2``, the off-diagonal
         ``de1_dg2`` / ``de2_dg1`` if present, and per-band
         ``{b}_dflux_fpfs1_dg2``); the diagonal ``de2_dg2`` is left alone
-        because both ``e2`` and ``g2`` flip sign and the two cancel.
+        because both ``e2`` and ``g2`` flip sign and the two cancel.  For
+        the Gaussian model covariance the odd-in-x component ``model_mxy``
+        flips, together with the ``g2`` derivatives of the even components
+        (``model_dflux_dg2``, ``model_dmxx_dg2``, ``model_dmyy_dg2``) and
+        the ``g1`` derivative of ``model_mxy``; ``model_dmxy_dg2`` flips
+        twice and stays.
         Photo-z columns ending in ``_2p`` are swapped with their ``_2m``
         partners since ``g2`` reverses sign.
         """
@@ -910,6 +950,11 @@ class MergePipe(PipelineTask):
             f"{p}dm00_dg2",
             f"{p}dm20_dg2",
             "dwsel_dg2",
+            "model_mxy",
+            "model_dflux_dg2",
+            "model_dmxx_dg2",
+            "model_dmyy_dg2",
+            "model_dmxy_dg1",
         ):
             if col in catalog.colnames:
                 catalog[col] = -np.asarray(catalog[col])
