@@ -19,6 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import hashlib
 from typing import Any, Sequence
 
 import anacal
@@ -175,7 +176,38 @@ class AnacalTask(Task):
             "force_center": self.config.force_center,
             "conv_tol": self.config.conv_tol,
         }
+        # (e1, e2, T) of every PSF stamp fitted so far, keyed by a digest
+        # of the stamp bytes: the detection stack's band slices, the
+        # forced-measurement cells and the n_inputs sampling all hand
+        # over byte-identical stamps, so each (cell, band) PSF is fitted
+        # once per patch instead of ~2.5 times.
+        self._psf_moment_cache: dict = {}
         return
+
+    _PSF_MOMENT_CACHE_MAX = 20000
+
+    def psf_gauss_moments(
+        self, psf: NDArray, pixel_scale: float
+    ) -> tuple[float, float, float]:
+        """Adaptive moments (e1, e2, T) of one 2-D PSF stamp, from
+        ``anacal.ngmix.fit_psf_gauss``; memoised on the stamp bytes."""
+        p = np.ascontiguousarray(psf, dtype=np.float64)
+        key = (
+            hashlib.blake2b(p.tobytes(), digest_size=16).digest(),
+            p.shape,
+            float(pixel_scale),
+        )
+        hit = self._psf_moment_cache.get(key)
+        if hit is not None:
+            return hit
+        r = anacal.ngmix.fit_psf_gauss(p, pixel_scale)
+        if not (r.converged and r.T > 0):
+            raise RuntimeError("Gaussian fit to the PSF failed")
+        out = (float(r.e1), float(r.e2), float(r.T))
+        if len(self._psf_moment_cache) >= self._PSF_MOMENT_CACHE_MAX:
+            self._psf_moment_cache.clear()
+        self._psf_moment_cache[key] = out
+        return out
 
     def get_sigma_arcsec(
         self,
@@ -207,12 +239,10 @@ class AnacalTask(Task):
             )
         e1 = e2 = T = 0.0
         for w, p in zip(wgt / np.sum(wgt), psf):
-            r = anacal.ngmix.fit_psf_gauss(np.ascontiguousarray(p), pixel_scale)
-            if not (r.converged and r.T > 0):
-                raise RuntimeError("Gaussian fit to the PSF failed")
-            e1 += w * r.e1
-            e2 += w * r.e2
-            T += w * r.T
+            r1, r2, rT = self.psf_gauss_moments(p, pixel_scale)
+            e1 += w * r1
+            e2 += w * r2
+            T += w * rT
         d = anacal.ngmix.ellip_dilation(e1, e2, self.config.psf_dilation_max)
         return float(np.sqrt(T * d / 2.0))
 

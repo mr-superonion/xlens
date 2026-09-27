@@ -48,11 +48,10 @@ from lsst.pipe.base import (
 from lsst.pipe.tasks.coaddBase import makeSkyInfo
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
-from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
 from ..simulator.sim import MultibandSimTask
-from ..utils.columns import select_detection_columns
+from ..utils.columns import merge_structured, select_detection_columns
 from ..utils.handle import SimulatedExposureHandle
 from ..utils.image import make_object_psf, rle_table_to_mask
 from .measure_base import AnacalMeasureTaskBase, MeasureBandsConfigBase
@@ -642,7 +641,11 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             n_image_band = None
             handle = (n_image_handles or {}).get(band)
             if handle is not None:
-                n_image_band = np.asarray(handle.get().array)
+                # cast ONCE per band: n_inputs_at is called per cell
+                # and would otherwise cast the whole patch each time
+                n_image_band = np.ascontiguousarray(
+                    handle.get().array, dtype=np.float32
+                )
             begin_x = int(data.get("begin_x", 0))
             begin_y = int(data.get("begin_y", 0))
 
@@ -712,7 +715,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
 
         nbands = len(bands)
         return {
-            key: rfn.merge_arrays(parts, flatten=True)
+            key: merge_structured(parts)
             for key, parts in force_parts.items()
             if len(parts) == nbands
         }
@@ -859,9 +862,8 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         )
         cell_results = []
         for key, force_cat in force_cats.items():
-            final = rfn.merge_arrays(
+            final = merge_structured(
                 [select_detection_columns(det_cats[key]), force_cat],
-                flatten=True,
             )
             cell_results.append(final)
 

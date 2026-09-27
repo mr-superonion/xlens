@@ -56,3 +56,27 @@ def test_dilation_cap_config():
     with pytest.raises(FieldValidationError):
         cfg.validate()
     assert not hasattr(AnacalConfig(), "sigma_arcsec")
+
+
+def test_psf_moments_are_memoised(monkeypatch):
+    task = AnacalTask(config=AnacalConfig())
+    calls = []
+    real = anacal.ngmix.fit_psf_gauss
+
+    def counting(psf, scale, *a, **k):
+        calls.append(1)
+        return real(psf, scale, *a, **k)
+
+    monkeypatch.setattr(anacal.ngmix, "fit_psf_gauss", counting)
+    stack = np.stack([_psf(0.16, 0.16, 0.0), _psf(0.24, 0.24, 0.0)])
+    s1 = task.get_sigma_arcsec(stack, SCALE, noise_variance=[1.0, 3.0])
+    assert len(calls) == 2
+    # a byte-identical copy of one band (what the forced stage hands
+    # over) is a cache hit; a different stamp is not
+    s2 = task.get_sigma_arcsec(stack[1].copy(), SCALE)
+    assert len(calls) == 2
+    np.testing.assert_allclose(s2, np.sqrt(0.24), rtol=1e-6)
+    task.get_sigma_arcsec(_psf(0.2, 0.2, 0.0), SCALE)
+    assert len(calls) == 3
+    np.testing.assert_allclose(s1, task.get_sigma_arcsec(stack, SCALE, noise_variance=[1.0, 3.0]))
+    assert len(calls) == 3

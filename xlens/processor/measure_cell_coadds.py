@@ -42,10 +42,9 @@ from lsst.pipe.base import (
 )
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
-from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
-from ..utils.columns import select_detection_columns
+from ..utils.columns import merge_structured, select_detection_columns
 import lsst.geom as lsst_geom
 from lsst.afw.image import MaskX
 
@@ -829,7 +828,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         for cell_id, parts in cell_force_parts.items():
             if len(parts) != nbands:
                 continue
-            force_cats[cell_id] = rfn.merge_arrays(parts, flatten=True)
+            force_cats[cell_id] = merge_structured(parts)
         return force_cats
 
     def run(
@@ -1018,9 +1017,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         )
         cell_results = []
         for cell_id, force_cat in force_cats.items():
-            final = rfn.merge_arrays(
+            final = merge_structured(
                 [select_detection_columns(det_cats[cell_id]), force_cat],
-                flatten=True,
             )
             cell_results.append(final)
 

@@ -112,6 +112,43 @@ def select_detection_columns(catalog: NDArray) -> NDArray:
     return np.asarray(out)
 
 
+def merge_structured(arrays) -> NDArray:
+    """Concatenate the fields of equal-length structured arrays.
+
+    Drop-in for ``rfn.merge_arrays(arrays, flatten=True)`` on flat
+    structured arrays: the output is packed (no alignment padding), the
+    field order is the input order and a duplicate field name raises.
+    Unlike ``merge_arrays``, which builds the result one Python tuple per
+    row, this allocates the packed array once and copies column by
+    column -- two orders of magnitude faster on catalog-sized inputs,
+    and it holds the GIL for correspondingly less time inside the
+    threaded cell loops.
+    """
+    arrays = [np.asarray(a) for a in arrays]
+    if not arrays:
+        raise ValueError("merge_structured: no arrays")
+    n = len(arrays[0])
+    descr: list = []
+    seen: set = set()
+    for a in arrays:
+        if a.dtype.names is None:
+            raise TypeError("merge_structured: inputs must be structured")
+        if len(a) != n:
+            raise ValueError(
+                f"merge_structured: length mismatch {len(a)} != {n}"
+            )
+        for name in a.dtype.names:
+            if name in seen:
+                raise ValueError(f"field '{name}' occurs more than once")
+            seen.add(name)
+            descr.append((name, a.dtype.fields[name][0]))
+    out = np.empty(n, dtype=np.dtype(descr))
+    for a in arrays:
+        for name in a.dtype.names:
+            out[name] = a[name]
+    return out
+
+
 GAUSS_APERTURE_COLUMNS: tuple[str, ...] = (
     "flux_gauss0",
     "dflux_gauss0_dg1",
