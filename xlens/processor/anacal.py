@@ -96,9 +96,9 @@ class AnacalConfig(Config):
     )
     prior_sigma_e = Field[float](
         doc=(
-            "Width of the Gaussian prior towards 0 on the ellipticity "
-            "(e1, e2) of the model at the re-smoothing scale; 0 disables "
-            "it."
+            "Width of the Gaussian prior towards 0 on the intrinsic "
+            "ellipticity (e1, e2) = (mxx - myy, 2 mxy) / T of the model; "
+            "0 disables it."
         ),
         default=0.3,
     )
