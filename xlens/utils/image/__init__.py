@@ -35,6 +35,7 @@ working:
 
 from . import cells, hsm, masks, noise, prepare, psf  # noqa: F401
 from .cells import (  # noqa: F401
+    cell_coadd_to_exposure,
     prepare_data_one_cell,
     prepare_data_one_cell_multiband,
 )

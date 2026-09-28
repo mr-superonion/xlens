@@ -45,6 +45,7 @@ from lsst.pipe.base import connectionTypes as cT
 from lsst.skymap import BaseSkyMap
 
 from xlens.utils.image import (
+    cell_coadd_to_exposure,
     estimate_noise_variance,
     mask_to_rle_table,
     stack_psfs_cells,
@@ -407,12 +408,10 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
             cell_coadd = handle.get()
             psf_array[i] = stack_psfs_cells(cell_coadd=cell_coadd, npix=npix)
 
-            # to_legacy_exposure() gives the whole patch as an afw Exposure
-            # -- image, variance, mask planes and WCS -- with no cell-grid
-            # constraint. (to_legacy() returns a MultipleCellCoadd, which has
-            # no getBBox/asExposure; the exposure form is what this task and
-            # get_noise_corr need.)
-            exp = cell_coadd.to_legacy_exposure()
+            # The stitched whole-patch exposure -- image, variance, mask
+            # planes and WCS, no cell-grid constraint -- is what this task
+            # and get_noise_corr need.
+            exp = cell_coadd_to_exposure(cell_coadd)
             stitched = None
 
             if stitched_bbox is None:
@@ -466,7 +465,7 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
                 band, tract, patch,
             )
             cell_coadd = handle.get()
-            stitched = cell_coadd.to_legacy_exposure()
+            stitched = cell_coadd_to_exposure(cell_coadd)
             noise_corr_array[i] = self.get_noise_corr(
                 stitched,
                 mask_array,
