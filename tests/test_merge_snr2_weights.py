@@ -143,7 +143,7 @@ def test_shape_weight_columns_and_derivative():
         assert col in out.colnames
     f1, _ = shape_weight_f1(out["fpfs1_s2n"], *params[:3])
     f2, _ = shape_weight_f2(out["esq"], *params[3:])
-    np.testing.assert_allclose(out["w_shape"], np.asarray(out["wsel"]) * f1 * f2, rtol=1e-12)
+    np.testing.assert_allclose(out["w_shape"], f1 * f2, rtol=1e-12)   # shape weight only, wsel separate
     for c in (1, 2):
         plus, minus = finalize(_sheared(t, c, +1)), finalize(_sheared(t, c, -1))
         fd = (np.asarray(plus["w_shape"]) - np.asarray(minus["w_shape"])) / (2 * DG)

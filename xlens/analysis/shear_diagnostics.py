@@ -170,7 +170,7 @@ for _b in "grizy":
         f"2.0 * {_bxy} / ({_bxx} + {_byy})", -0.1, 0.1, 12, False)
     _lo, _hi = _PSF_FWHM_RANGE[_b]
     PROPERTY_BINS[f"psf_fwhm_{_b}"] = (
-        f"2.3548200 * PSFSCALE_ * np.sqrt(0.5 * ({_bxx} + {_byy}))",
+        f"2.3548200 * np.sqrt(0.5 * ({_bxx} + {_byy}))",
         _lo, _hi, 12, False)
 
 # Shear response per object, R = (R_1 + R_2)/2, the denominator of
@@ -224,7 +224,7 @@ for _b in "grizy":
     _bxx = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_xx"
     _byy = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_yy"
     HIST_BINS["%s_psf_fwhm" % _b] = (
-        f"2.3548200 * PSFSCALE_ * np.sqrt(0.5 * ({_bxx} + {_byy}))",
+        f"2.3548200 * np.sqrt(0.5 * ({_bxx} + {_byy}))",
         0.40, 1.60, 80, False,
     )
     # Fine bins on purpose: n_inputs is a comb of integer spikes with a
@@ -410,13 +410,16 @@ class ShearStatsPipeConfig(
         ),
         default="",
     )
-    weight_column = Field[str](
+    shape_weight_column = Field[str](
         doc=(
-            "Per-object shape weight; its shear response is read from "
-            "``d<weight_column>_dg1`` / ``_dg2`` (so ``wsel`` pairs with "
-            "``dwsel_dg1``, ``w_shape`` with ``dw_shape_dg1``)."
+            "Optional per-object SHAPE weight applied on top of the detection "
+            "weight wsel (e.g. ``w_shape`` from MergePipe): "
+            "``e = wsel * <col> * eps`` with the product-rule response "
+            "``wsel*<col>*de/dg + (dwsel/dg*<col> + wsel*d<col>/dg)*eps``; "
+            "the derivatives are read from ``d<col>_dg1`` / ``_dg2``. Empty "
+            "(default) means wsel alone."
         ),
-        default="wsel",
+        default="",
     )
     snr_min = Field[float](
         doc="Basic selection: keep {survey}_i_s2n_fpfs1 > snr_min.",
@@ -576,17 +579,6 @@ class ShearStatsPipeConfig(
         ),
         default="",
     )
-    psf_moment_pixel_scale = Field[float](
-        doc=(
-            "Arcsec per pixel applied to sqrt(PSF second moments) wherever a "
-            "PSF FWHM is formed (cuts, property bins, histograms). Leave at "
-            "1.0 when the ext_shapeHSM moments are already in arcsec**2 "
-            "(DP2 measureCellCoadds converts them); set the pixel scale "
-            "(HSC: 0.168) for catalogs whose moments are in pixel**2, so "
-            "every FWHM threshold and axis is in arcsec."
-        ),
-        default=1.0,
-    )
     psf_fwhm_max = Field[float](
         doc=(
             "Basic selection: keep i-band PSF FWHM < psf_fwhm_max "
@@ -625,14 +617,13 @@ class ShearStatsPipe(PipelineTask):
         serve any survey: ``SURVEY_`` for the column prefix (``hsc_``,
         ``lsst_``).
 
-        ``PSFSCALE_`` binds ``psf_moment_pixel_scale`` (arcsec per pixel).
-        DP2's ext_shapeHSM PSF moments are already in ARCSEC**2, so the
-        default 1.0 leaves ``2.3548 * sqrt(0.5*(xx+yy))`` unscaled; HSC's
-        are in pixel**2 and need 0.168 for the FWHM to come out in arcsec.
+        There is no pixel-scale placeholder: the ext_shapeHSM PSF second
+        moments are in ARCSEC**2 in every catalog this task reads (DP2
+        converts at measurement time; the HSC PDR3 catalogs were converted
+        in place), so a FWHM is ``2.3548 * sqrt(0.5*(xx+yy))`` as is.
         """
         assert isinstance(self.config, ShearStatsPipeConfig)
-        return (expr.replace("SURVEY_", self.config.survey + "_")
-                .replace("PSFSCALE_", repr(float(self.config.psf_moment_pixel_scale))))
+        return expr.replace("SURVEY_", self.config.survey + "_")
 
     def _bin_ranges(self) -> dict:
         """``{property: (lo, hi)}`` from ``config.bin_ranges_file``."""
@@ -680,7 +671,7 @@ class ShearStatsPipe(PipelineTask):
             xx_col = self._localize(_XX)
             yy_col = self._localize(_YY)
             if xx_col in cat.dtype.names and yy_col in cat.dtype.names:
-                fwhm = 2.3548200 * self.config.psf_moment_pixel_scale * np.sqrt(0.5 * (
+                fwhm = 2.3548200 * np.sqrt(0.5 * (
                     np.asarray(cat[xx_col], dtype=np.float64)
                     + np.asarray(cat[yy_col], dtype=np.float64)
                 ))
@@ -734,7 +725,7 @@ class ShearStatsPipe(PipelineTask):
                     "PSF FWHM cut skipped for band %s: no %s", band, bxx
                 )
                 continue
-            fwhm = 2.3548200 * self.config.psf_moment_pixel_scale * np.sqrt(0.5 * (
+            fwhm = 2.3548200 * np.sqrt(0.5 * (
                 np.asarray(cat[bxx], dtype=np.float64)
                 + np.asarray(cat[byy], dtype=np.float64)
             ))
@@ -822,14 +813,21 @@ class ShearStatsPipe(PipelineTask):
         # Same estimator pieces as the cluster test.
         e1 = np.asarray(cat["fpfs1_e1"], dtype=np.float64)
         e2 = np.asarray(cat["fpfs1_e2"], dtype=np.float64)
-        wname = self.config.weight_column
-        w = np.asarray(cat[wname], dtype=np.float64)
+        w = np.asarray(cat["wsel"], dtype=np.float64)
+        dw1 = np.asarray(cat["dwsel_dg1"], dtype=np.float64)
+        dw2 = np.asarray(cat["dwsel_dg2"], dtype=np.float64)
+        sw = self.config.shape_weight_column
+        if sw:
+            # e = wsel * w_shape * eps; product rule for the total weight
+            f = np.asarray(cat[sw], dtype=np.float64)
+            df1 = np.asarray(cat[f"d{sw}_dg1"], dtype=np.float64)
+            df2 = np.asarray(cat[f"d{sw}_dg2"], dtype=np.float64)
+            dw1, dw2 = dw1 * f + w * df1, dw2 * f + w * df2
+            w = w * f
         we1 = w * e1
         we2 = w * e2
-        r1 = np.asarray(cat["fpfs1_de1_dg1"], dtype=np.float64) * w \
-            + np.asarray(cat[f"d{wname}_dg1"], dtype=np.float64) * e1
-        r2 = np.asarray(cat["fpfs1_de2_dg2"], dtype=np.float64) * w \
-            + np.asarray(cat[f"d{wname}_dg2"], dtype=np.float64) * e2
+        r1 = np.asarray(cat["fpfs1_de1_dg1"], dtype=np.float64) * w + dw1 * e1
+        r2 = np.asarray(cat["fpfs1_de2_dg2"], dtype=np.float64) * w + dw2 * e2
 
         stats_rows = []
         spans = self._bin_ranges()

@@ -225,10 +225,14 @@ class MergePipeConfig(
     )
     shape_weight_params = ListField[float](
         doc=(
-            "When given, write the optimal shape weight "
-            "``w_shape = wsel * f1(fpfs1_s2n) * f2(esq)`` and its shear "
-            "response ``dw_shape_dg{1,2}`` (chain rule through wsel, the "
-            "combined S/N and esq). Seven numbers ``[amp, a, snr0, beta, "
+            "When given, write the optimal SHAPE weight "
+            "``w_shape = f1(fpfs1_s2n) * f2(esq)`` -- the factor that "
+            "multiplies the wsel-weighted shape, NOT including wsel -- and "
+            "its shear response ``dw_shape_dg{1,2}`` (chain rule through the "
+            "combined S/N and esq). The estimator is then "
+            "``e = wsel * w_shape * eps`` with response "
+            "``wsel*w_shape*de/dg + (dwsel/dg*w_shape + wsel*dw_shape/dg)*eps``. "
+            "Seven numbers ``[amp, a, snr0, beta, "
             "esq_scale, esq_step, esq_max]`` (six = amp 1), with "
             "``f1(s) = amp * (s/50)**beta / (1 + (snr0/s)**a)`` and "
             "``f2(v) = exp(-v/esq_scale) * S(v; esq_step, esq_max)``, S the "
@@ -739,10 +743,11 @@ class MergePipe(PipelineTask):
         return catalog[keep]
 
     def _add_shape_weight(self, catalog: Table) -> Table:
-        """``w_shape = wsel f1(fpfs1_s2n) f2(esq)`` with its shear response
-        ``dw_shape/dg = dwsel/dg f1 f2 + wsel (f1' ds2n/dg f2 + f1 f2' desq/dg)``.
-        Must run after ``esq``/``desq_dg*`` exist, i.e. on the
-        WCS-corrected shape."""
+        """``w_shape = f1(fpfs1_s2n) f2(esq)`` (no wsel) with its shear
+        response ``dw_shape/dg = f1' ds2n/dg f2 + f1 f2' desq/dg``.  The
+        detection weight stays in ``wsel``; consumers form
+        ``wsel * w_shape`` and apply the product rule.  Must run after
+        ``esq``/``desq_dg*`` exist, i.e. on the WCS-corrected shape."""
         p = self.config.fpfs_prefix
         params = list(self.config.shape_weight_params)
         amp = params.pop(0) if len(params) == 7 else 1.0
@@ -751,13 +756,11 @@ class MergePipe(PipelineTask):
         v = np.asarray(catalog["esq"], dtype=np.float64)
         f1, df1 = shape_weight_f1(s, a, snr0, beta, amp)
         f2, df2 = shape_weight_f2(v, esq_scale, esq_step, esq_max)
-        w = np.asarray(catalog["wsel"], dtype=np.float64)
-        catalog["w_shape"] = w * f1 * f2
+        catalog["w_shape"] = f1 * f2
         for c in (1, 2):
-            dw = np.asarray(catalog[f"dwsel_dg{c}"], dtype=np.float64)
             ds = np.asarray(catalog[f"{p}ds2n_dg{c}"], dtype=np.float64)
             dv = np.asarray(catalog[f"desq_dg{c}"], dtype=np.float64)
-            catalog[f"dw_shape_dg{c}"] = dw * f1 * f2 + w * (df1 * ds * f2 + f1 * df2 * dv)
+            catalog[f"dw_shape_dg{c}"] = df1 * ds * f2 + f1 * df2 * dv
         return catalog
 
     def _collect_src_tables(self, srcList, tract=None,

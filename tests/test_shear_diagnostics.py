@@ -176,7 +176,7 @@ def test_default_registries_on_full_columns():
 
 
 def test_weight_and_snr_columns(monkeypatch):
-    """weight_column / snr_column redirect the estimator and the cut."""
+    """shape_weight_column multiplies wsel with the product rule; snr_column redirects the cut."""
     monkeypatch.setattr(
         sd, "PROPERTY_BINS",
         {"i_mag": ("hsc_i_mag_gauss2", 20.0, 25.0, 1, False)},
@@ -192,7 +192,7 @@ def test_weight_and_snr_columns(monkeypatch):
     import numpy.lib.recfunctions as rfn
     cat = rfn.append_fields(cat, list(extra), list(extra.values()), usemask=False)
     config = ShearStatsPipeConfig()
-    config.weight_column = "w_shape"
+    config.shape_weight_column = "w_shape"
     config.snr_column = "fpfs1_s2n"
     config.snr_min = 20.0
     out = ShearStatsPipe(config=config).run(catalog=cat)
@@ -205,7 +205,7 @@ def test_weight_and_snr_columns(monkeypatch):
     inbin = sel[(sel["hsc_i_mag_gauss2"] >= 20.0) & (sel["hsc_i_mag_gauss2"] < 25.0)]
     row = out.meanShearStats[0]
     assert row["n_gal"] == len(inbin)
-    np.testing.assert_allclose(row["sum_we1"], np.sum(inbin["w_shape"] * inbin["fpfs1_e1"]))
-    np.testing.assert_allclose(
-        row["sum_r1"],
-        np.sum(inbin["w_shape"] * inbin["fpfs1_de1_dg1"] + inbin["dw_shape_dg1"] * inbin["fpfs1_e1"]))
+    W = inbin["wsel"] * inbin["w_shape"]
+    dW1 = inbin["dwsel_dg1"] * inbin["w_shape"] + inbin["wsel"] * inbin["dw_shape_dg1"]
+    np.testing.assert_allclose(row["sum_we1"], np.sum(W * inbin["fpfs1_e1"]))
+    np.testing.assert_allclose(row["sum_r1"], np.sum(W * inbin["fpfs1_de1_dg1"] + dW1 * inbin["fpfs1_e1"]))
