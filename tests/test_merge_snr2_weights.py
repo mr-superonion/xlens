@@ -125,11 +125,11 @@ def test_snr2_derivatives_match_finite_difference():
             np.testing.assert_allclose(np.asarray(out[dcol]), fd, rtol=2e-5, atol=2e-6)
 
 
-def test_shape_weight_columns_and_derivative():
-    params = [1.6, 14.0, 0.06, 0.0875, 0.565, 0.64]
+def test_shape_weight_folded_into_wsel():
+    params = [3.0, 1.6, 14.0, 0.06, 0.0875, 0.565, 0.64]
     pipe = _pipe(per_object_snr2_weights=True, shape_weight_params=params)
     t = _perband()
-    # shape weight needs esq/desq (built by _finalize_columns) -> emulate
+
     def finalize(tab):
         tab = _combined(pipe, tab)
         tab["is_primary"] = np.ones(len(tab), dtype=bool)
@@ -139,20 +139,15 @@ def test_shape_weight_columns_and_derivative():
             tab[k] = np.zeros(len(tab))
         return pipe._finalize_columns(tab, [])
     out = finalize(t)
-    for col in ("w_shape", "dw_shape_dg1", "dw_shape_dg2", "fpfs1_s2n"):
-        assert col in out.colnames
-    f1, _ = shape_weight_f1(out["fpfs1_s2n"], *params[:3])
-    f2, _ = shape_weight_f2(out["esq"], *params[3:])
-    np.testing.assert_allclose(out["w_shape"], f1 * f2, rtol=1e-12)   # shape weight only, wsel separate
+    assert "w_shape" not in out.colnames and "dw_shape_dg1" not in out.colnames
+    f1, _ = shape_weight_f1(out["fpfs1_s2n"], *params[1:4], params[0])
+    f2, _ = shape_weight_f2(out["esq"], *params[4:])
+    # wsel now carries detection x shape weight
+    np.testing.assert_allclose(out["wsel"], np.asarray(t["wsel"]) * f1 * f2, rtol=1e-12)
+    # and dwsel_dg is the derivative of that product (finite difference of the whole pipeline)
     for c in (1, 2):
         plus, minus = finalize(_sheared(t, c, +1)), finalize(_sheared(t, c, -1))
-        fd = (np.asarray(plus["w_shape"]) - np.asarray(minus["w_shape"])) / (2 * DG)
-        np.testing.assert_allclose(np.asarray(out[f"dw_shape_dg{c}"]), fd, rtol=2e-5, atol=1e-7)
-    # a leading amplitude scales w_shape and its response together
-    pipe3 = _pipe(per_object_snr2_weights=True, shape_weight_params=[3.0] + params)
-    out3 = pipe3._finalize_columns(_combined(pipe3, t).copy(), []) if False else None
-    f1a, df1a = shape_weight_f1(out["fpfs1_s2n"], *params[:3], 3.0)
-    np.testing.assert_allclose(f1a, 3.0 * f1, rtol=1e-12)
-    # the smooth step really reaches zero at esq_max
-    f2z, df2z = shape_weight_f2(np.array([0.64, 0.7]), *params[3:])
+        fd = (np.asarray(plus["wsel"]) - np.asarray(minus["wsel"])) / (2 * DG)
+        np.testing.assert_allclose(np.asarray(out[f"dwsel_dg{c}"]), fd, rtol=2e-5, atol=1e-7)
+    f2z, df2z = shape_weight_f2(np.array([0.64, 0.7]), *params[4:])
     assert np.all(f2z == 0.0) and np.all(df2z == 0.0)

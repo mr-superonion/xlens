@@ -225,19 +225,18 @@ class MergePipeConfig(
     )
     shape_weight_params = ListField[float](
         doc=(
-            "When given, write the optimal SHAPE weight "
-            "``w_shape = f1(fpfs1_s2n) * f2(esq)`` -- the factor that "
-            "multiplies the wsel-weighted shape, NOT including wsel -- and "
-            "its shear response ``dw_shape_dg{1,2}`` (chain rule through the "
-            "combined S/N and esq). The estimator is then "
-            "``e = wsel * w_shape * eps`` with response "
-            "``wsel*w_shape*de/dg + (dwsel/dg*w_shape + wsel*dw_shape/dg)*eps``. "
+            "When given, FOLD the optimal shape weight "
+            "``w_opt = f1(fpfs1_s2n) * f2(esq)`` into the selection weight: "
+            "``wsel <- wsel * w_opt`` and ``dwsel_dg <- dwsel_dg * w_opt + "
+            "wsel * dw_opt/dg`` (chain rule through the combined S/N and esq). "
+            "No new column: downstream code keeps using ``e = wsel * eps`` and "
+            "``response = wsel * de/dg + dwsel/dg * eps`` unchanged. "
             "Seven numbers ``[amp, a, snr0, beta, "
             "esq_scale, esq_step, esq_max]`` (six = amp 1), with "
             "``f1(s) = amp * (s/50)**beta / (1 + (snr0/s)**a)`` and "
             "``f2(v) = exp(-v/esq_scale) * S(v; esq_step, esq_max)``, S the "
             "quintic smooth step from 1 at esq_step to 0 at esq_max. "
-            "Empty (default) writes no weight."
+            "Empty (default) leaves wsel as the pure detection weight."
         ),
         default=[],
     )
@@ -652,8 +651,7 @@ class MergePipe(PipelineTask):
             if col in catalog.colnames:
                 keep.append(col)
         if len(self.config.shape_weight_params) in (6, 7):
-            catalog = self._add_shape_weight(catalog)
-            keep += ["w_shape", "dw_shape_dg1", "dw_shape_dg2"]
+            catalog = self._apply_shape_weight(catalog)
         # Per-source PSF-quality columns, carried through when the
         # measurement produced them. n_mask_discontinuity counts
         # INEXACT_PSF pixels in a box around the source (current
@@ -742,12 +740,12 @@ class MergePipe(PipelineTask):
             raise RuntimeError(f"merge finalize: missing expected columns: {missing}")
         return catalog[keep]
 
-    def _add_shape_weight(self, catalog: Table) -> Table:
-        """``w_shape = f1(fpfs1_s2n) f2(esq)`` (no wsel) with its shear
-        response ``dw_shape/dg = f1' ds2n/dg f2 + f1 f2' desq/dg``.  The
-        detection weight stays in ``wsel``; consumers form
-        ``wsel * w_shape`` and apply the product rule.  Must run after
-        ``esq``/``desq_dg*`` exist, i.e. on the WCS-corrected shape."""
+    def _apply_shape_weight(self, catalog: Table) -> Table:
+        """Fold ``w_opt = f1(fpfs1_s2n) f2(esq)`` into the selection weight:
+        ``wsel <- wsel w_opt``, ``dwsel_dg <- dwsel_dg w_opt + wsel dw_opt/dg``
+        with ``dw_opt/dg = f1' ds2n/dg f2 + f1 f2' desq/dg``.  Runs after
+        the row filter and on the WCS-corrected shape (``esq``/``desq_dg*``),
+        so the row set is unchanged; a taper to zero leaves wsel = 0 rows."""
         p = self.config.fpfs_prefix
         params = list(self.config.shape_weight_params)
         amp = params.pop(0) if len(params) == 7 else 1.0
@@ -756,11 +754,15 @@ class MergePipe(PipelineTask):
         v = np.asarray(catalog["esq"], dtype=np.float64)
         f1, df1 = shape_weight_f1(s, a, snr0, beta, amp)
         f2, df2 = shape_weight_f2(v, esq_scale, esq_step, esq_max)
-        catalog["w_shape"] = f1 * f2
+        w = np.asarray(catalog["wsel"], dtype=np.float64)
+        wopt = f1 * f2
         for c in (1, 2):
             ds = np.asarray(catalog[f"{p}ds2n_dg{c}"], dtype=np.float64)
             dv = np.asarray(catalog[f"desq_dg{c}"], dtype=np.float64)
-            catalog[f"dw_shape_dg{c}"] = df1 * ds * f2 + f1 * df2 * dv
+            dwopt = df1 * ds * f2 + f1 * df2 * dv
+            dw = np.asarray(catalog[f"dwsel_dg{c}"], dtype=np.float64)
+            catalog[f"dwsel_dg{c}"] = dw * wopt + w * dwopt
+        catalog["wsel"] = w * wopt
         return catalog
 
     def _collect_src_tables(self, srcList, tract=None,

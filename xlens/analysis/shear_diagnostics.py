@@ -410,17 +410,6 @@ class ShearStatsPipeConfig(
         ),
         default="",
     )
-    shape_weight_column = Field[str](
-        doc=(
-            "Optional per-object SHAPE weight applied on top of the detection "
-            "weight wsel (e.g. ``w_shape`` from MergePipe): "
-            "``e = wsel * <col> * eps`` with the product-rule response "
-            "``wsel*<col>*de/dg + (dwsel/dg*<col> + wsel*d<col>/dg)*eps``; "
-            "the derivatives are read from ``d<col>_dg1`` / ``_dg2``. Empty "
-            "(default) means wsel alone."
-        ),
-        default="",
-    )
     snr_min = Field[float](
         doc="Basic selection: keep {survey}_i_s2n_fpfs1 > snr_min.",
         default=10.0,
@@ -814,20 +803,12 @@ class ShearStatsPipe(PipelineTask):
         e1 = np.asarray(cat["fpfs1_e1"], dtype=np.float64)
         e2 = np.asarray(cat["fpfs1_e2"], dtype=np.float64)
         w = np.asarray(cat["wsel"], dtype=np.float64)
-        dw1 = np.asarray(cat["dwsel_dg1"], dtype=np.float64)
-        dw2 = np.asarray(cat["dwsel_dg2"], dtype=np.float64)
-        sw = self.config.shape_weight_column
-        if sw:
-            # e = wsel * w_shape * eps; product rule for the total weight
-            f = np.asarray(cat[sw], dtype=np.float64)
-            df1 = np.asarray(cat[f"d{sw}_dg1"], dtype=np.float64)
-            df2 = np.asarray(cat[f"d{sw}_dg2"], dtype=np.float64)
-            dw1, dw2 = dw1 * f + w * df1, dw2 * f + w * df2
-            w = w * f
         we1 = w * e1
         we2 = w * e2
-        r1 = np.asarray(cat["fpfs1_de1_dg1"], dtype=np.float64) * w + dw1 * e1
-        r2 = np.asarray(cat["fpfs1_de2_dg2"], dtype=np.float64) * w + dw2 * e2
+        r1 = np.asarray(cat["fpfs1_de1_dg1"], dtype=np.float64) * w \
+            + np.asarray(cat["dwsel_dg1"], dtype=np.float64) * e1
+        r2 = np.asarray(cat["fpfs1_de2_dg2"], dtype=np.float64) * w \
+            + np.asarray(cat["dwsel_dg2"], dtype=np.float64) * e2
 
         stats_rows = []
         spans = self._bin_ranges()

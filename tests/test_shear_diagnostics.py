@@ -175,8 +175,8 @@ def test_default_registries_on_full_columns():
     assert {"i_mag", "abs_we1", "abs_we2", "response", "cmd_i_rmi"} <= names
 
 
-def test_weight_and_snr_columns(monkeypatch):
-    """shape_weight_column multiplies wsel with the product rule; snr_column redirects the cut."""
+def test_snr_column(monkeypatch):
+    """snr_column redirects the S/N cut; the weight is always wsel."""
     monkeypatch.setattr(
         sd, "PROPERTY_BINS",
         {"i_mag": ("hsc_i_mag_gauss2", 20.0, 25.0, 1, False)},
@@ -185,14 +185,9 @@ def test_weight_and_snr_columns(monkeypatch):
     monkeypatch.setattr(sd, "HIST2D_BINS", {})
     cat = _make_catalog()
     rng = np.random.RandomState(5)
-    extra = {"w_shape": rng.uniform(0.1, 0.5, len(cat)),
-             "dw_shape_dg1": rng.normal(0, 0.05, len(cat)),
-             "dw_shape_dg2": rng.normal(0, 0.05, len(cat)),
-             "fpfs1_s2n": rng.uniform(3, 200, len(cat))}
     import numpy.lib.recfunctions as rfn
-    cat = rfn.append_fields(cat, list(extra), list(extra.values()), usemask=False)
+    cat = rfn.append_fields(cat, ["fpfs1_s2n"], [rng.uniform(3, 200, len(cat))], usemask=False)
     config = ShearStatsPipeConfig()
-    config.shape_weight_column = "w_shape"
     config.snr_column = "fpfs1_s2n"
     config.snr_min = 20.0
     out = ShearStatsPipe(config=config).run(catalog=cat)
@@ -205,7 +200,7 @@ def test_weight_and_snr_columns(monkeypatch):
     inbin = sel[(sel["hsc_i_mag_gauss2"] >= 20.0) & (sel["hsc_i_mag_gauss2"] < 25.0)]
     row = out.meanShearStats[0]
     assert row["n_gal"] == len(inbin)
-    W = inbin["wsel"] * inbin["w_shape"]
-    dW1 = inbin["dwsel_dg1"] * inbin["w_shape"] + inbin["wsel"] * inbin["dw_shape_dg1"]
-    np.testing.assert_allclose(row["sum_we1"], np.sum(W * inbin["fpfs1_e1"]))
-    np.testing.assert_allclose(row["sum_r1"], np.sum(W * inbin["fpfs1_de1_dg1"] + dW1 * inbin["fpfs1_e1"]))
+    np.testing.assert_allclose(row["sum_we1"], np.sum(inbin["wsel"] * inbin["fpfs1_e1"]))
+    np.testing.assert_allclose(
+        row["sum_r1"],
+        np.sum(inbin["wsel"] * inbin["fpfs1_de1_dg1"] + inbin["dwsel_dg1"] * inbin["fpfs1_e1"]))
