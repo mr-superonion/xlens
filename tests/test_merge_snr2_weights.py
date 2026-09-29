@@ -125,29 +125,34 @@ def test_snr2_derivatives_match_finite_difference():
             np.testing.assert_allclose(np.asarray(out[dcol]), fd, rtol=2e-5, atol=2e-6)
 
 
-def test_shape_weight_folded_into_wsel():
+def test_shape_weight_applied_to_shape():
     params = [3.0, 1.6, 14.0, 0.06, 0.0875, 0.565, 0.64]
     pipe = _pipe(per_object_snr2_weights=True, shape_weight_params=params)
+    plain = _pipe(per_object_snr2_weights=True)
     t = _perband()
 
-    def finalize(tab):
-        tab = _combined(pipe, tab)
+    def finalize(pp, tab):
+        tab = _combined(pp, tab)
         tab["is_primary"] = np.ones(len(tab), dtype=bool)
         tab["object_id"] = np.arange(len(tab))
         for k in ("ra", "dec", "x1", "x2", "x1_det", "x2_det", "n_mask_base",
                   "bkg", "dbkg_dg1", "dbkg_dg2", "tract_id", "patch_x", "patch_y"):
             tab[k] = np.zeros(len(tab))
-        return pipe._finalize_columns(tab, [])
-    out = finalize(t)
+        return pp._finalize_columns(tab, [])
+    out, ref = finalize(pipe, t), finalize(plain, t)
     assert "w_shape" not in out.colnames and "dw_shape_dg1" not in out.colnames
-    f1, _ = shape_weight_f1(out["fpfs1_s2n"], *params[1:4], params[0])
-    f2, _ = shape_weight_f2(out["esq"], *params[4:])
-    # wsel now carries detection x shape weight
-    np.testing.assert_allclose(out["wsel"], np.asarray(t["wsel"]) * f1 * f2, rtol=1e-12)
-    # and dwsel_dg is the derivative of that product (finite difference of the whole pipeline)
-    for c in (1, 2):
-        plus, minus = finalize(_sheared(t, c, +1)), finalize(_sheared(t, c, -1))
-        fd = (np.asarray(plus["wsel"]) - np.asarray(minus["wsel"])) / (2 * DG)
-        np.testing.assert_allclose(np.asarray(out[f"dwsel_dg{c}"]), fd, rtol=2e-5, atol=1e-7)
+    f1, _ = shape_weight_f1(ref["fpfs1_s2n"], *params[1:4], params[0])
+    f2, _ = shape_weight_f2(ref["esq"], *params[4:])
+    # wsel, esq untouched; the shape carries the weight
+    np.testing.assert_allclose(out["wsel"], ref["wsel"], rtol=1e-12)
+    np.testing.assert_allclose(out["esq"], ref["esq"], rtol=1e-12)
+    for i in (1, 2):
+        np.testing.assert_allclose(out[f"fpfs1_e{i}"], np.asarray(ref[f"fpfs1_e{i}"]) * f1 * f2, rtol=1e-12)
+    # and fpfs1_de_i_dg_j is the derivative of the weighted shape (finite difference of the whole pipeline)
+    for j in (1, 2):
+        plus, minus = finalize(pipe, _sheared(t, j, +1)), finalize(pipe, _sheared(t, j, -1))
+        for i in (1, 2):
+            fd = (np.asarray(plus[f"fpfs1_e{i}"]) - np.asarray(minus[f"fpfs1_e{i}"])) / (2 * DG)
+            np.testing.assert_allclose(np.asarray(out[f"fpfs1_de{i}_dg{j}"]), fd, rtol=2e-5, atol=1e-7)
     f2z, df2z = shape_weight_f2(np.array([0.64, 0.7]), *params[4:])
     assert np.all(f2z == 0.0) and np.all(df2z == 0.0)

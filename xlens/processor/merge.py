@@ -225,18 +225,20 @@ class MergePipeConfig(
     )
     shape_weight_params = ListField[float](
         doc=(
-            "When given, FOLD the optimal shape weight "
-            "``w_opt = f1(fpfs1_s2n) * f2(esq)`` into the selection weight: "
-            "``wsel <- wsel * w_opt`` and ``dwsel_dg <- dwsel_dg * w_opt + "
-            "wsel * dw_opt/dg`` (chain rule through the combined S/N and esq). "
-            "No new column: downstream code keeps using ``e = wsel * eps`` and "
-            "``response = wsel * de/dg + dwsel/dg * eps`` unchanged. "
+            "When given, apply the optimal shape weight "
+            "``w_opt = f1(fpfs1_s2n) * f2(esq)`` to the shape itself: "
+            "``fpfs1_e{1,2} <- w_opt * eps`` and ``fpfs1_de{i}_dg{j} <- "
+            "w_opt * deps_i/dg_j + dw_opt/dg_j * eps_i`` (chain rule through "
+            "the combined S/N and esq). ``wsel`` stays the detection weight and "
+            "no column is added: downstream code keeps using ``e = wsel * "
+            "fpfs1_e`` and ``response = wsel * fpfs1_de/dg + dwsel/dg * "
+            "fpfs1_e`` unchanged; ``esq`` stays the UNWEIGHTED |eps|^2. "
             "Seven numbers ``[amp, a, snr0, beta, "
             "esq_scale, esq_step, esq_max]`` (six = amp 1), with "
             "``f1(s) = amp * (s/50)**beta / (1 + (snr0/s)**a)`` and "
             "``f2(v) = exp(-v/esq_scale) * S(v; esq_step, esq_max)``, S the "
             "quintic smooth step from 1 at esq_step to 0 at esq_max. "
-            "Empty (default) leaves wsel as the pure detection weight."
+            "Empty (default) leaves the shape unweighted."
         ),
         default=[],
     )
@@ -741,11 +743,12 @@ class MergePipe(PipelineTask):
         return catalog[keep]
 
     def _apply_shape_weight(self, catalog: Table) -> Table:
-        """Fold ``w_opt = f1(fpfs1_s2n) f2(esq)`` into the selection weight:
-        ``wsel <- wsel w_opt``, ``dwsel_dg <- dwsel_dg w_opt + wsel dw_opt/dg``
-        with ``dw_opt/dg = f1' ds2n/dg f2 + f1 f2' desq/dg``.  Runs after
-        the row filter and on the WCS-corrected shape (``esq``/``desq_dg*``),
-        so the row set is unchanged; a taper to zero leaves wsel = 0 rows."""
+        """Apply ``w_opt = f1(fpfs1_s2n) f2(esq)`` to the shape:
+        ``e_i <- w_opt e_i``, ``de_i/dg_j <- w_opt de_i/dg_j + dw_opt/dg_j e_i``
+        with ``dw_opt/dg = f1' ds2n/dg f2 + f1 f2' desq/dg``.  ``wsel`` and
+        ``esq`` (the unweighted |e|^2 that f2 is defined on) are untouched.
+        Runs after the row filter and on the WCS-corrected shape, so the row
+        set is unchanged; a taper to zero leaves e = 0 rows."""
         p = self.config.fpfs_prefix
         params = list(self.config.shape_weight_params)
         amp = params.pop(0) if len(params) == 7 else 1.0
@@ -754,15 +757,19 @@ class MergePipe(PipelineTask):
         v = np.asarray(catalog["esq"], dtype=np.float64)
         f1, df1 = shape_weight_f1(s, a, snr0, beta, amp)
         f2, df2 = shape_weight_f2(v, esq_scale, esq_step, esq_max)
-        w = np.asarray(catalog["wsel"], dtype=np.float64)
         wopt = f1 * f2
-        for c in (1, 2):
-            ds = np.asarray(catalog[f"{p}ds2n_dg{c}"], dtype=np.float64)
-            dv = np.asarray(catalog[f"desq_dg{c}"], dtype=np.float64)
+        e = {i: np.asarray(catalog[f"{p}e{i}"], dtype=np.float64) for i in (1, 2)}
+        for j in (1, 2):
+            ds = np.asarray(catalog[f"{p}ds2n_dg{j}"], dtype=np.float64)
+            dv = np.asarray(catalog[f"desq_dg{j}"], dtype=np.float64)
             dwopt = df1 * ds * f2 + f1 * df2 * dv
-            dw = np.asarray(catalog[f"dwsel_dg{c}"], dtype=np.float64)
-            catalog[f"dwsel_dg{c}"] = dw * wopt + w * dwopt
-        catalog["wsel"] = w * wopt
+            for i in (1, 2):
+                col = f"{p}de{i}_dg{j}"
+                if col in catalog.colnames:
+                    de = np.asarray(catalog[col], dtype=np.float64)
+                    catalog[col] = wopt * de + dwopt * e[i]
+        for i in (1, 2):
+            catalog[f"{p}e{i}"] = wopt * e[i]
         return catalog
 
     def _collect_src_tables(self, srcList, tract=None,
