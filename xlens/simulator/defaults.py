@@ -114,3 +114,6 @@ noise_variance_defaults = {
         "euclid": 0.314,
     },
 }
+
+# Objects centred more than this many pixels outside an image are not drawn.
+SIM_INCLUSION_PADDING = 200  # pixels

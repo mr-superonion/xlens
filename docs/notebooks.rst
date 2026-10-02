@@ -19,6 +19,7 @@ Cluster Lensing
 .. toctree::
 
     Cluster lensing profile <notebooks/example1_cluster_lensing>
+    Cluster scene from an object table <notebooks/example2_cluster_scene>
 
 Random Field
 ------------

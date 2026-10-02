@@ -23,11 +23,13 @@
 
 Provides an abstract :class:`BaseGalaxyCatalog` and concrete implementations
 for CatSim 2017, OpenUniverse 2024 Rubin-Roman, and Euclid Flagship 2025
-catalogs.
+catalogs, and :class:`SceneCatalog`, which renders a given list of objects
+at their own sky positions.
 """
 
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import Any, ClassVar, Iterable
 
 import fitsio
@@ -36,6 +38,7 @@ import lsst
 import numpy as np
 from numpy.lib import recfunctions as rfn
 
+from .defaults import SIM_INCLUSION_PADDING
 from .layout import Layout
 
 
@@ -124,11 +127,29 @@ class BaseGalaxyCatalog(ABC):
     # computed over.  All three catalogs fill an RA/Dec box, so naming
     # the columns is the only thing that varies between them.
     radec_columns: ClassVar[tuple[str, str]] = ("ra", "dec")
+    # Placement and lensing columns every truth catalog carries, ahead of the
+    # input-catalog property columns merged in by the constructor.
+    placement_dtype: ClassVar[list[tuple[str, str]]] = [
+        ("indices", "i8"),
+        ("redshift", "f8"),
+        ("angles", "f8"),
+        ("gamma1", "f8"),
+        ("gamma2", "f8"),
+        ("kappa", "f8"),
+        ("dx", "f8"),
+        ("dy", "f8"),
+        ("ra", "f8"),
+        ("dec", "f8"),  # post-lensed ra, dec
+        ("prelensed_ra", "f8"),
+        ("prelensed_dec", "f8"),
+        ("has_finite_shear", "bool"),
+        ("hlr", "f8"),
+    ]
 
     def __init__(
         self,
         *,
-        rng: np.random.RandomState,
+        rng: np.random.RandomState | None,
         tract_info: lsst.skymap.tractInfo.ExplicitTractInfo,
         layout_name: str,
         sep_arcsec: float | None = None,
@@ -145,12 +166,17 @@ class BaseGalaxyCatalog(ABC):
 
         Parameters
         ----------
-        rng : numpy.random.RandomState
-            Random number generator (old NumPy API).
+        rng : numpy.random.RandomState or None
+            Random number generator (old NumPy API).  The ``scene``
+            layout draws nothing at random and does not need one.
         tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
             Tract information providing WCS and bounding box.
-        layout_name : {'grid', 'hex', 'random', 'random_disk'}
-            Pattern used to place galaxies.
+        layout_name : {'grid', 'hex', 'random', 'random_disk', 'scene'}
+            Pattern used to place galaxies.  ``scene`` places every
+            (selected) input row once, at its own ``radec_columns``
+            position and with its own orientation (``angles`` = 0, so the
+            profile is drawn as the catalog gives it); the others sample
+            rows onto a :class:`Layout` with random orientations.
         sep_arcsec : float or None, optional
             Spacing for grid/hex layouts.
         indice_group_id : int or None, optional
@@ -184,13 +210,6 @@ class BaseGalaxyCatalog(ABC):
         ps = float(wcs.getPixelScale().asArcseconds())
         self.pixel_scale = ps
         bbox = tract_info.getBBox()
-        layout = Layout(
-            layout_name=layout_name,
-            wcs=wcs,
-            boundary_box=bbox,
-            sep_arcsec=sep_arcsec,
-            extend_ratio=extend_ratio,
-        )
         # ``input_row_ids`` are the row numbers in the unfiltered input
         # file, carried alongside the (possibly cut) catalog instead of
         # as a column to avoid copying the whole array.
@@ -200,55 +219,63 @@ class BaseGalaxyCatalog(ABC):
             select_upper_limit=select_upper_limit,
         )
 
-        # density drives how many objects the layout will place
-        density = self._compute_density(input_catalog)
-        # positions to place galaxies
-        shifts_array = layout.get_shifts(rng=rng, density=density)
+        if layout_name == "scene":
+            # every row once, at its own position, with its own orientation
+            num = len(input_catalog)
+            idx = np.arange(num, dtype=int)
+            ra_col, dec_col = self.radec_columns
+            pix_x, pix_y = wcs.skyToPixelArray(
+                np.asarray(input_catalog[ra_col], dtype=float),
+                np.asarray(input_catalog[dec_col], dtype=float),
+                degrees=True,
+            )
+            dx = (np.asarray(pix_x) - self.x_center) * ps
+            dy = (np.asarray(pix_y) - self.y_center) * ps
+            # the catalog's own orientation is kept: no extra rotation
+            angles = np.zeros(num)
+        else:
+            layout = Layout(
+                layout_name=layout_name,
+                wcs=wcs,
+                boundary_box=bbox,
+                sep_arcsec=sep_arcsec,
+                extend_ratio=extend_ratio,
+            )
+            # density drives how many objects the layout will place
+            density = self._compute_density(input_catalog)
+            # positions to place galaxies
+            shifts_array = layout.get_shifts(rng=rng, density=density)
+
+            # choose which catalog rows populate those positions
+            num = len(shifts_array)
+            catalog_size = len(input_catalog)
+            if (indice_group_id is None) or (indice_group_id < 0):
+                probs = self._probabilities_for_sampling(input_catalog)
+                integers = np.arange(0, catalog_size, dtype=int)
+                idx = rng.choice(integers, size=num, p=probs)
+            else:
+                indice_min = indice_group_id * num
+                indice_max = min(indice_min + num, catalog_size)
+                if indice_min >= catalog_size:
+                    raise ValueError("indice_min too large")
+                idx = np.arange(indice_min, indice_max, dtype=int) % catalog_size
+                num = indice_max - indice_min
+                shifts_array = shifts_array[0:num]
+            dx = np.asarray(shifts_array["dx"], dtype=float)
+            dy = np.asarray(shifts_array["dy"], dtype=float)
+            # random orientation for each placed galaxy
+            angles = rng.uniform(low=0.0, high=2.0 * np.pi, size=num)
 
         if force_pixel_center:
             inv_pixel_scale = 1.0 / ps
-            shifts_array["dx"] = (np.round(shifts_array["dx"] * inv_pixel_scale) + 0.5) * ps
-            shifts_array["dy"] = (np.round(shifts_array["dy"] * inv_pixel_scale) + 0.5) * ps
-
-        # choose which catalog rows populate those positions
-        num = len(shifts_array)
-        catalog_size = len(input_catalog)
-        if (indice_group_id is None) or (indice_group_id < 0):
-            probs = self._probabilities_for_sampling(input_catalog)
-            integers = np.arange(0, catalog_size, dtype=int)
-            idx = rng.choice(integers, size=num, p=probs)
-        else:
-            indice_min = indice_group_id * num
-            indice_max = min(indice_min + num, catalog_size)
-            if indice_min >= catalog_size:
-                raise ValueError("indice_min too large")
-            idx = np.arange(indice_min, indice_max, dtype=int) % catalog_size
-            num = indice_max - indice_min
-            shifts_array = shifts_array[0:num]
-        # random orientation for each placed galaxy
-        angles = rng.uniform(low=0.0, high=2.0 * np.pi, size=num)
+            dx = (np.round(dx * inv_pixel_scale) + 0.5) * ps
+            dy = (np.round(dy * inv_pixel_scale) + 0.5) * ps
         # rows of the input galaxy catalog that populate the placed objects
         selected = input_catalog[idx]
 
-        placement_dtype = [
-            ("indices", "i8"),
-            ("redshift", "f8"),
-            ("angles", "f8"),
-            ("gamma1", "f8"),
-            ("gamma2", "f8"),
-            ("kappa", "f8"),
-            ("dx", "f8"),
-            ("dy", "f8"),
-            ("ra", "f8"),
-            ("dec", "f8"),  # post-lensed ra, dec
-            ("prelensed_ra", "f8"),
-            ("prelensed_dec", "f8"),
-            ("has_finite_shear", "bool"),
-            ("hlr", "f8"),
-        ]
-        placement = np.zeros(num, dtype=placement_dtype)
-        placement["dx"] = shifts_array["dx"]
-        placement["dy"] = shifts_array["dy"]
+        placement = np.zeros(num, dtype=self.placement_dtype)
+        placement["dx"] = dx
+        placement["dy"] = dy
         placement["angles"] = angles
         image_x = self.x_center + placement["dx"] / ps
         image_y = self.y_center + placement["dy"] / ps
@@ -1170,12 +1197,664 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
 
 # ---------------------------------------------------------
+# Concrete implementation: object-table scene
+# ---------------------------------------------------------
+
+# AB magnitude of 1 nJy; the Rubin object tables report fluxes in nJy.
+AB_MAG_ZERO_NJY = 31.4
+
+
+class SceneCatalog(BaseGalaxyCatalog):
+    """Render every object of an input table at its own sky position.
+
+    The other catalogs sample galaxies from a static file and place them
+    with a :class:`~xlens.simulator.layout.Layout`.  This one draws a
+    *scene*, a fixed list of objects: each row of the input table is
+    rendered exactly once, at its own position, with its own morphology
+    and photometry, either a bulge + disk (de Vaucouleurs + exponential,
+    the cModel decomposition of the Rubin object table) or a single
+    Sersic profile.
+    Like the other catalogs it reads a FITS file, ``catalog_filename``
+    under ``catsim_dir`` (``$CATSIM_DIR`` by default), with the columns
+    below; :meth:`dp2_objects_to_scene` converts rows of the Rubin DP2
+    object table and :meth:`write_scene` writes a scene.
+
+    The truth catalog it builds has the same columns as the other
+    catalogs, so the scene goes through ``CatalogTask`` (rotation,
+    lensing) and ``MultibandSimTask`` unchanged with
+    ``galaxy_type = "scene"``; :meth:`draw_on_image` renders it
+    onto an existing image outside the pipeline.
+
+    Input columns
+    -------------
+    ``ra``, ``dec``
+        Sky position in degrees.
+    ``redshift``
+        Used by the lensing perturbation; objects at or below the lens
+        redshift are not lensed (stars carry ``0``).
+    ``bulge_r50_major``, ``bulge_r50_minor``, ``bulge_theta``,
+    ``disk_r50_major``, ``disk_r50_minor``, ``disk_theta``
+        Bulge + disk morphology: the half-light ellipse of each component,
+        semi-major and semi-minor radii in arcsec and position angle in
+        degrees counter-clockwise from the pixel ``+x`` axis.  The bulge is
+        a de Vaucouleurs and the disk an exponential profile, with the
+        light split by the per-band ``{survey}_{band}_bulge_frac`` (or a
+        band-independent ``bulge_frac``).  Each component is drawn at its
+        own position angle; the truth ``angles`` column starts at 0 and
+        only records later rotations (:meth:`rotate`).
+    ``sersic_n``, ``r50_major``, ``r50_minor``, ``theta``
+        Single-Sersic morphology, used when the table has no bulge/disk
+        columns: Sersic index, half-light ellipse and position angle as
+        above.
+    ``{survey}_{band}``
+        Total AB magnitudes, e.g. ``lsst_i``; ``hsc`` reuses the ``lsst``
+        columns.  A non-finite magnitude renders nothing.
+    ``is_point_source`` (optional)
+        Rows flagged ``True`` are rendered as point sources with the same
+        magnitude columns.
+
+    Every other column of the table is carried into the truth catalog.
+    """
+
+    # The scene, read from ``catsim_dir`` as for the other catalogs.
+    catalog_filename: ClassVar[str] = "scene.fits"
+    required_columns: ClassVar[tuple[str, ...] | None] = None
+
+    scene_columns: ClassVar[tuple[str, ...]] = ("ra", "dec", "redshift")
+    sersic_columns: ClassVar[tuple[str, ...]] = ("sersic_n", "r50_major", "r50_minor", "theta")
+    bulge_disk_columns: ClassVar[tuple[str, ...]] = (
+        "bulge_r50_major",
+        "bulge_r50_minor",
+        "bulge_theta",
+        "disk_r50_major",
+        "disk_r50_minor",
+        "disk_theta",
+    )
+    # GalSim's Sersic profile is defined for 0.3 <= n <= 6.2; indices are
+    # clipped to this range and rounded to 0.1 so that GalSim can reuse
+    # its Sersic look-up tables across objects.
+    sersic_n_bounds: ClassVar[tuple[float, float]] = (0.3, 6.2)
+    # Whole-object half-light radius cap (arcsec), for the same memory
+    # reason as :data:`MAX_BULGE_HLR_ARCSEC`: the scene is a single Sersic
+    # per object, and a high-n profile with a large radius makes GalSim
+    # size its stamp at thousands of pixels.
+    max_hlr_arcsec: ClassVar[float] = MAX_BULGE_HLR_ARCSEC
+    min_axis_ratio: ClassVar[float] = 0.05
+
+    def __init__(
+        self,
+        *,
+        tract_info,
+        rng: np.random.RandomState | None = None,
+        select_observable: list[str] | str | None = None,
+        select_lower_limit: Iterable[float] | None = None,
+        select_upper_limit: Iterable[float] | None = None,
+        force_pixel_center: bool = False,
+        catsim_dir: str | None = None,
+        survey_name_list: Iterable[str] | None = None,
+        **kwargs,
+    ):
+        """Build the truth catalog of the scene in ``catsim_dir``.
+
+        The base-class constructor with the ``scene`` layout: every row
+        of the scene file is placed once at its own ``ra``/``dec`` and
+        oriented by its own position angle, so nothing is random and
+        ``rng`` is not needed.  The layout arguments of the other catalogs
+        (``layout_name``, ``sep_arcsec``, ``indice_group_id``,
+        ``extend_ratio``) are accepted, so the pipeline can build every
+        catalog the same way, and ignored.
+        """
+        for name in ("layout_name", "sep_arcsec", "indice_group_id", "extend_ratio"):
+            kwargs.pop(name, None)
+        if kwargs:
+            raise TypeError(f"unexpected arguments: {sorted(kwargs)}")
+        super().__init__(
+            rng=rng,
+            tract_info=tract_info,
+            layout_name="scene",
+            select_observable=select_observable,
+            select_lower_limit=select_lower_limit,
+            select_upper_limit=select_upper_limit,
+            force_pixel_center=force_pixel_center,
+            catsim_dir=catsim_dir,
+            survey_name_list=survey_name_list,
+        )
+
+    def _read_catalog(self, **kwargs):
+        """The scene file, checked for the columns the scene needs."""
+        table, row_ids = super()._read_catalog(**kwargs)
+        self._check_scene_columns(tuple(table.dtype.names))
+        return table, row_ids
+
+    @classmethod
+    def _has_bulge_disk(cls, names) -> bool:
+        """Whether the table describes a bulge + disk morphology."""
+        return any(name in names for name in cls.bulge_disk_columns)
+
+    def _check_scene_columns(self, names: tuple[str, ...]) -> None:
+        missing = [name for name in self.scene_columns if name not in names]
+        bulge_disk = self._has_bulge_disk(names)
+        if bulge_disk:
+            missing += [name for name in self.bulge_disk_columns if name not in names]
+        else:
+            missing += [name for name in self.sersic_columns if name not in names]
+        for survey in self.survey_name_list:
+            prefix = _survey_prefix(survey) + "_"
+            if not any(name.startswith(prefix) and not name.endswith("_bulge_frac") for name in names):
+                missing.append(f"{prefix}{{band}} magnitudes")
+            if bulge_disk and "bulge_frac" not in names:
+                if not any(name.startswith(prefix) and name.endswith("_bulge_frac") for name in names):
+                    missing.append(f"{prefix}{{band}}_bulge_frac (or bulge_frac)")
+        if missing:
+            raise ValueError("scene table is missing columns: " + ", ".join(missing))
+
+    @classmethod
+    def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
+        """``{survey}_{band}``; ``hsc`` reuses the LSST photometry."""
+        return (f"{_survey_prefix(survey_name)}_{band}",)
+
+    def _half_light_radius(self, catalog) -> np.ndarray:
+        """Circularised radius ``sqrt(a * b)`` (arcsec) of the disk, or of the Sersic fit."""
+        prefix = "disk_" if self._has_bulge_disk(catalog.dtype.names) else ""
+        return np.sqrt(
+            np.maximum(np.asarray(catalog[f"{prefix}r50_major"], dtype=float), 1e-9)
+            * np.maximum(np.asarray(catalog[f"{prefix}r50_minor"], dtype=float), 1e-9)
+        )
+
+    @staticmethod
+    def _ellipse(entry, prefix: str) -> tuple[float, float]:
+        """Sanitised semi-major and semi-minor half-light radii (arcsec)."""
+        a = float(entry[f"{prefix}r50_major"])
+        b = float(entry[f"{prefix}r50_minor"])
+        if not (np.isfinite(a) and np.isfinite(b)):
+            a = b = 1e-4
+        return max(a, 1e-4), max(b, 1e-4)
+
+    def _generate_galaxy(
+        self,
+        *,
+        entry,
+        mag_zero,
+        band,
+        survey_name="lsst",
+        include_point_source=True,
+        force_isotropic=False,
+        force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
+        **kwargs,
+    ) -> galsim.GSObject:
+        """Build a GalSim object from one scene row, at its own position angle.
+
+        :meth:`get_obj` then applies the ``angles`` column, which is 0
+        unless the catalog was rotated.
+        """
+        sname = _survey_prefix(survey_name or "lsst")
+        mag = float(entry[f"{sname}_{band}"])
+        flux = 10 ** ((mag_zero - mag) / 2.5) if np.isfinite(mag) else 0.0
+
+        names = entry.dtype.names
+        if "is_point_source" in names and bool(entry["is_point_source"]):
+            if not include_point_source:
+                flux = 0.0
+            # same nearly-point-like convention as the CatSim AGN component
+            return galsim.Gaussian(flux=flux, sigma=1e-4)
+
+        if self._has_bulge_disk(names):
+            return self._bulge_disk_profile(
+                entry,
+                flux=flux,
+                frac_column=f"{sname}_{band}_bulge_frac",
+                force_isotropic=force_isotropic,
+                force_galaxy_profile=force_galaxy_profile,
+            )
+
+        a, b = self._ellipse(entry, "")
+        # GalSim's ``shear(q=)`` preserves area, so ``half_light_radius`` is
+        # the circularised radius and the drawn semi-major axis is
+        # hlr / sqrt(q) = a, as for CatSim's sqrt(a * b).
+        hlr = min(np.sqrt(a * b), self.max_hlr_arcsec)
+        q_cat = min(max(b / a, self.min_axis_ratio), 1.0)
+        q = 1.0 if force_isotropic else q_cat
+
+        if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+            gal = _forced_profile(force_galaxy_profile, flux=flux, half_light_radius=hlr)
+        else:
+            n = float(entry["sersic_n"])
+            if not np.isfinite(n):
+                n = 1.0
+            n_min, n_max = self.sersic_n_bounds
+            n = _galsim_round_sersic(min(max(n, n_min), n_max), 0.1)
+            gal = galsim.Sersic(n=n, flux=flux, half_light_radius=hlr)
+        theta = float(entry["theta"])
+        theta = theta if np.isfinite(theta) else 0.0
+        return gal.shear(q=q, beta=theta * galsim.degrees)
+
+    def _bulge_disk_profile(
+        self,
+        entry,
+        *,
+        flux: float,
+        frac_column: str,
+        force_isotropic: bool,
+        force_galaxy_profile: int,
+    ) -> galsim.GSObject:
+        """de Vaucouleurs bulge + exponential disk, the cModel decomposition.
+
+        The bulge takes the fraction ``frac_column`` of ``flux`` (falling
+        back to a band-independent ``bulge_frac`` column).  Each component
+        is drawn at its own position angle (a missing bulge angle falls
+        back to the disk's).
+        """
+        names = entry.dtype.names
+        frac = float(entry[frac_column]) if frac_column in names else float(entry["bulge_frac"])
+        frac = min(max(frac, 0.0), 1.0) if np.isfinite(frac) else 0.0
+        disk_theta = float(entry["disk_theta"])
+        if not np.isfinite(disk_theta):
+            disk_theta = 0.0
+
+        components = []
+        for prefix, weight, cap in (("disk_", 1.0 - frac, None), ("bulge_", frac, self.max_bulge_hlr_arcsec)):
+            component_flux = flux * weight
+            if component_flux <= 0.0:
+                continue
+            a, b = self._ellipse(entry, prefix)
+            hlr = np.sqrt(a * b)
+            if cap is not None:
+                hlr = min(hlr, cap)
+            q = 1.0 if force_isotropic else min(max(b / a, self.min_axis_ratio), 1.0)
+            theta = float(entry[f"{prefix}theta"])
+            if not np.isfinite(theta):
+                theta = disk_theta
+            if force_galaxy_profile > FORCE_GALAXY_PROFILE_NONE:
+                profile = _forced_profile(force_galaxy_profile, flux=component_flux, half_light_radius=hlr)
+            elif prefix == "disk_":
+                profile = galsim.Exponential(flux=component_flux, half_light_radius=hlr)
+            else:
+                profile = galsim.DeVaucouleurs(flux=component_flux, half_light_radius=hlr)
+            components.append(profile.shear(q=q, beta=theta * galsim.degrees))
+        if not components:
+            return galsim.Gaussian(flux=flux, sigma=1e-4)
+        if len(components) == 1:
+            return components[0]
+        return galsim.Add(components)
+
+    # ---------- building a scene from the Rubin object table ----------
+
+    # DP2 object-table columns of the two morphology models
+    dp2_sersic_columns: ClassVar[tuple[str, ...]] = (
+        "sersic_index",
+        "sersic_reff_major",
+        "sersic_reff_minor",
+        "sersic_theta",
+    )
+    dp2_cmodel_columns: ClassVar[tuple[str, ...]] = (
+        "{band}_cModel_dev_reff_major",
+        "{band}_cModel_dev_reff_minor",
+        "{band}_cModel_dev_theta",
+        "{band}_cModel_exp_reff_major",
+        "{band}_cModel_exp_reff_minor",
+        "{band}_cModel_exp_theta",
+    )
+
+    @classmethod
+    def write_scene(cls, scene, catsim_dir: str, *, clobber: bool = False) -> str:
+        """Write a scene table to ``catsim_dir/catalog_filename``.
+
+        ``scene`` is a structured array (e.g. from
+        :meth:`dp2_objects_to_scene`) or a mapping of column name to
+        equal-length arrays.  Returns the path, which the constructor then
+        reads with ``catsim_dir=catsim_dir``.
+        """
+        if not isinstance(scene, np.ndarray):
+            columns = {str(name): np.asarray(values) for name, values in scene.items()}
+            num = len(next(iter(columns.values())))
+            table = np.empty(num, dtype=[(name, values.dtype) for name, values in columns.items()])
+            for name, values in columns.items():
+                table[name] = values
+            scene = table
+        os.makedirs(catsim_dir, exist_ok=True)
+        fname = os.path.join(catsim_dir, cls.catalog_filename)
+        fitsio.write(fname, scene, clobber=clobber)
+        return fname
+
+    @classmethod
+    def dp2_objects_to_scene(
+        cls,
+        objects,
+        *,
+        bands: Iterable[str] = ("u", "g", "r", "i", "z", "y"),
+        survey_name: str = "lsst",
+        flux_column: str = "cModelFlux",
+        point_source_flux_column: str = "psfFlux",
+        extendedness_column: str = "refExtendedness",
+        extendedness_threshold: float = 0.5,
+        redshift_column: str | None = "bpz_z_best",
+        default_redshift: float = 0.0,
+        morphology: str = "bulge_disk",
+        morphology_band: str = "i",
+    ) -> np.ndarray:
+        """Scene table (structured array) from rows of the Rubin DP2 ``Object`` table.
+
+        ``objects`` is the path of a FITS file of DP2 object rows (e.g. a
+        cone search) or the structured array
+        ``fitsio.read`` returns for one.  Write the result with
+        :meth:`write_scene` and build the catalog from that directory.
+        Column mapping:
+
+        * ``coord_ra``, ``coord_dec`` -> ``ra``, ``dec``
+        * ``morphology="bulge_disk"`` (default): the cModel ellipses of
+          ``morphology_band`` -- ``{band}_cModel_dev_reff_major``,
+          ``_dev_reff_minor``, ``_dev_theta`` -> ``bulge_r50_major``,
+          ``bulge_r50_minor``, ``bulge_theta`` and the ``_exp_`` columns ->
+          ``disk_*`` -- with ``{band}_cModel_fracDev`` of every band ->
+          ``{survey_name}_{band}_bulge_frac``.  The cModel shapes are
+          fitted per band, so one band has to be chosen for the shapes.
+        * ``morphology="sersic"``: ``sersic_index`` -> ``sersic_n``;
+          ``sersic_reff_major``, ``sersic_reff_minor`` (arcsec) ->
+          ``r50_major``, ``r50_minor``; ``sersic_theta`` (deg) -> ``theta``
+        * Position angles are negated.  DP2 measures them in the sky frame,
+          from +RA (East) towards +Dec (North) (``PositionAngleFromMoments``
+          in ``pipe_tasks``); the scene measures them from pixel +x, which
+          on a tract with the standard East-left WCS is West, towards +y
+          (North), the frame GalSim draws in.  An axis at DP2 angle theta is
+          therefore at -theta in the scene.
+        * ``{band}_{flux_column}`` (nJy) -> ``{survey_name}_{band}`` AB
+          magnitude; point sources use ``{band}_{point_source_flux_column}``
+          instead when that column exists.
+        * ``{extendedness_column} < extendedness_threshold`` ->
+          ``is_point_source`` (every row is a galaxy when the column is
+          absent).
+        * ``redshift_column`` -> ``redshift``; missing or non-finite
+          values get ``default_redshift``, point sources ``0``.
+        * ``objectId`` is carried through when present.
+        """
+        if morphology not in ("bulge_disk", "sersic"):
+            raise ValueError(f"morphology must be 'bulge_disk' or 'sersic', not {morphology!r}")
+        table = fitsio.read(os.fspath(objects)) if isinstance(objects, (str, os.PathLike)) else objects
+        names = tuple(table.dtype.names)
+        bands = tuple(bands)
+        prefix = _survey_prefix(survey_name)
+        needed = ["coord_ra", "coord_dec"] + [f"{band}_{flux_column}" for band in bands]
+        if morphology == "bulge_disk":
+            needed += [name.format(band=morphology_band) for name in cls.dp2_cmodel_columns]
+            needed += [f"{band}_cModel_fracDev" for band in bands]
+        else:
+            needed += list(cls.dp2_sersic_columns)
+        missing = [name for name in needed if name not in names]
+        if missing:
+            raise ValueError("DP2 object table is missing columns: " + ", ".join(missing))
+        num = len(table)
+        columns: dict[str, np.ndarray] = {
+            "ra": np.asarray(table["coord_ra"], dtype=float),
+            "dec": np.asarray(table["coord_dec"], dtype=float),
+        }
+        if morphology == "bulge_disk":
+            for component, cmodel in (("bulge", "dev"), ("disk", "exp")):
+                for quantity, dp2_quantity, sign in (
+                    ("r50_major", "reff_major", 1.0),
+                    ("r50_minor", "reff_minor", 1.0),
+                    ("theta", "theta", -1.0),  # East->North (DP2) to West->North (pixel +x)
+                ):
+                    columns[f"{component}_{quantity}"] = sign * np.asarray(
+                        table[f"{morphology_band}_cModel_{cmodel}_{dp2_quantity}"], dtype=float
+                    )
+            for band in bands:
+                columns[f"{prefix}_{band}_bulge_frac"] = np.asarray(
+                    table[f"{band}_cModel_fracDev"], dtype=float
+                )
+        else:
+            columns["sersic_n"] = np.asarray(table["sersic_index"], dtype=float)
+            columns["r50_major"] = np.asarray(table["sersic_reff_major"], dtype=float)
+            columns["r50_minor"] = np.asarray(table["sersic_reff_minor"], dtype=float)
+            columns["theta"] = -np.asarray(table["sersic_theta"], dtype=float)  # see the docstring
+        if extendedness_column in names:
+            ext = np.asarray(table[extendedness_column], dtype=float)
+            point = np.isfinite(ext) & (ext < extendedness_threshold)
+        else:
+            point = np.zeros(num, dtype=bool)
+        columns["is_point_source"] = point
+
+        redshift = np.full(num, float(default_redshift))
+        if redshift_column is not None and redshift_column in names:
+            z_in = np.asarray(table[redshift_column], dtype=float)
+            good = np.isfinite(z_in)
+            redshift[good] = z_in[good]
+        redshift[point] = 0.0
+        columns["redshift"] = redshift
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            for band in bands:
+                flux = np.asarray(table[f"{band}_{flux_column}"], dtype=float)
+                point_flux_column = f"{band}_{point_source_flux_column}"
+                if point.any() and point_flux_column in names:
+                    flux = np.where(point, np.asarray(table[point_flux_column], dtype=float), flux)
+                columns[f"{prefix}_{band}"] = np.where(
+                    flux > 0, -2.5 * np.log10(flux) + AB_MAG_ZERO_NJY, np.nan
+                )
+        if "objectId" in names:
+            columns["objectId"] = np.asarray(table["objectId"])
+        scene = np.empty(num, dtype=[(name, values.dtype) for name, values in columns.items()])
+        for name, values in columns.items():
+            scene[name] = values
+        return scene
+
+    # ---------- rendering onto an existing image ----------
+
+    def draw_on_image(
+        self,
+        image,
+        *,
+        band: str,
+        mag_zero: float,
+        psf_obj: galsim.GSObject | None = None,
+        wcs=None,
+        survey_name: str = "lsst",
+        draw_method: str = "auto",
+        nn_trunc: int | None = None,
+        use_field_distortion: bool = True,
+        force_isotropic: bool = False,
+        force_galaxy_profile: int = FORCE_GALAXY_PROFILE_NONE,
+        include_point_source: bool = True,
+        inclusion_padding: float = SIM_INCLUSION_PADDING,
+    ) -> np.ndarray:
+        """Render the scene onto ``image`` in place.
+
+        This is the drawing loop of
+        :meth:`~xlens.simulator.sim.MultibandSimTask.draw_catalog` applied
+        to an image the caller already has, so a scene can be added to
+        a simulated exposure, or drawn onto a blank one, without running
+        the pipeline.
+
+        Parameters
+        ----------
+        image
+            ``lsst.afw.image.Exposure``, ``MaskedImage`` or ``Image`` (its
+            bounding box sets the pixel coordinates; an ``Exposure`` also
+            supplies the WCS and PSF when ``wcs``/``psf_obj`` are not
+            given), a ``galsim.Image`` (its ``xmin``/``ymin`` and ``wcs``
+            are used), or a C-contiguous float32/float64 2-D NumPy array
+            whose first pixel is ``(0, 0)``.  Pixels are added to it.
+        band : str
+            Photometric band.
+        mag_zero : float
+            Magnitude zero point of the image.
+        psf_obj : galsim.GSObject or None, optional
+            PSF to convolve with.  Defaults to the PSF of an ``Exposure``,
+            evaluated at the image centre.
+        wcs : lsst.afw.geom.SkyWcs or galsim.BaseWCS or None, optional
+            Sky-to-pixel mapping; required unless ``image`` carries one.
+        survey_name : str, optional
+            Survey whose magnitude columns are used.
+        draw_method, nn_trunc, use_field_distortion, force_isotropic,
+        force_galaxy_profile, include_point_source
+            As the same-named ``MultibandSimTask`` configuration fields.
+        inclusion_padding : float, optional
+            Objects centred more than this many pixels outside the image
+            are skipped.
+
+        Returns
+        -------
+        numpy.ndarray
+            Structured array with one row per scene object: ``index`` into
+            :attr:`data`, ``ra``, ``dec``, the image position ``image_x``,
+            ``image_y`` and whether the object was ``drawn``.
+        """
+        from ..wcs import tanwcs_dm2galsim
+
+        target = _image_target(image, wcs, self.pixel_scale)
+        wcs_dm, wcs_gs = target["wcs_dm"], target["wcs_gs"]
+        if wcs_dm is not None:
+            wcs_gs = tanwcs_dm2galsim(wcs_dm)
+            pix_x, pix_y = wcs_dm.skyToPixelArray(self.data["ra"], self.data["dec"], degrees=True)
+        elif wcs_gs is not None:
+            pix_x, pix_y = wcs_gs.radecToxy(self.data["ra"], self.data["dec"], units=galsim.degrees)
+        else:
+            raise ValueError("draw_on_image needs a wcs: pass one or use an image that carries one")
+        pix_x = np.asarray(pix_x, dtype=float)
+        pix_y = np.asarray(pix_y, dtype=float)
+
+        if psf_obj is None:
+            psf_obj = target["psf_obj"]
+        if psf_obj is None:
+            raise ValueError("draw_on_image needs psf_obj unless image is an Exposure with a PSF")
+
+        gs_image = galsim.Image(target["array"], xmin=target["xmin"], ymin=target["ymin"], wcs=wcs_gs)
+        xmin, xmax = gs_image.bounds.xmin, gs_image.bounds.xmax
+        ymin, ymax = gs_image.bounds.ymin, gs_image.bounds.ymax
+
+        truth = np.zeros(
+            len(self.data),
+            dtype=[
+                ("index", "i8"),
+                ("ra", "f8"),
+                ("dec", "f8"),
+                ("image_x", "f8"),
+                ("image_y", "f8"),
+                ("drawn", "bool"),
+            ],
+        )
+        truth["index"] = np.arange(len(self.data))
+        truth["ra"] = self.data["ra"]
+        truth["dec"] = self.data["dec"]
+        truth["image_x"] = pix_x
+        truth["image_y"] = pix_y
+
+        for i, src in enumerate(self.data):
+            ix, iy = pix_x[i], pix_y[i]
+            if not (
+                ((xmin - inclusion_padding) < ix < (xmax + inclusion_padding))
+                and ((ymin - inclusion_padding) < iy < (ymax + inclusion_padding))
+                and src["has_finite_shear"]
+            ):
+                continue
+            image_pos = galsim.PositionD(x=ix, y=iy)
+            gal_obj = self.get_obj(
+                ind=i,
+                mag_zero=mag_zero,
+                band=band,
+                force_isotropic=force_isotropic,
+                force_galaxy_profile=force_galaxy_profile,
+                include_point_source=include_point_source,
+                survey_name=survey_name,
+            )
+            convolved_object = galsim.Convolve([gal_obj, psf_obj])
+            if use_field_distortion:
+                stamp = convolved_object.drawImage(
+                    center=image_pos,
+                    wcs=wcs_gs.local(image_pos=image_pos),
+                    method=draw_method,
+                    nx=nn_trunc,
+                    ny=nn_trunc,
+                )
+            else:
+                stamp = convolved_object.drawImage(
+                    center=image_pos,
+                    wcs=None,
+                    method=draw_method,
+                    scale=self.pixel_scale,
+                    nx=nn_trunc,
+                    ny=nn_trunc,
+                )
+            bounds = stamp.bounds & gs_image.bounds
+            if bounds.isDefined():
+                gs_image[bounds] += stamp[bounds]
+                truth["drawn"][i] = True
+        return truth
+
+
+def _image_target(image, wcs, pixel_scale: float) -> dict[str, Any]:
+    """Resolve the pixel array, origin, WCS and PSF of ``image``.
+
+    See :meth:`SceneCatalog.draw_on_image` for the accepted types.
+    The returned ``array`` is a view onto the image's pixels, so drawing
+    into it modifies ``image``.  ``pixel_scale`` (arcsec) sizes the PSF of
+    an ``Exposure`` that carries no WCS of its own.
+    """
+    target: dict[str, Any] = {
+        "xmin": 0,
+        "ymin": 0,
+        "wcs_dm": None,
+        "wcs_gs": None,
+        "psf_obj": None,
+    }
+    if isinstance(image, galsim.Image):
+        target["array"] = image.array
+        target["xmin"], target["ymin"] = image.xmin, image.ymin
+        if wcs is None:
+            wcs = image.wcs
+    elif isinstance(image, np.ndarray):
+        if image.ndim != 2:
+            raise TypeError("image array must be 2-D")
+        target["array"] = image
+    elif hasattr(image, "getBBox"):
+        if hasattr(image, "getMaskedImage"):  # Exposure
+            target["array"] = image.getMaskedImage().getImage().getArray()
+            if wcs is None and hasattr(image, "getWcs"):
+                wcs = image.getWcs()
+            psf = image.getPsf() if hasattr(image, "getPsf") else None
+            if psf is not None:
+                import lsst.geom as geom
+
+                kernel = psf.computeKernelImage(geom.Point2D(image.getBBox().getCenter())).getArray()
+                image_wcs = image.getWcs()
+                scale = (
+                    float(image_wcs.getPixelScale().asArcseconds()) if image_wcs is not None else pixel_scale
+                )
+                target["psf_obj"] = galsim.InterpolatedImage(
+                    galsim.Image(np.array(kernel, dtype=float)), scale=scale, flux=1.0
+                )
+        elif hasattr(image, "getImage"):  # MaskedImage
+            target["array"] = image.getImage().getArray()
+        else:  # Image
+            target["array"] = image.getArray()
+        bbox = image.getBBox()
+        target["xmin"], target["ymin"] = bbox.getMinX(), bbox.getMinY()
+    else:
+        raise TypeError(f"cannot draw on an object of type {type(image).__name__}")
+
+    array = target["array"]
+    if array.dtype not in (np.float32, np.float64) or not array.flags["C_CONTIGUOUS"]:
+        raise TypeError("the image pixels must be a C-contiguous float32 or float64 array")
+    if not array.flags["WRITEABLE"]:
+        raise TypeError("the image pixels are read-only")
+
+    if wcs is not None:
+        if hasattr(wcs, "skyToPixelArray"):
+            target["wcs_dm"] = wcs
+        elif isinstance(wcs, galsim.BaseWCS):
+            target["wcs_gs"] = wcs
+        else:
+            raise TypeError(f"wcs must be an lsst SkyWcs or a galsim WCS, not {type(wcs).__name__}")
+    return target
+
+
+# ---------------------------------------------------------
 # galaxy_type registry
 # ---------------------------------------------------------
 GALAXY_CATALOG_CLASSES: dict[str, type[BaseGalaxyCatalog]] = {
     "catsim2017": CatSim2017Catalog,
     "flagship2025": Flagship2025Catalog,
     "diffsky": DiffskyCatalog,
+    "scene": SceneCatalog,
 }
 
 

@@ -58,6 +58,7 @@ Example notebooks are in the [`examples/`](examples/) directory:
 
 **Cluster lensing**
 - [Cluster lensing profile](examples/cluster/example1_cluster_lensing.ipynb)
+- [Cluster scene from an object table](examples/cluster/example2_cluster_scene.ipynb)
 
 **Random field**
 - [Lognormal random field](examples/field/example1_lognormal.ipynb)
