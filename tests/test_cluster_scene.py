@@ -7,16 +7,18 @@ the truth-catalog construction, the ``ra``/``dec`` <-> ``dx``/``dy``
 round trip, rotation and halo lensing, the rendering onto an exposure
 (flux, position, orientation), the consistency with the pipeline drawing
 loop of ``MultibandSimTask``, the DP2 object-table conversion, and the
-file-loading path.
+FITS loading from ``catsim_dir``.
 """
 
 import os
+import tempfile
 
 import fitsio
 import galsim
 import lsst.afw.image as afwImage
 import lsst.geom as geom
 import numpy as np
+import numpy.lib.recfunctions as rfn
 import pytest
 from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 
@@ -25,7 +27,6 @@ from xlens.simulator.galaxies import (
     AB_MAG_ZERO_NJY,
     ClusterSceneCatalog,
     get_catalog_class,
-    scene_to_structured_array,
 )
 from xlens.simulator.perturbation.halo import ShearHalo
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
@@ -77,7 +78,25 @@ def _scene_table():
         "redshift": rows[:, 7].astype(float),
         "is_point_source": rows[:, 8].astype(bool),
     }
-    return scene_to_structured_array(table)
+    return _structured(table)
+
+
+def _structured(columns):
+    """Structured array from a mapping of equal-length columns."""
+    columns = {name: np.asarray(values) for name, values in columns.items()}
+    num = len(next(iter(columns.values())))
+    out = np.empty(num, dtype=[(name, values.dtype) for name, values in columns.items()])
+    for name, values in columns.items():
+        out[name] = values
+    return out
+
+
+def _make(scene, **kwargs):
+    """Write ``scene`` as the catalog FITS file of a fresh ``catsim_dir`` and read it back,
+    the way the pipeline builds the catalog."""
+    with tempfile.TemporaryDirectory() as catsim_dir:
+        ClusterSceneCatalog.write_scene(scene, catsim_dir)
+        return ClusterSceneCatalog(catsim_dir=catsim_dir, **kwargs)
 
 
 def _flux(mag):
@@ -104,7 +123,7 @@ def _moments(array, cx, cy, half=15):
 
 
 def test_construct_from_offsets():
-    catalog = ClusterSceneCatalog(scene=_scene_table(), tract_info=TRACT_INFO)
+    catalog = _make(_scene_table(), tract_info=TRACT_INFO)
     data = catalog.data
     assert len(catalog) == len(SCENE_ROWS)
     for col in (
@@ -158,12 +177,12 @@ def test_construct_from_offsets():
 
 
 def test_construct_from_radec_round_trip():
-    reference = ClusterSceneCatalog(scene=_scene_table(), tract_info=TRACT_INFO)
+    reference = _make(_scene_table(), tract_info=TRACT_INFO)
     table = _scene_table()
     columns = {name: table[name] for name in table.dtype.names if name not in ("dx", "dy")}
     columns["ra"] = reference.data["ra"]
     columns["dec"] = reference.data["dec"]
-    catalog = ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+    catalog = _make(columns, tract_info=TRACT_INFO)
     np.testing.assert_allclose(catalog.data["dx"], reference.data["dx"], atol=1e-6)
     np.testing.assert_allclose(catalog.data["dy"], reference.data["dy"], atol=1e-6)
     np.testing.assert_allclose(catalog.data["ra"], reference.data["ra"], atol=1e-10)
@@ -173,17 +192,17 @@ def test_missing_columns_raise():
     table = _scene_table()
     columns = {name: table[name] for name in table.dtype.names if name != "sersic_n"}
     with pytest.raises(ValueError, match="sersic_n"):
-        ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+        _make(columns, tract_info=TRACT_INFO)
     columns = {name: table[name] for name in table.dtype.names if name not in ("dx", "dy")}
     with pytest.raises(ValueError, match="ra/dec or dx/dy"):
-        ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+        _make(columns, tract_info=TRACT_INFO)
     with pytest.raises(ValueError, match="euclid_"):
-        ClusterSceneCatalog(scene=_scene_table(), tract_info=TRACT_INFO, survey_name_list=["euclid"])
+        _make(_scene_table(), tract_info=TRACT_INFO, survey_name_list=["euclid"])
 
 
 def test_selection_and_pixel_center():
-    catalog = ClusterSceneCatalog(
-        scene=_scene_table(),
+    catalog = _make(
+        _scene_table(),
         tract_info=TRACT_INFO,
         select_observable=["lsst_i"],
         select_upper_limit=[20.5],
@@ -198,7 +217,7 @@ def test_selection_and_pixel_center():
 
 
 def test_rotate_and_lens():
-    catalog = ClusterSceneCatalog(scene=_scene_table(), tract_info=TRACT_INFO)
+    catalog = _make(_scene_table(), tract_info=TRACT_INFO)
     dx0, dy0 = catalog.data["dx"].copy(), catalog.data["dy"].copy()
     angles0 = catalog.data["angles"].copy()
     catalog.rotate(np.pi / 2)
@@ -223,7 +242,7 @@ def test_rotate_and_lens():
 
 
 def test_draw_on_exposure():
-    catalog = ClusterSceneCatalog(scene=_scene_table(), tract_info=TRACT_INFO)
+    catalog = _make(_scene_table(), tract_info=TRACT_INFO)
     exposure = _blank_exposure()
     truth = catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
     array = exposure.getMaskedImage().image.array
@@ -262,7 +281,7 @@ def test_draw_on_exposure():
 def test_draw_on_galsim_and_numpy_images():
     from xlens.wcs import tanwcs_dm2galsim
 
-    catalog = ClusterSceneCatalog(scene=_scene_table(), tract_info=TRACT_INFO)
+    catalog = _make(_scene_table(), tract_info=TRACT_INFO)
     bbox = TRACT_INFO.getBBox()
     wcs_gs = tanwcs_dm2galsim(TRACT_INFO.getWcs())
     gs_image = galsim.ImageF(
@@ -286,7 +305,7 @@ def test_draw_on_galsim_and_numpy_images():
 
 def test_matches_pipeline_drawing_loop():
     """``draw_on_image`` and ``MultibandSimTask`` render the same pixels."""
-    catalog = ClusterSceneCatalog(scene=_scene_table(), tract_info=TRACT_INFO)
+    catalog = _make(_scene_table(), tract_info=TRACT_INFO)
     config = MultibandSimConfig()
     config.galaxy_type = "cluster_scene"
     config.survey_name = "lsst"
@@ -318,7 +337,7 @@ def test_matches_pipeline_drawing_loop():
 
 def test_sim_task_run_from_truth_catalog():
     """The full sim task renders a scene truth catalog, PSF from the exposure."""
-    catalog = ClusterSceneCatalog(scene=_scene_table(), tract_info=TRACT_INFO)
+    catalog = _make(_scene_table(), tract_info=TRACT_INFO)
     halo = ShearHalo(mass=5e14, conc=4.0, z_lens=Z_CLUSTER)
     catalog.lens(shear_obj=halo)
 
@@ -365,12 +384,11 @@ def test_sim_task_run_from_truth_catalog():
     np.testing.assert_allclose(reference.getMaskedImage().image.array, sim_array, rtol=1e-5, atol=1e-5)
 
 
-def test_from_dp2_objects():
-    pd = pytest.importorskip("pandas")
+def test_dp2_objects_to_scene(tmp_path):
     dx = np.array([-10.0, 10.0, 0.0])
     dy = np.array([0.0, 0.0, 12.0])
-    reference = ClusterSceneCatalog(
-        scene={
+    reference = _make(
+        {
             "dx": dx,
             "dy": dy,
             "redshift": np.zeros(3),
@@ -383,7 +401,7 @@ def test_from_dp2_objects():
         tract_info=TRACT_INFO,
     )
     flux_i = np.array([1e4, 2e3, 5e2])  # nJy
-    objects = pd.DataFrame(
+    objects = _structured(
         {
             "objectId": np.array([11, 22, 33], dtype=np.int64),
             "coord_ra": reference.data["ra"],
@@ -398,15 +416,21 @@ def test_from_dp2_objects():
             "r_cModelFlux": flux_i * 2,
             "r_psfFlux": flux_i,
             "bpz_z_best": [0.31, np.nan, 0.9],
-            "name": ["a", "b", "c"],
         }
     )
-    catalog = ClusterSceneCatalog.from_dp2_objects(
-        objects, tract_info=TRACT_INFO, bands=("r", "i"), default_redshift=Z_CLUSTER, morphology="sersic"
+    scene = ClusterSceneCatalog.dp2_objects_to_scene(
+        objects, bands=("r", "i"), default_redshift=Z_CLUSTER, morphology="sersic"
     )
+    # a FITS file of the object rows converts to the same scene
+    fitsio.write(os.path.join(tmp_path, "objects.fits"), objects)
+    from_file = ClusterSceneCatalog.dp2_objects_to_scene(
+        os.path.join(tmp_path, "objects.fits"), bands=("r", "i"), default_redshift=Z_CLUSTER, morphology="sersic"
+    )
+    for name in scene.dtype.names:
+        np.testing.assert_array_equal(from_file[name], scene[name])
+    catalog = _make(scene, tract_info=TRACT_INFO)
     data = catalog.data
     assert len(catalog) == 3
-    assert "name" not in data.dtype.names
     np.testing.assert_array_equal(data["objectId"], [11, 22, 33])
     np.testing.assert_allclose(data["dx"], dx, atol=1e-6)
     np.testing.assert_allclose(data["dy"], dy, atol=1e-6)
@@ -429,19 +453,17 @@ def test_from_dp2_objects():
     np.testing.assert_allclose(exposure.getMaskedImage().image.array.sum(), expected, rtol=2e-2)
 
     with pytest.raises(ValueError, match="sersic_index"):
-        ClusterSceneCatalog.from_dp2_objects(
-            objects.drop(columns=["sersic_index"]), tract_info=TRACT_INFO, bands=("i",), morphology="sersic"
+        ClusterSceneCatalog.dp2_objects_to_scene(
+            rfn.drop_fields(objects, "sersic_index", usemask=False), bands=("i",), morphology="sersic"
         )
 
 
-def test_load_from_files(tmp_path):
+def test_load_from_catsim_dir(tmp_path):
     table = _scene_table()
-    fitsio.write(os.path.join(tmp_path, "scene.fits"), table, clobber=True)
+    fname = ClusterSceneCatalog.write_scene(table, str(tmp_path))
+    assert fname == os.path.join(tmp_path, ClusterSceneCatalog.catalog_filename)
 
-    class FitsScene(ClusterSceneCatalog):
-        catalog_filename = "scene.fits"
-
-    catalog = FitsScene(
+    catalog = ClusterSceneCatalog(
         rng=np.random.RandomState(0),
         tract_info=TRACT_INFO,
         layout_name="random",
@@ -451,25 +473,15 @@ def test_load_from_files(tmp_path):
     )
     assert len(catalog) == 4
     np.testing.assert_array_equal(catalog.data["indices"], [0, 1, 3, 4])
-
-    pa = pytest.importorskip("pyarrow")
-    pq = pytest.importorskip("pyarrow.parquet")
-    pq.write_table(
-        pa.table({name: table[name] for name in table.dtype.names}),
-        os.path.join(tmp_path, "scene.parquet"),
-    )
-
-    class ParquetScene(ClusterSceneCatalog):
-        catalog_filename = "scene.parquet"
-
-    catalog = ParquetScene(tract_info=TRACT_INFO, catsim_dir=str(tmp_path))
-    assert len(catalog) == len(SCENE_ROWS)
-    np.testing.assert_allclose(catalog.data["lsst_i"], table["lsst_i"])
     assert catalog.data["is_point_source"].dtype == np.bool_
 
-    # a path is also accepted directly as the scene
-    catalog = ClusterSceneCatalog(scene=os.path.join(tmp_path, "scene.parquet"), tract_info=TRACT_INFO)
+    # the pipeline builds it from the galaxy type and $CATSIM_DIR-style directory
+    catalog = get_catalog_class("cluster_scene")(tract_info=TRACT_INFO, catsim_dir=str(tmp_path))
     assert len(catalog) == len(SCENE_ROWS)
+    np.testing.assert_allclose(catalog.data["lsst_i"], table["lsst_i"])
+
+    with pytest.raises(FileNotFoundError, match="cluster_scene.fits"):
+        ClusterSceneCatalog(tract_info=TRACT_INFO, catsim_dir=str(tmp_path / "empty"))
 
 
 # --- bulge + disk morphology ---------------------------------------------------
@@ -506,7 +518,7 @@ def _bulge_disk_table():
 
 def test_bulge_disk_construction():
     table = _bulge_disk_table()
-    catalog = ClusterSceneCatalog(scene=table, tract_info=TRACT_INFO)
+    catalog = _make(table, tract_info=TRACT_INFO)
     data = catalog.data
     assert len(catalog) == 3
     for col in ("bulge_r50_major", "disk_theta", "lsst_i_bulge_frac", "lsst_r_bulge_frac"):
@@ -519,13 +531,13 @@ def test_bulge_disk_construction():
     # incomplete bulge/disk columns and a missing bulge fraction are reported
     columns = {name: values for name, values in table.items() if name != "bulge_theta"}
     with pytest.raises(ValueError, match="bulge_theta"):
-        ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+        _make(columns, tract_info=TRACT_INFO)
     columns = {name: values for name, values in table.items() if not name.endswith("_bulge_frac")}
     with pytest.raises(ValueError, match="bulge_frac"):
-        ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+        _make(columns, tract_info=TRACT_INFO)
     # a band-independent bulge fraction is accepted instead
     columns["bulge_frac"] = table["lsst_i_bulge_frac"]
-    catalog2 = ClusterSceneCatalog(scene=columns, tract_info=TRACT_INFO)
+    catalog2 = _make(columns, tract_info=TRACT_INFO)
     exposure = _blank_exposure()
     catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
     exposure2 = _blank_exposure()
@@ -536,7 +548,7 @@ def test_bulge_disk_construction():
 
 
 def test_bulge_disk_render():
-    catalog = ClusterSceneCatalog(scene=_bulge_disk_table(), tract_info=TRACT_INFO)
+    catalog = _make(_bulge_disk_table(), tract_info=TRACT_INFO)
     exposure = _blank_exposure()
     truth = catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
     array = exposure.getMaskedImage().image.array
@@ -597,14 +609,13 @@ def test_bulge_disk_render():
     np.testing.assert_allclose(reference.array, pipeline, rtol=1e-5, atol=1e-6)
 
 
-def test_from_dp2_objects_bulge_disk():
-    pd = pytest.importorskip("pandas")
-    reference = ClusterSceneCatalog(scene=_bulge_disk_table(), tract_info=TRACT_INFO)
+def test_dp2_objects_to_scene_bulge_disk():
+    reference = _make(_bulge_disk_table(), tract_info=TRACT_INFO)
     # fluxes (nJy) reproducing the magnitudes of the hand-built scene
     mag_i = np.array([r[2] for r in BULGE_DISK_ROWS])
     flux_i = 10 ** ((AB_MAG_ZERO_NJY - mag_i) / 2.5)
     flux_r = 10 ** ((AB_MAG_ZERO_NJY - (mag_i + 0.5)) / 2.5)
-    objects = pd.DataFrame(
+    objects = _structured(
         {
             "objectId": np.array([1, 2, 3], dtype=np.int64),
             "coord_ra": reference.data["ra"],
@@ -626,7 +637,7 @@ def test_from_dp2_objects_bulge_disk():
             "bpz_z_best": [Z_CLUSTER, Z_CLUSTER, 0.9],
         }
     )
-    catalog = ClusterSceneCatalog.from_dp2_objects(objects, tract_info=TRACT_INFO, bands=("r", "i"))
+    catalog = _make(ClusterSceneCatalog.dp2_objects_to_scene(objects, bands=("r", "i")), tract_info=TRACT_INFO)
     data = catalog.data
     assert "sersic_n" not in data.dtype.names
     np.testing.assert_allclose(data["bulge_r50_major"], [0.4, 1.2, 0.5])
@@ -654,13 +665,13 @@ def test_from_dp2_objects_bulge_disk():
         )
 
     # a missing bulge fraction renders as a pure disk
-    no_frac = ClusterSceneCatalog.from_dp2_objects(
-        objects.assign(i_cModel_fracDev=np.nan), tract_info=TRACT_INFO, bands=("i",)
-    )
+    no_frac_objects = objects.copy()
+    no_frac_objects["i_cModel_fracDev"] = np.nan
+    no_frac = _make(ClusterSceneCatalog.dp2_objects_to_scene(no_frac_objects, bands=("i",)), tract_info=TRACT_INFO)
     assert np.isnan(no_frac.data["lsst_i_bulge_frac"]).all()
     disk_only = {name: values for name, values in _bulge_disk_table().items() if name != "lsst_r_bulge_frac"}
     disk_only["lsst_i_bulge_frac"] = np.zeros(3)
-    disk_only = ClusterSceneCatalog(scene=disk_only, tract_info=TRACT_INFO)
+    disk_only = _make(disk_only, tract_info=TRACT_INFO)
     exposure = _blank_exposure()
     no_frac.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=_psf())
     handmade = _blank_exposure()
@@ -670,8 +681,8 @@ def test_from_dp2_objects_bulge_disk():
     )
 
     with pytest.raises(ValueError, match="i_cModel_fracDev"):
-        ClusterSceneCatalog.from_dp2_objects(
-            objects.drop(columns=["i_cModel_fracDev"]), tract_info=TRACT_INFO, bands=("i",)
+        ClusterSceneCatalog.dp2_objects_to_scene(
+            rfn.drop_fields(objects, "i_cModel_fracDev", usemask=False), bands=("i",)
         )
     with pytest.raises(ValueError, match="morphology"):
-        ClusterSceneCatalog.from_dp2_objects(objects, tract_info=TRACT_INFO, bands=("i",), morphology="bad")
+        ClusterSceneCatalog.dp2_objects_to_scene(objects, bands=("i",), morphology="bad")

@@ -1183,85 +1183,6 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 AB_MAG_ZERO_NJY = 31.4
 
 
-def _column_to_numpy(column) -> np.ndarray | None:
-    """Numeric or boolean NumPy array for a pandas column; ``None`` for text.
-
-    Handles NumPy-backed, nullable and Arrow-backed dtypes alike: integers
-    with missing values fall back to float with NaN, and booleans with
-    missing values become ``False``.
-    """
-    kind = getattr(getattr(column, "dtype", None), "kind", "O")
-    if kind == "b":
-        try:
-            return column.to_numpy(dtype=bool)
-        except (TypeError, ValueError):
-            return column.fillna(False).to_numpy(dtype=bool)
-    if kind in "iu":
-        try:
-            return column.to_numpy(dtype=np.int64)
-        except (TypeError, ValueError):
-            return column.to_numpy(dtype=float, na_value=np.nan)
-    if kind == "f":
-        return column.to_numpy(dtype=float, na_value=np.nan)
-    if kind in "USO":
-        return None
-    try:
-        return column.to_numpy(dtype=float, na_value=np.nan)
-    except (TypeError, ValueError):
-        return None
-
-
-def _columns_to_structured_array(columns: dict[str, np.ndarray]) -> np.ndarray:
-    """Pack a mapping of equal-length arrays into a structured array."""
-    if not columns:
-        raise ValueError("scene has no usable (numeric or boolean) columns")
-    num = len(next(iter(columns.values())))
-    for name, values in columns.items():
-        if len(values) != num:
-            raise ValueError(f"scene column {name!r} has {len(values)} rows, expected {num}")
-    out = np.empty(num, dtype=[(name, values.dtype) for name, values in columns.items()])
-    for name, values in columns.items():
-        out[name] = values
-    return out
-
-
-def scene_to_structured_array(scene) -> np.ndarray:
-    """Coerce a scene table into a NumPy structured array.
-
-    Accepts a structured array, an ``astropy.table.Table``, a
-    ``pandas.DataFrame`` (Arrow-backed columns included, e.g. the result
-    of an ``lsdb`` cone search), a mapping of column name to array, or the
-    path of a FITS or Parquet file.  Text columns are dropped: the truth
-    catalog only carries numbers.
-    """
-    if isinstance(scene, np.ndarray):
-        if scene.dtype.names is None:
-            raise TypeError("a scene array must be a structured array with named fields")
-        return scene
-    if isinstance(scene, (str, os.PathLike)):
-        fname = os.fspath(scene)
-        if fname.lower().endswith((".parq", ".parquet")):
-            import pyarrow.parquet as pq
-
-            return scene_to_structured_array(pq.read_table(fname).to_pandas())
-        return get_catalog(fname)
-    if hasattr(scene, "as_array"):  # astropy Table
-        arr = scene.as_array()
-        if isinstance(arr, np.ma.MaskedArray):
-            arr = arr.filled()
-        return np.asarray(arr)
-    if hasattr(scene, "columns") and hasattr(scene, "to_numpy"):  # pandas DataFrame
-        columns = {}
-        for name in scene.columns:
-            values = _column_to_numpy(scene[name])
-            if values is not None:
-                columns[str(name)] = values
-        return _columns_to_structured_array(columns)
-    if isinstance(scene, Mapping):
-        return _columns_to_structured_array({str(name): np.asarray(values) for name, values in scene.items()})
-    raise TypeError(f"cannot build a scene from an object of type {type(scene).__name__}")
-
-
 class ClusterSceneCatalog(BaseGalaxyCatalog):
     """Render every object of an input table at its own sky position.
 
@@ -1271,10 +1192,13 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     own position, with its own morphology and photometry, either a bulge +
     disk (de Vaucouleurs + exponential, the cModel decomposition of the
     Rubin object table) or a single Sersic profile.
-    It was written to re-simulate real cluster fields from the Rubin DP2
-    object table (see :meth:`from_dp2_objects`), but any table with the
-    columns below works, for instance a model cluster whose members were
-    drawn from an NFW profile.
+    Like the other catalogs it reads a FITS file, ``catalog_filename``
+    under ``catsim_dir`` (``$CATSIM_DIR`` by default), with the columns
+    below.  It was written to re-simulate real cluster fields from the
+    Rubin DP2 object table (:meth:`dp2_objects_to_scene` converts one and
+    :meth:`write_scene` writes it), but any FITS table with these columns
+    works, for instance a model cluster whose members were drawn from an
+    NFW profile.
 
     The truth catalog it builds has the same columns as the other
     catalogs, so the scene goes through ``CatalogTask`` (rotation,
@@ -1317,8 +1241,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     Every other column of the table is carried into the truth catalog.
     """
 
-    # Read from ``catsim_dir`` when no ``scene`` is given (the pipeline
-    # fallback path); FITS or Parquet.
+    # The scene, read from ``catsim_dir`` as for the other catalogs.
     catalog_filename: ClassVar[str] = "cluster_scene.fits"
     required_columns: ClassVar[tuple[str, ...] | None] = None
 
@@ -1347,7 +1270,6 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         self,
         *,
         tract_info,
-        scene=None,
         rng: np.random.RandomState | None = None,
         layout_name: str = "scene",
         sep_arcsec: float | None = None,
@@ -1360,16 +1282,12 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         catsim_dir: str | None = None,
         survey_name_list: Iterable[str] | None = None,
     ):
-        """Build the truth catalog of a scene.
+        """Build the truth catalog of the scene in ``catsim_dir``.
 
         Parameters
         ----------
         tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
             Provides the WCS and bounding box that define the pixel frame.
-        scene : structured array, Table, DataFrame, mapping or path, optional
-            The object table (see the class docstring for the columns).
-            When *None*, ``catalog_filename`` is read from ``catsim_dir``,
-            which is how the pipeline builds the catalog.
         rng, layout_name, sep_arcsec, indice_group_id, extend_ratio
             Accepted so the class can be constructed like the layout-based
             catalogs; a scene has no random placement, so they are unused.
@@ -1378,8 +1296,8 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         force_pixel_center : bool, optional
             Snap object centres to pixel centres.
         catsim_dir : str or None, optional
-            Directory holding ``catalog_filename``; defaults to
-            ``$CATSIM_DIR``.
+            Directory holding the scene FITS file ``catalog_filename``;
+            defaults to ``$CATSIM_DIR``.
         survey_name_list : iterable of str or None, optional
             Surveys whose ``{survey}_{band}`` magnitudes the table must
             carry.  Defaults to ``["lsst"]``.
@@ -1393,19 +1311,11 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         ps = float(wcs.getPixelScale().asArcseconds())
         self.pixel_scale = ps
 
-        if scene is None:
-            table, row_ids = self._read_catalog(
-                select_observable=select_observable,
-                select_lower_limit=select_lower_limit,
-                select_upper_limit=select_upper_limit,
-            )
-        else:
-            table, row_ids = self._apply_selection(
-                scene_to_structured_array(scene),
-                select_observable=select_observable,
-                select_lower_limit=select_lower_limit,
-                select_upper_limit=select_upper_limit,
-            )
+        table, row_ids = self._read_catalog(
+            select_observable=select_observable,
+            select_lower_limit=select_lower_limit,
+            select_upper_limit=select_upper_limit,
+        )
         names = tuple(table.dtype.names)
         self._check_scene_columns(names)
         num = len(table)
@@ -1492,14 +1402,6 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     def magnitude_columns(cls, survey_name: str, band: str) -> tuple[str, ...]:
         """``{survey}_{band}``; ``hsc`` reuses the LSST photometry."""
         return (f"{_survey_prefix(survey_name)}_{band}",)
-
-    def _load_catalog_file(self, fname: str, columns=None) -> Any:
-        """FITS through :func:`get_catalog`, Parquet through pyarrow."""
-        if fname.lower().endswith((".parq", ".parquet")):
-            import pyarrow.parquet as pq
-
-            return scene_to_structured_array(pq.read_table(fname, columns=columns).to_pandas())
-        return get_catalog(fname, columns=columns)
 
     def _half_light_radius(self, catalog) -> np.ndarray:
         """Circularised radius ``sqrt(a * b)`` (arcsec) of the disk, or of the Sersic fit."""
@@ -1643,11 +1545,31 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     )
 
     @classmethod
-    def from_dp2_objects(
+    def write_scene(cls, scene, catsim_dir: str, *, clobber: bool = False) -> str:
+        """Write a scene table to ``catsim_dir/catalog_filename``.
+
+        ``scene`` is a structured array (e.g. from
+        :meth:`dp2_objects_to_scene`) or a mapping of column name to
+        equal-length arrays.  Returns the path, which the constructor then
+        reads with ``catsim_dir=catsim_dir``.
+        """
+        if not isinstance(scene, np.ndarray):
+            columns = {str(name): np.asarray(values) for name, values in scene.items()}
+            num = len(next(iter(columns.values())))
+            table = np.empty(num, dtype=[(name, values.dtype) for name, values in columns.items()])
+            for name, values in columns.items():
+                table[name] = values
+            scene = table
+        os.makedirs(catsim_dir, exist_ok=True)
+        fname = os.path.join(catsim_dir, cls.catalog_filename)
+        fitsio.write(fname, scene, clobber=clobber)
+        return fname
+
+    @classmethod
+    def dp2_objects_to_scene(
         cls,
         objects,
         *,
-        tract_info,
         bands: Iterable[str] = ("u", "g", "r", "i", "z", "y"),
         survey_name: str = "lsst",
         flux_column: str = "cModelFlux",
@@ -1658,13 +1580,14 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         default_redshift: float = 0.0,
         morphology: str = "bulge_disk",
         morphology_band: str = "i",
-        **kwargs,
-    ) -> "ClusterSceneCatalog":
-        """Build a scene from rows of the Rubin DP2 ``Object`` table.
+    ) -> np.ndarray:
+        """Scene table (structured array) from rows of the Rubin DP2 ``Object`` table.
 
-        ``objects`` is anything :func:`scene_to_structured_array` accepts,
-        typically the ``pandas.DataFrame`` of an ``lsdb`` cone search
-        around a cluster, or a Parquet file of it.  Column mapping:
+        ``objects`` is the path of a FITS file of DP2 object rows (e.g. a
+        cone search around a cluster) or the structured array
+        ``fitsio.read`` returns for one.  Write the result with
+        :meth:`write_scene` and build the catalog from that directory.
+        Column mapping:
 
         * ``coord_ra``, ``coord_dec`` -> ``ra``, ``dec``
         * ``morphology="bulge_disk"`` (default): the cModel ellipses of
@@ -1686,13 +1609,10 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         * ``redshift_column`` -> ``redshift``; missing or non-finite
           values get ``default_redshift``, point sources ``0``.
         * ``objectId`` is carried through when present.
-
-        Remaining keyword arguments go to the constructor (selection cuts,
-        ``force_pixel_center``, ...).
         """
         if morphology not in ("bulge_disk", "sersic"):
             raise ValueError(f"morphology must be 'bulge_disk' or 'sersic', not {morphology!r}")
-        table = scene_to_structured_array(objects)
+        table = fitsio.read(os.fspath(objects)) if isinstance(objects, (str, os.PathLike)) else objects
         names = tuple(table.dtype.names)
         bands = tuple(bands)
         prefix = _survey_prefix(survey_name)
@@ -1755,12 +1675,10 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
                 )
         if "objectId" in names:
             columns["objectId"] = np.asarray(table["objectId"])
-        return cls(
-            scene=_columns_to_structured_array(columns),
-            tract_info=tract_info,
-            survey_name_list=[survey_name],
-            **kwargs,
-        )
+        scene = np.empty(num, dtype=[(name, values.dtype) for name, values in columns.items()])
+        for name, values in columns.items():
+            scene[name] = values
+        return scene
 
     # ---------- rendering onto an existing image ----------
 
