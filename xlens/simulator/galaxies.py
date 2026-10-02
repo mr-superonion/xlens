@@ -56,25 +56,6 @@ FORCE_GALAXY_PROFILE_EXPONENTIAL = 2
 # ``max_bulge_hlr_arcsec`` attribute.
 MAX_BULGE_HLR_ARCSEC = 3.0
 
-# Placement and lensing columns every truth catalog carries, ahead of the
-# input-catalog property columns merged in by the constructors.
-PLACEMENT_DTYPE = [
-    ("indices", "i8"),
-    ("redshift", "f8"),
-    ("angles", "f8"),
-    ("gamma1", "f8"),
-    ("gamma2", "f8"),
-    ("kappa", "f8"),
-    ("dx", "f8"),
-    ("dy", "f8"),
-    ("ra", "f8"),
-    ("dec", "f8"),  # post-lensed ra, dec
-    ("prelensed_ra", "f8"),
-    ("prelensed_dec", "f8"),
-    ("has_finite_shear", "bool"),
-    ("hlr", "f8"),
-]
-
 
 def _survey_prefix(survey_name: str) -> str:
     """Column prefix for *survey_name*; hsc reuses the LSST photometry."""
@@ -146,11 +127,29 @@ class BaseGalaxyCatalog(ABC):
     # computed over.  All three catalogs fill an RA/Dec box, so naming
     # the columns is the only thing that varies between them.
     radec_columns: ClassVar[tuple[str, str]] = ("ra", "dec")
+    # Placement and lensing columns every truth catalog carries, ahead of the
+    # input-catalog property columns merged in by the constructor.
+    placement_dtype: ClassVar[list[tuple[str, str]]] = [
+        ("indices", "i8"),
+        ("redshift", "f8"),
+        ("angles", "f8"),
+        ("gamma1", "f8"),
+        ("gamma2", "f8"),
+        ("kappa", "f8"),
+        ("dx", "f8"),
+        ("dy", "f8"),
+        ("ra", "f8"),
+        ("dec", "f8"),  # post-lensed ra, dec
+        ("prelensed_ra", "f8"),
+        ("prelensed_dec", "f8"),
+        ("has_finite_shear", "bool"),
+        ("hlr", "f8"),
+    ]
 
     def __init__(
         self,
         *,
-        rng: np.random.RandomState,
+        rng: np.random.RandomState | None,
         tract_info: lsst.skymap.tractInfo.ExplicitTractInfo,
         layout_name: str,
         sep_arcsec: float | None = None,
@@ -167,12 +166,16 @@ class BaseGalaxyCatalog(ABC):
 
         Parameters
         ----------
-        rng : numpy.random.RandomState
-            Random number generator (old NumPy API).
+        rng : numpy.random.RandomState or None
+            Random number generator (old NumPy API).  Only the ``catalog``
+            layout with catalog-given angles can do without one.
         tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
             Tract information providing WCS and bounding box.
-        layout_name : {'grid', 'hex', 'random', 'random_disk'}
-            Pattern used to place galaxies.
+        layout_name : {'grid', 'hex', 'random', 'random_disk', 'catalog'}
+            Pattern used to place galaxies.  ``catalog`` places every
+            (selected) input row once, at its own ``radec_columns``
+            position, oriented by :meth:`_catalog_angles`; the others
+            sample rows onto a :class:`Layout` with random orientations.
         sep_arcsec : float or None, optional
             Spacing for grid/hex layouts.
         indice_group_id : int or None, optional
@@ -206,13 +209,6 @@ class BaseGalaxyCatalog(ABC):
         ps = float(wcs.getPixelScale().asArcseconds())
         self.pixel_scale = ps
         bbox = tract_info.getBBox()
-        layout = Layout(
-            layout_name=layout_name,
-            wcs=wcs,
-            boundary_box=bbox,
-            sep_arcsec=sep_arcsec,
-            extend_ratio=extend_ratio,
-        )
         # ``input_row_ids`` are the row numbers in the unfiltered input
         # file, carried alongside the (possibly cut) catalog instead of
         # as a column to avoid copying the whole array.
@@ -222,39 +218,62 @@ class BaseGalaxyCatalog(ABC):
             select_upper_limit=select_upper_limit,
         )
 
-        # density drives how many objects the layout will place
-        density = self._compute_density(input_catalog)
-        # positions to place galaxies
-        shifts_array = layout.get_shifts(rng=rng, density=density)
+        if layout_name == "catalog":
+            # every row once, at its own position, with its own orientation
+            num = len(input_catalog)
+            idx = np.arange(num, dtype=int)
+            ra_col, dec_col = self.radec_columns
+            pix_x, pix_y = wcs.skyToPixelArray(
+                np.asarray(input_catalog[ra_col], dtype=float),
+                np.asarray(input_catalog[dec_col], dtype=float),
+                degrees=True,
+            )
+            dx = (np.asarray(pix_x) - self.x_center) * ps
+            dy = (np.asarray(pix_y) - self.y_center) * ps
+            angles = self._catalog_angles(input_catalog, rng)
+        else:
+            layout = Layout(
+                layout_name=layout_name,
+                wcs=wcs,
+                boundary_box=bbox,
+                sep_arcsec=sep_arcsec,
+                extend_ratio=extend_ratio,
+            )
+            # density drives how many objects the layout will place
+            density = self._compute_density(input_catalog)
+            # positions to place galaxies
+            shifts_array = layout.get_shifts(rng=rng, density=density)
+
+            # choose which catalog rows populate those positions
+            num = len(shifts_array)
+            catalog_size = len(input_catalog)
+            if (indice_group_id is None) or (indice_group_id < 0):
+                probs = self._probabilities_for_sampling(input_catalog)
+                integers = np.arange(0, catalog_size, dtype=int)
+                idx = rng.choice(integers, size=num, p=probs)
+            else:
+                indice_min = indice_group_id * num
+                indice_max = min(indice_min + num, catalog_size)
+                if indice_min >= catalog_size:
+                    raise ValueError("indice_min too large")
+                idx = np.arange(indice_min, indice_max, dtype=int) % catalog_size
+                num = indice_max - indice_min
+                shifts_array = shifts_array[0:num]
+            dx = np.asarray(shifts_array["dx"], dtype=float)
+            dy = np.asarray(shifts_array["dy"], dtype=float)
+            # random orientation for each placed galaxy
+            angles = rng.uniform(low=0.0, high=2.0 * np.pi, size=num)
 
         if force_pixel_center:
             inv_pixel_scale = 1.0 / ps
-            shifts_array["dx"] = (np.round(shifts_array["dx"] * inv_pixel_scale) + 0.5) * ps
-            shifts_array["dy"] = (np.round(shifts_array["dy"] * inv_pixel_scale) + 0.5) * ps
-
-        # choose which catalog rows populate those positions
-        num = len(shifts_array)
-        catalog_size = len(input_catalog)
-        if (indice_group_id is None) or (indice_group_id < 0):
-            probs = self._probabilities_for_sampling(input_catalog)
-            integers = np.arange(0, catalog_size, dtype=int)
-            idx = rng.choice(integers, size=num, p=probs)
-        else:
-            indice_min = indice_group_id * num
-            indice_max = min(indice_min + num, catalog_size)
-            if indice_min >= catalog_size:
-                raise ValueError("indice_min too large")
-            idx = np.arange(indice_min, indice_max, dtype=int) % catalog_size
-            num = indice_max - indice_min
-            shifts_array = shifts_array[0:num]
-        # random orientation for each placed galaxy
-        angles = rng.uniform(low=0.0, high=2.0 * np.pi, size=num)
+            dx = (np.round(dx * inv_pixel_scale) + 0.5) * ps
+            dy = (np.round(dy * inv_pixel_scale) + 0.5) * ps
         # rows of the input galaxy catalog that populate the placed objects
         selected = input_catalog[idx]
 
-        placement = np.zeros(num, dtype=PLACEMENT_DTYPE)
-        placement["dx"] = shifts_array["dx"]
-        placement["dy"] = shifts_array["dy"]
+        placement = np.zeros(num, dtype=self.placement_dtype)
+        placement["dx"] = dx
+        placement["dy"] = dy
         placement["angles"] = angles
         image_x = self.x_center + placement["dx"] / ps
         image_y = self.y_center + placement["dy"] / ps
@@ -290,6 +309,16 @@ class BaseGalaxyCatalog(ABC):
         self.dtype = self.data.dtype
         self.lensed = False
         return
+
+    def _catalog_angles(self, cat: Any, rng: np.random.RandomState | None) -> np.ndarray:
+        """Orientation (radians) of each row for the ``catalog`` layout.
+
+        Random by default, as for the other layouts; a catalog that carries
+        position angles overrides this.
+        """
+        if rng is None:
+            raise ValueError(f"{type(self).__name__} needs an rng for random orientations")
+        return rng.uniform(low=0.0, high=2.0 * np.pi, size=len(cat))
 
     def set_z_source(self, redshift):
         """Override all galaxy redshifts with a fixed value."""
@@ -1208,11 +1237,8 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
 
     Input columns
     -------------
-    position
-        ``ra``, ``dec`` in degrees, **or** ``dx``, ``dy`` in arcsec on the
-        tangent plane relative to the centre of the tract bounding box
-        (``+dx`` along the pixel ``+x`` axis, ``+dy`` along ``+y``).
-        ``ra``/``dec`` win when both are present.
+    ``ra``, ``dec``
+        Sky position in degrees.
     ``redshift``
         Used by the lensing perturbation; objects at or below the lens
         redshift are not lensed, so cluster members should carry the
@@ -1245,7 +1271,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     catalog_filename: ClassVar[str] = "cluster_scene.fits"
     required_columns: ClassVar[tuple[str, ...] | None] = None
 
-    scene_columns: ClassVar[tuple[str, ...]] = ("redshift",)
+    scene_columns: ClassVar[tuple[str, ...]] = ("ra", "dec", "redshift")
     sersic_columns: ClassVar[tuple[str, ...]] = ("sersic_n", "r50_major", "r50_minor", "theta")
     bulge_disk_columns: ClassVar[tuple[str, ...]] = (
         "bulge_r50_major",
@@ -1271,108 +1297,50 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         *,
         tract_info,
         rng: np.random.RandomState | None = None,
-        layout_name: str = "scene",
-        sep_arcsec: float | None = None,
-        indice_group_id: int | None = None,
         select_observable: list[str] | str | None = None,
         select_lower_limit: Iterable[float] | None = None,
         select_upper_limit: Iterable[float] | None = None,
-        extend_ratio: float = 1.08,
         force_pixel_center: bool = False,
         catsim_dir: str | None = None,
         survey_name_list: Iterable[str] | None = None,
+        **kwargs,
     ):
         """Build the truth catalog of the scene in ``catsim_dir``.
 
-        Parameters
-        ----------
-        tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
-            Provides the WCS and bounding box that define the pixel frame.
-        rng, layout_name, sep_arcsec, indice_group_id, extend_ratio
-            Accepted so the class can be constructed like the layout-based
-            catalogs; a scene has no random placement, so they are unused.
-        select_observable, select_lower_limit, select_upper_limit
-            Optional per-column cuts, as for the other catalogs.
-        force_pixel_center : bool, optional
-            Snap object centres to pixel centres.
-        catsim_dir : str or None, optional
-            Directory holding the scene FITS file ``catalog_filename``;
-            defaults to ``$CATSIM_DIR``.
-        survey_name_list : iterable of str or None, optional
-            Surveys whose ``{survey}_{band}`` magnitudes the table must
-            carry.  Defaults to ``["lsst"]``.
+        The base-class constructor with the ``catalog`` layout: every row
+        of the scene file is placed once at its own ``ra``/``dec`` and
+        oriented by its own position angle, so nothing is random and
+        ``rng`` is not needed.  The layout arguments of the other catalogs
+        (``layout_name``, ``sep_arcsec``, ``indice_group_id``,
+        ``extend_ratio``) are accepted, so the pipeline can build every
+        catalog the same way, and ignored.
         """
-        self.catsim_dir = catsim_dir or os.environ.get("CATSIM_DIR", ".")
-        if survey_name_list is None:
-            survey_name_list = ["lsst"]
-        self.survey_name_list = tuple(str(name).lower() for name in survey_name_list)
-        self.prepare_tract_info(tract_info)
-        wcs = tract_info.getWcs()
-        ps = float(wcs.getPixelScale().asArcseconds())
-        self.pixel_scale = ps
-
-        table, row_ids = self._read_catalog(
+        for name in ("layout_name", "sep_arcsec", "indice_group_id", "extend_ratio"):
+            kwargs.pop(name, None)
+        if kwargs:
+            raise TypeError(f"unexpected arguments: {sorted(kwargs)}")
+        super().__init__(
+            rng=rng,
+            tract_info=tract_info,
+            layout_name="catalog",
             select_observable=select_observable,
             select_lower_limit=select_lower_limit,
             select_upper_limit=select_upper_limit,
-        )
-        names = tuple(table.dtype.names)
-        self._check_scene_columns(names)
-        num = len(table)
-
-        # tangent-plane offsets (arcsec) from the tract centre, the frame
-        # ``rotate`` and ``lens`` work in
-        if "ra" in names and "dec" in names:
-            pix_x, pix_y = wcs.skyToPixelArray(
-                np.asarray(table["ra"], dtype=float),
-                np.asarray(table["dec"], dtype=float),
-                degrees=True,
-            )
-            dx = (np.asarray(pix_x) - self.x_center) * ps
-            dy = (np.asarray(pix_y) - self.y_center) * ps
-        else:
-            dx = np.asarray(table["dx"], dtype=float)
-            dy = np.asarray(table["dy"], dtype=float)
-        if force_pixel_center:
-            inv_pixel_scale = 1.0 / ps
-            dx = (np.round(dx * inv_pixel_scale) + 0.5) * ps
-            dy = (np.round(dy * inv_pixel_scale) + 0.5) * ps
-        ra, dec = wcs.pixelToSkyArray(
-            x=self.x_center + dx / ps,
-            y=self.y_center + dy / ps,
-            degrees=True,
+            force_pixel_center=force_pixel_center,
+            catsim_dir=catsim_dir,
+            survey_name_list=survey_name_list,
         )
 
-        placement = np.zeros(num, dtype=PLACEMENT_DTYPE)
-        placement["dx"] = dx
-        placement["dy"] = dy
-        # the position angle is the intrinsic orientation: ``_generate_galaxy``
-        # builds every profile along +x and ``get_obj`` rotates it by this
-        theta_column = "disk_theta" if self._has_bulge_disk(names) else "theta"
-        placement["angles"] = np.radians(np.nan_to_num(np.asarray(table[theta_column], dtype=float), nan=0.0))
-        placement["ra"] = ra
-        placement["dec"] = dec
-        placement["prelensed_ra"] = ra
-        placement["prelensed_dec"] = dec
-        placement["has_finite_shear"] = np.ones(num, dtype=bool)
-        placement["indices"] = row_ids
-        placement["redshift"] = np.asarray(table["redshift"], dtype=float)
-        placement["hlr"] = self._build_hlr_array(table)
+    def _read_catalog(self, **kwargs):
+        """The scene file, checked for the columns the scene needs."""
+        table, row_ids = super()._read_catalog(**kwargs)
+        self._check_scene_columns(tuple(table.dtype.names))
+        return table, row_ids
 
-        extra = [name for name in names if name not in placement.dtype.names]
-        if extra:
-            self.data = np.asarray(
-                rfn.merge_arrays(
-                    [placement, table[extra]],
-                    flatten=True,
-                    usemask=False,
-                )
-            )
-        else:
-            self.data = placement
-        self.dtype = self.data.dtype
-        self.lensed = False
-        return
+    def _catalog_angles(self, cat, rng) -> np.ndarray:
+        """The disk (or Sersic) position angle; ``get_obj`` rotates each profile by it."""
+        column = "disk_theta" if self._has_bulge_disk(cat.dtype.names) else "theta"
+        return np.radians(np.nan_to_num(np.asarray(cat[column], dtype=float), nan=0.0))
 
     @classmethod
     def _has_bulge_disk(cls, names) -> bool:
@@ -1381,8 +1349,6 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
 
     def _check_scene_columns(self, names: tuple[str, ...]) -> None:
         missing = [name for name in self.scene_columns if name not in names]
-        if not ({"ra", "dec"} <= set(names) or {"dx", "dy"} <= set(names)):
-            missing.append("ra/dec or dx/dy")
         bulge_disk = self._has_bulge_disk(names)
         if bulge_disk:
             missing += [name for name in self.bulge_disk_columns if name not in names]

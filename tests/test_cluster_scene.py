@@ -64,11 +64,17 @@ SCENE_ROWS = [
 ]
 
 
+# positions sit a little off the pixel grid: the scene is given in ra/dec, and an object
+# exactly on a pixel boundary rounds its stamp to either side at the 1e-9 level of the
+# sky <-> pixel round trip, depending on which WCS (DM or GalSim) does it
+OFF_GRID = 0.013  # arcsec
+
+
 def _scene_table():
     rows = np.array(SCENE_ROWS, dtype=object)
     table = {
-        "dx": rows[:, 0].astype(float),
-        "dy": rows[:, 1].astype(float),
+        "dx": rows[:, 0].astype(float) + OFF_GRID,
+        "dy": rows[:, 1].astype(float) + OFF_GRID,
         "lsst_i": rows[:, 2].astype(float),
         "lsst_r": rows[:, 2].astype(float) + 0.5,
         "sersic_n": rows[:, 3].astype(float),
@@ -91,11 +97,26 @@ def _structured(columns):
     return out
 
 
+def _radec_scene(scene, tract_info=TRACT_INFO):
+    """The scene with its ``dx``/``dy`` layout (arcsec from the tract centre, along the
+    pixel axes) turned into the ``ra``/``dec`` columns a scene file carries."""
+    columns = {name: np.asarray(scene[name]) for name in (scene.dtype.names if isinstance(scene, np.ndarray) else scene)}
+    if "dx" in columns and "ra" not in columns:
+        centre = tract_info.getBBox().getCenter()
+        ra, dec = tract_info.getWcs().pixelToSkyArray(
+            x=centre.getX() + columns.pop("dx") / PIXEL_SCALE,
+            y=centre.getY() + columns.pop("dy") / PIXEL_SCALE,
+            degrees=True,
+        )
+        columns = {"ra": np.asarray(ra), "dec": np.asarray(dec), **columns}
+    return _structured(columns)
+
+
 def _make(scene, **kwargs):
     """Write ``scene`` as the catalog FITS file of a fresh ``catsim_dir`` and read it back,
     the way the pipeline builds the catalog."""
     with tempfile.TemporaryDirectory() as catsim_dir:
-        ClusterSceneCatalog.write_scene(scene, catsim_dir)
+        ClusterSceneCatalog.write_scene(_radec_scene(scene, kwargs.get("tract_info", TRACT_INFO)), catsim_dir)
         return ClusterSceneCatalog(catsim_dir=catsim_dir, **kwargs)
 
 
@@ -148,8 +169,8 @@ def test_construct_from_offsets():
     ):
         assert col in data.dtype.names, col
     assert not catalog.lensed
-    np.testing.assert_allclose(data["dx"], [r[0] for r in SCENE_ROWS])
-    np.testing.assert_allclose(data["dy"], [r[1] for r in SCENE_ROWS])
+    np.testing.assert_allclose(data["dx"], [r[0] + OFF_GRID for r in SCENE_ROWS], atol=1e-8)
+    np.testing.assert_allclose(data["dy"], [r[1] + OFF_GRID for r in SCENE_ROWS], atol=1e-8)
     np.testing.assert_allclose(data["angles"], np.radians([r[6] for r in SCENE_ROWS]))
     np.testing.assert_allclose(data["hlr"], np.sqrt([r[4] * r[5] for r in SCENE_ROWS]))
     np.testing.assert_array_equal(data["indices"], np.arange(len(SCENE_ROWS)))
@@ -194,7 +215,7 @@ def test_missing_columns_raise():
     with pytest.raises(ValueError, match="sersic_n"):
         _make(columns, tract_info=TRACT_INFO)
     columns = {name: table[name] for name in table.dtype.names if name not in ("dx", "dy")}
-    with pytest.raises(ValueError, match="ra/dec or dx/dy"):
+    with pytest.raises(ValueError, match="ra, dec"):
         _make(columns, tract_info=TRACT_INFO)
     with pytest.raises(ValueError, match="euclid_"):
         _make(_scene_table(), tract_info=TRACT_INFO, survey_name_list=["euclid"])
@@ -258,7 +279,7 @@ def test_draw_on_exposure():
     star = truth[3]
     assert abs(ix + bbox.getMinX() - star["image_x"]) <= 1
     assert abs(iy + bbox.getMinY() - star["image_y"]) <= 1
-    np.testing.assert_allclose(star["image_x"], catalog.x_center + 15.0 / PIXEL_SCALE)
+    np.testing.assert_allclose(star["image_x"], catalog.x_center + (15.0 + OFF_GRID) / PIXEL_SCALE)
 
     # orientation: theta = 0 is elongated along x, theta = 90 along y
     ixx, iyy = _moments(array, truth[0]["image_x"] - bbox.getMinX(), truth[0]["image_y"] - bbox.getMinY())
@@ -459,7 +480,7 @@ def test_dp2_objects_to_scene(tmp_path):
 
 
 def test_load_from_catsim_dir(tmp_path):
-    table = _scene_table()
+    table = _radec_scene(_scene_table())
     fname = ClusterSceneCatalog.write_scene(table, str(tmp_path))
     assert fname == os.path.join(tmp_path, ClusterSceneCatalog.catalog_filename)
 
