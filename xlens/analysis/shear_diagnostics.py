@@ -402,6 +402,14 @@ class ShearStatsPipeConfig(
         doc="Basic selection: keep {survey}_i_mag_gauss2 < mag_max (finite).",
         default=25.0,
     )
+    snr_column = Field[str](
+        doc=(
+            "Column the S/N cut reads. Empty (default) means the i-band "
+            "``{survey}_i_s2n_fpfs1``; ``fpfs1_s2n`` selects on the "
+            "band-combined S/N MergePipe writes with the shape's weights."
+        ),
+        default="",
+    )
     snr_min = Field[float](
         doc="Basic selection: keep {survey}_i_s2n_fpfs1 > snr_min.",
         default=10.0,
@@ -508,6 +516,15 @@ class ShearStatsPipeConfig(
             "See psf_e1_abs_max_bands."
         ),
     )
+    n_inputs_max_bands = DictField(
+        keytype=str, itemtype=float, default={},
+        doc=(
+            "Per-band CEILING on {survey}_{band}_n_inputs, e.g. {'i': 10}: "
+            "a source is kept when every listed band is STRICTLY BELOW its "
+            "threshold (removes over-deep overlap regions). Same integer-"
+            "comb caveat as n_inputs_min_bands. Empty disables the cut."
+        ),
+    )
     n_inputs_min_bands = DictField(
         keytype=str, itemtype=float, default={},
         doc=(
@@ -589,11 +606,10 @@ class ShearStatsPipe(PipelineTask):
         serve any survey: ``SURVEY_`` for the column prefix (``hsc_``,
         ``lsst_``).
 
-        There is no pixel-scale placeholder any more: the ext_shapeHSM
-        PSF second moments are recorded in ARCSEC**2 (converted at
-        measurement time from the plugin's pixel**2 using the coadd
-        WCS), so a FWHM is ``2.3548 * sqrt(0.5*(xx+yy))`` with no scale
-        applied. Applying one here would now double-convert.
+        There is no pixel-scale placeholder: the ext_shapeHSM PSF second
+        moments are in ARCSEC**2 in every catalog this task reads (DP2
+        converts at measurement time; the HSC PDR3 catalogs were converted
+        in place), so a FWHM is ``2.3548 * sqrt(0.5*(xx+yy))`` as is.
         """
         assert isinstance(self.config, ShearStatsPipeConfig)
         return expr.replace("SURVEY_", self.config.survey + "_")
@@ -624,7 +640,8 @@ class ShearStatsPipe(PipelineTask):
         """The basic source selection (cluster-test cuts)."""
         assert isinstance(self.config, ShearStatsPipeConfig)
         mag = np.asarray(cat[self._col("i_mag_gauss2")], dtype=np.float64)
-        snr = np.asarray(cat[self._col("i_s2n_fpfs1")], dtype=np.float64)
+        snr_col = self.config.snr_column or self._col("i_s2n_fpfs1")
+        snr = np.asarray(cat[snr_col], dtype=np.float64)
         esq = np.asarray(cat["esq"], dtype=np.float64)
         mval = np.asarray(cat["n_mask_base"], dtype=np.float64)
         m00 = np.asarray(cat["fpfs1_m00"], dtype=np.float64)
@@ -760,6 +777,14 @@ class ShearStatsPipe(PipelineTask):
                 )
                 continue
             sel &= np.asarray(cat[col], dtype=np.float64) > lo
+        for band, hi in sorted(self.config.n_inputs_max_bands.items()):
+            col = self._col("%s_n_inputs" % band)
+            if col not in names:
+                self.log.warning(
+                    "n_inputs ceiling skipped for band %s: no %s", band, col
+                )
+                continue
+            sel &= np.asarray(cat[col], dtype=np.float64) < hi
         return sel
 
     def run(self, *, catalog) -> Struct:

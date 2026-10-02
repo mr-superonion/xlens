@@ -55,7 +55,7 @@ from numpy.typing import NDArray
 
 from ..catalog.utils import add_magnitude_columns
 from ..utils.catalog import set_isPrimary
-from ..utils.columns import select_band_gauss_fluxes
+from ..utils.columns import merge_structured, select_band_gauss_fluxes
 from ..utils.constants import MAG_ZERO_AB
 from ..utils.image import (
     broadcast_psf_hsm_moments,
@@ -345,7 +345,7 @@ class AnacalMeasureTaskBase(PipelineTask):
             len(cat), dtype=[("%sn_inputs" % prefix, np.float32)]
         )
         col["%sn_inputs" % prefix] = values
-        return np.asarray(rfn.merge_arrays([cat, col], flatten=True))
+        return merge_structured([cat, col])
 
     def apply_n_image_cut(self, mask_array, n_image_handles: dict):
         """OR low-coverage pixels into bit 0 of ``mask_array``.
@@ -674,7 +674,7 @@ class AnacalMeasureTaskBase(PipelineTask):
             band,
             survey=self.config.survey,
         )
-        return np.asarray(rfn.merge_arrays([cat, gauss_cat], flatten=True))
+        return merge_structured([cat, gauss_cat])
 
     def _psf_hsm_moments_per_cell(
         self, cells, band: str, *, pixel_scale: float,
@@ -762,7 +762,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         psf_cols = broadcast_psf_hsm_moments(
             moments, band, n=len(cat), survey=self.config.survey,
         )
-        return np.asarray(rfn.merge_arrays([cat, psf_cols], flatten=True))
+        return merge_structured([cat, psf_cols])
 
     def _append_psf_hsm_moments(
         self,
@@ -790,7 +790,7 @@ class AnacalMeasureTaskBase(PipelineTask):
             psf_moments, band, n=len(cat),
             survey=self.config.survey,
         )
-        return np.asarray(rfn.merge_arrays([cat, psf_cols], flatten=True))
+        return merge_structured([cat, psf_cols])
 
     def _finalize_catalog(
         self,

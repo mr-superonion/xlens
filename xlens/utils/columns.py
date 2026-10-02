@@ -29,7 +29,9 @@ forced measurement.
 
 :data:`DETECTION_KEEP_COLUMNS` is the positive whitelist of columns
 that are actually consumed by downstream code (set_isPrimary,
-matchPipe, cluster analysis, shear-recovery utilities, tests).  Use
+matchPipe, cluster analysis, shear-recovery utilities, tests), and
+:data:`MODEL_COLUMNS` the Gaussian-model flux and moments (with shear
+derivatives), exported as ``model_*``.  Use
 :func:`select_detection_columns` to project a detection catalog onto
 exactly these columns before merging it with forced measurement.
 """
@@ -78,19 +80,73 @@ DETECTION_KEEP_COLUMNS: tuple[str, ...] = (
 )
 
 
-def select_detection_columns(catalog: NDArray) -> NDArray:
-    """Project ``catalog`` onto :data:`DETECTION_KEEP_COLUMNS`.
+# Gaussian model fit (flux and intrinsic second moments) with shear
+# derivatives, kept under a ``model_`` prefix so they cannot be confused
+# with the per-band forced measurements.  The model ellipticity and size
+# follow from these: e1 = (mxx - myy) / T, e2 = 2 mxy / T, T = mxx + myy.
+MODEL_COLUMNS: dict[str, str] = {
+    f"{d}{q}{s}": f"model_{d}{q}{s}"
+    for q in ("flux", "mxx", "myy", "mxy")
+    for d, s in (("", ""), ("d", "_dg1"), ("d", "_dg2"))
+}
 
-    Columns listed in the keep-list but missing from the catalog are
+
+def select_detection_columns(catalog: NDArray) -> NDArray:
+    """Project ``catalog`` onto :data:`DETECTION_KEEP_COLUMNS` plus the
+    Gaussian-model columns :data:`MODEL_COLUMNS`, the latter renamed with
+    a ``model_`` prefix.
+
+    Columns listed in either list but missing from the catalog are
     silently skipped.  Returns a contiguous structured array.
     """
     if catalog is None or catalog.dtype.names is None:
         return catalog
     available = set(catalog.dtype.names)
     keep = [c for c in DETECTION_KEEP_COLUMNS if c in available]
-    if not keep:
+    model = [c for c in MODEL_COLUMNS if c in available]
+    if not keep and not model:
         return catalog
-    return np.asarray(rfn.repack_fields(catalog[keep]))
+    out = np.asarray(rfn.repack_fields(catalog[keep + model]))
+    if model:
+        out = rfn.rename_fields(out, {c: MODEL_COLUMNS[c] for c in model})
+    return np.asarray(out)
+
+
+def merge_structured(arrays) -> NDArray:
+    """Concatenate the fields of equal-length structured arrays.
+
+    Drop-in for ``rfn.merge_arrays(arrays, flatten=True)`` on flat
+    structured arrays: the output is packed (no alignment padding), the
+    field order is the input order and a duplicate field name raises.
+    Unlike ``merge_arrays``, which builds the result one Python tuple per
+    row, this allocates the packed array once and copies column by
+    column -- two orders of magnitude faster on catalog-sized inputs,
+    and it holds the GIL for correspondingly less time inside the
+    threaded cell loops.
+    """
+    arrays = [np.asarray(a) for a in arrays]
+    if not arrays:
+        raise ValueError("merge_structured: no arrays")
+    n = len(arrays[0])
+    descr: list = []
+    seen: set = set()
+    for a in arrays:
+        if a.dtype.names is None:
+            raise TypeError("merge_structured: inputs must be structured")
+        if len(a) != n:
+            raise ValueError(
+                f"merge_structured: length mismatch {len(a)} != {n}"
+            )
+        for name in a.dtype.names:
+            if name in seen:
+                raise ValueError(f"field '{name}' occurs more than once")
+            seen.add(name)
+            descr.append((name, a.dtype.fields[name][0]))
+    out = np.empty(n, dtype=np.dtype(descr))
+    for a in arrays:
+        for name in a.dtype.names:
+            out[name] = a[name]
+    return out
 
 
 GAUSS_APERTURE_COLUMNS: tuple[str, ...] = (

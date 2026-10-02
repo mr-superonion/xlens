@@ -86,7 +86,6 @@ def _simulate_band(skymap, band: str, truth):
 def _measure(skymap, exposures: dict):
     cfg = MeasureCoaddsPipeConfig()
     cfg.anacal.force_size = False
-    cfg.anacal.sigma_arcsec = 0.38
     cfg.anacal.num_epochs = 0
     cfg.anacal.do_noise_bias_correction = True
     cfg.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)

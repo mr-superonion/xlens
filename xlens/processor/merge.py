@@ -58,8 +58,13 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
+from ..utils.columns import MODEL_COLUMNS
 from ..utils.constants import FPFS_C0
 from ..wcs import extract_perturbation_dm_wcs, sky_to_pixel
+
+# The Gaussian model fit (flux and intrinsic covariance, with dg1/dg2
+# shear derivatives) as exported by the measurement tasks.
+MODEL_MERGE_COLUMNS: tuple[str, ...] = tuple(MODEL_COLUMNS.values())
 
 # Photo-z point-estimate columns written per object by photoZPipe: POINT_KEYS
 # times the five shear versions (0, 1p, 1m, 2p, 2m), in the same order the
@@ -72,6 +77,26 @@ PHOTOZ_POINT_COLUMNS = [
 ]
 #: Value written to every photo-z point column when a tract has no photo-z.
 PHOTOZ_MISSING_VALUE = -1.0
+
+
+def shape_weight_f1(s, a, snr0, beta, amp=1.0):
+    """``f1(s) = amp * (s/50)**beta / (1 + (snr0/s)**a)`` and ``df1/ds``."""
+    s = np.maximum(np.asarray(s, dtype=np.float64), 1e-3)
+    r = (snr0 / s) ** a
+    f = amp * (s / 50.0) ** beta / (1.0 + r)
+    return f, f * (beta / s + a * r / (s * (1.0 + r)))
+
+
+def shape_weight_f2(v, esq_scale, esq_step, esq_max):
+    """``f2(v) = exp(-v/esq_scale) S(v)`` and ``df2/dv``, with S the C2
+    quintic smooth step: 1 for v <= esq_step, 0 for v >= esq_max."""
+    v = np.asarray(v, dtype=np.float64)
+    ex = np.exp(-v / esq_scale)
+    t = np.clip((v - esq_step) / (esq_max - esq_step), 0.0, 1.0)
+    S = 1.0 - (6 * t**5 - 15 * t**4 + 10 * t**3)
+    dS = np.where((v > esq_step) & (v < esq_max),
+                  -(30 * t**4 - 60 * t**3 + 30 * t**2) / (esq_max - esq_step), 0.0)
+    return ex * S, ex * (dS - S / esq_scale)
 
 
 class MergePipeConnections(
@@ -184,6 +209,39 @@ class MergePipeConfig(
         ),
         default=[],
     )
+    per_object_snr2_weights = Field[bool](
+        doc=(
+            "Weight each band PER OBJECT by its flux S/N squared, "
+            "``w_b = ({band}_s2n_fpfs1)**2`` normalised over the bands, "
+            "instead of the fixed ``band_weights``. The weights' own shear "
+            "response, ``dw_b/dg = 2 s2n_b ds2n_b/dg``, is propagated into "
+            "every band-combined moment and into the combined S/N "
+            "``fpfs1_s2n``, so the estimator stays unbiased. A band given a "
+            "fixed weight of 0 in ``band_weights`` is excluded here too; a "
+            "row whose S/N are all unusable falls back to the fixed weights "
+            "with no weight response."
+        ),
+        default=False,
+    )
+    shape_weight_params = ListField[float](
+        doc=(
+            "When given, apply the optimal shape weight "
+            "``w_opt = f1(fpfs1_s2n) * f2(esq)`` to the shape itself: "
+            "``fpfs1_e{1,2} <- w_opt * eps`` and ``fpfs1_de{i}_dg{j} <- "
+            "w_opt * deps_i/dg_j + dw_opt/dg_j * eps_i`` (chain rule through "
+            "the combined S/N and esq). ``wsel`` stays the detection weight and "
+            "no column is added: downstream code keeps using ``e = wsel * "
+            "fpfs1_e`` and ``response = wsel * fpfs1_de/dg + dwsel/dg * "
+            "fpfs1_e`` unchanged; ``esq`` stays the UNWEIGHTED |eps|^2. "
+            "Seven numbers ``[amp, a, snr0, beta, "
+            "esq_scale, esq_step, esq_max]`` (six = amp 1), with "
+            "``f1(s) = amp * (s/50)**beta / (1 + (snr0/s)**a)`` and "
+            "``f2(v) = exp(-v/esq_scale) * S(v; esq_step, esq_max)``, S the "
+            "quintic smooth step from 1 at esq_step to 0 at esq_max. "
+            "Empty (default) leaves the shape unweighted."
+        ),
+        default=[],
+    )
     fpfs_c0 = Field[float](
         doc=(
             "C0 normalisation in ``e = m22c / (m00 + c0)``, on the fixed AB "
@@ -248,6 +306,11 @@ class MergePipeConfig(
         super().validate()
         if len(self.band_weights) != 0 and len(self.band_weights) != len(self.bands):
             raise ValueError("band_weights, when set, must have the same length as bands")
+        if len(self.shape_weight_params) not in (0, 6, 7):
+            raise ValueError("shape_weight_params must be empty, [a, snr0, beta, esq_scale, esq_step, esq_max] "
+                             "or [amp, a, snr0, beta, esq_scale, esq_step, esq_max]")
+        if self.per_object_snr2_weights and len(self.band_weights) == 0:
+            raise ValueError("per_object_snr2_weights needs band_weights (the fallback weights, 0 to exclude a band)")
 
 
 class MergePipe(PipelineTask):
@@ -323,8 +386,8 @@ class MergePipe(PipelineTask):
         catalog = self._collect_src_tables(
             srcList, tract=tract, n_patch_x=n_patch_x)
 
-        weights = self._derive_band_weights(catalog)
-        catalog = self._combine_band_moments(catalog, weights)
+        what, dwhat = self._band_weights(catalog)
+        catalog = self._combine_band_moments(catalog, what, dwhat)
 
         if self.config.do_wcs_correction:
             tract_info = skymap[tract]
@@ -505,6 +568,12 @@ class MergePipe(PipelineTask):
           ``{b}_dflux_fpfs1_dg2``, ``{b}_flux_fpfs1_err``, and the flux
           S/N ``{b}_s2n_fpfs1``, ``{b}_ds2n_fpfs1_dg1``,
           ``{b}_ds2n_fpfs1_dg2``.
+        - Gaussian model fit of the detection image, when present:
+          ``model_flux``, ``model_mxx``, ``model_myy``, ``model_mxy`` and
+          their ``_dg1`` / ``_dg2`` shear derivatives.  The spin-2 part
+          of the covariance is WCS-corrected like ``fpfs1_e*``; the model
+          ellipticity and size follow as ``e1 = (mxx - myy) / T``,
+          ``e2 = 2 mxy / T``, ``T = mxx + myy``.
         - Photo-z columns appended by ``_join_photoz`` (when present).
 
         Per-band shapes/moments, the detection-band raw FPFS columns
@@ -578,6 +647,13 @@ class MergePipe(PipelineTask):
             f"{p}dm20_dg1",
             f"{p}dm20_dg2",
         ]
+        # Band-combined flux S/N (same weights as the shape) + response;
+        # optional so catalogs merged before it existed still finalize.
+        for col in (f"{p}s2n", f"{p}ds2n_dg1", f"{p}ds2n_dg2"):
+            if col in catalog.colnames:
+                keep.append(col)
+        if len(self.config.shape_weight_params) in (6, 7):
+            catalog = self._apply_shape_weight(catalog)
         # Per-source PSF-quality columns, carried through when the
         # measurement produced them. n_mask_discontinuity counts
         # INEXACT_PSF pixels in a box around the source (current
@@ -588,7 +664,7 @@ class MergePipe(PipelineTask):
             "n_mask_discontinuity",
             "psf_mask_value",
             "psf_mask_frac",
-        ):
+        ) + MODEL_MERGE_COLUMNS:
             if col in catalog.colnames:
                 keep.append(col)
         for b in bands:
@@ -665,6 +741,36 @@ class MergePipe(PipelineTask):
         if missing:
             raise RuntimeError(f"merge finalize: missing expected columns: {missing}")
         return catalog[keep]
+
+    def _apply_shape_weight(self, catalog: Table) -> Table:
+        """Apply ``w_opt = f1(fpfs1_s2n) f2(esq)`` to the shape:
+        ``e_i <- w_opt e_i``, ``de_i/dg_j <- w_opt de_i/dg_j + dw_opt/dg_j e_i``
+        with ``dw_opt/dg = f1' ds2n/dg f2 + f1 f2' desq/dg``.  ``wsel`` and
+        ``esq`` (the unweighted |e|^2 that f2 is defined on) are untouched.
+        Runs after the row filter and on the WCS-corrected shape, so the row
+        set is unchanged; a taper to zero leaves e = 0 rows."""
+        p = self.config.fpfs_prefix
+        params = list(self.config.shape_weight_params)
+        amp = params.pop(0) if len(params) == 7 else 1.0
+        a, snr0, beta, esq_scale, esq_step, esq_max = params
+        s = np.asarray(catalog[f"{p}s2n"], dtype=np.float64)
+        v = np.asarray(catalog["esq"], dtype=np.float64)
+        f1, df1 = shape_weight_f1(s, a, snr0, beta, amp)
+        f2, df2 = shape_weight_f2(v, esq_scale, esq_step, esq_max)
+        wopt = f1 * f2
+        e = {i: np.asarray(catalog[f"{p}e{i}"], dtype=np.float64) for i in (1, 2)}
+        for j in (1, 2):
+            ds = np.asarray(catalog[f"{p}ds2n_dg{j}"], dtype=np.float64)
+            dv = np.asarray(catalog[f"desq_dg{j}"], dtype=np.float64)
+            dwopt = df1 * ds * f2 + f1 * df2 * dv
+            for i in (1, 2):
+                col = f"{p}de{i}_dg{j}"
+                if col in catalog.colnames:
+                    de = np.asarray(catalog[col], dtype=np.float64)
+                    catalog[col] = wopt * de + dwopt * e[i]
+        for i in (1, 2):
+            catalog[f"{p}e{i}"] = wopt * e[i]
+        return catalog
 
     def _collect_src_tables(self, srcList, tract=None,
                             n_patch_x=None) -> Table:
@@ -757,39 +863,102 @@ class MergePipe(PipelineTask):
         )
         return w
 
+    def _band_weights(self, catalog: Table):
+        """Normalised per-object band weights ``what[n, nb]`` and their
+        shear response ``dwhat[n, nb, 2]`` (all zero for fixed weights).
+
+        With ``per_object_snr2_weights``: ``w_b = s2n_b**2``,
+        ``dw_b/dg = 2 s2n_b ds2n_b/dg``, ``what_b = w_b / W`` and
+        ``dwhat_b/dg = (dw_b/dg - what_b dW/dg) / W``.
+        """
+        bands = list(self.config.bands)
+        n, nb = len(catalog), len(bands)
+        fixed = self._derive_band_weights(catalog)
+        if not self.config.per_object_snr2_weights:
+            return (np.broadcast_to(fixed, (n, nb)).copy(),
+                    np.zeros((n, nb, 2)))
+        use = (fixed > 0).astype(np.float64)
+        s = np.stack(
+            [np.asarray(catalog[f"{b}_s2n_fpfs1"], dtype=np.float64) for b in bands],
+            axis=1,
+        )
+        ds = np.stack(
+            [np.stack([np.asarray(catalog[f"{b}_ds2n_fpfs1_dg{c}"], dtype=np.float64)
+                       for c in (1, 2)], axis=1) for b in bands],
+            axis=1,
+        )
+        s = np.where(np.isfinite(s), s, 0.0) * use[None, :]
+        ds = np.where(np.isfinite(ds), ds, 0.0) * use[None, :, None]
+        w = s * s
+        dw = 2.0 * s[:, :, None] * ds
+        W = w.sum(axis=1)
+        dW = dw.sum(axis=1)
+        good = np.isfinite(W) & (W > 0)
+        Wsafe = np.where(good, W, 1.0)
+        what = w / Wsafe[:, None]
+        dwhat = (dw - what[:, :, None] * dW[:, None, :]) / Wsafe[:, None, None]
+        what[~good] = fixed
+        dwhat[~good] = 0.0
+        self.log.info(
+            "band weights: per-object s2n^2 over %s; %d of %d rows fell back "
+            "to the fixed weights",
+            ", ".join(b for b, u in zip(bands, use) if u > 0), int((~good).sum()), n,
+        )
+        return what, dwhat
+
     def _combine_band_moments(
         self,
         catalog: Table,
-        weights: np.ndarray,
+        what: np.ndarray,
+        dwhat: np.ndarray,
     ) -> Table:
+        """Band-combine the shapelet moments with per-object weights.
+
+        ``M = sum_b what_b M_b`` and, carrying the weights' own response,
+        ``dM/dg = sum_b (what_b dM_b/dg + dwhat_b/dg M_b)``.  The same
+        weights give the combined flux S/N ``fpfs1_s2n = F / sqrt(V)``
+        with ``F = sum what_b F_b`` and ``V = sum what_b**2 sigma_b**2``.
+        """
         bands = list(self.config.bands)
         p = self.config.fpfs_prefix
         n = len(catalog)
-        m00 = np.zeros(n)
-        m20 = np.zeros(n)
-        m22c = np.zeros(n)
-        m22s = np.zeros(n)
-        dm00_dg1 = np.zeros(n)
-        dm00_dg2 = np.zeros(n)
-        dm20_dg1 = np.zeros(n)
-        dm20_dg2 = np.zeros(n)
-        dm22c_dg1 = np.zeros(n)
-        dm22c_dg2 = np.zeros(n)
-        dm22s_dg1 = np.zeros(n)
-        dm22s_dg2 = np.zeros(n)
-        for b, w in zip(bands, weights):
-            m00 += w * np.asarray(catalog[f"{b}_{p}m00"])
-            m20 += w * np.asarray(catalog[f"{b}_{p}m20"])
-            m22c += w * np.asarray(catalog[f"{b}_{p}m22c"])
-            m22s += w * np.asarray(catalog[f"{b}_{p}m22s"])
-            dm00_dg1 += w * np.asarray(catalog[f"{b}_{p}dm00_dg1"])
-            dm00_dg2 += w * np.asarray(catalog[f"{b}_{p}dm00_dg2"])
-            dm20_dg1 += w * np.asarray(catalog[f"{b}_{p}dm20_dg1"])
-            dm20_dg2 += w * np.asarray(catalog[f"{b}_{p}dm20_dg2"])
-            dm22c_dg1 += w * np.asarray(catalog[f"{b}_{p}dm22c_dg1"])
-            dm22c_dg2 += w * np.asarray(catalog[f"{b}_{p}dm22c_dg2"])
-            dm22s_dg1 += w * np.asarray(catalog[f"{b}_{p}dm22s_dg1"])
-            dm22s_dg2 += w * np.asarray(catalog[f"{b}_{p}dm22s_dg2"])
+        moms = ("m00", "m20", "m22c", "m22s")
+        M = {X: np.zeros(n) for X in moms}
+        dM = {(X, c): np.zeros(n) for X in moms for c in (1, 2)}
+        F = np.zeros(n)
+        V = np.zeros(n)
+        dF = {c: np.zeros(n) for c in (1, 2)}
+        dV = {c: np.zeros(n) for c in (1, 2)}
+        for i, b in enumerate(bands):
+            wb = what[:, i]
+            for X in moms:
+                mb = np.asarray(catalog[f"{b}_{p}{X}"], dtype=np.float64)
+                M[X] += wb * mb
+                for c in (1, 2):
+                    dM[(X, c)] += (
+                        wb * np.asarray(catalog[f"{b}_{p}d{X}_dg{c}"], dtype=np.float64)
+                        + dwhat[:, i, c - 1] * mb
+                    )
+            fb = np.asarray(catalog[f"{b}_flux_fpfs1"], dtype=np.float64)
+            sg = np.asarray(catalog[f"{b}_flux_fpfs1_err"], dtype=np.float64)
+            F += wb * fb
+            V += wb * wb * sg * sg
+            for c in (1, 2):
+                dF[c] += (dwhat[:, i, c - 1] * fb
+                          + wb * np.asarray(catalog[f"{b}_dflux_fpfs1_dg{c}"], dtype=np.float64))
+                dV[c] += 2.0 * wb * dwhat[:, i, c - 1] * sg * sg
+        m00, m20, m22c, m22s = (M[X] for X in moms)
+        dm00_dg1, dm00_dg2 = dM[("m00", 1)], dM[("m00", 2)]
+        dm20_dg1, dm20_dg2 = dM[("m20", 1)], dM[("m20", 2)]
+        dm22c_dg1, dm22c_dg2 = dM[("m22c", 1)], dM[("m22c", 2)]
+        dm22s_dg1, dm22s_dg2 = dM[("m22s", 1)], dM[("m22s", 2)]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            sqv = np.sqrt(V)
+            s2n = F / sqv
+            ds2n = {c: dF[c] / sqv - 0.5 * F * dV[c] / (V * sqv) for c in (1, 2)}
+        catalog[f"{p}s2n"] = s2n
+        catalog[f"{p}ds2n_dg1"] = ds2n[1]
+        catalog[f"{p}ds2n_dg2"] = ds2n[2]
 
         # fpfs_c0 is already on the MAG_ZERO_AB scale, matching the moments.
         c0 = self.config.fpfs_c0
@@ -875,6 +1044,30 @@ class MergePipe(PipelineTask):
         catalog[f"{p}e1"] = e1_c
         catalog[f"{p}e2"] = e2_c
 
+        # The same two steps on the spin-2 part of the Gaussian model
+        # covariance, (mxx - myy, 2 mxy), whose shear derivatives are the
+        # differences of the moment derivatives.  The trace T = mxx + myy
+        # is spin-0 and stays, like m00 / m20 below; mxx, myy, mxy are
+        # rebuilt from the corrected pair and T.
+        if "model_mxx" in catalog.colnames:
+            mxx = np.asarray(catalog["model_mxx"], dtype=np.float64)
+            myy = np.asarray(catalog["model_myy"], dtype=np.float64)
+            mxy = np.asarray(catalog["model_mxy"], dtype=np.float64)
+            q1 = mxx - myy
+            q2 = 2.0 * mxy
+            dq1_dg1 = np.asarray(catalog["model_dmxx_dg1"]) - np.asarray(catalog["model_dmyy_dg1"])
+            dq1_dg2 = np.asarray(catalog["model_dmxx_dg2"]) - np.asarray(catalog["model_dmyy_dg2"])
+            dq2_dg1 = 2.0 * np.asarray(catalog["model_dmxy_dg1"])
+            dq2_dg2 = 2.0 * np.asarray(catalog["model_dmxy_dg2"])
+            q1_s = q1 - g1_w * dq1_dg1 - g2_w * dq1_dg2
+            q2_s = q2 - g1_w * dq2_dg1 - g2_w * dq2_dg2
+            q1_c = q1_s * cos2 + q2_s * sin2
+            q2_c = -q1_s * sin2 + q2_s * cos2
+            tr = mxx + myy
+            catalog["model_mxx"] = 0.5 * (tr + q1_c)
+            catalog["model_myy"] = 0.5 * (tr - q1_c)
+            catalog["model_mxy"] = 0.5 * q2_c
+
         # NOTE: the shear response (de*_dg*) and the spin-0 quantities (m00,
         # m20, fluxes) are deliberately NOT transformed by the WCS field
         # distortion.  Galaxies are randomly oriented, so the distortion does
@@ -894,7 +1087,12 @@ class MergePipe(PipelineTask):
         (band-combined ``dm00_dg2`` / ``dm20_dg2``, the off-diagonal
         ``de1_dg2`` / ``de2_dg1`` if present, and per-band
         ``{b}_dflux_fpfs1_dg2``); the diagonal ``de2_dg2`` is left alone
-        because both ``e2`` and ``g2`` flip sign and the two cancel.
+        because both ``e2`` and ``g2`` flip sign and the two cancel.  For
+        the Gaussian model covariance the odd-in-x component ``model_mxy``
+        flips, together with the ``g2`` derivatives of the even components
+        (``model_dflux_dg2``, ``model_dmxx_dg2``, ``model_dmyy_dg2``) and
+        the ``g1`` derivative of ``model_mxy``; ``model_dmxy_dg2`` flips
+        twice and stays.
         Photo-z columns ending in ``_2p`` are swapped with their ``_2m``
         partners since ``g2`` reverses sign.
         """
@@ -909,7 +1107,13 @@ class MergePipe(PipelineTask):
             f"{p}de2_dg1",
             f"{p}dm00_dg2",
             f"{p}dm20_dg2",
+            f"{p}ds2n_dg2",
             "dwsel_dg2",
+            "model_mxy",
+            "model_dflux_dg2",
+            "model_dmxx_dg2",
+            "model_dmyy_dg2",
+            "model_dmxy_dg1",
         ):
             if col in catalog.colnames:
                 catalog[col] = -np.asarray(catalog[col])

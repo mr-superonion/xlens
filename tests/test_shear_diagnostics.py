@@ -173,3 +173,34 @@ def test_default_registries_on_full_columns():
     assert "psf_e1_i" in props and "psf_e2_i" in props
     names = set(out.histStats["name"])
     assert {"i_mag", "abs_we1", "abs_we2", "response", "cmd_i_rmi"} <= names
+
+
+def test_snr_column(monkeypatch):
+    """snr_column redirects the S/N cut; the weight is always wsel."""
+    monkeypatch.setattr(
+        sd, "PROPERTY_BINS",
+        {"i_mag": ("hsc_i_mag_gauss2", 20.0, 25.0, 1, False)},
+    )
+    monkeypatch.setattr(sd, "HIST_BINS", {})
+    monkeypatch.setattr(sd, "HIST2D_BINS", {})
+    cat = _make_catalog()
+    rng = np.random.RandomState(5)
+    import numpy.lib.recfunctions as rfn
+    cat = rfn.append_fields(cat, ["fpfs1_s2n"], [rng.uniform(3, 200, len(cat))], usemask=False)
+    config = ShearStatsPipeConfig()
+    config.snr_column = "fpfs1_s2n"
+    config.snr_min = 20.0
+    out = ShearStatsPipe(config=config).run(catalog=cat)
+    fwhm = 2.3548200 * np.sqrt(0.5 * (cat["hsc_i_ext_shapeHSM_HsmPsfMoments_xx"]
+                                      + cat["hsc_i_ext_shapeHSM_HsmPsfMoments_yy"]))
+    sel = cat[(cat["hsc_i_mag_gauss2"] < config.mag_max) & (cat["fpfs1_s2n"] > 20.0)
+              & (cat["esq"] < config.esq_max) & (cat["n_mask_base"] < config.n_mask_base_max)
+              & ((cat["fpfs1_m00"] + cat["fpfs1_m20"]) / cat["fpfs1_m00"] > config.trace_min)
+              & (fwhm < config.psf_fwhm_max)]
+    inbin = sel[(sel["hsc_i_mag_gauss2"] >= 20.0) & (sel["hsc_i_mag_gauss2"] < 25.0)]
+    row = out.meanShearStats[0]
+    assert row["n_gal"] == len(inbin)
+    np.testing.assert_allclose(row["sum_we1"], np.sum(inbin["wsel"] * inbin["fpfs1_e1"]))
+    np.testing.assert_allclose(
+        row["sum_r1"],
+        np.sum(inbin["wsel"] * inbin["fpfs1_de1_dg1"] + inbin["dwsel_dg1"] * inbin["fpfs1_e1"]))

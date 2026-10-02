@@ -97,7 +97,6 @@ def _simulate(skymap, truth, band):
 def _measure(handles, skymap, detection_bands):
     config = MeasureCoaddsPipeConfig()
     config.anacal.force_size = False
-    config.anacal.sigma_arcsec = 0.38
     config.anacal.num_epochs = 0
     config.anacal.do_noise_bias_correction = False
     config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)

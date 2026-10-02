@@ -134,7 +134,6 @@ sim_task = IASimTask(config=cfg_sim)
 # Detection + i-band forced measurement
 # ------------------------------
 detect_config = MeasureCoaddsPipeConfig()
-detect_config.anacal.sigma_arcsec = 0.38
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True

@@ -43,6 +43,9 @@ requires = [
 ]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.package-data]
+xlens = ["data/filters/*.txt"]
+
 [tool.setuptools_scm]
 version_scheme = "post-release"
 local_scheme = "dirty-tag"

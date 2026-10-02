@@ -39,6 +39,28 @@ from .prepare import _stack_bands, prepare_detection
 from .psf import prepare_psf_array_cell
 
 
+def cell_coadd_to_exposure(cell_coadd):
+    """Return the whole-patch afw ``Exposure`` from any coadd flavour.
+
+    The legacy-conversion API differs between stack versions: some expose
+    ``to_legacy_exposure()``, others only ``to_legacy()`` (which may return
+    either an ``ExposureF`` or a ``MultipleCellCoadd``) plus
+    ``to_legacy_cell_coadd()``.  All roads lead to the stitched exposure --
+    image, variance, mask planes and WCS, with no cell-grid constraint.
+    """
+    if hasattr(cell_coadd, "to_legacy_exposure"):
+        return cell_coadd.to_legacy_exposure()
+    if hasattr(cell_coadd, "to_legacy"):
+        legacy = cell_coadd.to_legacy()
+        if hasattr(legacy, "getBBox"):
+            return legacy
+        if hasattr(legacy, "stitch"):
+            return legacy.stitch().asExposure()
+    if hasattr(cell_coadd, "to_legacy_cell_coadd"):
+        return cell_coadd.to_legacy_cell_coadd().stitch().asExposure()
+    return cell_coadd.stitch().asExposure()
+
+
 def prepare_data_one_cell(
     *,
     cell,
