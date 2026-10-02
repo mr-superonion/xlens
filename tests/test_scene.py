@@ -766,3 +766,23 @@ def test_dp2_position_angle_convention():
         ixx, iyy, ixy = ((sub * m).sum() / sub.sum() for m in (xx**2, yy**2, xx * yy))
         drawn = np.degrees(0.5 * np.arctan2(2 * ixy, ixx - iyy))
         assert abs(drawn - phi) < 1.0, (phi, theta_dp2, drawn)
+
+
+def test_draw_catalog_list_is_the_sum():
+    """A list of catalogs (e.g. a foreground scene and a background population)
+    is rendered into one image: the sum of drawing each catalog on its own."""
+    foreground = _make(_scene_table(), tract_info=TRACT_INFO)
+    background = _make(_bulge_disk_table(), tract_info=TRACT_INFO)
+    config = MultibandSimConfig()
+    config.galaxy_type = "scene"
+    config.survey_name = "lsst"
+    task = MultibandSimTask(config=config)
+    kwargs = dict(wcs=TRACT_INFO.getWcs(), bbox_outer=TRACT_INFO.getBBox(), psf_obj=_psf(), mag_zero=MAG_ZERO, band="i")
+    both = task.draw_catalog(galaxy_catalog=[foreground, background], **kwargs)
+    each = task.draw_catalog(galaxy_catalog=foreground, **kwargs) + task.draw_catalog(
+        galaxy_catalog=background, **kwargs
+    )
+    np.testing.assert_allclose(both, each, rtol=1e-6, atol=1e-6)
+    assert both.sum() > task.draw_catalog(galaxy_catalog=foreground, **kwargs).sum()
+    with pytest.raises(ValueError, match="empty"):
+        task.draw_catalog(galaxy_catalog=[], **kwargs)

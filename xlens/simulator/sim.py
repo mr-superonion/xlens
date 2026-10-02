@@ -401,6 +401,17 @@ class MultibandSimTask(PipelineTask):
             nn_trunc=nn_trunc,
         )
 
+    def _draw_catalogs(self, galaxy_catalogs, **draw_kwargs):
+        """Render every catalog of a list into the same image: the sum of
+        :meth:`draw_catalog` over them."""
+        if len(galaxy_catalogs) == 0:
+            raise ValueError("galaxy_catalog is an empty list")
+        image = None
+        for catalog in galaxy_catalogs:
+            array = self.draw_catalog(galaxy_catalog=catalog, **draw_kwargs)
+            image = array if image is None else image + array
+        return image
+
     def draw_catalog(
         self,
         *,
@@ -419,7 +430,9 @@ class MultibandSimTask(PipelineTask):
         Parameters
         ----------
         galaxy_catalog
-            Galaxy catalog with ``data`` array and ``get_obj`` method.
+            Galaxy catalog with ``data`` array and ``get_obj`` method, or a
+            list of them (e.g. a foreground scene and a background
+            population), all rendered into the same image.
         wcs
             LSST ``SkyWcs`` for the tangent-plane projection.
         bbox_outer
@@ -441,6 +454,18 @@ class MultibandSimTask(PipelineTask):
             Two-dimensional pixel array.
         """
         assert isinstance(self.config, MultibandSimConfig)
+        if isinstance(galaxy_catalog, (list, tuple)):
+            return self._draw_catalogs(
+                galaxy_catalog,
+                wcs=wcs,
+                bbox_outer=bbox_outer,
+                psf_obj=psf_obj,
+                mag_zero=mag_zero,
+                band=band,
+                draw_method=draw_method,
+                nn_trunc=nn_trunc,
+                **kwargs,
+            )
         xmin = bbox_outer.getMinX()
         ymin = bbox_outer.getMinY()
         xmax = bbox_outer.getMaxX()
@@ -817,6 +842,17 @@ class IASimTask(MultibandSimTask):
     ):
         """Render galaxies with intrinsic-alignment distortions via BATSim."""
         assert isinstance(self.config, IASimConfig)
+        if isinstance(galaxy_catalog, (list, tuple)):
+            return self._draw_catalogs(
+                galaxy_catalog,
+                wcs=wcs,
+                bbox_outer=bbox_outer,
+                psf_obj=psf_obj,
+                mag_zero=mag_zero,
+                band=band,
+                draw_method=draw_method,
+                **kwargs,
+            )
         if self.config.use_field_distortion:
             raise RuntimeError("IASimTask does not yet support use_field_distortion=True.")
 
