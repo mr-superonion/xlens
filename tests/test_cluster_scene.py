@@ -460,7 +460,8 @@ def test_dp2_objects_to_scene(tmp_path):
     assert data["is_point_source"].tolist() == [False, False, True]
     np.testing.assert_allclose(data["redshift"], [0.31, Z_CLUSTER, 0.0])
     np.testing.assert_array_equal(data["angles"], 0.0)
-    np.testing.assert_allclose(data["theta"], [10.0, -40.0, 0.0])
+    # DP2 angles (East towards North) are negated into the pixel frame
+    np.testing.assert_allclose(data["theta"], [-10.0, 40.0, 0.0])
     # galaxies use the cModel flux, the star its PSF flux
     expected_i = -2.5 * np.log10([1e4, 2e3, 2.5e2]) + AB_MAG_ZERO_NJY
     np.testing.assert_allclose(data["lsst_i"], expected_i)
@@ -647,10 +648,11 @@ def test_dp2_objects_to_scene_bulge_disk():
             "refExtendedness": [1.0, 1.0, 1.0],
             "i_cModel_dev_reff_major": [r[8] for r in BULGE_DISK_ROWS],
             "i_cModel_dev_reff_minor": [r[9] for r in BULGE_DISK_ROWS],
-            "i_cModel_dev_theta": [r[10] for r in BULGE_DISK_ROWS],
+            # DP2 angles run from East towards North: the negative of the scene's
+            "i_cModel_dev_theta": [-r[10] for r in BULGE_DISK_ROWS],
             "i_cModel_exp_reff_major": [r[5] for r in BULGE_DISK_ROWS],
             "i_cModel_exp_reff_minor": [r[6] for r in BULGE_DISK_ROWS],
-            "i_cModel_exp_theta": [r[7] for r in BULGE_DISK_ROWS],
+            "i_cModel_exp_theta": [-r[7] for r in BULGE_DISK_ROWS],
             "r_cModel_dev_reff_major": [9.0, 9.0, 9.0],  # another band's shapes: unused
             "i_cModel_fracDev": [r[3] for r in BULGE_DISK_ROWS],
             "r_cModel_fracDev": [r[4] for r in BULGE_DISK_ROWS],
@@ -710,3 +712,57 @@ def test_dp2_objects_to_scene_bulge_disk():
         )
     with pytest.raises(ValueError, match="morphology"):
         ClusterSceneCatalog.dp2_objects_to_scene(objects, bands=("i",), morphology="bad")
+
+
+def _dp2_position_angle(phi_deg, q, cd):
+    """DP2's ``theta`` for a pixel-frame ellipse at ``phi_deg`` from +x, computed the way
+    ``pipe_tasks`` ``PositionAngleFromMoments`` does: moments mapped to the sky with the
+    CD matrix (u = +RA, v = +Dec), then ``0.5 * atan2(2 uv, uu - vv)``."""
+    phi = np.radians(phi_deg)
+    rot = np.array([[np.cos(phi), -np.sin(phi)], [np.sin(phi), np.cos(phi)]])
+    moments = rot @ np.diag([1.0, q**2]) @ rot.T
+    sky = cd @ moments @ cd.T
+    return np.degrees(0.5 * np.arctan2(2 * sky[0, 1], sky[0, 0] - sky[1, 1]))
+
+
+def test_dp2_position_angle_convention():
+    """An object at a known pixel angle, described by DP2's own angle convention,
+    is drawn back at that pixel angle (not mirrored)."""
+    cd = TRACT_INFO.getWcs().getCdMatrix()
+    assert cd[0, 0] < 0  # standard East-left tract
+    centre = TRACT_INFO.getBBox().getCenter()
+    ra, dec = TRACT_INFO.getWcs().pixelToSkyArray(
+        x=np.array([centre.getX() + 0.3]), y=np.array([centre.getY() + 0.3]), degrees=True
+    )
+    for phi in (30.0, -60.0):
+        theta_dp2 = _dp2_position_angle(phi, 0.4, cd)
+        assert abs(abs(theta_dp2) - abs(phi)) < 1e-6 and np.sign(theta_dp2) == -np.sign(phi)
+        objects = _structured(
+            {
+                "coord_ra": ra,
+                "coord_dec": dec,
+                "sersic_index": [1.0],
+                "sersic_reff_major": [1.5],
+                "sersic_reff_minor": [0.6],
+                "sersic_theta": [theta_dp2],
+                "i_cModelFlux": [1e5],
+            }
+        )
+        catalog = _make(
+            ClusterSceneCatalog.dp2_objects_to_scene(objects, bands=("i",), morphology="sersic"),
+            tract_info=TRACT_INFO,
+        )
+        exposure = _blank_exposure()
+        truth = catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=galsim.Gaussian(fwhm=0.3))
+        array = exposure.getMaskedImage().image.array
+        bbox = exposure.getBBox()
+        cx = int(round(truth[0]["image_x"] - bbox.getMinX()))
+        cy = int(round(truth[0]["image_y"] - bbox.getMinY()))
+        half = 30
+        sub = array[cy - half : cy + half + 1, cx - half : cx + half + 1]
+        yy, xx = np.mgrid[-half : half + 1, -half : half + 1].astype(float)
+        xx -= (sub * xx).sum() / sub.sum()
+        yy -= (sub * yy).sum() / sub.sum()
+        ixx, iyy, ixy = ((sub * m).sum() / sub.sum() for m in (xx**2, yy**2, xx * yy))
+        drawn = np.degrees(0.5 * np.arctan2(2 * ixy, ixx - iyy))
+        assert abs(drawn - phi) < 1.0, (phi, theta_dp2, drawn)

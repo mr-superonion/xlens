@@ -1554,6 +1554,12 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         * ``morphology="sersic"``: ``sersic_index`` -> ``sersic_n``;
           ``sersic_reff_major``, ``sersic_reff_minor`` (arcsec) ->
           ``r50_major``, ``r50_minor``; ``sersic_theta`` (deg) -> ``theta``
+        * Position angles are negated.  DP2 measures them in the sky frame,
+          from +RA (East) towards +Dec (North) (``PositionAngleFromMoments``
+          in ``pipe_tasks``); the scene measures them from pixel +x, which
+          on a tract with the standard East-left WCS is West, towards +y
+          (North), the frame GalSim draws in.  An axis at DP2 angle theta is
+          therefore at -theta in the scene.
         * ``{band}_{flux_column}`` (nJy) -> ``{survey_name}_{band}`` AB
           magnitude; point sources use ``{band}_{point_source_flux_column}``
           instead when that column exists.
@@ -1586,12 +1592,12 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         }
         if morphology == "bulge_disk":
             for component, cmodel in (("bulge", "dev"), ("disk", "exp")):
-                for quantity, dp2_quantity in (
-                    ("r50_major", "reff_major"),
-                    ("r50_minor", "reff_minor"),
-                    ("theta", "theta"),
+                for quantity, dp2_quantity, sign in (
+                    ("r50_major", "reff_major", 1.0),
+                    ("r50_minor", "reff_minor", 1.0),
+                    ("theta", "theta", -1.0),  # East->North (DP2) to West->North (pixel +x)
                 ):
-                    columns[f"{component}_{quantity}"] = np.asarray(
+                    columns[f"{component}_{quantity}"] = sign * np.asarray(
                         table[f"{morphology_band}_cModel_{cmodel}_{dp2_quantity}"], dtype=float
                     )
             for band in bands:
@@ -1602,7 +1608,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
             columns["sersic_n"] = np.asarray(table["sersic_index"], dtype=float)
             columns["r50_major"] = np.asarray(table["sersic_reff_major"], dtype=float)
             columns["r50_minor"] = np.asarray(table["sersic_reff_minor"], dtype=float)
-            columns["theta"] = np.asarray(table["sersic_theta"], dtype=float)
+            columns["theta"] = -np.asarray(table["sersic_theta"], dtype=float)  # see the docstring
         if extendedness_column in names:
             ext = np.asarray(table[extendedness_column], dtype=float)
             point = np.isfinite(ext) & (ext < extendedness_threshold)
