@@ -171,7 +171,7 @@ def test_construct_from_offsets():
     assert not catalog.lensed
     np.testing.assert_allclose(data["dx"], [r[0] + OFF_GRID for r in SCENE_ROWS], atol=1e-8)
     np.testing.assert_allclose(data["dy"], [r[1] + OFF_GRID for r in SCENE_ROWS], atol=1e-8)
-    # the catalog layout keeps each galaxy's own orientation: no extra rotation
+    # the scene layout keeps each galaxy's own orientation: no extra rotation
     np.testing.assert_array_equal(data["angles"], 0.0)
     np.testing.assert_allclose(data["theta"], [r[6] for r in SCENE_ROWS])
     np.testing.assert_allclose(data["hlr"], np.sqrt([r[4] * r[5] for r in SCENE_ROWS]))

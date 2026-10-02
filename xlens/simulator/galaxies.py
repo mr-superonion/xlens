@@ -167,12 +167,12 @@ class BaseGalaxyCatalog(ABC):
         Parameters
         ----------
         rng : numpy.random.RandomState or None
-            Random number generator (old NumPy API).  The ``catalog``
+            Random number generator (old NumPy API).  The ``scene``
             layout draws nothing at random and does not need one.
         tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
             Tract information providing WCS and bounding box.
-        layout_name : {'grid', 'hex', 'random', 'random_disk', 'catalog'}
-            Pattern used to place galaxies.  ``catalog`` places every
+        layout_name : {'grid', 'hex', 'random', 'random_disk', 'scene'}
+            Pattern used to place galaxies.  ``scene`` places every
             (selected) input row once, at its own ``radec_columns``
             position and with its own orientation (``angles`` = 0, so the
             profile is drawn as the catalog gives it); the others sample
@@ -219,7 +219,7 @@ class BaseGalaxyCatalog(ABC):
             select_upper_limit=select_upper_limit,
         )
 
-        if layout_name == "catalog":
+        if layout_name == "scene":
             # every row once, at its own position, with its own orientation
             num = len(input_catalog)
             idx = np.arange(num, dtype=int)
@@ -1296,7 +1296,7 @@ class SceneCatalog(BaseGalaxyCatalog):
     ):
         """Build the truth catalog of the scene in ``catsim_dir``.
 
-        The base-class constructor with the ``catalog`` layout: every row
+        The base-class constructor with the ``scene`` layout: every row
         of the scene file is placed once at its own ``ra``/``dec`` and
         oriented by its own position angle, so nothing is random and
         ``rng`` is not needed.  The layout arguments of the other catalogs
@@ -1311,7 +1311,7 @@ class SceneCatalog(BaseGalaxyCatalog):
         super().__init__(
             rng=rng,
             tract_info=tract_info,
-            layout_name="catalog",
+            layout_name="scene",
             select_observable=select_observable,
             select_lower_limit=select_lower_limit,
             select_upper_limit=select_upper_limit,
