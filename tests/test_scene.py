@@ -1,4 +1,4 @@
-"""Unit tests for :class:`xlens.simulator.galaxies.ClusterSceneCatalog`.
+"""Unit tests for :class:`xlens.simulator.galaxies.SceneCatalog`.
 
 A scene is a table of objects rendered once each at their own positions,
 with a bulge + disk or single-Sersic morphology and per-band magnitudes.  The tests build
@@ -25,7 +25,7 @@ from lsst.skymap.ringsSkyMap import RingsSkyMap, RingsSkyMapConfig
 from xlens.simulator.defaults import mag_zero_defaults, psf_fwhm_defaults
 from xlens.simulator.galaxies import (
     AB_MAG_ZERO_NJY,
-    ClusterSceneCatalog,
+    SceneCatalog,
     get_catalog_class,
 )
 from xlens.simulator.perturbation.halo import ShearHalo
@@ -116,8 +116,8 @@ def _make(scene, **kwargs):
     """Write ``scene`` as the catalog FITS file of a fresh ``catsim_dir`` and read it back,
     the way the pipeline builds the catalog."""
     with tempfile.TemporaryDirectory() as catsim_dir:
-        ClusterSceneCatalog.write_scene(_radec_scene(scene, kwargs.get("tract_info", TRACT_INFO)), catsim_dir)
-        return ClusterSceneCatalog(catsim_dir=catsim_dir, **kwargs)
+        SceneCatalog.write_scene(_radec_scene(scene, kwargs.get("tract_info", TRACT_INFO)), catsim_dir)
+        return SceneCatalog(catsim_dir=catsim_dir, **kwargs)
 
 
 def _flux(mag):
@@ -190,10 +190,10 @@ def test_construct_from_offsets():
     np.testing.assert_array_equal(data["ra"], data["prelensed_ra"])
 
     # magnitude column lookup used by matchPipe
-    assert ClusterSceneCatalog.magnitude_columns("hsc", "i") == ("lsst_i",)
+    assert SceneCatalog.magnitude_columns("hsc", "i") == ("lsst_i",)
 
     # the truth catalog rebuilds the catalog without the input table
-    catalog2 = ClusterSceneCatalog.from_array(truthCatalog=data, tract_info=TRACT_INFO)
+    catalog2 = SceneCatalog.from_array(truthCatalog=data, tract_info=TRACT_INFO)
     for col in ("dx", "dy", "angles", "lsst_i", "r50_major"):
         np.testing.assert_array_equal(catalog.data[col], catalog2.data[col])
     assert catalog2.lensed
@@ -330,10 +330,10 @@ def test_matches_pipeline_drawing_loop():
     """``draw_on_image`` and ``MultibandSimTask`` render the same pixels."""
     catalog = _make(_scene_table(), tract_info=TRACT_INFO)
     config = MultibandSimConfig()
-    config.galaxy_type = "cluster_scene"
+    config.galaxy_type = "scene"
     config.survey_name = "lsst"
     config.validate()
-    assert get_catalog_class("cluster_scene") is ClusterSceneCatalog
+    assert get_catalog_class("scene") is SceneCatalog
     task = MultibandSimTask(config=config)
     psf = _psf()
     bbox = TRACT_INFO.getBBox()
@@ -365,7 +365,7 @@ def test_sim_task_run_from_truth_catalog():
     catalog.lens(shear_obj=halo)
 
     config = MultibandSimConfig()
-    config.galaxy_type = "cluster_scene"
+    config.galaxy_type = "scene"
     config.survey_name = "lsst"
     config.draw_image_noise = False
     task = MultibandSimTask(config=config)
@@ -441,12 +441,12 @@ def test_dp2_objects_to_scene(tmp_path):
             "bpz_z_best": [0.31, np.nan, 0.9],
         }
     )
-    scene = ClusterSceneCatalog.dp2_objects_to_scene(
+    scene = SceneCatalog.dp2_objects_to_scene(
         objects, bands=("r", "i"), default_redshift=Z_CLUSTER, morphology="sersic"
     )
     # a FITS file of the object rows converts to the same scene
     fitsio.write(os.path.join(tmp_path, "objects.fits"), objects)
-    from_file = ClusterSceneCatalog.dp2_objects_to_scene(
+    from_file = SceneCatalog.dp2_objects_to_scene(
         os.path.join(tmp_path, "objects.fits"), bands=("r", "i"), default_redshift=Z_CLUSTER, morphology="sersic"
     )
     for name in scene.dtype.names:
@@ -478,17 +478,17 @@ def test_dp2_objects_to_scene(tmp_path):
     np.testing.assert_allclose(exposure.getMaskedImage().image.array.sum(), expected, rtol=2e-2)
 
     with pytest.raises(ValueError, match="sersic_index"):
-        ClusterSceneCatalog.dp2_objects_to_scene(
+        SceneCatalog.dp2_objects_to_scene(
             rfn.drop_fields(objects, "sersic_index", usemask=False), bands=("i",), morphology="sersic"
         )
 
 
 def test_load_from_catsim_dir(tmp_path):
     table = _radec_scene(_scene_table())
-    fname = ClusterSceneCatalog.write_scene(table, str(tmp_path))
-    assert fname == os.path.join(tmp_path, ClusterSceneCatalog.catalog_filename)
+    fname = SceneCatalog.write_scene(table, str(tmp_path))
+    assert fname == os.path.join(tmp_path, SceneCatalog.catalog_filename)
 
-    catalog = ClusterSceneCatalog(
+    catalog = SceneCatalog(
         rng=np.random.RandomState(0),
         tract_info=TRACT_INFO,
         layout_name="random",
@@ -501,12 +501,12 @@ def test_load_from_catsim_dir(tmp_path):
     assert catalog.data["is_point_source"].dtype == np.bool_
 
     # the pipeline builds it from the galaxy type and $CATSIM_DIR-style directory
-    catalog = get_catalog_class("cluster_scene")(tract_info=TRACT_INFO, catsim_dir=str(tmp_path))
+    catalog = get_catalog_class("scene")(tract_info=TRACT_INFO, catsim_dir=str(tmp_path))
     assert len(catalog) == len(SCENE_ROWS)
     np.testing.assert_allclose(catalog.data["lsst_i"], table["lsst_i"])
 
-    with pytest.raises(FileNotFoundError, match="cluster_scene.fits"):
-        ClusterSceneCatalog(tract_info=TRACT_INFO, catsim_dir=str(tmp_path / "empty"))
+    with pytest.raises(FileNotFoundError, match="scene.fits"):
+        SceneCatalog(tract_info=TRACT_INFO, catsim_dir=str(tmp_path / "empty"))
 
 
 # --- bulge + disk morphology ---------------------------------------------------
@@ -551,7 +551,7 @@ def test_bulge_disk_construction():
     # no extra rotation; the disk sets the half-light radius
     np.testing.assert_array_equal(data["angles"], 0.0)
     np.testing.assert_allclose(data["hlr"], np.sqrt(table["disk_r50_major"] * table["disk_r50_minor"]))
-    assert ClusterSceneCatalog.magnitude_columns("lsst", "i") == ("lsst_i",)
+    assert SceneCatalog.magnitude_columns("lsst", "i") == ("lsst_i",)
 
     # incomplete bulge/disk columns and a missing bulge fraction are reported
     columns = {name: values for name, values in table.items() if name != "bulge_theta"}
@@ -610,7 +610,7 @@ def test_bulge_disk_render():
     np.testing.assert_allclose(obj.flux, _flux(21.0))
     # the pipeline drawing loop renders the same pixels
     config = MultibandSimConfig()
-    config.galaxy_type = "cluster_scene"
+    config.galaxy_type = "scene"
     config.survey_name = "lsst"
     task = MultibandSimTask(config=config)
     pipeline = task.draw_catalog(
@@ -663,7 +663,7 @@ def test_dp2_objects_to_scene_bulge_disk():
             "bpz_z_best": [Z_CLUSTER, Z_CLUSTER, 0.9],
         }
     )
-    catalog = _make(ClusterSceneCatalog.dp2_objects_to_scene(objects, bands=("r", "i")), tract_info=TRACT_INFO)
+    catalog = _make(SceneCatalog.dp2_objects_to_scene(objects, bands=("r", "i")), tract_info=TRACT_INFO)
     data = catalog.data
     assert "sersic_n" not in data.dtype.names
     np.testing.assert_allclose(data["bulge_r50_major"], [0.4, 1.2, 0.5])
@@ -693,7 +693,7 @@ def test_dp2_objects_to_scene_bulge_disk():
     # a missing bulge fraction renders as a pure disk
     no_frac_objects = objects.copy()
     no_frac_objects["i_cModel_fracDev"] = np.nan
-    no_frac = _make(ClusterSceneCatalog.dp2_objects_to_scene(no_frac_objects, bands=("i",)), tract_info=TRACT_INFO)
+    no_frac = _make(SceneCatalog.dp2_objects_to_scene(no_frac_objects, bands=("i",)), tract_info=TRACT_INFO)
     assert np.isnan(no_frac.data["lsst_i_bulge_frac"]).all()
     disk_only = {name: values for name, values in _bulge_disk_table().items() if name != "lsst_r_bulge_frac"}
     disk_only["lsst_i_bulge_frac"] = np.zeros(3)
@@ -707,11 +707,11 @@ def test_dp2_objects_to_scene_bulge_disk():
     )
 
     with pytest.raises(ValueError, match="i_cModel_fracDev"):
-        ClusterSceneCatalog.dp2_objects_to_scene(
+        SceneCatalog.dp2_objects_to_scene(
             rfn.drop_fields(objects, "i_cModel_fracDev", usemask=False), bands=("i",)
         )
     with pytest.raises(ValueError, match="morphology"):
-        ClusterSceneCatalog.dp2_objects_to_scene(objects, bands=("i",), morphology="bad")
+        SceneCatalog.dp2_objects_to_scene(objects, bands=("i",), morphology="bad")
 
 
 def _dp2_position_angle(phi_deg, q, cd):
@@ -749,7 +749,7 @@ def test_dp2_position_angle_convention():
             }
         )
         catalog = _make(
-            ClusterSceneCatalog.dp2_objects_to_scene(objects, bands=("i",), morphology="sersic"),
+            SceneCatalog.dp2_objects_to_scene(objects, bands=("i",), morphology="sersic"),
             tract_info=TRACT_INFO,
         )
         exposure = _blank_exposure()

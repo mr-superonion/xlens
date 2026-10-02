@@ -23,8 +23,8 @@
 
 Provides an abstract :class:`BaseGalaxyCatalog` and concrete implementations
 for CatSim 2017, OpenUniverse 2024 Rubin-Roman, and Euclid Flagship 2025
-catalogs, and :class:`ClusterSceneCatalog`, which renders an object table
-(for instance a real DP2 cluster field) at its own sky positions.
+catalogs, and :class:`SceneCatalog`, which renders a given list of objects
+at their own sky positions.
 """
 
 import os
@@ -1197,34 +1197,32 @@ class DiffskyCatalog(BaseGalaxyCatalog):
 
 
 # ---------------------------------------------------------
-# Concrete implementation: object-table scene (e.g. a DP2 cluster field)
+# Concrete implementation: object-table scene
 # ---------------------------------------------------------
 
 # AB magnitude of 1 nJy; the Rubin object tables report fluxes in nJy.
 AB_MAG_ZERO_NJY = 31.4
 
 
-class ClusterSceneCatalog(BaseGalaxyCatalog):
+class SceneCatalog(BaseGalaxyCatalog):
     """Render every object of an input table at its own sky position.
 
     The other catalogs sample galaxies from a static file and place them
     with a :class:`~xlens.simulator.layout.Layout`.  This one draws a
-    *scene*: each row of the input table is rendered exactly once, at its
-    own position, with its own morphology and photometry, either a bulge +
-    disk (de Vaucouleurs + exponential, the cModel decomposition of the
-    Rubin object table) or a single Sersic profile.
+    *scene*, a fixed list of objects: each row of the input table is
+    rendered exactly once, at its own position, with its own morphology
+    and photometry, either a bulge + disk (de Vaucouleurs + exponential,
+    the cModel decomposition of the Rubin object table) or a single
+    Sersic profile.
     Like the other catalogs it reads a FITS file, ``catalog_filename``
     under ``catsim_dir`` (``$CATSIM_DIR`` by default), with the columns
-    below.  It was written to re-simulate real cluster fields from the
-    Rubin DP2 object table (:meth:`dp2_objects_to_scene` converts one and
-    :meth:`write_scene` writes it), but any FITS table with these columns
-    works, for instance a model cluster whose members were drawn from an
-    NFW profile.
+    below; :meth:`dp2_objects_to_scene` converts rows of the Rubin DP2
+    object table and :meth:`write_scene` writes a scene.
 
     The truth catalog it builds has the same columns as the other
     catalogs, so the scene goes through ``CatalogTask`` (rotation,
     lensing) and ``MultibandSimTask`` unchanged with
-    ``galaxy_type = "cluster_scene"``; :meth:`draw_on_image` renders it
+    ``galaxy_type = "scene"``; :meth:`draw_on_image` renders it
     onto an existing image outside the pipeline.
 
     Input columns
@@ -1233,8 +1231,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         Sky position in degrees.
     ``redshift``
         Used by the lensing perturbation; objects at or below the lens
-        redshift are not lensed, so cluster members should carry the
-        cluster redshift and stars ``0``.
+        redshift are not lensed (stars carry ``0``).
     ``bulge_r50_major``, ``bulge_r50_minor``, ``bulge_theta``,
     ``disk_r50_major``, ``disk_r50_minor``, ``disk_theta``
         Bulge + disk morphology: the half-light ellipse of each component,
@@ -1260,7 +1257,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
     """
 
     # The scene, read from ``catsim_dir`` as for the other catalogs.
-    catalog_filename: ClassVar[str] = "cluster_scene.fits"
+    catalog_filename: ClassVar[str] = "scene.fits"
     required_columns: ClassVar[tuple[str, ...] | None] = None
 
     scene_columns: ClassVar[tuple[str, ...]] = ("ra", "dec", "redshift")
@@ -1538,7 +1535,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         """Scene table (structured array) from rows of the Rubin DP2 ``Object`` table.
 
         ``objects`` is the path of a FITS file of DP2 object rows (e.g. a
-        cone search around a cluster) or the structured array
+        cone search) or the structured array
         ``fitsio.read`` returns for one.  Write the result with
         :meth:`write_scene` and build the catalog from that directory.
         Column mapping:
@@ -1663,7 +1660,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
 
         This is the drawing loop of
         :meth:`~xlens.simulator.sim.MultibandSimTask.draw_catalog` applied
-        to an image the caller already has, so a cluster can be added to
+        to an image the caller already has, so a scene can be added to
         a simulated exposure, or drawn onto a blank one, without running
         the pipeline.
 
@@ -1787,7 +1784,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
 def _image_target(image, wcs, pixel_scale: float) -> dict[str, Any]:
     """Resolve the pixel array, origin, WCS and PSF of ``image``.
 
-    See :meth:`ClusterSceneCatalog.draw_on_image` for the accepted types.
+    See :meth:`SceneCatalog.draw_on_image` for the accepted types.
     The returned ``array`` is a view onto the image's pixels, so drawing
     into it modifies ``image``.  ``pixel_scale`` (arcsec) sizes the PSF of
     an ``Exposure`` that carries no WCS of its own.
@@ -1857,7 +1854,7 @@ GALAXY_CATALOG_CLASSES: dict[str, type[BaseGalaxyCatalog]] = {
     "catsim2017": CatSim2017Catalog,
     "flagship2025": Flagship2025Catalog,
     "diffsky": DiffskyCatalog,
-    "cluster_scene": ClusterSceneCatalog,
+    "scene": SceneCatalog,
 }
 
 
