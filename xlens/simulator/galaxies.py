@@ -167,15 +167,16 @@ class BaseGalaxyCatalog(ABC):
         Parameters
         ----------
         rng : numpy.random.RandomState or None
-            Random number generator (old NumPy API).  Only the ``catalog``
-            layout with catalog-given angles can do without one.
+            Random number generator (old NumPy API).  The ``catalog``
+            layout draws nothing at random and does not need one.
         tract_info : lsst.skymap.tractInfo.ExplicitTractInfo
             Tract information providing WCS and bounding box.
         layout_name : {'grid', 'hex', 'random', 'random_disk', 'catalog'}
             Pattern used to place galaxies.  ``catalog`` places every
             (selected) input row once, at its own ``radec_columns``
-            position, oriented by :meth:`_catalog_angles`; the others
-            sample rows onto a :class:`Layout` with random orientations.
+            position and with its own orientation (``angles`` = 0, so the
+            profile is drawn as the catalog gives it); the others sample
+            rows onto a :class:`Layout` with random orientations.
         sep_arcsec : float or None, optional
             Spacing for grid/hex layouts.
         indice_group_id : int or None, optional
@@ -230,7 +231,8 @@ class BaseGalaxyCatalog(ABC):
             )
             dx = (np.asarray(pix_x) - self.x_center) * ps
             dy = (np.asarray(pix_y) - self.y_center) * ps
-            angles = self._catalog_angles(input_catalog, rng)
+            # the catalog's own orientation is kept: no extra rotation
+            angles = np.zeros(num)
         else:
             layout = Layout(
                 layout_name=layout_name,
@@ -309,16 +311,6 @@ class BaseGalaxyCatalog(ABC):
         self.dtype = self.data.dtype
         self.lensed = False
         return
-
-    def _catalog_angles(self, cat: Any, rng: np.random.RandomState | None) -> np.ndarray:
-        """Orientation (radians) of each row for the ``catalog`` layout.
-
-        Random by default, as for the other layouts; a catalog that carries
-        position angles overrides this.
-        """
-        if rng is None:
-            raise ValueError(f"{type(self).__name__} needs an rng for random orientations")
-        return rng.uniform(low=0.0, high=2.0 * np.pi, size=len(cat))
 
     def set_z_source(self, redshift):
         """Override all galaxy redshifts with a fixed value."""
@@ -1250,9 +1242,9 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         degrees counter-clockwise from the pixel ``+x`` axis.  The bulge is
         a de Vaucouleurs and the disk an exponential profile, with the
         light split by the per-band ``{survey}_{band}_bulge_frac`` (or a
-        band-independent ``bulge_frac``).  The disk position angle
-        becomes the ``angles`` column of the truth catalog, so
-        :meth:`rotate` turns the orientation together with the position.
+        band-independent ``bulge_frac``).  Each component is drawn at its
+        own position angle; the truth ``angles`` column starts at 0 and
+        only records later rotations (:meth:`rotate`).
     ``sersic_n``, ``r50_major``, ``r50_minor``, ``theta``
         Single-Sersic morphology, used when the table has no bulge/disk
         columns: Sersic index, half-light ellipse and position angle as
@@ -1337,11 +1329,6 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         self._check_scene_columns(tuple(table.dtype.names))
         return table, row_ids
 
-    def _catalog_angles(self, cat, rng) -> np.ndarray:
-        """The disk (or Sersic) position angle; ``get_obj`` rotates each profile by it."""
-        column = "disk_theta" if self._has_bulge_disk(cat.dtype.names) else "theta"
-        return np.radians(np.nan_to_num(np.asarray(cat[column], dtype=float), nan=0.0))
-
     @classmethod
     def _has_bulge_disk(cls, names) -> bool:
         """Whether the table describes a bulge + disk morphology."""
@@ -1398,11 +1385,10 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         force_galaxy_profile=FORCE_GALAXY_PROFILE_NONE,
         **kwargs,
     ) -> galsim.GSObject:
-        """Build a GalSim object from one scene row.
+        """Build a GalSim object from one scene row, at its own position angle.
 
-        The profile is built relative to the position angle stored in the
-        ``angles`` column (the disk angle for a bulge + disk row), which
-        :meth:`get_obj` applies afterwards.
+        :meth:`get_obj` then applies the ``angles`` column, which is 0
+        unless the catalog was rotated.
         """
         sname = _survey_prefix(survey_name or "lsst")
         mag = float(entry[f"{sname}_{band}"])
@@ -1441,7 +1427,9 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
             n_min, n_max = self.sersic_n_bounds
             n = _galsim_round_sersic(min(max(n, n_min), n_max), 0.1)
             gal = galsim.Sersic(n=n, flux=flux, half_light_radius=hlr)
-        return gal.shear(q=q, beta=0.0 * galsim.radians)
+        theta = float(entry["theta"])
+        theta = theta if np.isfinite(theta) else 0.0
+        return gal.shear(q=q, beta=theta * galsim.degrees)
 
     def _bulge_disk_profile(
         self,
@@ -1455,9 +1443,9 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
         """de Vaucouleurs bulge + exponential disk, the cModel decomposition.
 
         The bulge takes the fraction ``frac_column`` of ``flux`` (falling
-        back to a band-independent ``bulge_frac`` column).  Both components
-        are built relative to the disk position angle, which is the
-        ``angles`` column applied by :meth:`get_obj`.
+        back to a band-independent ``bulge_frac`` column).  Each component
+        is drawn at its own position angle (a missing bulge angle falls
+        back to the disk's).
         """
         names = entry.dtype.names
         frac = float(entry[frac_column]) if frac_column in names else float(entry["bulge_frac"])
@@ -1485,7 +1473,7 @@ class ClusterSceneCatalog(BaseGalaxyCatalog):
                 profile = galsim.Exponential(flux=component_flux, half_light_radius=hlr)
             else:
                 profile = galsim.DeVaucouleurs(flux=component_flux, half_light_radius=hlr)
-            components.append(profile.shear(q=q, beta=(theta - disk_theta) * galsim.degrees))
+            components.append(profile.shear(q=q, beta=theta * galsim.degrees))
         if not components:
             return galsim.Gaussian(flux=flux, sigma=1e-4)
         if len(components) == 1:

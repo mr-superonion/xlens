@@ -171,7 +171,9 @@ def test_construct_from_offsets():
     assert not catalog.lensed
     np.testing.assert_allclose(data["dx"], [r[0] + OFF_GRID for r in SCENE_ROWS], atol=1e-8)
     np.testing.assert_allclose(data["dy"], [r[1] + OFF_GRID for r in SCENE_ROWS], atol=1e-8)
-    np.testing.assert_allclose(data["angles"], np.radians([r[6] for r in SCENE_ROWS]))
+    # the catalog layout keeps each galaxy's own orientation: no extra rotation
+    np.testing.assert_array_equal(data["angles"], 0.0)
+    np.testing.assert_allclose(data["theta"], [r[6] for r in SCENE_ROWS])
     np.testing.assert_allclose(data["hlr"], np.sqrt([r[4] * r[5] for r in SCENE_ROWS]))
     np.testing.assert_array_equal(data["indices"], np.arange(len(SCENE_ROWS)))
     assert data["is_point_source"].tolist() == [r[8] for r in SCENE_ROWS]
@@ -457,7 +459,8 @@ def test_dp2_objects_to_scene(tmp_path):
     np.testing.assert_allclose(data["dy"], dy, atol=1e-6)
     assert data["is_point_source"].tolist() == [False, False, True]
     np.testing.assert_allclose(data["redshift"], [0.31, Z_CLUSTER, 0.0])
-    np.testing.assert_allclose(data["angles"], np.radians([10.0, -40.0, 0.0]))
+    np.testing.assert_array_equal(data["angles"], 0.0)
+    np.testing.assert_allclose(data["theta"], [10.0, -40.0, 0.0])
     # galaxies use the cModel flux, the star its PSF flux
     expected_i = -2.5 * np.log10([1e4, 2e3, 2.5e2]) + AB_MAG_ZERO_NJY
     np.testing.assert_allclose(data["lsst_i"], expected_i)
@@ -544,8 +547,8 @@ def test_bulge_disk_construction():
     assert len(catalog) == 3
     for col in ("bulge_r50_major", "disk_theta", "lsst_i_bulge_frac", "lsst_r_bulge_frac"):
         assert col in data.dtype.names
-    # the disk sets the orientation column and the half-light radius
-    np.testing.assert_allclose(data["angles"], np.radians(table["disk_theta"]))
+    # no extra rotation; the disk sets the half-light radius
+    np.testing.assert_array_equal(data["angles"], 0.0)
     np.testing.assert_allclose(data["hlr"], np.sqrt(table["disk_r50_major"] * table["disk_r50_minor"]))
     assert ClusterSceneCatalog.magnitude_columns("lsst", "i") == ("lsst_i",)
 
@@ -666,7 +669,7 @@ def test_dp2_objects_to_scene_bulge_disk():
     np.testing.assert_allclose(data["bulge_theta"], [0.0, 90.0, 60.0])
     np.testing.assert_allclose(data["lsst_i_bulge_frac"], [0.0, 1.0, 0.5])
     np.testing.assert_allclose(data["lsst_r_bulge_frac"], [0.2, 1.0, 0.5])
-    np.testing.assert_allclose(data["angles"], np.radians([0.0, 0.0, 30.0]))
+    np.testing.assert_array_equal(data["angles"], 0.0)
     assert not data["is_point_source"].any()
     np.testing.assert_allclose(data["redshift"], [Z_CLUSTER, Z_CLUSTER, 0.9])
     np.testing.assert_allclose(data["lsst_i"], mag_i)
