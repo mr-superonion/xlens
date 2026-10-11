@@ -62,16 +62,23 @@ def build_skymap():
     return DiscreteSkyMap(config)
 
 
-def _outdir(layout, test_target, shear_value, shear_mode, kind, version=None):
+def _outdir(layout, test_target, shear_value, shear_mode, kind, version=None,
+            tag=None):
     """Internal: build/create the output directory for `kind` in
     {'sim', 'process'}. sim.py writes truth + exposures to the 'sim'
     directory; process.py reads from 'sim' and writes catalogs to
-    'process'. When `version` is set, `-v<version>` is appended to
-    the leaf directory name so parallel processing runs can coexist.
+    'process'.
+
+    Two independent leaf-name suffixes let parallel processing runs
+    coexist: `version` appends `-v<version>` (a throwaway integer tag for
+    a re-run), `tag` appends `_<tag>` (a name for a configuration worth
+    keeping, e.g. tag="spectral" -> `process_mode40_spectral/`).
     """
     subdir = f"{kind}_mode{shear_mode}"
     if version is not None:
         subdir = f"{subdir}-v{int(version)}"
+    if tag:
+        subdir = f"{subdir}_{tag}"
     outdir = os.path.join(
         OUTPUT_ROOT,
         f"constant_shear_{layout}",
@@ -88,14 +95,17 @@ def sim_outdir(layout, test_target, shear_value, shear_mode):
     return _outdir(layout, test_target, shear_value, shear_mode, "sim")
 
 
-def process_outdir(layout, test_target, shear_value, shear_mode, version=None):
+def process_outdir(layout, test_target, shear_value, shear_mode, version=None,
+                   tag=None):
     """Directory that holds process.py products (matched catalogs).
 
-    `version` is an optional integer tag; when set, outputs go to
-    ``process_mode<N>-v<version>/`` instead of ``process_mode<N>/``.
+    `version` is an optional integer tag and `tag` an optional name; when
+    set, outputs go to ``process_mode<N>-v<version>_<tag>/`` instead of
+    ``process_mode<N>/``.
     """
     return _outdir(
-        layout, test_target, shear_value, shear_mode, "process", version=version,
+        layout, test_target, shear_value, shear_mode, "process",
+        version=version, tag=tag,
     )
 
 

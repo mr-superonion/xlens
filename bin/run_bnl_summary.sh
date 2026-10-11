@@ -23,6 +23,10 @@ STAMP_DIM="1350"            # --stamp-dim N (usable image dim in pixels)
 BANDS="ugrizy"              # --bands STR
 REDSHIFT="flexzboost"       # --redshift STR
 VERSION=""                  # --version N (optional; empty = unversioned outputs)
+TAG=""                      # --tag STR (optional; empty = unnamed outputs)
+SUMMARY_TAG=""              # --summary-tag STR (optional; names the CUTS)
+MAG_MAX=""                  # --mag-max F (optional; empty = script default)
+TRACE_MIN=""                # --trace-min F (optional; empty = script default)
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="summary.py"
@@ -52,6 +56,14 @@ Options:
   --redshift STR        photo-z estimator name (default: ${REDSHIFT})
   --version N           optional integer tag; injects --version N into the
                         python arguments (default: none)
+  --tag STR             configuration name; injects --tag STR into the python
+                        arguments, reading process_mode<N>_<tag>/ and writing
+                        partials to summary-flux-40-00_<tag>/ (default: none)
+  --summary-tag STR     name for the CUTS; injects --summary-tag STR, which
+                        appends to the PARTIALS directory only, so several cut
+                        choices over the same catalogs coexist (default: none)
+  --mag-max F           injects --mag-max F (default: none = script default)
+  --trace-min F         injects --trace-min F (default: none = script default)
   --no-correction       add --no-correction to summary_seeds.py arguments
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
@@ -86,6 +98,10 @@ while [[ $# -gt 0 ]]; do
     --bands)         BANDS="$2"; shift 2 ;;
     --redshift)      REDSHIFT="$2"; shift 2 ;;
     --version)       VERSION="$2"; shift 2 ;;
+    --tag)           TAG="$2"; shift 2 ;;
+    --summary-tag)   SUMMARY_TAG="$2"; shift 2 ;;
+    --mag-max)       MAG_MAX="$2"; shift 2 ;;
+    --trace-min)     TRACE_MIN="$2"; shift 2 ;;
     --no-correction) NO_CORR=true; shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     -h|--help)       usage; exit 0 ;;
@@ -152,6 +168,10 @@ arguments       = ${SCRIPT_PATH} \\
                   --bands ${BANDS} \\
                   --redshift ${REDSHIFT} \\
                   ${VERSION:+--version ${VERSION}} \\
+                  ${TAG:+--tag ${TAG}} \\
+                  ${SUMMARY_TAG:+--summary-tag ${SUMMARY_TAG}} \\
+                  ${MAG_MAX:+--mag-max ${MAG_MAX}} \\
+                  ${TRACE_MIN:+--trace-min ${TRACE_MIN}} \\
                   ${NO_CORR_ARG} \\
                   --min-id \$(start) --max-id \$(end)
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out

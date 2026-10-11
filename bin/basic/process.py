@@ -84,9 +84,23 @@ parser.add_argument(
          "different detection bands in separate directories.",
 )
 parser.add_argument(
+    "--renoise-mode", type=str, default="rotate",
+    choices=["rotate", "spectral"],
+    help="Noise-bias correction with the pure-noise image: 'rotate' adds a "
+         "90-degree-rotated copy of the noise, 'spectral' adds the minimal-"
+         "variance noise of the renoising draft. 'rotate' is the method the "
+         "reference catalogs in process_mode<N>/ were made with.",
+)
+parser.add_argument(
     "--version", type=int, default=None,
     help="Optional integer tag; when set, catalogs go to "
          "process_mode<N>-v<version>/ instead of process_mode<N>/.",
+)
+parser.add_argument(
+    "--tag", type=str, default=None,
+    help="Optional name for the configuration; when set, catalogs go to "
+         "process_mode<N>_<tag>/ (e.g. --tag spectral -> "
+         "process_mode40_spectral/). Combines with --version.",
 )
 args, unknown_args = parser.parse_known_args()
 if unknown_args:
@@ -128,6 +142,7 @@ if RANK == 0:
         print(f"[Info] Running with MPI across {SIZE} ranks.")
     print(f"[Info] Detecting on {','.join(detection_bands)}; "
           f"forced measurement on {','.join(bands)}.")
+    print(f"[Info] Renoising method: {args.renoise_mode}.")
 
 # ------------------------------
 # SkyMap Setup
@@ -140,6 +155,7 @@ if RANK == 0:
 # Detection (on detection_bands) + per-band forced measurement (all bands)
 # ------------------------------
 detect_config = MeasureCoaddsPipeConfig()
+detect_config.renoise_mode = args.renoise_mode
 detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
@@ -170,6 +186,7 @@ sim_dir = common.sim_outdir(
 )
 proc_dir = common.process_outdir(
     args.layout, test_target, shear_value, shear_mode, version=args.version,
+    tag=args.tag,
 )
 
 

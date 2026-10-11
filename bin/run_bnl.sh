@@ -20,6 +20,8 @@ LAYOUT="random"             # --layout STR
 BAND="u,g,r,i,z,y"          # --band STR
 DETECTION_BAND=""           # --detection-band STR (optional; empty = script default)
 VERSION=""                  # --version N (optional; empty = unversioned outputs)
+RENOISE_MODE=""             # --renoise-mode STR (optional; empty = script default)
+TAG=""                      # --tag STR (optional; empty = unnamed outputs)
 MEMORY=1228                 # request_memory in MB; override with: --memory N
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
@@ -47,6 +49,13 @@ Options:
                         (default: none = the python script's own default)
   --version N           optional integer tag; injects --version N into the
                         python arguments (default: none)
+  --renoise-mode STR    noise-bias correction with the pure-noise image,
+                        'rotate' or 'spectral'; injects --renoise-mode STR
+                        into the python arguments (default: none = the
+                        python script's own default, 'rotate')
+  --tag STR             name for the configuration; injects --tag STR into
+                        the python arguments, sending catalogs to
+                        process_mode<N>_<tag>/ (default: none)
   --memory N            HTCondor request_memory in MB (default: ${MEMORY})
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
@@ -80,6 +89,8 @@ while [[ $# -gt 0 ]]; do
     --band)           BAND="$2"; shift 2 ;;
     --detection-band) DETECTION_BAND="$2"; shift 2 ;;
     --version)      VERSION="$2"; shift 2 ;;
+    --renoise-mode) RENOISE_MODE="$2"; shift 2 ;;
+    --tag)          TAG="$2"; shift 2 ;;
     --memory)       MEMORY="$2"; shift 2 ;;
     --dry-run)      DRY_RUN=true; shift ;;
     -h|--help)      usage; exit 0 ;;
@@ -131,7 +142,7 @@ request_memory  = ${MEMORY}
 request_cpus    = 1
 
 executable      = /bin/bash
-arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} ${DETECTION_BAND:+--detection-band ${DETECTION_BAND}} ${VERSION:+--version ${VERSION}} || exit 1; done'"
+arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} ${DETECTION_BAND:+--detection-band ${DETECTION_BAND}} ${VERSION:+--version ${VERSION}} ${RENOISE_MODE:+--renoise-mode ${RENOISE_MODE}} ${TAG:+--tag ${TAG}} || exit 1; done'"
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).out
 error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log
