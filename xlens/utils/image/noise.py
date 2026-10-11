@@ -276,7 +276,7 @@ def generate_filler_array(
             * noise_std
         )
     if klim is None:
-        klim = 3.1 / pixel_scale
+        klim = anacal.task.KLIM_PIX / pixel_scale
     spectrum = anacal.renoise.make_noise_spectrum(n, pixel_scale, float(noise_variance), corr)
     spectrum = anacal.renoise.symmetrize_spectrum(
         spectrum,

@@ -83,7 +83,11 @@ class AnacalConfig(Config):
         default=False,
     )
     force_center = Field[bool](
-        doc="Whether forcing the size and shape of galaxies",
+        doc=(
+            "Whether holding the centre of every source at its detected "
+            "pixel (no sub-pixel offsets; the forced FPFS measurement "
+            "runs at the same pixel)"
+        ),
         default=True,
     )
     prior_sigma_T = Field[float](
@@ -377,7 +381,7 @@ class AnacalTask(Task):
                         anacal.renoise.symmetrize_spectrum(
                             s,
                             np.ascontiguousarray(p, dtype=np.float64),
-                            3.1 / pixel_scale,
+                            anacal.task.KLIM_PIX / pixel_scale,
                             renoise_delta,
                         )
                         for s, p in zip(spectra, psfs)
