@@ -218,7 +218,11 @@ class SelBiasRedshiftPipeConfig(
         default=30.0,
     )
     zbounds = ListField[float](
-        doc="Redshift boundaries defining the bins.",
+        doc=(
+            "Redshift bin edges; len(zbounds) - 1 interior bins are measured "
+            "and sources outside the outer edges are dropped.  Must be empty "
+            "with redshift_estimator='none'."
+        ),
         default=[0.3, 0.6, 0.9, 1.2, 1.5, 1.8],
     )
     emax = Field[float](
@@ -248,8 +252,10 @@ class SelBiasRedshiftPipeConfig(
     redshift_estimator = Field[str](
         doc=(
             "Photometric redshift estimator: 'flexzboost' or 'bpz' to run the "
-            "model here, or 'cached' to read point estimates precomputed by "
-            "xlens.processor.photoz.  'cached' needs the pz* inputs and is "
+            "model here, 'cached' to read point estimates precomputed by "
+            "xlens.processor.photoz, or 'none' for no tomographic binning at "
+            "all (one bin over the whole sample; no photo-z is evaluated, and "
+            "zbounds must be empty).  'cached' needs the pz* inputs and is "
             "~30x faster, but is only valid if the cache was written with the "
             "same bands/flux_name/model AND the same dg as this task uses."
         ),
@@ -303,11 +309,27 @@ class SelBiasRedshiftPipeConfig(
                 "target must be either 'g1' or 'g2'",
             )
 
-        if self.redshift_estimator not in {"flexzboost", "bpz"}:
+        if self.redshift_estimator not in {"flexzboost", "bpz", "cached", "none"}:
             raise FieldValidationError(
                 self.__class__.redshift_estimator,
                 self,
-                "redshift_estimator must be 'flexzboost' or 'bpz'",
+                "redshift_estimator must be 'flexzboost', 'bpz', 'cached' or 'none'",
+            )
+        if self.redshift_estimator == "none":
+            if len(self.zbounds) > 0:
+                raise FieldValidationError(
+                    self.__class__.zbounds,
+                    self,
+                    "redshift_estimator='none' is a single bin over the whole "
+                    "sample; set zbounds=[]",
+                )
+        elif len(self.zbounds) < 2:
+            raise FieldValidationError(
+                self.__class__.zbounds,
+                self,
+                "tomographic binning needs at least two edges in zbounds "
+                "(len(zbounds) - 1 bins); use redshift_estimator='none' for "
+                "a single bin",
             )
 
         if self.shear_value < 0.0 or self.shear_value > 0.10:
@@ -332,8 +354,14 @@ class SelBiasRedshiftPipe(PipelineTask):
     ):
         super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, SelBiasRedshiftPipeConfig)
-        self._zbounds = list(self.config.zbounds)
-        self._ncut = len(self._zbounds) + 1
+        if self.config.redshift_estimator == "none":
+            # one bin over the whole sample: measure_shear takes no zbounds
+            self._zbounds = None
+            self._ncut = 1
+        else:
+            self._zbounds = list(self.config.zbounds)
+            # measure_shear returns the interior bins only
+            self._ncut = len(self._zbounds) - 1
         self._z_estimator = self._init_z_estimator()
 
     def _init_z_estimator(self):
@@ -341,6 +369,9 @@ class SelBiasRedshiftPipe(PipelineTask):
         config = self.config
         if config.redshift_estimator == "cached":
             # built per catalog in run(), since each one has its own rows
+            return None
+        if config.redshift_estimator == "none":
+            # no binning: measure_shear is called without an estimator
             return None
         if config.model_path:
             model_path = config.model_path
@@ -520,21 +551,25 @@ class SelBiasRedshiftSummaryPipeConfig(
         default=10000,
     )
     zbounds = ListField[float](
-        doc="Redshift boundaries used to validate the stacked outputs.",
+        doc=(
+            "Redshift bin edges the measurements were made with "
+            "(len(zbounds) - 1 bins); empty for an unbinned measurement "
+            "(redshift_estimator='none' upstream, one bin)."
+        ),
         default=[0.3, 0.6, 0.9, 1.2, 1.5, 1.8],
     )
 
     def validate(self):
         super().validate()
-        if self.redshift_estimator == "cached" and self.cached_dg != self.dg:
-            raise ValueError(
-                f"cached_dg ({self.cached_dg}) != dg ({self.dg}); the cached "
-                "1p/1m estimates were computed at a different shear step, so "
-                "the selection response would be wrong.  Rebuild the photo-z "
-                "cache at dg or set dg to match it."
-            )
         if len(self.connections.dataType) == 0:
             raise ValueError("connections.dataType missing")
+        if len(self.zbounds) == 1:
+            raise FieldValidationError(
+                self.__class__.zbounds,
+                self,
+                "zbounds needs at least two edges, or none for an unbinned "
+                "measurement",
+            )
 
         if self.shear_value < 0.0 or self.shear_value > 0.10:
             raise FieldValidationError(
@@ -558,7 +593,9 @@ class SelBiasRedshiftSummaryPipe(PipelineTask):
     ):
         super().__init__(config=config, log=log, initInputs=initInputs, **kwargs)
         assert isinstance(self.config, SelBiasRedshiftSummaryPipeConfig)
-        self._ncut = len(self.config.zbounds) + 1
+        # interior bins only, or the single unbinned value
+        nz = len(self.config.zbounds)
+        self._ncut = nz - 1 if nz else 1
 
     def runQuantum(self, butlerQC, inputRefs, outputRefs):
         inputs = butlerQC.get(inputRefs)

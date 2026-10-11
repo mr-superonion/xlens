@@ -61,7 +61,50 @@ def get_trace(
 
 
 def _bin_count(*, idx, weights=None, minlength=0):
+    """Per-bin sums of ``weights`` (counts when None) for ``np.digitize`` indices.
+
+    The under- and overflow bins are dropped, so ``len(zbounds)`` edges give
+    ``len(zbounds) - 1`` interior bins.
+    """
     return np.bincount(idx, weights=weights, minlength=minlength)[1:-1]
+
+
+def _accumulate(weights, idx, minlength):
+    """Sum ``weights`` per redshift bin, or over everything when unbinned.
+
+    ``idx=None`` is the no-tomography case: a single number for the whole
+    sample, returned as a 1-element array so callers see the same "one
+    value per bin" shape either way, and computed with a plain sum instead
+    of a bincount.
+    """
+    if idx is None:
+        return np.array([np.sum(weights)], dtype=np.float64)
+    return _bin_count(idx=idx, weights=weights, minlength=minlength)
+
+
+def _count(mask, idx, minlength):
+    """Number of selected sources per bin (or in total when ``idx`` is None)."""
+    if idx is None:
+        return np.array([np.count_nonzero(mask)], dtype=np.float64)
+    return _bin_count(idx=idx, minlength=minlength).astype(np.float64)
+
+
+def _check_binning(z_estimator, zbounds):
+    """Validate the (z_estimator, zbounds) pair; -> True when binned."""
+    if z_estimator is None:
+        if zbounds is not None:
+            raise ValueError(
+                "zbounds given without a z_estimator: there is no redshift to "
+                "bin on.  Pass a z_estimator for tomographic bins, or drop "
+                "zbounds for a single bin over the whole sample."
+            )
+        return False
+    if zbounds is None or len(zbounds) < 2:
+        raise ValueError(
+            "a z_estimator needs zbounds with at least two edges "
+            f"(got {zbounds!r}); len(zbounds) - 1 interior bins are returned"
+        )
+    return True
 
 
 def build_selection_mask(
@@ -75,7 +118,7 @@ def build_selection_mask(
     flux_name: str = "fpfs1",
     shape_name: str = "fpfs",
     emax: float = 0.3,
-    trace_min: float = 0.05,
+    trace_min: float | None = 0.05,
     extinction: np.ndarray | None = None,
     z_estimator=None,
     z_width95_max: float = 2.75,
@@ -87,7 +130,9 @@ def build_selection_mask(
 
     Combines, in order:
       1. shape ``|e|^2 < emax^2``  (``get_esq``, evaluated at ``dg``)
-      2. size  ``trace > trace_min`` (``get_trace``, evaluated at ``dg``)
+      2. size  ``trace > trace_min`` (``get_trace``, evaluated at ``dg``);
+         skipped entirely when ``trace_min`` is None -- note that 0.0 is a
+         real cut, it drops sources whose monopole is not positive
       3. per-band mag cut: ``mag_b < mag_max[b]`` with
          ``flux_b = src[{b}_flux{fn}] + dg * src[{b}_dflux{fn}_dg{comp}]``
          and ``mag_b = mag_zero - 2.5*log10(flux_b)``
@@ -125,9 +170,9 @@ def build_selection_mask(
     sn = shape_name + "_" if (shape_name and not shape_name.endswith("_")) else (shape_name or "")
     emax2 = emax * emax
 
-    esq_s = get_esq(src, comp=comp, dg=dg, sn=sn)
-    trace_s = get_trace(src, comp=comp, dg=dg, sn=sn)
-    mask = (esq_s < emax2) & (trace_s > trace_min)
+    mask = get_esq(src, comp=comp, dg=dg, sn=sn) < emax2
+    if trace_min is not None:
+        mask &= get_trace(src, comp=comp, dg=dg, sn=sn) > trace_min
     for b in bands:
         flux_b = src[f"{b}_flux{fn}"] + dg * src[f"{b}_dflux{fn}_dg{comp}"]
         a_ext = None if extinction is None else extinction[f"a_{b}"]
@@ -162,18 +207,28 @@ class ShearEstimator(object):
         *,
         mag_max: float | dict = 40.0,
         emax: float = 0.3,
-        trace_min: float = 0.05,
+        trace_min: float | None = 0.05,
         mag_zero: float = MAG_ZERO_AB,
         flux_name: str = "gauss2",
         shape_name: str = "fpfs",
         bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
         ref_band: str = "lsst_i",
         z_estimator=None,
-        zbounds: list[float] = [0.0, 100.0],
+        zbounds: list[float] | None = None,
         z_width95_max: float = 2.75,
         dg: float = 0.02,
         z_point_name: str = "zmode",
     ):
+        """Shear estimator with magnitude, shape and size cuts.
+
+        With ``z_estimator`` and ``zbounds`` the outputs are per redshift
+        bin (``len(zbounds) - 1`` interior bins).  With neither, there is
+        no tomographic binning: every output is a 1-element array for the
+        whole sample, no photo-z is evaluated and nothing is digitized.
+        Giving one without the other is an error.  ``trace_min=None`` skips
+        the size cut.
+        """
+        self.binned = _check_binning(z_estimator, zbounds)
         self.fn = _resolve_cut_name(flux_name)
         self.magx = _resolve_cut(mag_max, bands=bands)
         self.dg = dg
@@ -229,32 +284,15 @@ class ShearEstimator(object):
             idx_s = np.digitize(z_s, self.zbounds, right=False)
             minlen = len(self.zbounds) + 1
         else:
-            idx_s = np.ones(np.sum(mask_s.astype(int)))
-            minlen = 3
+            # no tomographic binning: plain sums over the selection
+            idx_s, minlen = None, 0
 
-        we = wsel[mask_s] * e_comp[mask_s]
-        response = wsel[mask_s] * de_dg[mask_s]
-        response_det = dw_dg[mask_s] * e_comp[mask_s]
-        ell_s = _bin_count(
-            idx=idx_s,
-            weights=we,
-            minlength=minlen,
-        )
-        response_s = _bin_count(
-            idx=idx_s,
-            weights=response,
-            minlength=minlen,
-        )
-        response_det_s = _bin_count(
-            idx=idx_s,
-            weights=response_det,
-            minlength=minlen,
-        )
-        num_s = _bin_count(
-            idx=idx_s,
-            weights=None,
-            minlength=minlen,
-        )
+        w_s = wsel[mask_s]
+        e_s = e_comp[mask_s]
+        ell_s = _accumulate(w_s * e_s, idx_s, minlen)
+        response_s = _accumulate(w_s * de_dg[mask_s], idx_s, minlen)
+        response_det_s = _accumulate(dw_dg[mask_s] * e_s, idx_s, minlen)
+        num_s = _count(mask_s, idx_s, minlen)
         return ell_s, response_s, response_det_s, num_s
 
     def get_sel_response(
@@ -342,11 +380,11 @@ class ShearEstimator(object):
 def measure_shear(
     *,
     src: np.ndarray,
-    z_estimator,
-    zbounds: list[float],
+    z_estimator=None,
+    zbounds: list[float] | None = None,
     flux_min: float | dict = 40.0,
     emax: float = 0.3,
-    trace_min: float = 0.05,
+    trace_min: float | None = 0.05,
     z_width95_max: float = 2.75,
     dg: float = 0.02,
     target: str = "g1",
@@ -358,165 +396,118 @@ def measure_shear(
     z_point_name: str = "zmode",
 ):
     """
-    Measure shear components in redshift bins, using a supplied z-estimator.
+    Measure shear components, in redshift bins or over the whole sample.
 
     Parameters
     ----------
-    z_estimator : object
-        Must provide method
-          get_zsel(
-              src, *, mag_zero, flux_name, bands, ref_band, comp, dg
-          ) -> (zmode, width95)
+    z_estimator : object or None
+        Must provide
+          get_zsel(src, *, mag_zero, flux_name, bands, ref_band, comp, dg,
+                   ...) -> (zpoint, width95).
+        None means no tomographic binning: every output is a 1-element
+        array for the whole sample, the estimator is never called (so no
+        photo-z cost and no per-cut catalog copies), and nothing is
+        digitized.
+    zbounds : list of float or None
+        Bin edges; ``len(zbounds) - 1`` interior bins are returned, sources
+        outside the outer edges are dropped.  Required with ``z_estimator``,
+        must be None without it.
+    trace_min : float or None
+        Size cut ``(m00 + m20) / m00 > trace_min``.  None skips the cut and
+        never computes the trace; 0.0 is a real cut that drops sources whose
+        monopole is not positive.
+
+    Returns
+    -------
+    dict of arrays, one value per bin: ``e``, ``r``, ``r_sel``, ``n_gal``
+    (``e1``/``r1``/``r1_sel``, ``e2``/... and ``n_gal`` for target "g1g2").
     """
+    binned = _check_binning(z_estimator, zbounds)
+    minlen = len(zbounds) + 1 if binned else 0
     fn = _resolve_cut_name(flux_name)
-    esq0 = get_esq(src)
-    trace0 = get_trace(src)
-
-    # band-independent fields
-    e1_all = src["fpfs_e1"]
-    e2_all = src["fpfs_e2"]
-    de1_dg1 = src["fpfs_de1_dg1"]
-    de2_dg2 = src["fpfs_de2_dg2"]
+    emax2 = emax * emax
     wopt = src["wsel"]
-
-    dw_dg1 = src["dwsel_dg1"]
-    dw_dg2 = src["dwsel_dg2"]
 
     # per-band flux minima and base fluxes
     fm = _resolve_cut(flux_min, bands=bands)
     flux = {b: src[f"{b}_flux{fn}"] for b in bands}
 
-    # No shear
-    mask = np.ones(src.shape[0], dtype=bool)
-    for b in bands:
-        mask &= flux[b] > fm[b]
-    mask &= esq0 < emax * emax
-    mask &= trace0 > trace_min
-    # photo-z + width cut at base shear
-    zmode, width95 = z_estimator.get_zsel(
-        src[mask],
-        mag_zero=mag_zero,
-        flux_name=flux_name,
-        bands=bands,
-        ref_band=ref_band,
-        comp=1,
-        dg=0.0,
-        include_mag_err=False,
-        z_point_name=z_point_name,
-    )
-    mtmp = width95 < z_width95_max
-    mask[mask] &= mtmp
-    zmode = zmode[mtmp]
-    del mtmp, width95
-    minlen = len(zbounds) + 1
+    def select(comp: int, dg_eff: float) -> np.ndarray:
+        """Flux, shape and size cuts at shear g_comp = dg_eff."""
+        mask = get_esq(src, comp=comp, dg=dg_eff) < emax2
+        if trace_min is not None:
+            mask &= get_trace(src, comp=comp, dg=dg_eff) > trace_min
+        for b in bands:
+            if dg_eff == 0.0:
+                mask &= flux[b] > fm[b]
+            else:
+                df = src[f"{b}_dflux{fn}_dg{comp}"]
+                mask &= flux[b] + dg_eff * df > fm[b]
+        return mask
+
+    def bin_index(mask: np.ndarray, comp: int, dg_eff: float):
+        """Apply the photo-z width cut in place; -> digitized bin index.
+
+        Returns None when unbinned, in which case ``mask`` is untouched and
+        the estimator is never consulted.
+        """
+        if not binned:
+            return None
+        z, width95 = z_estimator.get_zsel(
+            src[mask],
+            mag_zero=mag_zero,
+            flux_name=flux_name,
+            bands=bands,
+            ref_band=ref_band,
+            comp=comp,
+            dg=dg_eff,
+            include_mag_err=False,
+            z_point_name=z_point_name,
+        )
+        keep = width95 < z_width95_max
+        mask[mask] &= keep
+        return np.digitize(z[keep], zbounds, right=False)
+
+    # the unperturbed selection (comp is irrelevant at dg = 0)
+    mask0 = select(1, 0.0)
+    idx0 = bin_index(mask0, 1, 0.0)
+    n_gal = _count(mask0, idx0, minlen)
+    w0 = wopt[mask0]
 
     def sel_term(comp: int) -> np.ndarray:
-        """Selection response term for component comp (1 or 2)."""
+        """Selection response for component comp (1 or 2) by finite difference."""
         e_comp = src[f"fpfs_e{comp}"]
 
         def one_side(sign: float) -> np.ndarray:
-            """Compute binned ⟨w_sel e⟩ for shear +sign*dg."""
             dg_eff = sign * dg
-            esq_side = get_esq(src, comp=comp, dg=dg_eff)
-            trace_side = get_trace(src, comp=comp, dg=dg_eff)
-            mask_side = (esq_side < emax * emax) & (trace_side > trace_min)
-            for b in bands:
-                df = src[f"{b}_dflux{fn}_dg{comp}"]
-                mask_side &= flux[b] + dg_eff * df > fm[b]
+            mask = select(comp, dg_eff)
+            # without the correction the photo-z is evaluated at the
+            # unperturbed magnitudes even though the cuts are perturbed
+            idx = bin_index(mask, comp, dg_eff if do_correction else 0.0)
+            return _accumulate(wopt[mask] * e_comp[mask], idx, minlen)
 
-            if do_correction:
-                z_side, w_side = z_estimator.get_zsel(
-                    src[mask_side],
-                    mag_zero=mag_zero,
-                    flux_name=flux_name,
-                    bands=bands,
-                    ref_band=ref_band,
-                    comp=comp,
-                    dg=dg_eff,
-                    include_mag_err=False,
-                    z_point_name=z_point_name,
-                )
-            else:
-                z_side, w_side = z_estimator.get_zsel(
-                    src[mask_side],
-                    mag_zero=mag_zero,
-                    flux_name=flux_name,
-                    bands=bands,
-                    ref_band=ref_band,
-                    comp=comp,
-                    dg=0.0,
-                    include_mag_err=False,
-                    z_point_name=z_point_name,
-                )
+        return (one_side(+1.0) - one_side(-1.0)) / (2.0 * dg)
 
-            mtmp_local = w_side < z_width95_max
-            mask_side[mask_side] &= mtmp_local
-            z_side = z_side[mtmp_local]
-            del mtmp_local, w_side
+    def component(comp: int):
+        """-> (e, r, r_sel) for one shear component."""
+        e = src[f"fpfs_e{comp}"][mask0]
+        de = src[f"fpfs_de{comp}_dg{comp}"][mask0]
+        dw = src[f"dwsel_dg{comp}"][mask0]
+        return (
+            _accumulate(w0 * e, idx0, minlen),
+            _accumulate(dw * e + w0 * de, idx0, minlen),
+            sel_term(comp),
+        )
 
-            idx_side = np.digitize(z_side, zbounds, right=False)
-            ell_side = _bin_count(
-                weights=wopt[mask_side] * e_comp[mask_side],
-                idx=idx_side,
-                minlength=minlen,
-            )
-            del esq_side, trace_side, mask_side, idx_side
-            return ell_side
-
-        ellp = one_side(+1.0)
-        ellm = one_side(-1.0)
-        return (ellp - ellm) / (2.0 * dg)
-
-    idx0 = np.digitize(zmode, zbounds, right=False)
     if target == "g1":
-        e1 = _bin_count(
-            weights=wopt[mask] * e1_all[mask],
-            idx=idx0,
-            minlength=minlen,
-        )
-        r1 = _bin_count(
-            weights=dw_dg1[mask] * e1_all[mask] + wopt[mask] * de1_dg1[mask],
-            idx=idx0,
-            minlength=minlen,
-        )
-        r1_sel = sel_term(1)
-        return {"e": e1, "r": r1, "r_sel": r1_sel}
+        e1, r1, r1_sel = component(1)
+        return {"e": e1, "r": r1, "r_sel": r1_sel, "n_gal": n_gal}
     elif target == "g2":
-        e2 = _bin_count(
-            weights=wopt[mask] * e2_all[mask],
-            idx=idx0,
-            minlength=minlen,
-        )
-        r2 = _bin_count(
-            weights=dw_dg2[mask] * e2_all[mask] + wopt[mask] * de2_dg2[mask],
-            idx=idx0,
-            minlength=minlen,
-        )
-        r2_sel = sel_term(2)
-        return {"e": e2, "r": r2, "r_sel": r2_sel}
+        e2, r2, r2_sel = component(2)
+        return {"e": e2, "r": r2, "r_sel": r2_sel, "n_gal": n_gal}
     elif target == "g1g2":
-        e1 = _bin_count(
-            weights=wopt[mask] * e1_all[mask],
-            idx=idx0,
-            minlength=minlen,
-        )
-        r1 = _bin_count(
-            weights=dw_dg1[mask] * e1_all[mask] + wopt[mask] * de1_dg1[mask],
-            idx=idx0,
-            minlength=minlen,
-        )
-        r1_sel = sel_term(1)
-        e2 = _bin_count(
-            weights=wopt[mask] * e2_all[mask],
-            idx=idx0,
-            minlength=minlen,
-        )
-        r2 = _bin_count(
-            weights=dw_dg2[mask] * e2_all[mask] + wopt[mask] * de2_dg2[mask],
-            idx=idx0,
-            minlength=minlen,
-        )
-        r2_sel = sel_term(2)
+        e1, r1, r1_sel = component(1)
+        e2, r2, r2_sel = component(2)
         return {
             "e1": e1,
             "r1": r1,
@@ -524,6 +515,7 @@ def measure_shear(
             "e2": e2,
             "r2": r2,
             "r2_sel": r2_sel,
+            "n_gal": n_gal,
         }
     else:
         raise ValueError(f"target must be 'g1', 'g2', or 'g1g2', got {target!r}")
