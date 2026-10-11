@@ -158,6 +158,14 @@ class FpfsMeasurementTask(Task):
         begin_x: int = 0,
         begin_y: int = 0,
         n_mask_base_max: float | None = None,
+        # the noise-bias correction mode and the patch noise correlation
+        # function (see AnacalTask.run): handed in by the measurement
+        # pipe so that detection and forced measurement share them
+        renoise_mode: str = "rotate",
+        renoise_c: float = 0.1,
+        renoise_delta: float = 0.05,
+        noise_corr: NDArray | None = None,
+        noise_corrs: list | None = None,
         **kwargs,
     ):
         """Run FPFS measurement on image arrays.
@@ -231,13 +239,9 @@ class FpfsMeasurementTask(Task):
             float(getattr(psf_object, "y_min", 0.0)),
         )
         n_mask_base = None
-        has_mask_col = detection is not None and "n_mask_base" in (
-            detection.dtype.names or ()
-        )
+        has_mask_col = detection is not None and "n_mask_base" in (detection.dtype.names or ())
         if has_mask_col:
-            n_mask_base = np.ascontiguousarray(
-                detection["n_mask_base"], dtype=np.float32
-            )
+            n_mask_base = np.ascontiguousarray(detection["n_mask_base"], dtype=np.float32)
         elif psf_model is not None and detection is not None:
             # writable sentinel target even without a systematics mask
             n_mask_base = np.zeros(len(detection), dtype=np.float32)
@@ -257,13 +261,16 @@ class FpfsMeasurementTask(Task):
             n_mask_base_max=n_mask_base_max,
             psf_model=psf_model,
             psf_offset=psf_offset,
+            renoise_mode=renoise_mode,
+            renoise_c=renoise_c,
+            renoise_delta=renoise_delta,
+            filler_psf=psf_array,
+            noise_corr=(
+                noise_corr if noise_corrs is None else (noise_corrs[0] if len(noise_corrs) == 1 else None)
+            ),
+            noise_rotated=True,
         )
-        if (
-            psf_model is not None
-            and n_mask_base is not None
-            and detection is not None
-            and has_mask_col
-        ):
+        if psf_model is not None and n_mask_base is not None and detection is not None and has_mask_col:
             # Propagate the 1.0 sentinels the C++ wrote back into the
             # caller's catalog: no usable PSF in one band means the
             # SOURCE is unusable, so every band that runs after this

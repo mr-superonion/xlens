@@ -62,11 +62,7 @@ band_order = "ugrizy"
 class MeasureCoaddsPipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch"),
-    defaultTemplates={
-        "inputName": "deep_coadd",
-        "outName": "deep_coadd",
-        "catName": "cat"
-    },
+    defaultTemplates={"inputName": "deep_coadd", "outName": "deep_coadd", "catName": "cat"},
 ):
     skyMap = cT.Input(
         doc="SkyMap to use in processing",
@@ -189,15 +185,12 @@ class MeasureCoaddsPipeConfig(
     def validate(self):
         super().validate()
         if self.use_sim:
-            missing = [
-                b for b in self.detection_bands if b not in self.sim_bands
-            ]
+            missing = [b for b in self.detection_bands if b not in self.sim_bands]
             if missing:
                 raise FieldValidationError(
                     self.__class__.sim_bands,
                     self,
-                    f"sim_bands must include every detection band; "
-                    f"missing {missing}.",
+                    f"sim_bands must include every detection band; " f"missing {missing}.",
                 )
 
 
@@ -255,13 +248,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             # The RLE table does not describe its own geometry; the
             # mask covers the patch's outer bbox by construction.
             _bbox = inputs["skyMap"][tract][patch].getOuterBBox()
-            arr = rle_table_to_mask(
-                inputs["mask"], (_bbox.getHeight(), _bbox.getWidth())
-            )
+            arr = rle_table_to_mask(inputs["mask"], (_bbox.getHeight(), _bbox.getWidth()))
             msk = MaskX(width=arr.shape[1], height=arr.shape[0])
-            msk.getArray()[:, :] = arr.astype(
-                msk.getArray().dtype, copy=False
-            )
+            msk.getArray()[:, :] = arr.astype(msk.getArray().dtype, copy=False)
             inputs["mask"] = msk
 
         seed: int | None = None
@@ -352,23 +341,17 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             )
         return handles
 
-    def _load_noise_corr(
-        self, corr_array: np.ndarray | None, band: str
-    ) -> NDArray | None:
+    def _load_noise_corr(self, corr_array: np.ndarray | None, band: str) -> NDArray | None:
         if corr_array is None:
             return None
         if band not in band_order:
             return None
-        noise_corr = self._normalize_noise_corr(
-            corr_array[band_order.index(band)]
-        )
+        noise_corr = self._normalize_noise_corr(corr_array[band_order.index(band)])
         if noise_corr is not None:
             self.log.debug("With correlation (band=%s)", band)
         return noise_corr
 
-    def _cache_bands_multiband(
-        self, *, bands: list, exposures: dict, data: dict, cells: list
-    ) -> dict:
+    def _cache_bands_multiband(self, *, bands: list, exposures: dict, data: dict, cells: list) -> dict:
         """Per-band force-measurement inputs recovered from the detection
         preparation, so ``_force`` can skip ``prepare_data`` for the
         detection bands.
@@ -422,9 +405,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 src = by_index.get(gg.index)
                 if src is None:
                     continue
-                gg.psf_array = np.ascontiguousarray(
-                    np.asarray(src.psf_array)[ib]
-                )
+                gg.psf_array = np.ascontiguousarray(np.asarray(src.psf_array)[ib])
                 bcells.append(gg)
             band_cache[band] = {
                 "exposure": exposure,
@@ -456,10 +437,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         bands = list(self.config.detection_bands)
         missing = [b for b in bands if b not in exposure_handles_dict]
         if missing:
-            raise KeyError(
-                f"detection band(s) {missing} not in "
-                f"{list(exposure_handles_dict.keys())}"
-            )
+            raise KeyError(f"detection band(s) {missing} not in " f"{list(exposure_handles_dict.keys())}")
 
         exposures = {}
         noise_corrs = {}
@@ -483,6 +461,8 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 patch=patch,
                 mask_array=mask_array,
                 num_workers=self.config.num_workers,
+                renoise_mode=self.config.renoise_mode,
+                renoise_delta=self.config.renoise_delta,
             )
         else:
             self.log.info("Detecting on the coadd of bands %s", bands)
@@ -498,6 +478,8 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 patch=patch,
                 mask_array=mask_array,
                 num_workers=self.config.num_workers,
+                renoise_mode=self.config.renoise_mode,
+                renoise_delta=self.config.renoise_delta,
             )
         cells = data.pop("cells")
 
@@ -508,15 +490,16 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             band_cache = {
                 band: {
                     "exposure": exposures[band],
-                    "data": {
-                        k: v for k, v in data.items() if k != "detection"
-                    },
+                    "data": {k: v for k, v in data.items() if k != "detection"},
                     "cells": cells,
                 }
             }
         else:
             band_cache = self._cache_bands_multiband(
-                bands=bands, exposures=exposures, data=data, cells=cells,
+                bands=bands,
+                exposures=exposures,
+                data=data,
+                cells=cells,
             )
 
         def _detect_one(cell):
@@ -541,8 +524,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             # Same edge-of-tract semantics as MeasureCellCoaddsPipe: no
             # detections anywhere means the quantum is SKIPPED, not FAILED.
             raise NoWorkFound(
-                f"No objects detected in any cell "
-                f"(tract={tract}, patch={patch}); skipping this patch."
+                f"No objects detected in any cell " f"(tract={tract}, patch={patch}); skipping this patch."
             )
         return det_cats, band_cache
 
@@ -579,8 +561,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 # The detection stage already prepared this band with the
                 # same seed and code path; reuse it instead of loading and
                 # preparing the exposure a second time.
-                self.log.debug("Measuring band %s (reusing detection prep)",
-                               band)
+                self.log.debug("Measuring band %s (reusing detection prep)", band)
                 exposure = cached["exposure"]
                 data = dict(cached["data"])
                 cell_map = {bb.index: bb for bb in cached["cells"]}
@@ -601,6 +582,8 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                     patch=patch,
                     mask_array=mask_array,
                     num_workers=self.config.num_workers,
+                    renoise_mode=self.config.renoise_mode,
+                    renoise_delta=self.config.renoise_delta,
                 )
                 data.pop("detection")
                 cell_map = {bb.index: bb for bb in data.pop("cells")}
@@ -615,25 +598,24 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             # Hoisted above the HSM call: the PSF second moments are
             # converted to arcsec**2 with this scale, so it has to exist
             # before the measurement, not only before _force_one.
-            pixel_scale = float(
-                exposure.getWcs().getPixelScale().asArcseconds()
-            )
+            pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
             # PSF-HSM sampling locus: per anacal cell (default -- keeps the
             # patch's spatial PSF variation) or once at the patch centre,
             # broadcast to every source. The simulated PSF is uniform across
             # the patch, so use_sim forces the patch-centre path.
-            psf_hsm_center = (
-                self.config.psfHsmAtPatchCenter or self.config.use_sim
-            )
+            psf_hsm_center = self.config.psfHsmAtPatchCenter or self.config.use_sim
             if psf_hsm_center:
                 center_moments = self._psf_hsm_moments_at_center(
-                    exposure, pixel_scale=pixel_scale,
+                    exposure,
+                    pixel_scale=pixel_scale,
                 )
                 psf_hsm = {}
             else:
                 center_moments = None
                 psf_hsm = self._psf_hsm_moments_per_cell(
-                    list(cell_map.values()), band, pixel_scale=pixel_scale,
+                    list(cell_map.values()),
+                    band,
+                    pixel_scale=pixel_scale,
                 )
 
             # Per-band coverage map, sampled per source below. Optional:
@@ -643,9 +625,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             if handle is not None:
                 # cast ONCE per band: n_inputs_at is called per cell
                 # and would otherwise cast the whole patch each time
-                n_image_band = np.ascontiguousarray(
-                    handle.get().array, dtype=np.float32
-                )
+                n_image_band = np.ascontiguousarray(handle.get().array, dtype=np.float32)
             begin_x = int(data.get("begin_x", 0))
             begin_y = int(data.get("begin_y", 0))
 
@@ -662,9 +642,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                     # killing the whole patch.
                     cell = cell_map.get(key)
                     if cell is None:
-                        raise KeyError(
-                            f"cell {key} has no PSF in band {band}"
-                        )
+                        raise KeyError(f"cell {key} has no PSF in band {band}")
                     cells = [cell]
                     cat = self._run_fpfs(**data, detection=det)
                     cat = self._append_gauss_fluxes(
@@ -674,9 +652,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                     )
                     # Pure lookup + column merge: no HSM call, no GIL.
                     cat = self._attach_psf_hsm_moments(
-                        cat, band=band,
-                        moments=(center_moments if psf_hsm_center
-                                 else psf_hsm.get(key)),
+                        cat,
+                        band=band,
+                        moments=(center_moments if psf_hsm_center else psf_hsm.get(key)),
                     )
                     if n_image_band is not None:
                         # det positions are arcsec in the parent frame;
@@ -685,13 +663,13 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                             cat,
                             self.n_inputs_at(
                                 n_image_band,
-                                np.asarray(det["x1_det"]) / pixel_scale
-                                - begin_x,
-                                np.asarray(det["x2_det"]) / pixel_scale
-                                - begin_y,
+                                np.asarray(det["x1_det"]) / pixel_scale - begin_x,
+                                np.asarray(det["x2_det"]) / pixel_scale - begin_y,
                                 sigma=self.anacal.get_sigma_arcsec(
-                                    cell.psf_array, pixel_scale,
-                                ) * 1.5,
+                                    cell.psf_array,
+                                    pixel_scale,
+                                )
+                                * 1.5,
                                 scale=pixel_scale,
                             ),
                             band,
@@ -699,8 +677,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                     return cat
                 except Exception as e:
                     self.log.error(
-                        "Measurement failed tract=%d patch=%d cell=%s "
-                        "band=%s: %s",
+                        "Measurement failed tract=%d patch=%d cell=%s " "band=%s: %s",
                         tract,
                         patch,
                         key,
@@ -714,11 +691,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                     force_parts[key].append(cat)
 
         nbands = len(bands)
-        return {
-            key: merge_structured(parts)
-            for key, parts in force_parts.items()
-            if len(parts) == nbands
-        }
+        return {key: merge_structured(parts) for key, parts in force_parts.items() if len(parts) == nbands}
 
     def run(
         self,
@@ -807,9 +780,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             # restored below after the per-group results are merged.
             exposure = next(iter(exposure_handles_dict.values())).get()
             bbox = exposure.getBBox()
-            pixel_scale = float(
-                exposure.getWcs().getPixelScale().asArcseconds()
-            )
+            pixel_scale = float(exposure.getWcs().getPixelScale().asArcseconds())
             geo = anacal.geometry.get_cell_list(
                 img_ny=bbox.getHeight(),
                 img_nx=bbox.getWidth(),
@@ -820,17 +791,19 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             )
             x0, y0 = bbox.getBeginX(), bbox.getBeginY()
             regions = [
-                (bb.index, x0 + bb.xmin_in, y0 + bb.ymin_in,
-                 x0 + bb.xmax_in, y0 + bb.ymax_in)
-                for bb in geo
+                (bb.index, x0 + bb.xmin_in, y0 + bb.ymin_in, x0 + bb.xmax_in, y0 + bb.ymax_in) for bb in geo
             ]
             # Pixel positions come from ra/dec through THIS exposure's
             # WCS; whatever the catalog carried is overwritten.
             det_use = self._ingest_external_detection(
-                detection, exposure.getWcs(), pixel_scale,
+                detection,
+                exposure.getWcs(),
+                pixel_scale,
             )
             det_cats, order = self._partition_external_detection(
-                det_use, regions, pixel_scale,
+                det_use,
+                regions,
+                pixel_scale,
             )
             if not det_cats:
                 raise NoWorkFound(
@@ -880,9 +853,15 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             # External catalogs are row-aligned to their producer (e.g.
             # a det_id column); undo the cell grouping.
             final = self._restore_input_order(
-                final, list(force_cats.keys()), order,
+                final,
+                list(force_cats.keys()),
+                order,
             )
         final = self._finalize_catalog(
-            final, seed=seed, skyMap=skyMap, tract=tract, patch=patch,
+            final,
+            seed=seed,
+            skyMap=skyMap,
+            tract=tract,
+            patch=patch,
         )
         return Struct(anacalCatalog=final)

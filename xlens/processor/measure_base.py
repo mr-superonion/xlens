@@ -80,6 +80,29 @@ class AnacalMeasureConfigBase(Config):
         doc="Fpfs Source Measurement Task",
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
+    renoise_mode = Field[str](
+        doc=(
+            "Noise-bias correction with the pure-noise image, ONE knob "
+            "for both stages (the anacal detection / measurement and the "
+            "forced FPFS measurement receive it as a run() argument, so "
+            "they cannot be set differently): 'rotate' adds a 90-degree-"
+            "rotated copy of the noise (doubles the noise variance); "
+            "'spectral' adds the minimal-variance noise of the renoising "
+            "draft (a filler removing the spin-2 part of the noise "
+            "spectrum, plus added noise of fraction renoise_c with an "
+            "assigned shear response), built from the patch noise "
+            "correlation function and each cell's PSF."
+        ),
+        default="rotate",
+    )
+    renoise_c = Field[float](
+        doc="spectral renoising: added-noise fraction c",
+        default=0.1,
+    )
+    renoise_delta = Field[float](
+        doc="spectral renoising: smoothing of the spectrum maximum",
+        default=0.05,
+    )
     n_mask_base_max = Field[float](
         doc=(
             "Mask-cut threshold on ``n_mask_base``, the Gaussian-"
@@ -108,6 +131,14 @@ class AnacalMeasureConfigBase(Config):
 
     def validate(self):
         super().validate()
+        if self.renoise_mode not in ("rotate", "spectral"):
+            raise FieldValidationError(
+                self.__class__.renoise_mode,
+                self,
+                "renoise_mode must be 'rotate' or 'spectral'",
+            )
+        if not self.renoise_c > 0:
+            raise FieldValidationError(self.__class__.renoise_c, self, "renoise_c must be > 0")
         if not 0.0 < self.n_mask_base_max <= 1.0:
             raise FieldValidationError(
                 self.__class__.n_mask_base_max,
@@ -221,11 +252,11 @@ class MeasureBandsConfigBase(AnacalMeasureConfigBase):
     )
     num_workers = Field[int](
         doc="Worker threads for the per-cell loops. 1 means a plain "
-            "serial Python loop. Values >1 use a thread pool: AnaCal "
-            "releases the GIL around its C++ compute (detection, "
-            "measurement and the native per-source PSF draws), so the "
-            "cell loops scale -- ~3x at 8 workers on a patch coadd. "
-            "Results are independent of this value.",
+        "serial Python loop. Values >1 use a thread pool: AnaCal "
+        "releases the GIL around its C++ compute (detection, "
+        "measurement and the native per-source PSF draws), so the "
+        "cell loops scale -- ~3x at 8 workers on a patch coadd. "
+        "Results are independent of this value.",
         default=1,
     )
 
@@ -337,13 +368,8 @@ class AnacalMeasureTaskBase(PipelineTask):
     def attach_n_inputs_column(self, cat, values, band: str):
         """Merge a per-source ``{survey}_{band}_n_inputs`` column."""
         assert isinstance(self.config, MeasureBandsConfigBase)
-        prefix = (
-            "%s_%s_" % (self.config.survey, band)
-            if self.config.survey is not None else "%s_" % band
-        )
-        col = np.zeros(
-            len(cat), dtype=[("%sn_inputs" % prefix, np.float32)]
-        )
+        prefix = "%s_%s_" % (self.config.survey, band) if self.config.survey is not None else "%s_" % band
+        col = np.zeros(len(cat), dtype=[("%sn_inputs" % prefix, np.float32)])
         col["%sn_inputs" % prefix] = values
         return merge_structured([cat, col])
 
@@ -371,7 +397,9 @@ class AnacalMeasureTaskBase(PipelineTask):
             return mask_array
         self.log.info(
             "nImage cut (< %d visits in %s): masking %.2f%% of the patch",
-            self.config.n_image_min, ",".join(want), 100.0 * low.mean(),
+            self.config.n_image_min,
+            ",".join(want),
+            100.0 * low.mean(),
         )
         if mask_array is None:
             return low.astype(np.uint8)
@@ -390,9 +418,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         """
         if self.config.num_workers <= 1 or len(items) <= 1:
             return [fn(item) for item in items]
-        with ThreadPoolExecutor(
-            max_workers=self.config.num_workers
-        ) as pool:
+        with ThreadPoolExecutor(max_workers=self.config.num_workers) as pool:
             return list(pool.map(fn, items))
 
     def _ingest_external_detection(
@@ -432,10 +458,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         measurement downstream.
         """
         names = set(detection.dtype.names or ())
-        missing = [
-            c for c in ("ra", "dec", "wsel", "dwsel_dg1", "dwsel_dg2")
-            if c not in names
-        ]
+        missing = [c for c in ("ra", "dec", "wsel", "dwsel_dg1", "dwsel_dg2") if c not in names]
         if missing:
             raise ValueError(
                 f"External detection catalog is missing required "
@@ -459,10 +482,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         # not another instrument's pixels) is as valid an input as one
         # whose values we are about to discard.
         out = detection.copy()
-        absent = [
-            c for c in ("x1", "x2", "x1_det", "x2_det")
-            if c not in names
-        ]
+        absent = [c for c in ("x1", "x2", "x1_det", "x2_det") if c not in names]
         if absent:
             out = rfn.append_fields(
                 out,
@@ -519,11 +539,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         order: dict = {}
         assigned = np.zeros(len(px), dtype=bool)
         for key, x0, y0, x1, y1 in regions:
-            sel = (
-                ~assigned
-                & (px >= x0) & (px < x1)
-                & (py >= y0) & (py < y1)
-            )
+            sel = ~assigned & (px >= x0) & (px < x1) & (py >= y0) & (py < y1)
             if not np.any(sel):
                 continue
             assigned |= sel
@@ -590,7 +606,11 @@ class AnacalMeasureTaskBase(PipelineTask):
     def _run_anacal(self, **data):
         """Detection + detection-band measurement, with the mask cut."""
         return self.anacal.run(
-            n_mask_base_max=self.config.n_mask_base_max, **data
+            n_mask_base_max=self.config.n_mask_base_max,
+            renoise_mode=self.config.renoise_mode,
+            renoise_c=self.config.renoise_c,
+            renoise_delta=self.config.renoise_delta,
+            **data,
         )
 
     def _run_fpfs(self, **data):
@@ -610,7 +630,11 @@ class AnacalMeasureTaskBase(PipelineTask):
         the rows on that same value.
         """
         return self.fpfs.run(
-            n_mask_base_max=self.config.n_mask_base_max, **data
+            n_mask_base_max=self.config.n_mask_base_max,
+            renoise_mode=self.config.renoise_mode,
+            renoise_c=self.config.renoise_c,
+            renoise_delta=self.config.renoise_delta,
+            **data,
         )
 
     def _make_measure_subtasks(self) -> None:
@@ -627,7 +651,8 @@ class AnacalMeasureTaskBase(PipelineTask):
                 algMetadata=dafBase.PropertyList(),
             )
             self._psfHsmCtx = build_psf_hsm_context(
-                schema, self.config.psfHsmMeasurement,
+                schema,
+                self.config.psfHsmMeasurement,
             )
 
     def _seed_from_handle(self, handle) -> int:
@@ -649,9 +674,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         noise_corr = noise_corr / variance
         ny, nx = noise_corr.shape
         if not np.isclose(noise_corr[ny // 2, nx // 2], 1.0):
-            raise RuntimeError(
-                "Noise correlation is not normalized to 1 at the center pixel."
-            )
+            raise RuntimeError("Noise correlation is not normalized to 1 at the center pixel.")
         return noise_corr
 
     def _append_gauss_fluxes(
@@ -677,7 +700,11 @@ class AnacalMeasureTaskBase(PipelineTask):
         return merge_structured([cat, gauss_cat])
 
     def _psf_hsm_moments_per_cell(
-        self, cells, band: str, *, pixel_scale: float,
+        self,
+        cells,
+        band: str,
+        *,
+        pixel_scale: float,
     ) -> dict:
         """PSF HSM moments for every cell, measured SERIALLY.
 
@@ -700,24 +727,30 @@ class AnacalMeasureTaskBase(PipelineTask):
                 if arr is None:
                     continue
                 arr = np.asarray(arr)
-                if arr.ndim != 2:      # multiband stack: this band's slice
+                if arr.ndim != 2:  # multiband stack: this band's slice
                     continue
                 psf = psf_array_to_image(arr)
             try:
                 out[bb.index] = measure_psf_hsm_moments(
-                    self._psfHsmCtx, self.psfHsmMeasurement,
+                    self._psfHsmCtx,
+                    self.psfHsmMeasurement,
                     make_psf_stamp_exposure(psf),
                     pixel_scale=pixel_scale,
                 )
             except Exception as exc:
                 self.log.warning(
                     "PSF HSM failed for cell %s band %s: %s",
-                    bb.index, band, exc,
+                    bb.index,
+                    band,
+                    exc,
                 )
         return out
 
     def _psf_hsm_moments_at_center(
-        self, exposure, *, pixel_scale: float,
+        self,
+        exposure,
+        *,
+        pixel_scale: float,
     ) -> dict | None:
         """PSF HSM moments at the PATCH CENTRE, to broadcast to all sources.
 
@@ -741,7 +774,8 @@ class AnacalMeasureTaskBase(PipelineTask):
             except Exception:
                 img = psf.computeImage(center)
             return measure_psf_hsm_moments(
-                self._psfHsmCtx, self.psfHsmMeasurement,
+                self._psfHsmCtx,
+                self.psfHsmMeasurement,
                 make_psf_stamp_exposure(psf_array_to_image(np.asarray(img.array))),
                 pixel_scale=pixel_scale,
             )
@@ -760,7 +794,10 @@ class AnacalMeasureTaskBase(PipelineTask):
         if not self.config.doPsfHsmMoments or not moments:
             return cat
         psf_cols = broadcast_psf_hsm_moments(
-            moments, band, n=len(cat), survey=self.config.survey,
+            moments,
+            band,
+            n=len(cat),
+            survey=self.config.survey,
         )
         return merge_structured([cat, psf_cols])
 
@@ -783,11 +820,15 @@ class AnacalMeasureTaskBase(PipelineTask):
         if not self.config.doPsfHsmMoments or hsm_exposure is None:
             return cat
         psf_moments = measure_psf_hsm_moments(
-            self._psfHsmCtx, self.psfHsmMeasurement, hsm_exposure,
+            self._psfHsmCtx,
+            self.psfHsmMeasurement,
+            hsm_exposure,
             pixel_scale=pixel_scale,
         )
         psf_cols = broadcast_psf_hsm_moments(
-            psf_moments, band, n=len(cat),
+            psf_moments,
+            band,
+            n=len(cat),
             survey=self.config.survey,
         )
         return merge_structured([cat, psf_cols])
@@ -807,9 +848,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         catalog = np.asarray(add_magnitude_columns(catalog, MAG_ZERO_AB))
         # Stable per-object IDs derived from the patch-level seed. Used
         # downstream by ``photoZPipe`` and any object-level joiners.
-        object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(
-            len(catalog), dtype=np.int64
-        )
+        object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(catalog), dtype=np.int64)
         catalog = rfn.append_fields(
             catalog,
             "object_id",
@@ -822,9 +861,7 @@ class AnacalMeasureTaskBase(PipelineTask):
             # cell-coadd bbox).
             tractInfo = skyMap[tract]
             patchInfo = tractInfo[patch]
-            pixel_scale = float(
-                tractInfo.getWcs().getPixelScale().asArcseconds()
-            )
+            pixel_scale = float(tractInfo.getWcs().getPixelScale().asArcseconds())
             set_isPrimary(catalog, skyMap, tractInfo, patchInfo, pixel_scale)
         return self._select_rows(catalog)
 
@@ -858,21 +895,18 @@ class AnacalMeasureTaskBase(PipelineTask):
         names = catalog.dtype.names or ()
         # TEMPORARY DEBUG: dump the pre-cut catalog when asked.
         import os as _os
+
         _dump = _os.environ.get("XLENS_DUMP_PRECUT")
         if _dump:
             np.save(_dump, catalog)
-            self.log.info("pre-cut catalog dumped to %s (%d rows)",
-                          _dump, len(catalog))
+            self.log.info("pre-cut catalog dumped to %s (%d rows)", _dump, len(catalog))
         keep = np.ones(len(catalog), dtype=bool)
         if "is_primary" in names:
             keep &= np.asarray(catalog["is_primary"], dtype=bool)
         if "wsel" in names:
             keep &= np.asarray(catalog["wsel"]) > 1e-5
         if "n_mask_base" in names:
-            keep &= (
-                np.asarray(catalog["n_mask_base"])
-                < self.config.n_mask_base_max
-            )
+            keep &= np.asarray(catalog["n_mask_base"]) < self.config.n_mask_base_max
         if keep.all():
             # Nothing to drop: skip the copy entirely.
             return catalog
@@ -885,13 +919,16 @@ class AnacalMeasureTaskBase(PipelineTask):
         # which is exactly the wrong place to look.
         parts = []
         for _f, _m in (
-            ("is_primary", np.asarray(catalog["is_primary"], dtype=bool)
-             if "is_primary" in names else None),
-            ("wsel<=1e-5", ~(np.asarray(catalog["wsel"]) > 1e-5)
-             if "wsel" in names else None),
-            ("n_mask_base", ~(np.asarray(catalog["n_mask_base"])
-                              < self.config.n_mask_base_max)
-             if "n_mask_base" in names else None),
+            ("is_primary", np.asarray(catalog["is_primary"], dtype=bool) if "is_primary" in names else None),
+            ("wsel<=1e-5", ~(np.asarray(catalog["wsel"]) > 1e-5) if "wsel" in names else None),
+            (
+                "n_mask_base",
+                (
+                    ~(np.asarray(catalog["n_mask_base"]) < self.config.n_mask_base_max)
+                    if "n_mask_base" in names
+                    else None
+                ),
+            ),
         ):
             if _m is None:
                 continue
@@ -899,7 +936,9 @@ class AnacalMeasureTaskBase(PipelineTask):
             parts.append("%s drops %d" % (_f, _drop))
         self.log.info(
             "Row cut: keeping %d of %d sources (%s; n_mask_base_max=%g).",
-            int(keep.sum()), len(catalog), ", ".join(parts),
+            int(keep.sum()),
+            len(catalog),
+            ", ".join(parts),
             self.config.n_mask_base_max,
         )
         return catalog[keep]

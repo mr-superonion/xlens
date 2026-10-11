@@ -62,10 +62,7 @@ class AnacalConfig(Config):
         default=5.0,
     )
     num_epochs = Field[int](
-        doc=(
-            "Maximum number of Gaussian-fit epochs. 0 exports the moment "
-            "initialisation (production)."
-        ),
+        doc=("Maximum number of Gaussian-fit epochs. 0 exports the moment " "initialisation (production)."),
         default=0,
     )
     conv_tol = Field[float](
@@ -186,9 +183,7 @@ class AnacalTask(Task):
 
     _PSF_MOMENT_CACHE_MAX = 20000
 
-    def psf_gauss_moments(
-        self, psf: NDArray, pixel_scale: float
-    ) -> tuple[float, float, float]:
+    def psf_gauss_moments(self, psf: NDArray, pixel_scale: float) -> tuple[float, float, float]:
         """Adaptive moments (e1, e2, T) of one 2-D PSF stamp, from
         ``anacal.ngmix.fit_psf_gauss``; memoised on the stamp bytes."""
         p = np.ascontiguousarray(psf, dtype=np.float64)
@@ -234,9 +229,7 @@ class AnacalTask(Task):
         if noise_variance is None:
             wgt = np.ones(len(psf))
         else:
-            wgt = 1.0 / np.broadcast_to(
-                np.asarray(noise_variance, dtype=np.float64), (len(psf),)
-            )
+            wgt = 1.0 / np.broadcast_to(np.asarray(noise_variance, dtype=np.float64), (len(psf),))
         e1 = e2 = T = 0.0
         for w, p in zip(wgt / np.sum(wgt), psf):
             r1, r2, rT = self.psf_gauss_moments(p, pixel_scale)
@@ -285,9 +278,24 @@ class AnacalTask(Task):
         detection: NDArray | None,
         cells,
         n_mask_base_max: float | None = None,
+        # noise correlation function of the patch (one per band for a
+        # stack), only used by the spectral renoising
+        noise_corr: NDArray | None = None,
+        noise_corrs: list | None = None,
+        # the noise-bias correction mode: a run() argument, like
+        # n_mask_base_max, so that the caller hands the detection and the
+        # forced FPFS measurement the same one (config.renoise_mode of the
+        # measurement pipe)
+        renoise_mode: str = "rotate",
+        renoise_c: float = 0.1,
+        renoise_delta: float = 0.05,
+        # set by prepare_data when the spin-2 filler was added to the image
+        filler_added: bool = False,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
+        if renoise_mode not in ("rotate", "spectral"):
+            raise ValueError("renoise_mode must be 'rotate' or 'spectral', got " f"{renoise_mode!r}")
 
         # These flux-scale thresholds are defined at AnaCal's
         # THRESHOLD_REF_MAG_ZERO, which equals MAG_ZERO_AB. The image is
@@ -318,6 +326,73 @@ class AnacalTask(Task):
         if det is not None and len(cells) > 1:
             owner = anacal.task.assign_cell_ids(det, list(cells))
         prior = self.make_prior()
+        # Renoising: one noise spectrum per band on the cell grid, from the
+        # patch's correlation function (white noise without one), handed
+        # to anacal in BOTH modes so that the noise variances are summed
+        # over the actual total spectrum: raw spectrum plus its rotated
+        # copy for "rotate", the spectrum of the image WITH the filler of
+        # the patch PSF (symmetrized, the same symmetrization prepare_data
+        # applied) plus the added noise for "spectral".  The kernels
+        # follow each cell's PSF inside anacal; cells of one size share a
+        # Setup.
+        use_spectra = noise_array is not None
+        spectral = renoise_mode == "spectral" and use_spectra
+        if spectral and not filler_added:
+            raise ValueError(
+                "spectral renoising needs the image WITH the spin-2 filler "
+                "(prepare_data with renoise_mode='spectral')"
+            )
+        setups: dict = {}
+
+        def renoise_setup(cell):
+            if not use_spectra:
+                return None
+            n = int(cell.nx)
+            if n != int(cell.ny):
+                raise ValueError("renoising needs square cells, got " f"{cell.nx} x {cell.ny}")
+            if n not in setups:
+                if np.ndim(noise_variance) == 0:
+                    variances = [float(noise_variance)]
+                else:
+                    variances = [float(v) for v in noise_variance]
+                corrs = noise_corrs
+                if corrs is None:
+                    corrs = [noise_corr] * len(variances)
+                if len(corrs) != len(variances):
+                    raise ValueError(
+                        f"{len(corrs)} noise correlation function(s) for " f"{len(variances)} band(s)"
+                    )
+                psfs = [psf_array] if np.ndim(psf_array) == 2 else list(psf_array)
+                spectra = [
+                    anacal.renoise.make_noise_spectrum(
+                        n,
+                        pixel_scale,
+                        v,
+                        None if c is None else np.asarray(c, dtype=np.float64),
+                    )
+                    for v, c in zip(variances, corrs)
+                ]
+                if spectral:
+                    spectra = [
+                        anacal.renoise.symmetrize_spectrum(
+                            s,
+                            np.ascontiguousarray(p, dtype=np.float64),
+                            3.1 / pixel_scale,
+                            renoise_delta,
+                        )
+                        for s, p in zip(spectra, psfs)
+                    ]
+                # the pure noise is drawn from the 90-degree-rotated
+                # correlation (generate_pure_noise), AnaCal's Option-1
+                # convention
+                setups[n] = anacal.renoise.Setup(
+                    c=renoise_c,
+                    spectra=spectra,
+                    noise_rotated=True,
+                    mode="spectral" if spectral else "rotate",
+                )
+            return setups[n]
+
         parts = []
         for cell in cells:
             cell_det = det
@@ -330,9 +405,7 @@ class AnacalTask(Task):
                 cell_psf = psf_array
             task = anacal.task.Task(
                 scale=pixel_scale,
-                sigma_arcsec=self.get_sigma_arcsec(
-                    cell_psf, pixel_scale, noise_variance
-                ),
+                sigma_arcsec=self.get_sigma_arcsec(cell_psf, pixel_scale, noise_variance),
                 omega_f=0.218,
                 omega_v=0.011,
                 fpfs_c0=FPFS_C0,
@@ -340,23 +413,24 @@ class AnacalTask(Task):
                 prior=prior,
                 **self.config_kwargs,
             )
-            parts.append(task.process_image(
-                gal_array,
-                psf_array,
-                variance=noise_variance,
-                cell_list=[cell],
-                detection=cell_det,
-                noise_array=noise_array,
-                mask_array=mask_array,
-                do_fpfs=self.config.do_fpfs,
-                n_mask_base_max=n_mask_base_max,
-            ))
+            parts.append(
+                task.process_image(
+                    gal_array,
+                    psf_array,
+                    variance=noise_variance,
+                    cell_list=[cell],
+                    detection=cell_det,
+                    noise_array=noise_array,
+                    mask_array=mask_array,
+                    do_fpfs=self.config.do_fpfs,
+                    n_mask_base_max=n_mask_base_max,
+                    renoise=renoise_setup(cell),
+                )
+            )
         if parts:
             catalog = np.concatenate(parts)
         else:
-            catalog = anacal.table.make_catalog_empty(
-                np.zeros(0), np.zeros(0)
-            )
+            catalog = anacal.table.make_catalog_empty(np.zeros(0), np.zeros(0))
         catalog["x1"] = catalog["x1"] + begin_x * pixel_scale
         catalog["x2"] = catalog["x2"] + begin_y * pixel_scale
         catalog["x1_det"] = catalog["x1_det"] + begin_x * pixel_scale
@@ -391,6 +465,8 @@ class AnacalTask(Task):
         detection: astropy.table.Table | None = None,
         cells: list | None = None,
         num_workers: int = 1,
+        renoise_mode: str = "rotate",
+        renoise_delta: float = 0.05,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -418,6 +494,8 @@ class AnacalTask(Task):
         data = utils.image.prepare_data(
             exposure=exposure,
             seed=seed,
+            renoise_mode=renoise_mode,
+            renoise_delta=renoise_delta,
             noiseId=self.config.noiseId,
             rotId=self.config.rotId,
             npix=self.config.npix,
@@ -467,6 +545,8 @@ class AnacalTask(Task):
         detection: astropy.table.Table | None = None,
         cells: list | None = None,
         num_workers: int = 1,
+        renoise_mode: str = "rotate",
+        renoise_delta: float = 0.05,
         **kwargs,
     ):
         """Prepare a stack of bands as one anacal detection input.
@@ -503,6 +583,8 @@ class AnacalTask(Task):
             bands=bands,
             exposures=exposures,
             seed=seed,
+            renoise_mode=renoise_mode,
+            renoise_delta=renoise_delta,
             noiseId=self.config.noiseId,
             rotId=self.config.rotId,
             npix=self.config.npix,

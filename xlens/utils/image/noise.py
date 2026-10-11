@@ -27,7 +27,6 @@ Split out of ``xlens.utils.image``, which re-exports every public name here
 for backward compatibility.
 """
 
-
 import anacal
 import numpy as np
 from numpy.typing import NDArray
@@ -220,3 +219,70 @@ def prepare_noise_array(
         star_cat,
     )
     return noise_array
+
+
+def generate_filler_array(
+    *,
+    ny: int,
+    nx: int,
+    pixel_scale: float,
+    seed: int,
+    band: str | None,
+    noise_variance: float,
+    psf_array: NDArray,
+    noise_corr=None,
+    noiseId: int = 0,
+    rotId: int = 0,
+    survey: str | None = None,
+    delta: float = 0.05,
+    klim: float | None = None,
+) -> NDArray:
+    """The spin-2 filler of the spectral renoising: g * eps'' with eps'' an
+    independent noise realization of the patch (same correlation function
+    as the image noise, NOT rotated, its own seed) and g the filler filter
+    of ``anacal.renoise.symmetrize_spectrum`` for the patch PSF, so that
+    the image noise plus the filler has a 90-degree-symmetric deconvolved
+    spectrum.  Built on the smallest even square grid holding the image
+    and cropped.
+    """
+    from ..random import get_noise_seed
+
+    n = max(ny, nx)
+    n += n % 2
+    noise_std = np.sqrt(noise_variance)
+    filler_seed = get_noise_seed(
+        galaxy_seed=seed,
+        noiseId=noiseId,
+        rotId=rotId,
+        band=band,
+        survey=survey,
+        is_sim=False,
+        tag="filler",
+    )
+    if noise_corr is None:
+        eps = np.random.RandomState(filler_seed).normal(scale=noise_std, size=(n, n))
+        corr = None
+    else:
+        corr = np.asarray(noise_corr, dtype=np.float64)
+        corr = corr / corr[corr.shape[0] // 2, corr.shape[1] // 2]
+        eps = (
+            anacal.noise.simulate_noise(
+                seed=filler_seed,
+                correlation=corr,
+                nx=n,
+                ny=n,
+                scale=pixel_scale,
+            )
+            * noise_std
+        )
+    if klim is None:
+        klim = 3.1 / pixel_scale
+    spectrum = anacal.renoise.make_noise_spectrum(n, pixel_scale, float(noise_variance), corr)
+    spectrum = anacal.renoise.symmetrize_spectrum(
+        spectrum,
+        np.ascontiguousarray(psf_array, dtype=np.float64),
+        klim,
+        delta,
+    )
+    filler = np.fft.irfft2(np.fft.rfft2(eps) * spectrum.g, s=(n, n))
+    return np.asarray(filler[:ny, :nx], dtype=np.float32)
