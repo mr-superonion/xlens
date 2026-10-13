@@ -28,6 +28,7 @@ from xlens.processor.match import (
     matchPipe,
     matchPipeConfig,
 )
+from xlens.simulator.noise import AddNoisePipe, AddNoisePipeConfig
 from xlens.processor.measure_coadds import (
     MeasureCoaddsPipe,
     MeasureCoaddsPipeConfig,
@@ -95,6 +96,25 @@ parser.add_argument(
     "--version", type=int, default=None,
     help="Optional integer tag; when set, catalogs go to "
          "process_mode<N>-v<version>/ instead of process_mode<N>/.",
+)
+parser.add_argument(
+    "--sim-tag", type=str, default=None,
+    help="Read the exposures from sim_mode<N>_<sim-tag>/ instead of "
+         "sim_mode<N>/ (e.g. 'noiseless').",
+)
+parser.add_argument(
+    "--add-noise", action="store_true",
+    help="The exposures are noiseless (sim.py --no-image-noise): add the "
+         "image noise here, in memory, with AddNoisePipe before measuring. "
+         "The realisation is the one sim.py would have drawn for this seed "
+         "(and --noise-id), so the catalogs equal those of a noisy "
+         "simulation; the noisy images are never written.",
+)
+parser.add_argument(
+    "--noise-id", type=int, default=0,
+    help="noiseId of the realisation added by --add-noise (sim.py uses 0); "
+         "another value is an independent noise realisation on the same "
+         "galaxies.",
 )
 parser.add_argument(
     "--tag", type=str, default=None,
@@ -166,6 +186,21 @@ detect_config.detection_bands = detection_bands
 detect_config.validate()
 meas_task = MeasureCoaddsPipe(config=detect_config)
 
+noise_task = None
+if args.add_noise:
+    # the same survey / galId / rotId as sim.py, so the seed derivation
+    # matches a simulation that drew its own noise
+    noise_config = AddNoisePipeConfig()
+    noise_config.survey_name = common.SURVEY_NAME_LIST[0]
+    noise_config.galId = 0
+    noise_config.rotId = args.rot
+    noise_config.noiseId = args.noise_id
+    noise_config.connections.noiseId = args.noise_id
+    noise_config.validate()
+    noise_task = AddNoisePipe(config=noise_config)
+    if RANK == 0:
+        print(f"[Info] Adding image noise at processing time (noiseId={args.noise_id}).")
+
 config = matchPipeConfig()
 config.mag_max_truth = common.MAG_MAX_TRUTH
 # The magnitude column names of the truth catalog follow from the input
@@ -182,7 +217,7 @@ match_task = matchPipe(config=config)
 # process.py reads from there and writes catalogs under process_mode<N>/.
 # ------------------------------
 sim_dir = common.sim_outdir(
-    args.layout, test_target, shear_value, shear_mode,
+    args.layout, test_target, shear_value, shear_mode, tag=args.sim_tag,
 )
 proc_dir = common.process_outdir(
     args.layout, test_target, shear_value, shear_mode, version=args.version,
@@ -216,6 +251,11 @@ for i in range(istart, iend):
 
     truth_catalog = fitsio.read(truthfname)
     exposures = {bb: ExposureF(exp_fnames[bb]) for bb in bands}
+    if noise_task is not None:
+        for bb in bands:
+            exposures[bb] = noise_task.run(
+                exposure=exposures[bb], seed=sim_seed, band=bb,
+            ).simExposure
 
     handles = make_exposure_handles(
         exposures,

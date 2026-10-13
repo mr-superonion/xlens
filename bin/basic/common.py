@@ -41,9 +41,13 @@ MAG_MAX_TRUTH = 28.0
 # ------------------------------
 # Output directory
 # ------------------------------
+# The flagship2025 set.  The earlier tree (seeds 0-39999 with the noise drawn
+# in the simulation, Aug-Oct 2026) was renamed basic_shear_test_flagship2025_backup
+# on 2026-10-13; this one holds NOISELESS images (sim.py --no-image-noise), the
+# noise being added at processing time (process.py --add-noise).
 OUTPUT_ROOT = (
     "/gpfs/mnt/gpfs02/astro/astro_desc/data/simulation/image_simulation/"
-    "basic_shear_test"
+    "basic_shear_test_flagship2025"
 )
 
 
@@ -90,9 +94,12 @@ def _outdir(layout, test_target, shear_value, shear_mode, kind, version=None,
     return outdir
 
 
-def sim_outdir(layout, test_target, shear_value, shear_mode):
-    """Directory that holds sim.py products (truth + per-band exposures)."""
-    return _outdir(layout, test_target, shear_value, shear_mode, "sim")
+def sim_outdir(layout, test_target, shear_value, shear_mode, tag=None):
+    """Directory that holds sim.py products (truth + per-band exposures).
+
+    `tag` names a variant, e.g. tag="noiseless" -> ``sim_mode<N>_noiseless/``.
+    """
+    return _outdir(layout, test_target, shear_value, shear_mode, "sim", tag=tag)
 
 
 def process_outdir(layout, test_target, shear_value, shear_mode, version=None,

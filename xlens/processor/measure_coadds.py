@@ -117,11 +117,16 @@ class MeasureCoaddsPipeConnections(
         multiple=False,
     )
     noiseCorrArray = cT.Input(
-        doc="Stacked noise correlation array (6 x npix x npix).",
+        doc=(
+            "Stacked noise correlation array (6 x npix x npix). Optional: "
+            "without it the noise is taken as white at the exposures' "
+            "variance (simulated coadds have no systematics products)."
+        ),
         name="{inputName}_systematics_noisecorr_6bands",
         storageClass="NumpyArray",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
+        minimum=0,
     )
     mask = cT.Input(
         doc=(
@@ -136,6 +141,7 @@ class MeasureCoaddsPipeConnections(
         storageClass="ArrowAstropy",
         dimensions=("skymap", "tract", "patch"),
         multiple=False,
+        minimum=0,
     )
     anacalCatalog = cT.Output(
         doc="anacal catalog",

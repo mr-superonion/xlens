@@ -54,7 +54,7 @@ from lsst.pipe.base import (
 from numpy.typing import NDArray
 
 from ..utils.random import gal_seed_base, get_noise_seed
-from .defaults import noise_variance_defaults
+from .defaults import mag_zero_defaults, noise_variance_defaults
 
 
 def get_noise_array(
@@ -109,29 +109,36 @@ class AddNoisePipeConnections(
     PipelineTaskConnections,
     dimensions=("skymap", "tract", "patch", "band"),
     defaultTemplates={
-        "coaddName": "deep",
+        "inputName": "deep_coadd",
         "noiseId": 0,
     },
 ):
-    """Butler connections for :class:`AddNoisePipe`."""
+    """Butler connections for :class:`AddNoisePipe`.
+
+    The output is named after the input, as every derived product is:
+    ``{inputName}`` -> ``{inputName}_noise{noiseId}_coadd``, e.g.
+    ``deep_coadd`` -> ``deep_coadd_noise0_coadd`` and, after a noiseless
+    simulation, ``sim_0_rot0_coadd`` -> ``sim_0_rot0_coadd_noise0_coadd``,
+    which MeasureCoaddsPipe then reads through its own ``inputName``.
+    """
 
     noiseCorrImage = cT.Input(
         doc="image for noise correlation function",
-        name="deep_coadd_systematics_noisecorr",
+        name="{inputName}_systematics_noisecorr",
         dimensions=("skymap", "tract", "patch", "band"),
         storageClass="ImageF",
         multiple=False,
         minimum=0,
     )
     exposure = cT.Input(
-        doc="Input simulated coadd exposure",
-        name="{coaddName}_coadd_calexp",
+        doc="Input (noiseless) coadd exposure",
+        name="{inputName}",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
     simExposure = cT.Output(
-        doc="Output simulated coadd exposure",
-        name="{coaddName}noise{noiseId}_coadd",
+        doc="The exposure with the noise realisation noiseId added",
+        name="{inputName}_noise{noiseId}_coadd",
         storageClass="ExposureF",
         dimensions=("skymap", "tract", "patch", "band"),
     )
@@ -163,11 +170,49 @@ class AddNoisePipeConfig(
         doc="random seed for noise, 0 <= noiseId < 10",
         default=0,
     )
+    survey_in_seed = Field[bool](
+        doc=(
+            "Mix survey_name into the noise seed. MultibandSimTask does NOT "
+            "(it calls get_noise_seed without a survey), so leave this False "
+            "to add, to a noiseless simulation, exactly the realisation that "
+            "draw_image_noise=True would have drawn for the same seed, "
+            "galId, noiseId, rotId and band."
+        ),
+        default=False,
+    )
+    mag_zero = Field[float](
+        doc=(
+            "Magnitude zero point the exposure was rendered at; the white-"
+            "noise variance is noise_variance_defaults scaled by "
+            "10**(0.8 (mag_zero - survey default)), exactly as "
+            "MultibandSimTask computes it. Negative (default) means the "
+            "survey default, as in the simulator."
+        ),
+        default=-1.0,
+    )
+    check_variance_plane = Field[bool](
+        doc=(
+            "If the input already carries a positive variance plane, require "
+            "it to agree with the noise variance to be added (float32 "
+            "precision); a disagreement means the image was rendered for a "
+            "different noise level. The plane is set to the noise variance "
+            "in any case, so an input without one comes out correct."
+        ),
+        default=True,
+    )
 
     def validate(self):
         super().validate()
         if self.noiseId < 0 or self.noiseId >= 10:
             raise FieldValidationError(self.__class__.noiseId, self, "We require 0 <= noiseId < 10")
+        # the realisation in the output NAME must be the one that seeds the noise
+        if int(self.connections.noiseId) != int(self.noiseId):
+            raise FieldValidationError(
+                self.__class__.noiseId,
+                self,
+                f"noiseId ({self.noiseId}) must equal connections.noiseId "
+                f"({self.connections.noiseId}); set both",
+            )
 
     def setDefaults(self):
         super().setDefaults()
@@ -232,7 +277,14 @@ class AddNoisePipe(PipelineTask):
         # Obtain Noise correlation array
         if noiseCorrImage is None:
             noise_corr = None
-            variance = noise_variance_defaults[band][self.config.survey_name]
+            # the simulator's own arithmetic, so the float64 noise_std -- and
+            # hence every noise sample -- is bit-identical to draw_image_noise
+            mag_zero_default = mag_zero_defaults[self.config.survey_name]
+            if self.config.mag_zero < 0:
+                var_ratio = 1.0
+            else:
+                var_ratio = 10.0 ** ((self.config.mag_zero - mag_zero_default) * 0.8)
+            variance = noise_variance_defaults[band][self.config.survey_name] * var_ratio
             self.log.debug("No correlation, variance:", variance)
         else:
             noise_corr = noiseCorrImage.getArray()
@@ -243,13 +295,29 @@ class AddNoisePipe(PipelineTask):
                 raise RuntimeError("noise correlation peak is not at the center pixel")
             self.log.debug("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
+        # The variance plane must describe the noise that is now in the
+        # image: set it to the noise variance (per pixel; for correlated
+        # noise this is the peak of the correlation function).  An input
+        # that already has one is checked first, since a different value
+        # means the galaxies were rendered for another noise level.
+        var_plane = exposure.getMaskedImage().variance.array
+        if self.config.check_variance_plane:
+            plane = float(np.median(var_plane))
+            if plane > 0.0 and not np.isclose(plane, variance, rtol=1e-6, atol=0.0):
+                raise RuntimeError(
+                    f"variance plane ({plane:g}) disagrees with the noise "
+                    f"variance to add ({variance:g}) for band {band}; the "
+                    "exposure was rendered for a different noise level "
+                    "(survey_name / mag_zero)"
+                )
+        var_plane[:, :] = variance
         galaxy_seed = seed * gal_seed_base + self.config.galId
         seed_noise = get_noise_seed(
             galaxy_seed=galaxy_seed,
             noiseId=self.config.noiseId,
             rotId=self.config.rotId,
             band=band,
-            survey=self.config.survey_name,
+            survey=self.config.survey_name if self.config.survey_in_seed else None,
             is_sim=True,
         )
         height, width = exposure.getMaskedImage().image.array.shape

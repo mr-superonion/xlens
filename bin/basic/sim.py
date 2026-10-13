@@ -58,6 +58,18 @@ parser.add_argument(
     "--band", type=str, default="u,g,r,i,z,y",
     help="comma-separated bands list (e.g. 'r,i,z')",
 )
+parser.add_argument(
+    "--no-image-noise", action="store_true",
+    help="Render the galaxies without drawing the image noise. The variance "
+         "plane is still set to the survey noise variance, so addnoise.py "
+         "can add the noise afterwards (the same realisation sim.py would "
+         "have drawn).",
+)
+parser.add_argument(
+    "--tag", type=str, default=None,
+    help="Name for this variant; outputs go to sim_mode<N>_<tag>/ instead "
+         "of sim_mode<N>/ (e.g. --no-image-noise --tag noiseless).",
+)
 args, unknown_args = parser.parse_known_args()
 if unknown_args:
     print("[warn] Ignoring unknown args:", unknown_args)
@@ -116,7 +128,7 @@ cat_task = CatalogShearTask(config=cfg_cat)
 cfg_sim = MultibandSimConfig()
 cfg_sim.galaxy_type = common.GALAXY_TYPE
 cfg_sim.survey_name = common.SURVEY_NAME_LIST[0]
-cfg_sim.draw_image_noise = True
+cfg_sim.draw_image_noise = not args.no_image_noise
 sim_task = MultibandSimTask(config=cfg_sim)
 
 
@@ -124,7 +136,8 @@ sim_task = MultibandSimTask(config=cfg_sim)
 # Output layout (sim products live under sim_mode<N>/; process.py reads
 # from this dir and writes catalogs under process_mode<N>/).
 # ------------------------------
-outdir = common.sim_outdir(args.layout, test_target, shear_value, shear_mode)
+outdir = common.sim_outdir(args.layout, test_target, shear_value, shear_mode,
+                           tag=args.tag)
 
 
 # ------------------------------
