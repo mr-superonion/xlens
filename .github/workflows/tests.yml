@@ -74,6 +74,11 @@ jobs:
         shell: bash -l {0}
         run: |
           conda activate test
+          # FlexCode (photo-z model) is PyPI-only; --no-deps keeps pip from
+          # pulling the CUDA wheels (nvidia-nccl) of PyPI xgboost.  Its
+          # runtime deps (numpy, pywavelets, scikit-learn, xgboost) come
+          # from conda-lock.yml.
+          pip install --no-deps FlexCode==0.2.3
           pip install -e .
 
       - name: Test with pytest and coverage
