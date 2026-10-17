@@ -6,7 +6,7 @@ platforms:
 dependencies:
   # runtime (mirrors requirements.txt)
   - python=3.13
-  - anacal=0.8.2=py313*
+  - anacal=0.8.3=py313*
   - stackvana>=0.2026.13=py313*
   - click
   - healpy
@@ -18,7 +18,11 @@ dependencies:
   - namaster
   - scikit-learn
   - pywavelets
-  - xgboost
+  - xgboost=*=cpu*
+  # CPU builds of the GPU packages rubin-env (stackvana) pulls in; no CUDA
+  - pytorch=*=cpu*
+  - torchvision=*=cpu*
+  - jaxlib=*=cpu*
   # test (mirrors requirements_test.txt)
   - nbval
   - flake8-pyproject
@@ -27,5 +31,6 @@ dependencies:
   - pytest-xdist
   - pytest-timeout
   - pip
-  - pip:
-      - FlexCode
+  # FlexCode is PyPI-only and is installed with `pip install --no-deps
+  # FlexCode==0.2.3` in CI (see .github/workflows/tests.yml), not here: its
+  # PyPI xgboost requirement drags in CUDA wheels conda-lock cannot place.
