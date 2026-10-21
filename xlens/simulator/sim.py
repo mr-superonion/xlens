@@ -208,6 +208,26 @@ class MultibandSimConfig(
         doc="whether to use real PSF",
         default=False,
     )
+    psf_interpolant = Field[str](
+        doc=(
+            "x_interpolant for the InterpolatedImage built from the supplied "
+            "PSF stamp when use_real_psf is set.  This is NOT cosmetic: the "
+            "galaxy is convolved with the interpolated reconstruction while "
+            "the measurement deconvolves the raw stamp, so inside the band "
+            "the effective PSF carries an extra factor Ihat(k), the "
+            "interpolant's own transfer function.  GalSim's default "
+            "'quintic' has Ihat falling to 0.79 by k = 2.75 rad/pixel and "
+            "biases m by -2.7e-3 for a poorly resolved galaxy; 'lanczos15' "
+            "has Ihat = 1 to 1e-4 and reproduces the analytic-PSF answer to "
+            "1e-5.  ('sinc' would be exact but has infinite support and "
+            "GalSim refuses the FFT.)\n\n"
+            "The default stays GalSim's 'quintic' so that images already "
+            "rendered remain reproducible: the bias is removed instead by "
+            "storing the EFFECTIVE PSF on the exposure (see run()), which "
+            "works for any interpolant.  Changing this changes the pixels."
+        ),
+        default="quintic",
+    )
     force_isotropic = Field[bool](
         doc="force all input catalog to be isotropic",
         default=False,
@@ -638,7 +658,32 @@ class MultibandSimTask(PipelineTask):
                 galsim.Image(psf_array),
                 scale=pixel_scale,
                 flux=1.0,
+                x_interpolant=self.config.psf_interpolant,
             )
+            # The galaxies are convolved with the INTERPOLATED
+            # reconstruction, not with the stamp, and inside the band the
+            # two differ by the interpolant's own transfer function Ihat(k):
+            # II~(k) = FFT(stamp)(k) * Ihat(k).  Storing the raw stamp as
+            # the exposure PSF therefore hands the shear estimator a kernel
+            # the galaxies were never convolved with, and it deconvolves
+            # Ihat away as if it were signal.  For GalSim's default quintic
+            # that is a -2.7e-3 multiplicative bias on a poorly resolved
+            # galaxy.
+            #
+            # Convolving with a delta forces GalSim's FFT path, which
+            # renders the band-limited profile, so what is stored is
+            # exactly the effective PSF: its FFT is FFT(stamp) * Ihat.
+            # Resampling II directly would NOT do this -- interpolation is
+            # exact at the nodes, so it just returns the stamp.
+            psf_array = galsim.Convolve(
+                [psf_galsim, galsim.DeltaFunction()]
+            ).drawImage(
+                nx=psf_array.shape[1],
+                ny=psf_array.shape[0],
+                scale=pixel_scale,
+                method="no_pixel",
+            ).array
+            psf_array = psf_array / np.sum(psf_array)
             psfImage = afwImage.ImageF(psf_array.shape[0], psf_array.shape[1])
         else:
             draw_method = "auto"

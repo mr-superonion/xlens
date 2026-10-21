@@ -27,6 +27,7 @@ TAG=""                      # --tag STR (optional; empty = unnamed outputs)
 SUMMARY_TAG=""              # --summary-tag STR (optional; names the CUTS)
 MAG_MAX=""                  # --mag-max F (optional; empty = script default)
 TRACE_MIN=""                # --trace-min F (optional; empty = script default)
+SHAPE_NAME=""               # --shape-name STR (optional; empty = summary.py default "fpfs")
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="summary.py"
@@ -64,6 +65,9 @@ Options:
                         choices over the same catalogs coexist (default: none)
   --mag-max F           injects --mag-max F (default: none = script default)
   --trace-min F         injects --trace-min F (default: none = script default)
+  --shape-name STR      shape columns the estimator reads; injects
+                        --shape-name STR (default: none = summary.py's
+                        "fpfs"; e.g. "lsst_i_fpfs1")
   --no-correction       add --no-correction to summary_seeds.py arguments
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
@@ -102,6 +106,7 @@ while [[ $# -gt 0 ]]; do
     --summary-tag)   SUMMARY_TAG="$2"; shift 2 ;;
     --mag-max)       MAG_MAX="$2"; shift 2 ;;
     --trace-min)     TRACE_MIN="$2"; shift 2 ;;
+    --shape-name)    SHAPE_NAME="$2"; shift 2 ;;
     --no-correction) NO_CORR=true; shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     -h|--help)       usage; exit 0 ;;
@@ -172,6 +177,7 @@ arguments       = ${SCRIPT_PATH} \\
                   ${SUMMARY_TAG:+--summary-tag ${SUMMARY_TAG}} \\
                   ${MAG_MAX:+--mag-max ${MAG_MAX}} \\
                   ${TRACE_MIN:+--trace-min ${TRACE_MIN}} \\
+                  ${SHAPE_NAME:+--shape-name ${SHAPE_NAME}} \\
                   ${NO_CORR_ARG} \\
                   --min-id \$(start) --max-id \$(end)
 output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out

@@ -21,7 +21,7 @@ import os
 import common
 import fitsio
 import numpy as np
-from lsst.afw.image import ExposureF
+from lsst.afw.image import ExposureF, ImageF
 from mpi4py import MPI
 
 from xlens.processor.match import (
@@ -111,10 +111,27 @@ parser.add_argument(
          "simulation; the noisy images are never written.",
 )
 parser.add_argument(
+    "--noise-corr", type=str, default=None,
+    help="FITS noise correlation kernel normalised to 1 at its centre pixel "
+         "(e.g. noise_correlation_0.fits). It is used for BOTH sides of the "
+         "noise bias correction: with --add-noise the noise is generated with "
+         "this correlation, and the measurement receives it so the renoising "
+         "(rotate or spectral) is built from the same spectrum. Per band the "
+         "kernel is scaled to that exposure's noise variance. Without it the "
+         "noise is white.",
+)
+parser.add_argument(
     "--noise-id", type=int, default=0,
     help="noiseId of the realisation added by --add-noise (sim.py uses 0); "
          "another value is an independent noise realisation on the same "
          "galaxies.",
+)
+parser.add_argument(
+    "--sigma-shapelets1", type=float, default=0.38 * np.sqrt(2.0),
+    help="Gaussian kernel of the FPFS shapelet FLUX measurement [arcsec], "
+         "the lsst_<b>_flux_fpfs1 columns the magnitude cut uses. The "
+         "default 0.38*sqrt(2) = 0.5374 is the legacy value: 0.38 was the "
+         "hard-coded sigma_arcsec before d7dad07.",
 )
 parser.add_argument(
     "--tag", type=str, default=None,
@@ -180,11 +197,51 @@ detect_config.anacal.force_size = True
 detect_config.anacal.num_epochs = 0
 detect_config.anacal.do_noise_bias_correction = True
 detect_config.fpfs.do_noise_bias_correction = True
-detect_config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
+detect_config.fpfs.sigma_shapelets1 = args.sigma_shapelets1
 detect_config.use_sim = False
 detect_config.detection_bands = detection_bands
 detect_config.validate()
 meas_task = MeasureCoaddsPipe(config=detect_config)
+
+# One kernel for both the noise realisation and its bias correction.
+noise_kernel = None
+if args.noise_corr:
+    noise_kernel = fitsio.read(args.noise_corr).astype(np.float64)
+    kny, knx = noise_kernel.shape
+    if kny % 2 == 0 or knx % 2 == 0:
+        raise ValueError(f"noise correlation must have odd dimensions, got {noise_kernel.shape}")
+    peak = float(np.amax(noise_kernel))
+    if not np.isclose(noise_kernel[kny // 2, knx // 2], peak) or peak <= 0:
+        raise ValueError("noise correlation peak must be positive and at the centre pixel")
+    noise_kernel = noise_kernel / peak
+    if RANK == 0:
+        print(f"[Info] Noise correlation from {args.noise_corr} {noise_kernel.shape}; "
+              f"used for the noise realisation and the renoising.")
+
+BAND_ORDER = "ugrizy"
+
+
+def band_corr_arrays(exposures):
+    """(per-band kernel scaled to its variance, 6-band stack) or (None, None).
+
+    The two consumers differ: AddNoisePipe reads the variance off the
+    kernel's peak, while the measurement normalises the peak away and takes
+    the variance from the exposure.  Scaling by each exposure's own variance
+    plane satisfies both and keeps them consistent by construction.
+    """
+    if noise_kernel is None:
+        return None, None
+    per_band = {}
+    stack = np.zeros((len(BAND_ORDER),) + noise_kernel.shape)
+    for bb, exp in exposures.items():
+        var = float(np.median(exp.getMaskedImage().variance.array))
+        if not np.isfinite(var) or var <= 0:
+            raise RuntimeError(f"band {bb}: variance plane is {var}, cannot scale the kernel")
+        per_band[bb] = noise_kernel * var
+        if bb in BAND_ORDER:
+            stack[BAND_ORDER.index(bb)] = per_band[bb]
+    return per_band, stack
+
 
 noise_task = None
 if args.add_noise:
@@ -251,10 +308,17 @@ for i in range(istart, iend):
 
     truth_catalog = fitsio.read(truthfname)
     exposures = {bb: ExposureF(exp_fnames[bb]) for bb in bands}
+    corr_by_band, corr_array = band_corr_arrays(exposures)
     if noise_task is not None:
         for bb in bands:
+            corr_img = None
+            if corr_by_band is not None:
+                arr = corr_by_band[bb]
+                corr_img = ImageF(arr.shape[1], arr.shape[0])
+                corr_img.getArray()[:, :] = arr.astype(np.float32)
             exposures[bb] = noise_task.run(
                 exposure=exposures[bb], seed=sim_seed, band=bb,
+                noiseCorrImage=corr_img,
             ).simExposure
 
     handles = make_exposure_handles(
@@ -266,7 +330,7 @@ for i in range(istart, iend):
     )
     res = meas_task.run(
         exposure_handles_dict=handles,
-        corr_array=None,
+        corr_array=corr_array,
         skyMap=skymap,
         tract=common.TRACT_ID,
         patch=common.PATCH_ID,

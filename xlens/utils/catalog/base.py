@@ -391,6 +391,7 @@ def measure_shear(
     do_correction: bool = True,
     mag_zero: float = MAG_ZERO_AB,
     flux_name: str = "gauss2",
+    shape_name: str = "fpfs",
     bands: tuple[str, ...] = ("lsst_g", "lsst_r", "lsst_i", "lsst_z", "lsst_y"),
     ref_band: str = "lsst_i",
     z_point_name: str = "zmode",
@@ -425,6 +426,10 @@ def measure_shear(
     binned = _check_binning(z_estimator, zbounds)
     minlen = len(zbounds) + 1 if binned else 0
     fn = _resolve_cut_name(flux_name)
+    # Same convention as build_selection_mask / ShearEstimator: the shape
+    # columns are "<shape_name>_e1" etc, so "fpfs" -> "fpfs_", and a
+    # per-band set is named e.g. "lsst_i_fpfs1".
+    sn = shape_name + "_" if (shape_name and not shape_name.endswith("_")) else (shape_name or "")
     emax2 = emax * emax
     wopt = src["wsel"]
 
@@ -434,9 +439,9 @@ def measure_shear(
 
     def select(comp: int, dg_eff: float) -> np.ndarray:
         """Flux, shape and size cuts at shear g_comp = dg_eff."""
-        mask = get_esq(src, comp=comp, dg=dg_eff) < emax2
+        mask = get_esq(src, comp=comp, dg=dg_eff, sn=sn) < emax2
         if trace_min is not None:
-            mask &= get_trace(src, comp=comp, dg=dg_eff) > trace_min
+            mask &= get_trace(src, comp=comp, dg=dg_eff, sn=sn) > trace_min
         for b in bands:
             if dg_eff == 0.0:
                 mask &= flux[b] > fm[b]
@@ -476,7 +481,7 @@ def measure_shear(
 
     def sel_term(comp: int) -> np.ndarray:
         """Selection response for component comp (1 or 2) by finite difference."""
-        e_comp = src[f"fpfs_e{comp}"]
+        e_comp = src[f"{sn}e{comp}"]
 
         def one_side(sign: float) -> np.ndarray:
             dg_eff = sign * dg
@@ -490,8 +495,8 @@ def measure_shear(
 
     def component(comp: int):
         """-> (e, r, r_sel) for one shear component."""
-        e = src[f"fpfs_e{comp}"][mask0]
-        de = src[f"fpfs_de{comp}_dg{comp}"][mask0]
+        e = src[f"{sn}e{comp}"][mask0]
+        de = src[f"{sn}de{comp}_dg{comp}"][mask0]
         dw = src[f"dwsel_dg{comp}"][mask0]
         return (
             _accumulate(w0 * e, idx0, minlen),

@@ -12,6 +12,7 @@ from typing import Iterable, List, Optional, Tuple
 import common
 import fitsio
 import numpy as np
+import numpy.lib.recfunctions as rfn
 
 from xlens.utils.catalog import measure_shear as _measure_shear_binned
 from xlens.utils.constants import MAG_ZERO_AB
@@ -22,30 +23,58 @@ def _shear_root(layout, target, shear):
     return os.path.dirname(common.process_outdir(layout, target, shear, 40))
 
 
-colnames = [
-    "wsel",
-    "dwsel_dg1",
-    "dwsel_dg2",
-    "fpfs_e1",
-    "fpfs_de1_dg1",
-    "fpfs_de1_dg2",
-    "fpfs_e2",
-    "fpfs_de2_dg1",
-    "fpfs_de2_dg2",
-    "fpfs_m0",
-    "fpfs_dm0_dg1",
-    "fpfs_dm0_dg2",
-    "fpfs_m2",
-    "fpfs_dm2_dg1",
-    "fpfs_dm2_dg2",
-    "lsst_i_flux_fpfs1",
-    "lsst_i_dflux_fpfs1_dg1",
-    "lsst_i_dflux_fpfs1_dg2",
-    "lsst_i_fpfs1_e1",
-    "lsst_i_fpfs1_de1_dg1",
-    "lsst_i_fpfs1_e2",
-    "lsst_i_fpfs1_de2_dg2",
-]
+# The shape set the estimator reads is chosen by --shape-name:
+#
+#   "fpfs"          the joint multiband shape, measured at the PSF-adaptive
+#                   sigma_arcsec (AnacalTask.get_sigma_arcsec).  Carries
+#                   m0/m2 directly.  This is the default and what every
+#                   published summary here used.
+#   "lsst_<b>_fpfs1" that band's shapelet shape at the FIXED
+#                   sigma_shapelets1 (process.py: 0.38*sqrt(2) = 0.5374").
+#                   Carries m00/m20 instead of m0/m2, so cat_read
+#                   synthesises m0 = m00 and m2 = m00 + m20 (and the same
+#                   for the dg derivatives) before the library sees it.
+BASE_COLS = ["wsel", "dwsel_dg1", "dwsel_dg2",
+             "lsst_i_flux_fpfs1", "lsst_i_dflux_fpfs1_dg1",
+             "lsst_i_dflux_fpfs1_dg2"]
+SHAPE_COLS = ["e1", "de1_dg1", "de1_dg2", "e2", "de2_dg1", "de2_dg2"]
+# fpfs_ ships m0/m2; the per-band fpfs1 sets ship the raw m00/m20
+MOMENT_COLS = {"fpfs": ["m0", "dm0_dg1", "dm0_dg2", "m2", "dm2_dg1", "dm2_dg2"],
+               "fpfs1": ["m00", "dm00_dg1", "dm00_dg2",
+                         "m20", "dm20_dg1", "dm20_dg2"]}
+
+
+def _moment_flavour(shape_name: str) -> str:
+    return "fpfs" if shape_name == "fpfs" else "fpfs1"
+
+
+def columns_for(shape_name: str) -> list:
+    sn = shape_name + "_"
+    flavour = _moment_flavour(shape_name)
+    cols = list(BASE_COLS)
+    cols += [sn + c for c in SHAPE_COLS]
+    cols += [sn + c for c in MOMENT_COLS[flavour]]
+    return list(dict.fromkeys(cols))
+
+
+def add_moment_aliases(src, shape_name: str):
+    """Give an fpfs1 shape set the m0/m2 names ``get_trace`` expects.
+
+    AnaCal's monopole and quadrupole are m00 and m20; the joint ``fpfs_``
+    set is already published as m0 = m00 and m2 = m00 + m20, so the
+    per-band sets are mapped the same way rather than changing the library.
+    """
+    if _moment_flavour(shape_name) == "fpfs":
+        return src
+    sn = shape_name + "_"
+    names, arrays = [], []
+    for d in ("", "_dg1", "_dg2"):
+        m00 = src[f"{sn}m00" if not d else f"{sn}dm00{d}"]
+        m20 = src[f"{sn}m20" if not d else f"{sn}dm20{d}"]
+        names += [f"{sn}m0{d}" if not d else f"{sn}dm0{d}",
+                  f"{sn}m2{d}" if not d else f"{sn}dm2{d}"]
+        arrays += [m00, m00 + m20]
+    return rfn.append_fields(src, names, arrays, usemask=False)
 
 
 def parse_args() -> argparse.Namespace:
@@ -159,6 +188,14 @@ def parse_args() -> argparse.Namespace:
              "summary-flux-40-00_<tag>/. Combines with --version.",
     )
     parser.add_argument(
+        "--shape-name", type=str, default="fpfs",
+        help="Shape columns the estimator reads: 'fpfs' (default, the "
+             "joint multiband shape at the PSF-adaptive sigma_arcsec) or "
+             "e.g. 'lsst_i_fpfs1' (that band's shapelet shape at the "
+             "fixed sigma_shapelets1). Does NOT change the flux cut, "
+             "which always uses lsst_i_flux_fpfs1.",
+    )
+    parser.add_argument(
         "--summary-tag",
         type=str,
         default=None,
@@ -173,13 +210,17 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def cat_read(layout, target, shear, mode, sim_id, version=None, tag=None):
+def cat_read(layout, target, shear, mode, sim_id, version=None, tag=None,
+             shape_name="fpfs"):
     outdir = common.process_outdir(layout, target, shear, mode,
                                    version=version, tag=tag)
-    return fitsio.read(common.cat_path(outdir, sim_id), columns=colnames)
+    src = fitsio.read(common.cat_path(outdir, sim_id),
+                      columns=columns_for(shape_name))
+    return add_moment_aliases(src, shape_name)
 
 
 def measure_shear(src, flux_min=0.0, emax=0.3, trace_min=None, dg=0.02,
+                  shape_name="fpfs",
                   target="g1"):
     """Selection + response, including the selection response.
 
@@ -208,6 +249,7 @@ def measure_shear(src, flux_min=0.0, emax=0.3, trace_min=None, dg=0.02,
         target=target,
         mag_zero=MAG_ZERO_AB,
         flux_name="fpfs1",
+        shape_name=shape_name,
         bands=("lsst_i",),
         ref_band="lsst_i",
     )
@@ -224,6 +266,7 @@ def per_rank_work(
     trace_min: Optional[float] = None,
     version: Optional[int] = None,
     tag: Optional[str] = None,
+    shape_name: str = "fpfs",
 ):
     e_pos_rows = []
     e_neg_rows = []
@@ -234,7 +277,7 @@ def per_rank_work(
     for sim_id in ids_chunk:
         src_pos = cat_read(
             layout, target, shear, mode=40, sim_id=sim_id, version=version,
-            tag=tag,
+            tag=tag, shape_name=shape_name,
         )
         out_pos = measure_shear(
             src=src_pos,
@@ -243,12 +286,13 @@ def per_rank_work(
             trace_min=trace_min,
             dg=dg,
             target=target,
+            shape_name=shape_name,
         )
         del src_pos
         gc.collect()
         src_neg = cat_read(
             layout, target, shear, mode=0, sim_id=sim_id, version=version,
-            tag=tag,
+            tag=tag, shape_name=shape_name,
         )
         out_neg = measure_shear(
             src=src_neg,
@@ -257,6 +301,7 @@ def per_rank_work(
             trace_min=trace_min,
             dg=dg,
             target=target,
+            shape_name=shape_name,
         )
         del src_neg
         gc.collect()
@@ -430,6 +475,7 @@ def main() -> None:
                 trace_min=args.trace_min,
                 version=args.version,
                 tag=args.tag,
+                shape_name=args.shape_name,
             )
             save_rank_partial(
                 args.layout,
