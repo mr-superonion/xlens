@@ -28,6 +28,11 @@ MEMORY=1228                 # request_memory in MB; override with: --memory N
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="sim.py"
 LOG_DIR="${HOME}/log"
+# Per-job stdout/stderr go to GPFS, not $HOME.  The NFS home export
+# (/astro_u) hit 91% full and threw EACCES on ~600 of 4000 job starts on
+# 2026-10-22 (cluster 126), after $HOME/log had accumulated ~258k files.
+# The one-per-cluster UserLog stays in $LOG_DIR, where the tooling looks.
+JOB_LOG_DIR="${XLENS_JOB_LOG_DIR:-/gpfs02/astro/workarea/${USER}/log}"
 DRY_RUN=false
 
 usage() {
@@ -67,7 +72,7 @@ Options:
 
 Notes:
 - python = python3 in PATH
-- logs   = \$HOME/log
+- logs   = \$HOME/log (per-cluster .log), \$JOB_LOG_DIR (per-job .out/.err)
 USAGE
 }
 
@@ -132,7 +137,7 @@ if ! [[ "$MEMORY" =~ ^[0-9]+$ ]] || (( MEMORY <= 0 )); then
   echo "Error: --memory must be a positive integer in MB (got ${MEMORY})." >&2
   exit 1
 fi
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$JOB_LOG_DIR"
 
 # -------------------------------
 # Generate submit description
@@ -148,8 +153,8 @@ request_cpus    = 1
 
 executable      = /bin/bash
 arguments       = "-c 'for ((i=\$(start); i<\$(end); i++)); do ${PYTHON_EXE_PATH} ${SCRIPT_PATH} --mode \$(mode) --rot ${ROT} --shear ${SHEAR} --kappa ${KAPPA} --target ${TARGET} --start \$i --end \$((i+1)) --layout ${LAYOUT} --band ${BAND} ${DETECTION_BAND:+--detection-band ${DETECTION_BAND}} ${VERSION:+--version ${VERSION}} ${RENOISE_MODE:+--renoise-mode ${RENOISE_MODE}} ${TAG:+--tag ${TAG}} ${EXTRA} || exit 1; done'"
-output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).out
-error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).err
+output          = ${JOB_LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).out
+error           = ${JOB_LOG_DIR}/\$(ClusterId)_\$(ProcId)_\$(mode)_idx\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log
 
 queue mode, start, end from (

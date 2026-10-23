@@ -60,6 +60,16 @@ parser.add_argument(
     help="comma-separated bands list (e.g. 'r,i,z')",
 )
 parser.add_argument(
+    "--source-noise", action="store_true",
+    help="Include source photon noise, so the image noise is "
+         "non-stationary: per-pixel variance sky + c * flux from "
+         "simulator.defaults.get_variance_array. The variance plane stays at "
+         "the constant sky value, which is what the noise-bias correction "
+         "and the renoising want. Needs the noise to be drawn here, so it "
+         "cannot be combined with --no-image-noise; for noiseless images use "
+         "process.py --add-noise --source-noise instead.",
+)
+parser.add_argument(
     "--no-image-noise", action="store_true",
     help="Render the galaxies without drawing the image noise. The variance "
          "plane is still set to the survey noise variance, so addnoise.py "
@@ -161,6 +171,13 @@ cfg_sim = MultibandSimConfig()
 cfg_sim.galaxy_type = common.GALAXY_TYPE
 cfg_sim.survey_name = common.SURVEY_NAME_LIST[0]
 cfg_sim.draw_image_noise = not args.no_image_noise
+if args.source_noise and args.no_image_noise:
+    raise SystemExit(
+        "--source-noise needs the noise to be drawn here; drop "
+        "--no-image-noise, or add it at processing time with "
+        "process.py --add-noise --source-noise"
+    )
+cfg_sim.draw_source_noise = args.source_noise
 cfg_sim.use_real_psf = psf_array is not None
 if psf_array is None:
     cfg_sim.psf_e1 = args.psf_e1

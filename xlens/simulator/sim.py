@@ -80,7 +80,7 @@ from .defaults import (
     sys_npix,
 )
 from .galaxies import GALAXY_CATALOG_CLASSES, get_catalog_class
-from .noise import get_noise_array
+from .noise import get_noise_array, get_total_variance_array
 from ..foreground.star import bright_star
 
 DEFAULT_BAT_STAMP_SIZE = 64
@@ -186,6 +186,21 @@ class MultibandSimConfig(
     )
     draw_image_noise = Field[bool](
         doc="Whether to draw image noise in the simulation",
+        default=False,
+    )
+    draw_source_noise = Field[bool](
+        doc=(
+            "Add source photon noise on top of the sky noise, making the "
+            "image noise NON-STATIONARY: the per-pixel variance of the "
+            "realisation becomes defaults.get_variance_array, sky + c * flux, "
+            "with the flux taken from the noiseless galaxy image. One white "
+            "field is drawn, scaled by sqrt(sky + c * flux); this is NOT "
+            "supported together with a noise correlation kernel. The "
+            "variance PLANE written to the exposure stays at the constant sky "
+            "value -- that is what the shear estimator's noise-bias "
+            "correction and the renoising are entitled to, since both model "
+            "stationary sky noise. LSST only, and requires draw_image_noise."
+        ),
         default=False,
     )
     use_field_distortion = Field[bool](
@@ -308,6 +323,21 @@ class MultibandSimConfig(
                 self,
                 "We require galaxy_type in " f"{sorted(GALAXY_CATALOG_CLASSES)}",
             )
+        if self.draw_source_noise:
+            if not self.draw_image_noise:
+                raise FieldValidationError(
+                    self.__class__.draw_source_noise,
+                    self,
+                    "draw_source_noise has nothing to add to unless "
+                    "draw_image_noise is also set",
+                )
+            if self.survey_name.lower() != "lsst":
+                raise FieldValidationError(
+                    self.__class__.draw_source_noise,
+                    self,
+                    "source photon noise is only calibrated for lsst, not "
+                    f"{self.survey_name}",
+                )
         if self.survey_name not in ["lsst", "hsc", "euclid"]:
             raise FieldValidationError(
                 self.__class__.survey_name,
@@ -769,6 +799,11 @@ class MultibandSimTask(PipelineTask):
             if noise_corr[ny // 2, nx // 2] != 1:
                 raise RuntimeError("noise correlation peak is not at the center pixel")
             self.log.debug("With correlation, variance:", variance)
+        if self.config.draw_source_noise and noise_corr is not None:
+            raise RuntimeError(
+                "draw_source_noise is not supported with a noise "
+                "correlation kernel; use one or the other"
+            )
         noise_std = np.sqrt(variance)
 
         exp_out = afwImage.ExposureF(boundary_box)
@@ -777,6 +812,13 @@ class MultibandSimTask(PipelineTask):
         exp_out.setPhotoCalib(photo_calib)
         exp_out.setPsf(kernel_psf)
         exp_out.setWcs(wcs)
+        # Sky variance only, and constant, even when draw_source_noise
+        # makes the noise in the image non-stationary: downstream,
+        # ``estimate_noise_variance`` collapses this plane to one float per
+        # band for anacal's noise-bias correction and for the renoising
+        # spectrum, and both of those model stationary sky noise.  The source
+        # photon term belongs in the realisation, not in what the correction
+        # is told about it.
         exp_out.getMaskedImage().variance.array[:, :] = variance
         filter_label = afwImage.FilterLabel(band=band, physical=band)
         exp_out.setFilter(filter_label)
@@ -793,13 +835,24 @@ class MultibandSimTask(PipelineTask):
                 band=band,
                 is_sim=True,
             )
+            variance_array = None
+            if self.config.draw_source_noise:
+                variance_array = get_total_variance_array(
+                    image_array=galaxy_array,
+                    band=band,
+                    survey_name=survey_name,
+                    sky_variance=variance,
+                    mag_zero=mag_zero,
+                )
             noise_array = get_noise_array(
                 seed_noise=seed_noise,
                 noise_std=noise_std,
                 noise_corr=noise_corr,
                 shape=galaxy_array.shape,
                 pixel_scale=pixel_scale,
+                variance_array=variance_array,
             )
+            del variance_array
             exp_out.getMaskedImage().image.array[:, :] = (
                 exp_out.getMaskedImage().image.array[:, :] + noise_array
             )
@@ -807,6 +860,30 @@ class MultibandSimTask(PipelineTask):
         exp_out.getMaskedImage().mask.array[:, :] = mask_array
         del mask_array, galaxy_array
 
+        # TODO: the foreground star gets no photon noise of its own.
+        #
+        # The noise block above has already run, and the variance plane and
+        # the noise realisation it drew both describe the galaxy image alone.
+        # The star is then added to a CLONE of that finished exposure, so it
+        # sits on top of a noise field that was never told it was there.
+        #
+        # This matters more than it looks once ``get_variance_array`` from
+        # ``.defaults`` is wired in to give the galaxies their source photon
+        # noise: in r band the source term only equals the sky at about
+        # 133 ADU/pixel at ZP=30 (~24.7 mag/pixel), so for the galaxy
+        # population it is a faint core-pixel effect -- while a 13th-mag star
+        # is orders of magnitude above that crossover and is precisely the
+        # object whose own Poisson noise dominates its neighbourhood.
+        # Leaving it out understates the noise exactly where a bright-star
+        # systematics test is looking.
+        #
+        # The fix is to add ``foreground_array`` to the image BEFORE the
+        # noise block, so the star enters the variance map with everything
+        # else.  That is not a drop-in change: it moves where the RNG is
+        # consumed relative to the image, so every existing foreground
+        # realisation shifts, and ``exp_out`` (the star-free output) would
+        # then have to be built by subtracting the star back off rather than
+        # by cloning before it is added.
         if self.config.foreground_model != 'None':
             foreground_array = self.simulate_foreground(
                 galaxy_catalog.pixel_scale, 

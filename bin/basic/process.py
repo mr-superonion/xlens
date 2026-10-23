@@ -111,6 +111,14 @@ parser.add_argument(
          "simulation; the noisy images are never written.",
 )
 parser.add_argument(
+    "--source-noise", action="store_true",
+    help="With --add-noise, also draw source photon noise, making the noise "
+         "non-stationary (per-pixel variance sky + c * flux, read off the "
+         "noiseless image). The variance plane the measurement sees stays at "
+         "the constant sky value, so the noise-bias correction and the "
+         "renoising are still given the stationary sky noise they model.",
+)
+parser.add_argument(
     "--noise-corr", type=str, default=None,
     help="FITS noise correlation kernel normalised to 1 at its centre pixel "
          "(e.g. noise_correlation_0.fits). It is used for BOTH sides of the "
@@ -253,10 +261,18 @@ if args.add_noise:
     noise_config.rotId = args.rot
     noise_config.noiseId = args.noise_id
     noise_config.connections.noiseId = args.noise_id
+    noise_config.draw_source_noise = args.source_noise
     noise_config.validate()
     noise_task = AddNoisePipe(config=noise_config)
     if RANK == 0:
-        print(f"[Info] Adding image noise at processing time (noiseId={args.noise_id}).")
+        print(
+            f"[Info] Adding image noise at processing time "
+            f"(noiseId={args.noise_id}"
+            + (", with source photon noise" if args.source_noise else "")
+            + ")."
+        )
+elif args.source_noise:
+    raise SystemExit("--source-noise only means anything with --add-noise")
 
 config = matchPipeConfig()
 config.mag_max_truth = common.MAG_MAX_TRUTH

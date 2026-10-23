@@ -32,6 +32,11 @@ SHAPE_NAME=""               # --shape-name STR (optional; empty = summary.py def
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="summary.py"
 LOG_DIR="${HOME}/log"
+# Per-job stdout/stderr go to GPFS, not $HOME.  The NFS home export
+# (/astro_u) hit 91% full and threw EACCES on ~600 of 4000 job starts on
+# 2026-10-22 (cluster 126), after $HOME/log had accumulated ~258k files.
+# The one-per-cluster UserLog stays in $LOG_DIR, where the tooling looks.
+JOB_LOG_DIR="${XLENS_JOB_LOG_DIR:-/gpfs02/astro/workarea/${USER}/log}"
 DRY_RUN=false
 NO_CORR=false               # if true, append --no-correction to arguments
 
@@ -74,7 +79,7 @@ Options:
 
 Notes:
 - python = python3 in PATH
-- logs   = \$HOME/log
+- logs   = \$HOME/log (per-cluster .log), \$JOB_LOG_DIR (per-job .out/.err)
 USAGE
 }
 
@@ -139,7 +144,7 @@ if (( PER_TASK <= 0 )); then
   echo "Error: --per-task must be a positive integer (got ${PER_TASK})." >&2
   exit 1
 fi
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$JOB_LOG_DIR"
 
 # Optional arg for --no-correction
 NO_CORR_ARG=""
@@ -180,8 +185,8 @@ arguments       = ${SCRIPT_PATH} \\
                   ${SHAPE_NAME:+--shape-name ${SHAPE_NAME}} \\
                   ${NO_CORR_ARG} \\
                   --min-id \$(start) --max-id \$(end)
-output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out
-error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).err
+output          = ${JOB_LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out
+error           = ${JOB_LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log
 
 queue start, end from (

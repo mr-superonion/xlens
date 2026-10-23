@@ -54,7 +54,11 @@ from lsst.pipe.base import (
 from numpy.typing import NDArray
 
 from ..utils.random import gal_seed_base, get_noise_seed
-from .defaults import mag_zero_defaults, noise_variance_defaults
+from .defaults import (
+    mag_zero_defaults,
+    noise_variance_defaults,
+    source_noise_coeff_defaults,
+)
 
 
 def get_noise_array(
@@ -64,6 +68,7 @@ def get_noise_array(
     noise_corr: NDArray | None,
     shape: tuple[int, int],
     pixel_scale: float,
+    variance_array: NDArray | None = None,
 ) -> NDArray:
     """Generate a noise realisation, optionally with spatial correlation.
 
@@ -72,7 +77,7 @@ def get_noise_array(
     seed_noise : int
         Random seed for reproducibility.
     noise_std : float
-        Standard deviation of the noise (before correlation scaling).
+        Standard deviation of the sky noise (before correlation scaling).
     noise_corr : NDArray or None
         Normalised noise correlation kernel.  When *None*, independent
         Gaussian noise is drawn.
@@ -80,12 +85,33 @@ def get_noise_array(
         ``(height, width)`` of the output array.
     pixel_scale : float
         Pixel scale in arcseconds, passed to ``anacal.noise.simulate_noise``.
+    variance_array : NDArray or None
+        Per-pixel TOTAL noise variance, sky + source photon noise, as
+        ``get_total_variance_array`` returns it.  When given it replaces
+        ``noise_std``: one standard-normal field is scaled by its square
+        root, so the noise is white but non-stationary.  Not supported
+        together with ``noise_corr``.
 
     Returns
     -------
     NDArray
         Two-dimensional noise array.
     """
+    if variance_array is not None:
+        if noise_corr is not None:
+            raise RuntimeError(
+                "source photon noise is not supported with correlated "
+                "noise: a stationary correlated field cannot be rescaled "
+                "pixel by pixel without destroying the correlation it was "
+                "built to have"
+            )
+        # One field, not a sky field plus a source field: there is a single
+        # noise, whose variance happens to vary across the image.
+        # NB numpy's normal(scale=s) is s * gauss off the same stream, so
+        # where the flux is zero this reproduces the sky-only realisation
+        # for the same seed bit for bit; only pixels with flux change.
+        eps = np.random.RandomState(seed_noise).normal(size=shape)
+        return eps * np.sqrt(variance_array)
     if noise_corr is None:
         noise_array = np.random.RandomState(seed_noise).normal(
             scale=noise_std,
@@ -103,6 +129,41 @@ def get_noise_array(
             * noise_std
         )
     return noise_array
+
+
+def get_total_variance_array(
+    *,
+    image_array: NDArray,
+    band: str,
+    survey_name: str,
+    sky_variance: float,
+    mag_zero: float,
+) -> NDArray:
+    """Per-pixel noise variance, sky + source photon noise, in the image's
+    own units.
+
+    This is ``defaults.get_variance_array`` generalised to a zero point other
+    than the tabulated one.  ``source_noise_coeff_defaults`` is a gain, 1/g,
+    tabulated at ``mag_zero_defaults[survey_name]``; a gain is flux-like, so
+    it rescales as ``10**(0.4 dZ)`` -- NOT as the ``10**(0.8 dZ)`` of the
+    variance it multiplies into.  Rescaling the coefficient once is why the
+    image never has to be carried to the tabulated zero point and the noise
+    carried back.
+
+    ``sky_variance`` is passed in rather than looked up, because the caller
+    has already formed it at the image's own zero point (and, for correlated
+    noise, may have taken it from the peak of a correlation function instead
+    of from the defaults table).
+
+    Negative pixels are clipped -- a variance cannot be negative.  A noiseless
+    simulated image has none, but this is cheap insurance for the case where
+    the input is not in fact noiseless.
+    """
+    coeff = source_noise_coeff_defaults[band][survey_name] * 10.0 ** (
+        0.4 * (mag_zero - mag_zero_defaults[survey_name])
+    )
+    image = np.maximum(np.asarray(image_array, dtype=np.float64), 0.0)
+    return sky_variance + coeff * image
 
 
 class AddNoisePipeConnections(
@@ -190,6 +251,21 @@ class AddNoisePipeConfig(
         ),
         default=-1.0,
     )
+    draw_source_noise = Field[bool](
+        doc=(
+            "Add source photon noise on top of the sky noise, making the "
+            "image noise NON-STATIONARY: the per-pixel variance becomes "
+            "defaults.get_variance_array, sky + c * flux, with the flux read "
+            "off the (noiseless) input image. One white field is drawn, "
+            "scaled by sqrt(sky + c * flux); this is NOT supported together "
+            "with a noise correlation kernel. The variance PLANE is left at "
+            "the constant sky value regardless -- see the note on the plane "
+            "below. LSST only. Do NOT set this on an input that already "
+            "contains noise (a real deep_coadd): the flux it reads would be "
+            "that noise, and the photon term would be drawn from it."
+        ),
+        default=False,
+    )
     check_variance_plane = Field[bool](
         doc=(
             "If the input already carries a positive variance plane, require "
@@ -203,6 +279,13 @@ class AddNoisePipeConfig(
 
     def validate(self):
         super().validate()
+        if self.draw_source_noise and self.survey_name != "lsst":
+            raise FieldValidationError(
+                self.__class__.draw_source_noise,
+                self,
+                "source photon noise is only calibrated for lsst, not "
+                f"{self.survey_name}",
+            )
         if self.noiseId < 0 or self.noiseId >= 10:
             raise FieldValidationError(self.__class__.noiseId, self, "We require 0 <= noiseId < 10")
         # the realisation in the output NAME must be the one that seeds the noise
@@ -274,6 +357,11 @@ class AddNoisePipe(PipelineTask):
             exposure.
         """
         assert isinstance(self.config, AddNoisePipeConfig)
+        if self.config.draw_source_noise and noiseCorrImage is not None:
+            raise RuntimeError(
+                "draw_source_noise is not supported with a noise "
+                "correlation kernel; use one or the other"
+            )
         # Obtain Noise correlation array
         if noiseCorrImage is None:
             noise_corr = None
@@ -295,11 +383,18 @@ class AddNoisePipe(PipelineTask):
                 raise RuntimeError("noise correlation peak is not at the center pixel")
             self.log.debug("With correlation, variance:", variance)
         noise_std = np.sqrt(variance)
-        # The variance plane must describe the noise that is now in the
-        # image: set it to the noise variance (per pixel; for correlated
-        # noise this is the peak of the correlation function).  An input
-        # that already has one is checked first, since a different value
-        # means the galaxies were rendered for another noise level.
+        # The variance plane carries the SKY noise variance only -- the
+        # constant (for correlated noise, the peak of the correlation
+        # function) -- even when draw_source_noise has made the noise in the
+        # image non-stationary.  That is deliberate: downstream,
+        # ``estimate_noise_variance`` collapses this plane to one float per
+        # band, which anacal uses for the noise-bias correction and for the
+        # renoising spectrum, and both of those model stationary sky noise.
+        # They must be told the sky level and nothing more; handing them the
+        # source term would have them correct for noise the correction does
+        # not apply to.  An input that already has a plane is checked first,
+        # since a different value means the galaxies were rendered for
+        # another noise level.
         var_plane = exposure.getMaskedImage().variance.array
         if self.config.check_variance_plane:
             plane = float(np.median(var_plane))
@@ -323,12 +418,27 @@ class AddNoisePipe(PipelineTask):
         height, width = exposure.getMaskedImage().image.array.shape
         wcs = exposure.getWcs()
         pixel_scale = wcs.getPixelScale().asArcseconds()
+        variance_array = None
+        if self.config.draw_source_noise:
+            # the flux is read off the image while it is still noiseless
+            variance_array = get_total_variance_array(
+                image_array=exposure.getMaskedImage().image.array,
+                band=band,
+                survey_name=self.config.survey_name,
+                sky_variance=variance,
+                mag_zero=(
+                    mag_zero_defaults[self.config.survey_name]
+                    if self.config.mag_zero < 0
+                    else self.config.mag_zero
+                ),
+            )
         noise_array = get_noise_array(
             seed_noise=seed_noise,
             noise_std=noise_std,
             noise_corr=noise_corr,
             shape=(height, width),
             pixel_scale=pixel_scale,
+            variance_array=variance_array,
         )
         exposure.getMaskedImage().image.array[:, :] = (
             exposure.getMaskedImage().image.array[:, :] + noise_array
