@@ -344,7 +344,13 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
         )
         window_array = window_array * self._noise_window(noise_array, variance_array, noise_variance)
 
-        noise_array[~window_array.astype(bool)] = 0.0
+        # Mean-subtract over the kept pixels before zeroing the masked
+        # ones (as build_cell_systematics does): a DC offset would
+        # otherwise spread to a flat mu^2 pedestal across every lag.
+        window_bool = window_array.astype(bool)
+        if window_bool.any():
+            noise_array -= noise_array[window_bool].mean()
+        noise_array[~window_bool] = 0.0
         return self._correlate(noise_array, window_array, self.config.npix)
 
     def get_psf_systematics(self, exposure, catalog, seed, band):

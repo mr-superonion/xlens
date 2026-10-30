@@ -62,6 +62,7 @@ from ..utils.image import (
     build_psf_hsm_context,
     default_psf_hsm_plugin_config,
     measure_psf_hsm_moments,
+    remove_noise_corr_pedestal,
 )
 from ..utils.image.hsm import make_psf_stamp_exposure, psf_array_to_image
 from .anacal import AnacalTask
@@ -662,12 +663,27 @@ class AnacalMeasureTaskBase(PipelineTask):
     def _normalize_noise_corr(self, noise_corr: NDArray | None) -> NDArray | None:
         """Normalize a noise-correlation image to 1 at its centre pixel.
 
+        The large-lag pedestal is removed first
+        (``remove_noise_corr_pedestal``): systematics built before the
+        estimator did so carry one, and its truncated spectrum has
+        negative modes that break the spectral renoising and inflate the
+        noise variances of both modes.
+
         Returns ``None`` for missing input or a non-positive peak; raises if
         the maximum is not at the centre pixel (the kernel would then be
         applied off-centre).
         """
         if noise_corr is None:
             return None
+        peak = float(np.amax(noise_corr))
+        if peak <= 0:
+            return None
+        noise_corr, pedestal = remove_noise_corr_pedestal(noise_corr)
+        if abs(pedestal) > 1e-3 * peak:
+            self.log.info(
+                "noise correlation: removed a large-lag pedestal of %.2e (relative to the peak)",
+                pedestal / peak,
+            )
         variance = float(np.amax(noise_corr))
         if variance <= 0:
             return None

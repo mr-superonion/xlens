@@ -62,7 +62,7 @@ from lsst.pex.config import (
 from lsst.pipe.base import PipelineTask
 from numpy.typing import NDArray
 
-from ..utils.image import badMaskDefault, prepare_mask
+from ..utils.image import badMaskDefault, prepare_mask, remove_noise_corr_pedestal
 from ..utils.mask import (
     GAIA_TABLE_DTYPE,
     STAR_MASK_RADIUS_FUNCS,
@@ -349,6 +349,9 @@ class BuildSystematicsTaskBase(PipelineTask):
         zero-padded here so the FFT does not wrap around, correlated,
         and the noise correlation is divided by the window's own
         autocorrelation to undo the window's lag-dependent weighting.
+        The large-lag pedestal (background structure beyond the stamp,
+        see ``remove_noise_corr_pedestal``) is subtracted, so the result
+        vanishes at the stamp edge and has a positive spectrum.
         """
         pad_width = ((10, 10), (10, 10))
         window_array = np.pad(
@@ -376,4 +379,5 @@ class BuildSystematicsTaskBase(PipelineTask):
         good = window_corr > 0
         out = np.zeros_like(window_corr, dtype=np.float32)
         out[good] = noise_corr[good] / window_corr[good]
+        out, _ = remove_noise_corr_pedestal(out)
         return out

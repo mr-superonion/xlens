@@ -34,6 +34,32 @@ from numpy.typing import NDArray
 from .masks import MAX_VALID_VARIANCE
 
 
+def remove_noise_corr_pedestal(noise_corr, rmin_frac: float = 0.8):
+    """Subtract the large-lag pedestal of a measured noise correlation.
+
+    A coadd's "noise" image carries background structure on scales far
+    beyond the correlation stamp (sky-subtraction residuals, unmasked
+    faint light): in the windowed autocorrelation it shows up as a flat
+    offset that has not decayed at the stamp edge.  Cut off by the stamp
+    (a box window) that offset gives a spectrum with NEGATIVE modes, and
+    the spectral renoising, which divides by the spectrum of the
+    pure-noise realization, then amplifies modes with no power.  Those
+    scales carry no shape information, so the pedestal -- the mean over
+    the outer ring ``|lag| >= rmin_frac * (npix // 2)`` -- is removed,
+    leaving a correlation that vanishes at the stamp edge.
+
+    Returns the corrected correlation (same dtype) and the pedestal, in
+    the units of the input.
+    """
+    corr = np.asarray(noise_corr)
+    ny, nx = corr.shape
+    yy, xx = np.indices(corr.shape)
+    radius = np.hypot(yy - ny // 2, xx - nx // 2)
+    ring = radius >= rmin_frac * (min(ny, nx) // 2)
+    pedestal = float(corr[ring].mean())
+    return (corr - pedestal).astype(corr.dtype), pedestal
+
+
 def rotate_noise_corr(noise_corr):
     noise_max = np.amax(noise_corr)
     noise_corr = noise_corr / noise_max
