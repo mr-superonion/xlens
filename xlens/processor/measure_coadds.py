@@ -385,6 +385,11 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             bdata["noise2_array"] = None if noise2 is None else noise2[ib]
             bdata["psf_array"] = np.ascontiguousarray(psf_stack[ib])
             bdata["noise_variance"] = float(data["noise_variance"][ib])
+            # one band's correlation, as prepare_data hands it over: a
+            # leftover per-band list makes the forced FPFS fall back to
+            # a white spectrum
+            bdata.pop("noise_corrs", None)
+            bdata["noise_corr"] = data["noise_corrs"][ib]
             if self.config.survey is not None:
                 bdata["base_column_name"] = f"{self.config.survey}_{band}_"
             else:

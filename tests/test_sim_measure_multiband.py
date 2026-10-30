@@ -8,7 +8,10 @@ band-by-band in both cases and must be unaffected.
 The r+i+z detection image is deeper, so it is expected to find more
 sources; what the tests pin down is that the extra sources come with sane
 columns and that turning the feature off leaves the old path exactly as it
-was.
+was.  The forced measurement of the detection bands reuses their
+detection preparation; that reuse must hand each band exactly what a
+fresh single-band preparation would, its own noise correlation and
+variance included.
 
 The r+i+z catalog is then joined to the truth catalog with ``matchPipe``,
 mirroring what ``bin/basic/process.py`` does.  The input catalog here is
@@ -114,18 +117,26 @@ def _measure(handles, skymap, detection_bands):
 
 
 @pytest.fixture(scope="module")
-def measured():
+def scene():
     skymap = _make_skymap()
     truth = _make_truth(skymap)
-    exposures = {b: _simulate(skymap, truth, b) for b in BANDS}
-    handles = make_exposure_handles(
-        exposures, tract=TRACT_ID, patch=PATCH_ID, skyMap=skymap,
-    )
     return SimpleNamespace(
         skymap=skymap,
         truth=truth,
-        single=_measure(handles, skymap, ["i"]),
-        multi=_measure(handles, skymap, BANDS),
+        exposures={b: _simulate(skymap, truth, b) for b in BANDS},
+    )
+
+
+@pytest.fixture(scope="module")
+def measured(scene):
+    handles = make_exposure_handles(
+        scene.exposures, tract=TRACT_ID, patch=PATCH_ID, skyMap=scene.skymap,
+    )
+    return SimpleNamespace(
+        skymap=scene.skymap,
+        truth=scene.truth,
+        single=_measure(handles, scene.skymap, ["i"]),
+        multi=_measure(handles, scene.skymap, BANDS),
     )
 
 
@@ -223,6 +234,85 @@ def test_coadd_catalog_matches_truth(measured):
     assert np.all(np.asarray(match["redshift"]) > 0.0)
     for band in BANDS:
         assert f"lsst_{band}_fpfs1_e1" in match.dtype.names
+
+
+def _band_noise_corrs(npix=33):
+    """A 6-band correlation stack (ugrizy) with a different anisotropic
+    shape and an un-normalised amplitude in each band, as the systematics
+    product stores it."""
+    corr = np.zeros((6, npix, npix))
+    c = npix // 2
+    for ib in range(6):
+        kernel = np.zeros((3, 3))
+        kernel[1, 1] = 1.0
+        kernel[1, 2] = 0.1 * (ib + 1)  # x-lag grows with the band index
+        kernel[2, 1] = 0.05
+        acf = np.zeros((npix, npix))
+        for dy in range(-2, 3):
+            for dx in range(-2, 3):
+                ys = slice(max(dy, 0), 3 + min(dy, 0))
+                yk = slice(max(-dy, 0), 3 + min(-dy, 0))
+                xs = slice(max(dx, 0), 3 + min(dx, 0))
+                xk = slice(max(-dx, 0), 3 + min(-dx, 0))
+                acf[c + dy, c + dx] = np.sum(kernel[ys, xs] * kernel[yk, xk])
+        corr[ib] = (ib + 2.0) * acf
+    return corr
+
+
+def test_forced_reuse_matches_fresh_prepare(scene):
+    """The detection bands' force inputs, recovered from the r+i+z
+    detection preparation (``_cache_bands_multiband``), must equal a
+    fresh single-band ``prepare_data`` -- in particular each band must
+    get its OWN noise correlation, normalised to 1 at zero lag, and its
+    own patch variance.  A leftover per-band ``noise_corrs`` list made
+    the forced FPFS fall back to a white spectrum."""
+    config = _validatable_config()
+    config.detection_bands = BANDS
+    config.renoise_mode = "spectral"  # also builds the filler eps''
+    config.validate()
+    pipe = MeasureCoaddsPipe(config=config)
+    corr_array = _band_noise_corrs()
+    corrs = {b: pipe._load_noise_corr(corr_array, b) for b in BANDS}
+    common = dict(
+        seed=7,
+        survey=SURVEY_NAME,
+        skyMap=scene.skymap,
+        tract=TRACT_ID,
+        patch=PATCH_ID,
+        detection=None,
+        renoise_mode=config.renoise_mode,
+        renoise_delta=config.renoise_delta,
+    )
+    data = pipe.anacal.prepare_data_multiband(
+        exposures=scene.exposures, bands=BANDS, noise_corrs=corrs, **common,
+    )
+    cache = pipe._cache_bands_multiband(
+        bands=BANDS,
+        exposures=scene.exposures,
+        data=data,
+        cells=data.pop("cells"),
+    )
+    for band in BANDS:
+        fresh = pipe.anacal.prepare_data(
+            exposure=scene.exposures[band],
+            band=band,
+            noise_corr=corrs[band],
+            **common,
+        )
+        cached = cache[band]["data"]
+        assert "noise_corrs" not in cached
+        np.testing.assert_array_equal(cached["noise_corr"], fresh["noise_corr"])
+        mid = cached["noise_corr"].shape[0] // 2
+        assert cached["noise_corr"][mid, mid] == 1.0
+        assert cached["noise_variance"] == fresh["noise_variance"]
+        for key in ("gal_array", "noise_array", "noise2_array"):
+            assert cached[key] is not None, key
+            np.testing.assert_array_equal(cached[key], fresh[key], err_msg=key)
+        assert cached["base_column_name"] == fresh["base_column_name"]
+    # the bands really differ, so a mix-up could not pass
+    assert not np.array_equal(
+        cache["r"]["data"]["noise_corr"], cache["z"]["data"]["noise_corr"]
+    )
 
 
 def _validatable_config():
