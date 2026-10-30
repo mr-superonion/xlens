@@ -101,7 +101,7 @@ class AnacalMeasureConfigBase(Config):
     )
     renoise_delta = Field[float](
         doc="spectral renoising: smoothing of the spectrum maximum",
-        default=0.05,
+        default=0.01,
     )
     n_mask_base_max = Field[float](
         doc=(

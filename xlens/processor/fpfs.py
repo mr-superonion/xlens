@@ -152,8 +152,9 @@ class FpfsMeasurementTask(Task):
         psf_array: NDArray,
         mask_array: NDArray,
         noise_array: NDArray | None,
-        detection: NDArray | None,
-        psf_object: utils.image.LsstPsf | None,
+        noise2_array: NDArray | None = None,
+        detection: NDArray | None = None,
+        psf_object: utils.image.LsstPsf | None = None,
         base_column_name: str | None = None,
         begin_x: int = 0,
         begin_y: int = 0,
@@ -163,7 +164,7 @@ class FpfsMeasurementTask(Task):
         # pipe so that detection and forced measurement share them
         renoise_mode: str = "rotate",
         renoise_c: float = 0.1,
-        renoise_delta: float = 0.05,
+        renoise_delta: float = 0.01,
         noise_corr: NDArray | None = None,
         noise_corrs: list | None = None,
         **kwargs,
@@ -254,6 +255,7 @@ class FpfsMeasurementTask(Task):
             psf_array=psf_array,
             mask_array=mask_array,
             noise_array=noise_array,
+            noise2_array=noise2_array,
             detection=det,
             psf_object=psf_object,
             base_column_name=base_column_name,
@@ -264,7 +266,6 @@ class FpfsMeasurementTask(Task):
             renoise_mode=renoise_mode,
             renoise_c=renoise_c,
             renoise_delta=renoise_delta,
-            filler_psf=psf_array,
             noise_corr=(
                 noise_corr if noise_corrs is None else (noise_corrs[0] if len(noise_corrs) == 1 else None)
             ),

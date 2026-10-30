@@ -273,6 +273,10 @@ class AnacalTask(Task):
         psf_array: NDArray,
         mask_array: NDArray,
         noise_array: NDArray | None,
+        # second, independent noise realization eps'' (spectral renoising):
+        # anacal applies the spin-2 filler g * eps'' in Fourier space, per
+        # cell with each cell's PSF
+        noise2_array: NDArray | None = None,
         begin_x: int = 0,
         begin_y: int = 0,
         wcs: SkyWcs | None = None,
@@ -292,9 +296,7 @@ class AnacalTask(Task):
         # measurement pipe)
         renoise_mode: str = "rotate",
         renoise_c: float = 0.1,
-        renoise_delta: float = 0.05,
-        # set by prepare_data when the spin-2 filler was added to the image
-        filler_added: bool = False,
+        renoise_delta: float = 0.01,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
@@ -330,21 +332,22 @@ class AnacalTask(Task):
         if det is not None and len(cells) > 1:
             owner = anacal.task.assign_cell_ids(det, list(cells))
         prior = self.make_prior()
-        # Renoising: one noise spectrum per band on the cell grid, from the
-        # patch's correlation function (white noise without one), handed
-        # to anacal in BOTH modes so that the noise variances are summed
-        # over the actual total spectrum: raw spectrum plus its rotated
-        # copy for "rotate", the spectrum of the image WITH the filler of
-        # the patch PSF (symmetrized, the same symmetrization prepare_data
-        # applied) plus the added noise for "spectral".  The kernels
-        # follow each cell's PSF inside anacal; cells of one size share a
-        # Setup.
+        # Renoising: one RAW noise spectrum per band on the cell grid,
+        # from the patch's correlation function (white noise without
+        # one), handed to anacal in BOTH modes so that the noise
+        # variances are summed over the actual total spectrum: raw
+        # spectrum plus its rotated copy for "rotate", the per-cell
+        # symmetrized spectrum plus the added noise for "spectral".  The
+        # symmetrization, like the spin-2 filler prepare_data added to
+        # the image, is done per cell with each cell's own PSF inside
+        # anacal (make_cell_kernels); cells of one size share a Setup.
         use_spectra = noise_array is not None
         spectral = renoise_mode == "spectral" and use_spectra
-        if spectral and not filler_added:
+        if spectral and noise2_array is None:
             raise ValueError(
-                "spectral renoising needs the image WITH the spin-2 filler "
-                "(prepare_data with renoise_mode='spectral')"
+                "spectral renoising needs the second noise realization "
+                "eps'' (prepare_data with renoise_mode='spectral' returns "
+                "it as noise2_array)"
             )
         setups: dict = {}
 
@@ -366,7 +369,6 @@ class AnacalTask(Task):
                     raise ValueError(
                         f"{len(corrs)} noise correlation function(s) for " f"{len(variances)} band(s)"
                     )
-                psfs = [psf_array] if np.ndim(psf_array) == 2 else list(psf_array)
                 spectra = [
                     anacal.renoise.make_noise_spectrum(
                         n,
@@ -376,16 +378,6 @@ class AnacalTask(Task):
                     )
                     for v, c in zip(variances, corrs)
                 ]
-                if spectral:
-                    spectra = [
-                        anacal.renoise.symmetrize_spectrum(
-                            s,
-                            np.ascontiguousarray(p, dtype=np.float64),
-                            anacal.task.KLIM_PIX / pixel_scale,
-                            renoise_delta,
-                        )
-                        for s, p in zip(spectra, psfs)
-                    ]
                 # the pure noise is drawn from the 90-degree-rotated
                 # correlation (generate_pure_noise), AnaCal's Option-1
                 # convention
@@ -394,6 +386,7 @@ class AnacalTask(Task):
                     spectra=spectra,
                     noise_rotated=True,
                     mode="spectral" if spectral else "rotate",
+                    delta=renoise_delta,
                 )
             return setups[n]
 
@@ -425,6 +418,7 @@ class AnacalTask(Task):
                     cell_list=[cell],
                     detection=cell_det,
                     noise_array=noise_array,
+                    noise2_array=noise2_array if spectral else None,
                     mask_array=mask_array,
                     do_fpfs=self.config.do_fpfs,
                     n_mask_base_max=n_mask_base_max,
@@ -470,7 +464,7 @@ class AnacalTask(Task):
         cells: list | None = None,
         num_workers: int = 1,
         renoise_mode: str = "rotate",
-        renoise_delta: float = 0.05,
+        renoise_delta: float = 0.01,
         **kwargs,
     ):
         """Prepares the data from LSST exposure
@@ -550,7 +544,7 @@ class AnacalTask(Task):
         cells: list | None = None,
         num_workers: int = 1,
         renoise_mode: str = "rotate",
-        renoise_delta: float = 0.05,
+        renoise_delta: float = 0.01,
         **kwargs,
     ):
         """Prepare a stack of bands as one anacal detection input.

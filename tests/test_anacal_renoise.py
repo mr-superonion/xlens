@@ -1,6 +1,8 @@
 """The renoise_mode switch of AnacalTask: 'rotate' (AnaCal's rotated-noise
-correction) and 'spectral' (minimal-variance renoising from the patch noise
-correlation function) run on the same scene through the same entry point.
+correction) and 'spectral' (low-variance renoising from the patch noise
+correlation function, with the spin-2 filler built in Fourier space from
+a second noise realization eps'') run on the same scene through the same
+entry point.
 """
 
 import anacal
@@ -11,7 +13,7 @@ from lsst.pex.config import FieldValidationError
 
 from xlens.processor.anacal import AnacalConfig, AnacalTask
 from xlens.processor.measure_coadds import MeasureCoaddsPipeConfig
-from xlens.utils.image.noise import generate_filler_array
+from xlens.utils.image.noise import generate_filler_noise
 
 SCALE = 0.2
 MAG_ZERO = 30.0
@@ -80,22 +82,6 @@ def test_config_validation():
 def test_spectral_switch_runs_and_matches_rotate():
     psf = _psf()
     img, noise, var, n = _scene(psf)
-    # the spectral mode measures the image WITH the spin-2 filler of the
-    # patch PSF (prepare_data adds it; here by hand)
-    filler = generate_filler_array(
-        ny=n,
-        nx=n,
-        pixel_scale=SCALE,
-        seed=7,
-        band="i",
-        noise_variance=var,
-        psf_array=psf,
-        noise_corr=None,
-    )
-    assert filler.shape == img.shape and filler.dtype == np.float32
-    # the filler carries the high-k power the smoothing kernel removes
-    assert 0.03 < np.std(filler) / np.sqrt(var) < 1.0
-    img_s = img + filler
     cells = anacal.geometry.get_cell_list(
         img_nx=n,
         img_ny=n,
@@ -104,16 +90,29 @@ def test_spectral_switch_runs_and_matches_rotate():
         cell_overlap=64,
         scale=SCALE,
     )
+    # the second, independent noise realization eps'': anacal builds the
+    # spin-2 filler g * eps'' from it in Fourier space, per cell
+    noise2 = generate_filler_noise(
+        ny=n,
+        nx=n,
+        pixel_scale=SCALE,
+        seed=7,
+        band="i",
+        noise_variance=var,
+        noise_corr=None,
+    ).astype(np.float32)
+    assert noise2.shape == img.shape
+    assert np.isclose(np.std(noise2), np.sqrt(var), rtol=0.05)
     task = AnacalTask(config=AnacalConfig())
     cat_rot = _run(task, img, psf, noise, var, cells, renoise_mode="rotate")
-    sp = {"renoise_mode": "spectral", "filler_added": True}
-    cat_spec = _run(task, img_s, psf, noise, var, cells, **sp)
+    sp = {"renoise_mode": "spectral", "noise2_array": noise2}
+    cat_spec = _run(task, img, psf, noise, var, cells, **sp)
     # a (normalised) correlation function of white noise gives the same
     # result as none, through the per-band list and the single entry
     corr = np.zeros((9, 9))
     corr[4, 4] = 1.0
-    cat_corr = _run(task, img_s, psf, noise, var, cells, noise_corr=corr, **sp)
-    cat_corrs = _run(task, img_s, psf, noise, var, cells, noise_corrs=[corr], **sp)
+    cat_corr = _run(task, img, psf, noise, var, cells, noise_corr=corr, **sp)
+    cat_corrs = _run(task, img, psf, noise, var, cells, noise_corrs=[corr], **sp)
     # Option 1 through the patch spectrum: the white correlation function
     # reproduces the plain white run, a correlated one changes the flux
     # errors (summed over S^d + S^d(R k)) but not the measurement
@@ -144,6 +143,6 @@ def test_spectral_switch_runs_and_matches_rotate():
     assert np.array_equal(cat0, cat1)
     with pytest.raises(ValueError):
         _run(task, img, psf, noise, var, cells, renoise_mode="other")
-    # the spectral mode refuses an image without the filler
+    # the spectral mode refuses to run without the second realization
     with pytest.raises(ValueError):
         _run(task, img, psf, noise, var, cells, renoise_mode="spectral")

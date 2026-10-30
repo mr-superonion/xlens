@@ -40,7 +40,7 @@ from numpy.typing import NDArray
 from ..constants import MAG_ZERO_AB
 from .noise import (
     estimate_noise_variance,
-    generate_filler_array,
+    generate_filler_noise,
     prepare_noise_array,
 )
 from .psf import (
@@ -290,10 +290,15 @@ def prepare_data(
     rotId: int = 0,
     npix: int = 64,
     noise_corr: NDArray | None = None,
-    # spectral renoising: the spin-2 filler of the patch PSF is added to
-    # the image here, once per patch and band (see generate_filler_array)
+    # spectral renoising: the second, independent noise realization
+    # eps'' is drawn here (same correlation as the image noise, its own
+    # seed) and handed to anacal, which applies the spin-2 filler
+    # g * eps'' in Fourier space, per cell with each cell's PSF.  A
+    # caller with its own eps'' (e.g. a cell coadd's second noise
+    # realization) passes it as ``noise2_array`` instead.
     renoise_mode: str = "rotate",
-    renoise_delta: float = 0.05,
+    renoise_delta: float = 0.01,
+    noise2_array: NDArray | None = None,
     do_noise_bias_correction: bool = True,
     skyMap=None,
     tract: int = 0,
@@ -409,26 +414,26 @@ def prepare_data(
         MAG_ZERO_AB,
     )
 
-    filler_added = False
+    noise2 = None
     if renoise_mode == "spectral" and noise_array is not None:
-        filler = generate_filler_array(
-            ny=gal_array.shape[0],
-            nx=gal_array.shape[1],
-            pixel_scale=pixel_scale,
-            seed=seed,
-            band=band,
-            noise_variance=noise_variance,
-            psf_array=psf_array,
-            noise_corr=noise_corr,
-            noiseId=noiseId,
-            rotId=rotId,
-            survey=survey,
-            delta=renoise_delta,
-        )
+        if noise2_array is None:
+            noise2 = generate_filler_noise(
+                ny=gal_array.shape[0],
+                nx=gal_array.shape[1],
+                pixel_scale=pixel_scale,
+                seed=seed,
+                band=band,
+                noise_variance=noise_variance,
+                noise_corr=noise_corr,
+                noiseId=noiseId,
+                rotId=rotId,
+                survey=survey,
+            )
+        else:
+            noise2 = noise2_array
+        noise2 = np.asarray(noise2, dtype=np.float32)
         # masked pixels stay as they are, like in the pure-noise image
-        anacal.mask.mask_galaxy_image(filler, mask_array, star_cat)
-        gal_array = gal_array + filler
-        filler_added = True
+        anacal.mask.mask_galaxy_image(noise2, mask_array, star_cat)
 
     return {
         "pixel_scale": pixel_scale,
@@ -438,10 +443,13 @@ def prepare_data(
         "psf_array": psf_array,
         "mask_array": mask_array,
         "noise_array": noise_array,
+        # the second, independent noise realization eps'' (spectral
+        # renoising; None otherwise): anacal builds the spin-2 filler
+        # from it in Fourier space, per cell
+        "noise2_array": noise2,
         # the (unrotated) noise correlation function of the patch, for the
         # spectral renoising; None for white noise
         "noise_corr": noise_corr,
-        "filler_added": filler_added,
         "begin_x": beginx,
         "begin_y": beginy,
         "wcs": wcs,
@@ -465,7 +473,11 @@ def prepare_data(
 # ---------------------------------------------------------------------------
 
 
-def _stack_bands(per_band_data, bands, keys=("gal_array", "noise_array")):
+def _stack_bands(
+    per_band_data,
+    bands,
+    keys=("gal_array", "noise_array", "noise2_array"),
+):
     """Move each band's planes into one preallocated stack.
 
     ``per_band_data`` is a generator of single-band dicts.  The planes are
@@ -473,7 +485,7 @@ def _stack_bands(per_band_data, bands, keys=("gal_array", "noise_array")):
     at most one band's worth of extra memory is held on top of the stack --
     ``np.stack`` on a list of all the bands would hold two full copies.
     """
-    SHARED = ("pixel_scale", "begin_x", "begin_y", "mag_zero", "filler_added")
+    SHARED = ("pixel_scale", "begin_x", "begin_y", "mag_zero")
 
     stacks: dict = {}
     psf_stack = None
@@ -550,7 +562,7 @@ def prepare_data_multiband(
     npix: int = 64,
     noise_corrs: dict | None = None,
     renoise_mode: str = "rotate",
-    renoise_delta: float = 0.05,
+    renoise_delta: float = 0.01,
     do_noise_bias_correction: bool = True,
     skyMap=None,
     tract: int = 0,

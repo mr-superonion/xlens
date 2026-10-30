@@ -373,6 +373,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         acfg = self.anacal.config
         gal = data["gal_array"]
         noise = data["noise_array"]
+        noise2 = data.get("noise2_array")
         psf_stack = data["psf_array"]
         by_index = {bb.index: bb for bb in cells}
         band_cache: dict = {}
@@ -381,6 +382,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             bdata = {k: v for k, v in data.items() if k != "detection"}
             bdata["gal_array"] = gal[ib]
             bdata["noise_array"] = None if noise is None else noise[ib]
+            bdata["noise2_array"] = None if noise2 is None else noise2[ib]
             bdata["psf_array"] = np.ascontiguousarray(psf_stack[ib])
             bdata["noise_variance"] = float(data["noise_variance"][ib])
             if self.config.survey is not None:
