@@ -172,6 +172,18 @@ for _b in "grizy":
     PROPERTY_BINS[f"psf_fwhm_{_b}"] = (
         f"2.3548200 * np.sqrt(0.5 * ({_bxx} + {_byy}))",
         _lo, _hi, 12, False)
+    # Spin-2 4th-order PSF ellipticity from the HSM standardized
+    # higher-order moments (Zhang et al.): e4_1 = M40 - M04,
+    # e4_2 = 2 (M31 + M13).
+    _bh = f"SURVEY_{_b}_ext_shapeHSM_HigherOrderMomentsPSF_"
+    PROPERTY_BINS[f"psf_e4_1_{_b}"] = (
+        f"{_bh}40 - {_bh}04", -0.03, 0.03, 12, False)
+    PROPERTY_BINS[f"psf_e4_2_{_b}"] = (
+        f"2.0 * ({_bh}31 + {_bh}13)", -0.03, 0.03, 12, False)
+    # 4th-order PSF size (radial kurtosis), M40 + M04 + 2 M22; 2 for a
+    # Gaussian, larger for extended wings.
+    PROPERTY_BINS[f"psf_m4_{_b}"] = (
+        f"{_bh}40 + {_bh}04 + 2.0 * {_bh}22", 2.05, 2.35, 12, False)
 
 # Shear response per object, R = (R_1 + R_2)/2, the denominator of
 # <gamma> = sum(w e) / sum(R). Spelled out here because both the 1-D
@@ -516,6 +528,35 @@ class ShearStatsPipeConfig(
             "See psf_e1_abs_max_bands."
         ),
     )
+    psf_m4_min_bands = DictField(
+        keytype=str, itemtype=float, default={},
+        doc=(
+            "Per-band LOWER limit on the 4th-order PSF size "
+            "M40 + M04 + 2 M22 from the ext_shapeHSM higher-order PSF "
+            "moments (2 for a Gaussian), e.g. {'i': 2.14}. Empty disables "
+            "it; a band whose columns are absent is skipped with a warning."
+        ),
+    )
+    psf_m4_max_bands = DictField(
+        keytype=str, itemtype=float, default={},
+        doc=(
+            "Per-band UPPER limit on the 4th-order PSF size "
+            "M40 + M04 + 2 M22. See psf_m4_min_bands."
+        ),
+    )
+    psf_e4_1_min_bands = DictField(
+        keytype=str, itemtype=float, default={},
+        doc=(
+            "Per-band LOWER limit on the 4th-order PSF ellipticity "
+            "e4_1 = M40 - M04 (ext_shapeHSM higher-order PSF moments), "
+            "e.g. {'r': -0.013}. Empty disables it; a band whose columns "
+            "are absent is skipped with a warning."
+        ),
+    )
+    psf_e4_1_max_bands = DictField(
+        keytype=str, itemtype=float, default={},
+        doc="Per-band UPPER limit on e4_1 = M40 - M04. See psf_e4_1_min_bands.",
+    )
     n_inputs_max_bands = DictField(
         keytype=str, itemtype=float, default={},
         doc=(
@@ -567,6 +608,15 @@ class ShearStatsPipeConfig(
             "Empty means use the ranges in PROPERTY_BINS."
         ),
         default="",
+    )
+    use_detection_weight = Field[bool](
+        default=True,
+        doc=(
+            "Weight the shear by the detection weight wsel and include its "
+            "response dwsel/dg (the estimator). False sets wsel = 1 and "
+            "dwsel/dg = 0 in the mean-shear sums -- a diagnostic that "
+            "removes the detection weighting and its selection response."
+        ),
     )
     psf_fwhm_max = Field[float](
         doc=(
@@ -768,6 +818,50 @@ class ShearStatsPipe(PipelineTask):
                             / (xx + yy)
                 sel &= np.isfinite(e) & (np.abs(e) < hi)
 
+        # 4th-order PSF e4_1 = M40 - M04 window, per band.
+        for band in sorted(
+            set(self.config.psf_e4_1_min_bands) | set(self.config.psf_e4_1_max_bands)
+        ):
+            c40 = self._col("%s_ext_shapeHSM_HigherOrderMomentsPSF_40" % band)
+            c04 = self._col("%s_ext_shapeHSM_HigherOrderMomentsPSF_04" % band)
+            if c40 not in names or c04 not in names:
+                self.log.warning(
+                    "PSF e4_1 cut skipped for band %s: no %s", band, c40
+                )
+                continue
+            e4 = (np.asarray(cat[c40], dtype=np.float64)
+                  - np.asarray(cat[c04], dtype=np.float64))
+            lo = self.config.psf_e4_1_min_bands.get(band)
+            hi = self.config.psf_e4_1_max_bands.get(band)
+            if lo is not None:
+                sel &= np.isfinite(e4) & (e4 > lo)
+            if hi is not None:
+                sel &= np.isfinite(e4) & (e4 < hi)
+
+        # 4th-order PSF size window, per band.
+        for band in sorted(
+            set(self.config.psf_m4_min_bands) | set(self.config.psf_m4_max_bands)
+        ):
+            cols = [
+                self._col("%s_ext_shapeHSM_HigherOrderMomentsPSF_%s" % (band, k))
+                for k in ("40", "04", "22")
+            ]
+            if any(c not in names for c in cols):
+                self.log.warning(
+                    "PSF 4th-order size cut skipped for band %s: no %s",
+                    band, cols[0]
+                )
+                continue
+            m4 = (np.asarray(cat[cols[0]], dtype=np.float64)
+                  + np.asarray(cat[cols[1]], dtype=np.float64)
+                  + 2.0 * np.asarray(cat[cols[2]], dtype=np.float64))
+            lo = self.config.psf_m4_min_bands.get(band)
+            hi = self.config.psf_m4_max_bands.get(band)
+            if lo is not None:
+                sel &= np.isfinite(m4) & (m4 > lo)
+            if hi is not None:
+                sel &= np.isfinite(m4) & (m4 < hi)
+
         # Coadd-depth floor, per band (inclusive).
         for band, lo in sorted(self.config.n_inputs_min_bands.items()):
             col = self._col("%s_n_inputs" % band)
@@ -802,13 +896,17 @@ class ShearStatsPipe(PipelineTask):
         # Same estimator pieces as the cluster test.
         e1 = np.asarray(cat["fpfs1_e1"], dtype=np.float64)
         e2 = np.asarray(cat["fpfs1_e2"], dtype=np.float64)
-        w = np.asarray(cat["wsel"], dtype=np.float64)
+        if self.config.use_detection_weight:
+            w = np.asarray(cat["wsel"], dtype=np.float64)
+            dw1 = np.asarray(cat["dwsel_dg1"], dtype=np.float64)
+            dw2 = np.asarray(cat["dwsel_dg2"], dtype=np.float64)
+        else:
+            w = np.ones(len(cat))
+            dw1 = dw2 = np.zeros(len(cat))
         we1 = w * e1
         we2 = w * e2
-        r1 = np.asarray(cat["fpfs1_de1_dg1"], dtype=np.float64) * w \
-            + np.asarray(cat["dwsel_dg1"], dtype=np.float64) * e1
-        r2 = np.asarray(cat["fpfs1_de2_dg2"], dtype=np.float64) * w \
-            + np.asarray(cat["dwsel_dg2"], dtype=np.float64) * e2
+        r1 = np.asarray(cat["fpfs1_de1_dg1"], dtype=np.float64) * w + dw1 * e1
+        r2 = np.asarray(cat["fpfs1_de2_dg2"], dtype=np.float64) * w + dw2 * e2
 
         stats_rows = []
         spans = self._bin_ranges()
