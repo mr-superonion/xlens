@@ -663,6 +663,11 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                         data={**data, "detection": det, "cells": cells},
                         band=band,
                     )
+                    cat = self._append_cnn_shapes(
+                        cat,
+                        data={**data, "detection": det, "cells": cells},
+                        band=band,
+                    )
                     # Pure lookup + column merge: no HSM call, no GIL.
                     cat = self._attach_psf_hsm_moments(
                         cat,

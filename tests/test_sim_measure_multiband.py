@@ -347,3 +347,34 @@ def test_detection_bands_validation():
     config.detection_bands = ["r", "i"]
     with pytest.raises(Exception, match="every detection band"):
         config.validate()
+
+
+def test_cnn_columns_through_the_pipe(scene, measured, tmp_path):
+    """do_measure_cnn adds the per-band ``cnn_*`` columns in the force
+    stage, aligned with the forced FPFS rows, with the same renoising and
+    mask cut; the model is a tiny random export in the cpu_src format."""
+    from test_cnn_measure import write_tiny_export
+
+    config = _validatable_config()
+    config.detection_bands = ["i"]
+    config.renoise_mode = "spectral"
+    config.do_measure_cnn = True
+    config.cnn.model_path = write_tiny_export(str(tmp_path / "tiny.npz"))
+    config.validate()
+    pipe = MeasureCoaddsPipe(config=config)
+    handles = make_exposure_handles(
+        scene.exposures, tract=TRACT_ID, patch=PATCH_ID, skyMap=scene.skymap,
+    )
+    cat = pipe.run(
+        exposure_handles_dict=handles, corr_array=None, skyMap=scene.skymap,
+        tract=TRACT_ID, patch=PATCH_ID,
+    ).anacalCatalog
+    for band in BANDS:
+        for col in ("cnn_e1", "cnn_de1_dg1", "cnn_de1_dg2", "cnn_e2", "cnn_de2_dg1", "cnn_de2_dg2"):
+            assert f"lsst_{band}_{col}" in cat.dtype.names
+        e1 = cat[f"lsst_{band}_cnn_e1"]
+        # stamps that fit in their cell are measured; the rest stay NaN
+        assert np.isfinite(e1).sum() > 0.5 * len(cat)
+        assert np.all(np.isfinite(cat[f"lsst_{band}_cnn_de1_dg1"][np.isfinite(e1)]))
+    # with the switch off (the module fixture) there are no such columns
+    assert not any("_cnn_" in n for n in measured.single.dtype.names)

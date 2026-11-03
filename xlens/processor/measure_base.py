@@ -66,6 +66,7 @@ from ..utils.image import (
 )
 from ..utils.image.hsm import make_psf_stamp_exposure, psf_array_to_image
 from .anacal import AnacalTask
+from .cnn import CnnMeasurementTask
 from .fpfs import FpfsMeasurementTask
 
 
@@ -79,6 +80,14 @@ class AnacalMeasureConfigBase(Config):
     fpfs = ConfigurableField(
         target=FpfsMeasurementTask,
         doc="Fpfs Source Measurement Task",
+    )
+    cnn = ConfigurableField(
+        target=CnnMeasurementTask,
+        doc=(
+            "Forced CNN shape measurement (wl_D4T_CNN's D4-equivariant "
+            "network through anacal.math.D4ShapeNet); runs in the force "
+            "stage when do_measure_cnn is set"
+        ),
     )
     idGenerator = SkyMapIdGeneratorConfig.make_field()
     renoise_mode = Field[str](
@@ -132,6 +141,13 @@ class AnacalMeasureConfigBase(Config):
 
     def validate(self):
         super().validate()
+        # do_measure_cnn lives on the pipe configs, not on every subclass
+        if getattr(self, "do_measure_cnn", False) and not self.cnn.model_path:
+            raise FieldValidationError(
+                self.__class__.cnn,
+                self,
+                "do_measure_cnn needs cnn.model_path (the wl_D4T_CNN cpu_src model export)",
+            )
         if self.renoise_mode not in ("rotate", "spectral"):
             raise FieldValidationError(
                 self.__class__.renoise_mode,
@@ -193,6 +209,15 @@ class MeasureBandsConfigBase(AnacalMeasureConfigBase):
             "If True, also run AnaCal forced measurement during the "
             "force stage to extract per-band Gaussian fluxes and merge "
             "them into the output catalog."
+        ),
+        default=False,
+    )
+    do_measure_cnn = Field[bool](
+        doc=(
+            "If True, also measure the detections with the CNN shape "
+            "estimator (config.cnn, which needs model_path) in the force "
+            "stage, per band, with the same renoising and mask cut as the "
+            "forced FPFS; adds the ``{survey}_{band}_cnn_*`` columns."
         ),
         default=False,
     )
@@ -642,6 +667,8 @@ class AnacalMeasureTaskBase(PipelineTask):
         """anacal + fpfs subtasks, plus the PSF-HSM subtask when enabled."""
         self.makeSubtask("anacal")
         self.makeSubtask("fpfs")
+        if getattr(self.config, "do_measure_cnn", False):
+            self.makeSubtask("cnn")
         if self.config.doPsfHsmMoments:
             # Schema is shared across every measurement; the plugins
             # register their fields on construction.
@@ -714,6 +741,31 @@ class AnacalMeasureTaskBase(PipelineTask):
             survey=self.config.survey,
         )
         return merge_structured([cat, gauss_cat])
+
+    def _append_cnn_shapes(
+        self,
+        cat: NDArray,
+        *,
+        data: dict,
+        band: str,
+    ) -> NDArray:
+        """Merge the per-band CNN shapes and responses into a forced catalog.
+
+        No-op unless ``do_measure_cnn`` is set.  ``data`` is the prepared
+        measurement dict for this band with ``detection`` (the cell's
+        sources) and ``cells`` (that one cell); the CNN gets the same
+        renoising mode and mask cut as the forced FPFS.
+        """
+        if not getattr(self.config, "do_measure_cnn", False):
+            return cat
+        cnn_cat = self.cnn.run(
+            n_mask_base_max=self.config.n_mask_base_max,
+            renoise_mode=self.config.renoise_mode,
+            renoise_c=self.config.renoise_c,
+            renoise_delta=self.config.renoise_delta,
+            **data,
+        )
+        return merge_structured([cat, cnn_cat])
 
     def _psf_hsm_moments_per_cell(
         self,
