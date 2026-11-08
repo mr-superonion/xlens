@@ -42,8 +42,14 @@ def _load_photoz_catalog() -> np.ndarray:
         for name in catalog.dtype.names:
             if "flux_gauss" in name:  # flux / dflux / flux_err (not mag_*)
                 catalog[name] = catalog[name] * r
+    # The fixture predates the per-band FPFS fluxes: its Gaussian
+    # aperture columns stand in for them under the fpfs1 names.
+    catalog = np.asarray(rfn.rename_fields(
+        catalog,
+        {n: n.replace("gauss2", "fpfs1") for n in catalog.dtype.names if "gauss2" in n},
+    ))
     # The bundled fixture has single-letter per-band columns
-    # (``u_flux_gauss2``);
+    # (``u_flux_fpfs1``);
     # the pipeline now uses survey-prefixed band names, so re-key the per-band
     # columns to ``lsst_<band>_...`` to match ``bands=["lsst_u", ...]``.
     band_rename = {
@@ -67,7 +73,7 @@ def _make_config(
 ) -> photoZPipeConfig:
     cfg = photoZPipeConfig()
     cfg.model_path = os.fspath(FZB_MODEL)
-    cfg.flux_name = "gauss2"
+    cfg.flux_name = "fpfs1"
     cfg.bands = [f"lsst_{b}" for b in "ugrizy"]
     cfg.ref_band = "lsst_i"
     cfg.do_distortions = False  # one undistorted call is enough

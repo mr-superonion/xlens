@@ -518,15 +518,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 cells=cells,
             )
 
-        # With the Gaussian fluxes on, the detection call also measures
-        # every band of the stack alone, from the band images it has
-        # already prepared, so the force stage does not prepare and
-        # measure the detection bands a second time.
-        per_band = bool(self.config.do_measure_flux_gauss)
-
         def _detect_one(cell):
             try:
-                return self._run_anacal(**data, cells=[cell], per_band=per_band)
+                return self._run_anacal(**data, cells=[cell])
             except Exception as e:
                 self.log.error(
                     "Detection failed tract=%d patch=%d cell=%d: %s",
@@ -538,19 +532,11 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 return None
 
         det_cats: dict = {}
-        gauss_cats: dict = {band: {} for band in bands}
         for cell, result in zip(cells, self._map_parallel(_detect_one, cells)):
             if result is None:
                 continue
-            cat, bcats = self._split_detection(result, bands)
-            if len(cat) > 0:
-                det_cats[cell.index] = cat
-                if bcats is not None:
-                    for band in bands:
-                        gauss_cats[band][cell.index] = bcats[band]
-        if per_band:
-            for band in bands:
-                band_cache[band]["gauss"] = gauss_cats[band]
+            if len(result) > 0:
+                det_cats[cell.index] = result
 
         if not det_cats:
             # Same edge-of-tract semantics as MeasureCellCoaddsPipe: no
@@ -589,9 +575,6 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
 
         for band in bands:
             cached = (band_cache or {}).get(band)
-            # Gaussian fluxes of a detection band, measured per cell in the
-            # detection stage (None: measured here with a forced run)
-            gauss_cats = None
             if cached is not None:
                 # The detection stage already prepared this band with the
                 # same seed and code path; reuse it instead of loading and
@@ -600,7 +583,6 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 exposure = cached["exposure"]
                 data = dict(cached["data"])
                 cell_map = {bb.index: bb for bb in cached["cells"]}
-                gauss_cats = cached.get("gauss")
             else:
                 self.log.debug("Measuring band %s", band)
                 exposure = exposure_handles_dict[band].get()
@@ -669,7 +651,7 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 det = detection_dict[key]
                 try:
                     # fpfs is position-driven; the cell only steers the
-                    # gauss-flux run.  A cell present in the detection
+                    # CNN run.  A cell present in the detection
                     # band can be ABSENT here (get_cells drops cells
                     # whose PSF cannot be evaluated at the centre, and
                     # coverage differs band to band), so look it up
@@ -681,12 +663,6 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                         raise KeyError(f"cell {key} has no PSF in band {band}")
                     cells = [cell]
                     cat = self._run_fpfs(**data, detection=det)
-                    cat = self._append_gauss_fluxes(
-                        cat,
-                        data={**data, "detection": det, "cells": cells},
-                        band=band,
-                        band_catalog=None if gauss_cats is None else gauss_cats[key],
-                    )
                     cat = self._append_cnn_shapes(
                         cat,
                         data={**data, "detection": det, "cells": cells},

@@ -335,12 +335,6 @@ class AnacalTask(Task):
         renoise_mode: str = "rotate",
         renoise_c: float = 0.1,
         renoise_delta: float = 0.01,
-        # Also return, per band of the stack, the forced single-band
-        # measurement of the catalog (Gaussian fluxes at this run's
-        # sigma), taken from the band images the coadd measurement
-        # already prepared (anacal Task.process_image_bands); the result
-        # is then ``(catalog, [band catalogs])``, row-aligned.
-        per_band: bool = False,
         **kwargs,
     ):
         assert isinstance(self.config, AnacalConfig)
@@ -434,9 +428,7 @@ class AnacalTask(Task):
                 )
             return setups[n]
 
-        nband = 1 if np.ndim(gal_array) == 2 else int(np.shape(gal_array)[0])
         parts: list = []
-        band_parts: list[list] = [[] for _ in range(nband)]
         for cell in cells:
             cell_det = det
             if owner is not None:
@@ -467,12 +459,7 @@ class AnacalTask(Task):
                 n_mask_base_max=n_mask_base_max,
                 renoise=renoise_setup(cell),
             )
-            if per_band:
-                cat, bcats = task.process_image_bands(gal_array, psf_array, **kwargs_cell)
-                for ib, bcat in enumerate(bcats):
-                    band_parts[ib].append(bcat)
-            else:
-                cat = task.process_image(gal_array, psf_array, **kwargs_cell)
+            cat = task.process_image(gal_array, psf_array, **kwargs_cell)
             parts.append(cat)
 
         def finish(parts):
@@ -497,10 +484,7 @@ class AnacalTask(Task):
                 catalog["dec"] = dec
             return catalog
 
-        catalog = finish(parts)
-        if per_band:
-            return catalog, [finish(bp) for bp in band_parts]
-        return catalog
+        return finish(parts)
 
     def prepare_data(
         self,

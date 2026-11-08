@@ -239,7 +239,7 @@ class SelBiasRedshiftPipeConfig(
     )
     flux_name = Field[str](
         doc="Flux column suffix used for the selection cut.",
-        default="gauss2",
+        default="fpfs1",
     )
     bands = ListField[str](
         doc="Ordered survey-prefixed bands used for flux cuts.",

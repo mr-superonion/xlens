@@ -178,7 +178,7 @@ def mag_shear_response(
 def add_magnitude_columns(
     catalog: NDArray,
     mag_zero: float,
-    families: tuple[str, ...] = ("fpfs1", "gauss2"),
+    families: tuple[str, ...] = ("fpfs1",),
 ) -> NDArray:
     """Append per-band AB magnitude + shear response for each flux family.
 

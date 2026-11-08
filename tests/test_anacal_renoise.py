@@ -124,7 +124,6 @@ def test_spectral_switch_runs_and_matches_rotate():
     corr2[5, 4] = corr2[3, 4] = 0.1
     cat_rot_c = _run(task, img, psf, noise, var, cells, noise_corr=corr2, **rot)
     assert np.array_equal(cat_rot["e1"], cat_rot_c["e1"])
-    assert not np.allclose(cat_rot["flux_gauss0_err"], cat_rot_c["flux_gauss0_err"])
     for cat in (cat_rot, cat_spec, cat_corr, cat_corrs):
         assert len(cat) > 20
         assert np.all(np.isfinite(cat["e1"]))
@@ -134,9 +133,6 @@ def test_spectral_switch_runs_and_matches_rotate():
     # same sources (same image noise), different added noise
     assert abs(len(cat_spec) - len(cat_rot)) < 0.2 * len(cat_rot)
     assert not np.array_equal(cat_spec["e1"][:10], cat_rot["e1"][:10])
-    # the spectral mode adds much less noise than the rotated copy
-    r = np.median(cat_spec["flux_gauss0_err"]) / np.median(cat_rot["flux_gauss0_err"])
-    assert 0.7 < r < 0.85, r
     # without the pure-noise image both modes are the plain measurement
     cat0 = _run(task, img, psf, None, var, cells, renoise_mode="spectral")
     cat1 = _run(task, img, psf, None, var, cells)

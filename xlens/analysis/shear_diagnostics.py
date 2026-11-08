@@ -32,7 +32,7 @@ stacked by plain addition and the mean shear bootstrapped over tracts:
 
 with the bin abscissa placed at the weighted mean property,
 ``sum_wx / sum_w``.  Everything (mean-shear bins and histograms) is
-computed AFTER the basic source selection (``i_mag_gauss2 < 25``,
+computed AFTER the basic source selection (``i_mag_fpfs1 < 25``,
 ``i_s2n_fpfs1 > 10``, ``|e| < 0.4``, ``n_mask_base < 0.035``,
 ``trace = (m00 + m20)/m00 > 0.1``, i-band ``PSF FWHM < 0.8``
 arcsec by default --
@@ -82,11 +82,11 @@ _XY = "SURVEY_i_ext_shapeHSM_HsmPsfMoments_xy"
 
 # Mean-shear null-test properties.
 PROPERTY_BINS = {
-    "i_mag": ("SURVEY_i_mag_gauss2", 20.0, 25.0, 10, False),
-    "gmr_color": ("SURVEY_g_mag_gauss2 - SURVEY_r_mag_gauss2", -0.5, 2.5, 12, False),
-    "rmi_color": ("SURVEY_r_mag_gauss2 - SURVEY_i_mag_gauss2", -0.5, 2.0, 12, False),
-    "imz_color": ("SURVEY_i_mag_gauss2 - SURVEY_z_mag_gauss2", -0.5, 1.5, 12, False),
-    "zmy_color": ("SURVEY_z_mag_gauss2 - SURVEY_y_mag_gauss2", -0.5, 1.0, 12, False),
+    "i_mag": ("SURVEY_i_mag_fpfs1", 20.0, 25.0, 10, False),
+    "gmr_color": ("SURVEY_g_mag_fpfs1 - SURVEY_r_mag_fpfs1", -0.5, 2.5, 12, False),
+    "rmi_color": ("SURVEY_r_mag_fpfs1 - SURVEY_i_mag_fpfs1", -0.5, 2.0, 12, False),
+    "imz_color": ("SURVEY_i_mag_fpfs1 - SURVEY_z_mag_fpfs1", -0.5, 1.5, 12, False),
+    "zmy_color": ("SURVEY_z_mag_fpfs1 - SURVEY_y_mag_fpfs1", -0.5, 1.0, 12, False),
     "n_mask_base": ("n_mask_base", 0.0, 0.035, 10, False),
     # Local background under the source, from the detection image. The
     # coadd mask planes miss a coherent background offset -- scattered
@@ -102,15 +102,15 @@ PROPERTY_BINS = {
     "bkg": ("bkg", -0.6, 1.0, 5, False),
     "discontinuity": ("n_mask_discontinuity", 0.0, 1.0, 10, False),
 
-    "g_flux_err": ("SURVEY_g_flux_gauss2_err", 22.0, 32.0, 10, False),
-    "r_flux_err": ("SURVEY_r_flux_gauss2_err", 37.0, 52.0, 10, False),
-    "i_flux_err": ("SURVEY_i_flux_gauss2_err", 46.0, 82.0, 10, False),
-    "z_flux_err": ("SURVEY_z_flux_gauss2_err", 95.0, 130.0, 10, False),
-    "y_flux_err": ("SURVEY_y_flux_gauss2_err", 200.0, 275.0, 10, False),
-    "g_mag": ("SURVEY_g_mag_gauss2", 21.0, 27.0, 12, False),
-    "r_mag": ("SURVEY_r_mag_gauss2", 20.0, 25.5, 11, False),
-    "z_mag": ("SURVEY_z_mag_gauss2", 19.5, 25.0, 11, False),
-    "y_mag": ("SURVEY_y_mag_gauss2", 19.0, 25.5, 13, False),
+    "g_flux_err": ("SURVEY_g_flux_fpfs1_err", 22.0, 32.0, 10, False),
+    "r_flux_err": ("SURVEY_r_flux_fpfs1_err", 37.0, 52.0, 10, False),
+    "i_flux_err": ("SURVEY_i_flux_fpfs1_err", 46.0, 82.0, 10, False),
+    "z_flux_err": ("SURVEY_z_flux_fpfs1_err", 95.0, 130.0, 10, False),
+    "y_flux_err": ("SURVEY_y_flux_fpfs1_err", 200.0, 275.0, 10, False),
+    "g_mag": ("SURVEY_g_mag_fpfs1", 21.0, 27.0, 12, False),
+    "r_mag": ("SURVEY_r_mag_fpfs1", 20.0, 25.5, 11, False),
+    "z_mag": ("SURVEY_z_mag_fpfs1", 19.5, 25.0, 11, False),
+    "y_mag": ("SURVEY_y_mag_fpfs1", 19.0, 25.5, 13, False),
     "trace": ("(fpfs1_m00 + fpfs1_m20) / fpfs1_m00", 0.1, 1.6, 12, False),
     "abs_e": ("np.sqrt(esq)", 0.0, 0.4, 10, False),
     # sky position: wide ranges covering all fields; bins outside the
@@ -203,11 +203,11 @@ _RESOLUTION_EXPR = "(fpfs1_m00 + fpfs1_m20) / fpfs1_m00"
 # tracts spanning all six fields, so the tails are visible without the
 # bulk being squeezed into two bins.
 HIST_BINS = {
-    "g_mag": ("SURVEY_g_mag_gauss2", 18.0, 27.0, 90, False),
-    "r_mag": ("SURVEY_r_mag_gauss2", 18.0, 27.0, 90, False),
-    "i_mag": ("SURVEY_i_mag_gauss2", 18.0, 27.0, 90, False),
-    "z_mag": ("SURVEY_z_mag_gauss2", 18.0, 27.0, 90, False),
-    "y_mag": ("SURVEY_y_mag_gauss2", 18.0, 27.0, 90, False),
+    "g_mag": ("SURVEY_g_mag_fpfs1", 18.0, 27.0, 90, False),
+    "r_mag": ("SURVEY_r_mag_fpfs1", 18.0, 27.0, 90, False),
+    "i_mag": ("SURVEY_i_mag_fpfs1", 18.0, 27.0, 90, False),
+    "z_mag": ("SURVEY_z_mag_fpfs1", 18.0, 27.0, 90, False),
+    "y_mag": ("SURVEY_y_mag_fpfs1", 18.0, 27.0, 90, False),
     "abs_we1": ("np.abs(wsel * fpfs1_e1)", 0.0, 0.4, 80, False),
     "abs_we2": ("np.abs(wsel * fpfs1_e2)", 0.0, 0.4, 80, False),
     "response": (_RESPONSE_EXPR, -1.0, 3.0, 80, False),
@@ -231,7 +231,7 @@ for _b in "grizy":
         "SURVEY_%s_s2n_fpfs1" % _b, 1.0, 3000.0, 72, True,
     )
     HIST_BINS["%s_flux_err" % _b] = (
-        "SURVEY_%s_flux_gauss2_err" % _b, 15.0, 900.0, 80, True,
+        "SURVEY_%s_flux_fpfs1_err" % _b, 15.0, 900.0, 80, True,
     )
     _bxx = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_xx"
     _byy = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_yy"
@@ -253,19 +253,19 @@ for _b in "grizy":
 # the notebook's 26, since nothing survives above it.
 HIST2D_BINS = {
     "cmd_i_rmi": (
-        ("SURVEY_i_mag_gauss2", 20.0, 25.0, 60, False),
-        ("SURVEY_r_mag_gauss2 - SURVEY_i_mag_gauss2", -0.2, 1.3, 60, False),
+        ("SURVEY_i_mag_fpfs1", 20.0, 25.0, 60, False),
+        ("SURVEY_r_mag_fpfs1 - SURVEY_i_mag_fpfs1", -0.2, 1.3, 60, False),
     ),
     "cmd_i_imz": (
-        ("SURVEY_i_mag_gauss2", 20.0, 25.0, 60, False),
-        ("SURVEY_i_mag_gauss2 - SURVEY_z_mag_gauss2", -0.5, 1.0, 60, False),
+        ("SURVEY_i_mag_fpfs1", 20.0, 25.0, 60, False),
+        ("SURVEY_i_mag_fpfs1 - SURVEY_z_mag_fpfs1", -0.5, 1.0, 60, False),
     ),
     "mag_response": (
-        ("SURVEY_i_mag_gauss2", 20.0, 25.0, 60, False),
+        ("SURVEY_i_mag_fpfs1", 20.0, 25.0, 60, False),
         (_RESPONSE_EXPR, -0.5, 1.2, 60, False),
     ),
     "mag_resolution": (
-        ("SURVEY_i_mag_gauss2", 20.0, 25.0, 60, False),
+        ("SURVEY_i_mag_fpfs1", 20.0, 25.0, 60, False),
         (_RESOLUTION_EXPR, 0.1, 1.5, 60, False),
     ),
 }
@@ -403,7 +403,7 @@ class ShearStatsPipeConfig(
     survey = Field[str](
         doc=(
             "Column-name prefix of the per-band measurements: 'hsc' "
-            "reads hsc_i_mag_gauss2, 'lsst' reads lsst_i_mag_gauss2. "
+            "reads hsc_i_mag_fpfs1, 'lsst' reads lsst_i_mag_fpfs1. "
             "The binning registries are written against a SURVEY_ "
             "placeholder that this replaces, so one set of definitions "
             "serves every survey."
@@ -411,7 +411,7 @@ class ShearStatsPipeConfig(
         default="hsc",
     )
     mag_max = Field[float](
-        doc="Basic selection: keep {survey}_i_mag_gauss2 < mag_max (finite).",
+        doc="Basic selection: keep {survey}_i_mag_fpfs1 < mag_max (finite).",
         default=25.0,
     )
     snr_column = Field[str](
@@ -448,7 +448,7 @@ class ShearStatsPipeConfig(
     mag_max_bands = DictField(
         keytype=str, itemtype=float, default={},
         doc=(
-            "Per-band upper limit on {survey}_{band}_mag_gauss2, e.g. "
+            "Per-band upper limit on {survey}_{band}_mag_fpfs1, e.g. "
             "{'g': 28.0, 'r': 27.0}. Empty means no per-band cut.\n\n"
             "This is a SANITY cut, not a depth cut: flux_to_mag "
             "saturates at 40 for a non-detection or negative flux, and "
@@ -460,9 +460,9 @@ class ShearStatsPipeConfig(
     flux_err_min_bands = DictField(
         keytype=str, itemtype=float, default={},
         doc=(
-            "Per-band LOWER limit on {survey}_{band}_flux_gauss2_err, "
+            "Per-band LOWER limit on {survey}_{band}_flux_fpfs1_err, "
             "e.g. {'g': 25.0}. Empty means no lower limit.\n\n"
-            "flux_gauss2_err is a fixed-aperture flux error, so it is "
+            "flux_fpfs1_err is a fixed-aperture flux error, so it is "
             "set by the cell's noise and PSF rather than by the source "
             "-- within a patch it varies by only a few percent, while "
             "across the survey it spans a factor of two. Cutting on it "
@@ -472,7 +472,7 @@ class ShearStatsPipeConfig(
     flux_err_max_bands = DictField(
         keytype=str, itemtype=float, default={},
         doc=(
-            "Per-band UPPER limit on {survey}_{band}_flux_gauss2_err. "
+            "Per-band UPPER limit on {survey}_{band}_flux_fpfs1_err. "
             "See flux_err_min_bands."
         ),
     )
@@ -645,7 +645,7 @@ class ShearStatsPipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
 
     def _col(self, suffix: str) -> str:
-        """``lsst_i_mag_gauss2`` from ``i_mag_gauss2``."""
+        """``lsst_i_mag_fpfs1`` from ``i_mag_fpfs1``."""
         assert isinstance(self.config, ShearStatsPipeConfig)
         return "%s_%s" % (self.config.survey, suffix)
 
@@ -689,7 +689,7 @@ class ShearStatsPipe(PipelineTask):
     def _select(self, cat: NDArray) -> NDArray:
         """The basic source selection (cluster-test cuts)."""
         assert isinstance(self.config, ShearStatsPipeConfig)
-        mag = np.asarray(cat[self._col("i_mag_gauss2")], dtype=np.float64)
+        mag = np.asarray(cat[self._col("i_mag_fpfs1")], dtype=np.float64)
         snr_col = self.config.snr_column or self._col("i_s2n_fpfs1")
         snr = np.asarray(cat[snr_col], dtype=np.float64)
         esq = np.asarray(cat["esq"], dtype=np.float64)
@@ -722,7 +722,7 @@ class ShearStatsPipe(PipelineTask):
 
         # Per-band magnitude sanity cut (see mag_max_bands).
         for band, hi in sorted(self.config.mag_max_bands.items()):
-            col = self._col("%s_mag_gauss2" % band)
+            col = self._col("%s_mag_fpfs1" % band)
             if col not in (cat.dtype.names or ()):
                 self.log.warning(
                     "magnitude cut skipped for band %s: no %s", band, col
@@ -736,7 +736,7 @@ class ShearStatsPipe(PipelineTask):
             set(self.config.flux_err_min_bands)
             | set(self.config.flux_err_max_bands)
         ):
-            col = self._col("%s_flux_gauss2_err" % band)
+            col = self._col("%s_flux_fpfs1_err" % band)
             if col not in (cat.dtype.names or ()):
                 self.log.warning(
                     "flux_err cut skipped for band %s: no %s", band, col
@@ -784,8 +784,8 @@ class ShearStatsPipe(PipelineTask):
                     "color_abs_max key %r is not of the form 'b1-b2'"
                     % pair
                 ) from None
-            c1 = self._col("%s_mag_gauss2" % b1)
-            c2 = self._col("%s_mag_gauss2" % b2)
+            c1 = self._col("%s_mag_fpfs1" % b1)
+            c2 = self._col("%s_mag_fpfs1" % b2)
             if c1 not in names or c2 not in names:
                 self.log.warning(
                     "colour cut skipped for %s: no %s / %s", pair, c1, c2

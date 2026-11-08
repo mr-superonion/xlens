@@ -79,7 +79,7 @@ def spec_selection(meas, sepcheck) -> np.ndarray:
     with np.errstate(invalid="ignore", divide="ignore"):
         for b, cut in MAG_CUTS.items():
             sel &= (
-                MAG_ZERO - 2.5 * np.log10(np.asarray(meas[f"{b}_flux_gauss2"]))
+                MAG_ZERO - 2.5 * np.log10(np.asarray(meas[f"{b}_flux_fpfs1"]))
             ) < cut
         m00 = np.asarray(meas[f"{REF_BAND}_fpfs1_m00"])
         m20 = np.asarray(meas[f"{REF_BAND}_fpfs1_m20"])

@@ -113,8 +113,8 @@ class photoZPipeConfig(
         default="",
     )
     flux_name = Field[str](
-        doc="Flux column suffix (e.g. gauss2 -> {band}_fluxgauss2).",
-        default="gauss2",
+        doc="Flux column suffix (e.g. fpfs1 -> {band}_flux_fpfs1).",
+        default="fpfs1",
     )
     bands = ListField[str](
         doc="Survey-prefixed band names used as color features, in order.",

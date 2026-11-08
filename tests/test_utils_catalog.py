@@ -18,6 +18,12 @@ REF_BAND = "lsst_i"
 
 def _read_prefixed(fname):
     catalog = fitsio.read(fname)
+    # the fixture predates the per-band FPFS fluxes: its Gaussian
+    # aperture columns stand in for them under the fpfs1 names
+    catalog = np.asarray(rfn.rename_fields(
+        catalog,
+        {n: n.replace("gauss2", "fpfs1") for n in catalog.dtype.names if "gauss2" in n},
+    ))
     rename = {
         n: f"lsst_{n}"
         for n in catalog.dtype.names
@@ -59,7 +65,7 @@ def test_pz():
     out = fzbobj.get_z(
         catalog,
         mag_zero=30.0,
-        flux_name="gauss2",
+        flux_name="fpfs1",
         bands=PREFIXED_BANDS,
         ref_band=REF_BAND,
     )
@@ -116,7 +122,7 @@ def test_measure_shear_consistency():
         "do_correction": do_correction,
         "z_width95_max": z_width95_max,
         "mag_zero": mag_zero,
-        "flux_name": "gauss2",
+        "flux_name": "fpfs1",
         "bands": bands,
         "ref_band": ref_band,
     }
@@ -129,7 +135,7 @@ def test_measure_shear_consistency():
         emax=emax,
         trace_min=trace_min,
         mag_zero=mag_zero,
-        flux_name="gauss2",
+        flux_name="fpfs1",
         bands=bands,
         ref_band=ref_band,
         z_estimator=fzbobj,
@@ -182,7 +188,7 @@ _UNBINNED_KW = dict(
     trace_min=0.05,
     dg=0.02,
     mag_zero=30.0,
-    flux_name="gauss2",
+    flux_name="fpfs1",
     bands=PREFIXED_BANDS,
     ref_band=REF_BAND,
 )
@@ -224,7 +230,7 @@ def test_measure_shear_binning_arguments_are_validated():
             raise AssertionError(f"{bad} must raise ValueError")
 
 
-def _make_synth_catalog(n=4000, seed=7, bands=PREFIXED_BANDS, flux_name="gauss2"):
+def _make_synth_catalog(n=4000, seed=7, bands=PREFIXED_BANDS, flux_name="fpfs1"):
     """Synthetic catalog with every column measure_shear reads.
 
     The bundled ``catalog.fits`` has three rows, which is enough to pin the
@@ -277,14 +283,14 @@ def test_measure_shear_trace_min_none_skips_the_cut():
     src["fpfs_e1"][bad] = 0.0
     src["fpfs_e2"][bad] = 0.0
     for b in PREFIXED_BANDS:
-        src[f"{b}_flux_gauss2"][bad] = 1.0e3
+        src[f"{b}_flux_fpfs1"][bad] = 1.0e3
     kw = dict(_UNBINNED_KW)
     kw.pop("trace_min")
     kw["flux_min"] = 10.0
 
     sel = get_esq(src) < kw["emax"] ** 2
     for b in PREFIXED_BANDS:
-        sel &= src[f"{b}_flux_gauss2"] > kw["flux_min"]
+        sel &= src[f"{b}_flux_fpfs1"] > kw["flux_min"]
     trace = get_trace(src)
     assert np.all(np.isfinite(trace)) and sel[bad].all()
 
@@ -312,12 +318,12 @@ def test_shear_estimator_unbinned_matches_measure_shear():
     flux_min = 10.0 ** ((mag_zero - mag_max) / 2.5)
     out1 = measure_shear(
         src=catalog, target="g1g2", flux_min=flux_min, emax=0.3,
-        trace_min=0.05, dg=0.02, mag_zero=mag_zero, flux_name="gauss2",
+        trace_min=0.05, dg=0.02, mag_zero=mag_zero, flux_name="fpfs1",
         bands=PREFIXED_BANDS, ref_band=REF_BAND,
     )
     est = ShearEstimator(
         mag_max=mag_max, emax=0.3, trace_min=0.05, mag_zero=mag_zero,
-        flux_name="gauss2", bands=PREFIXED_BANDS, ref_band=REF_BAND, dg=0.02,
+        flux_name="fpfs1", bands=PREFIXED_BANDS, ref_band=REF_BAND, dg=0.02,
     )
     out2 = est.measure_shear(catalog, target="g1g2")
     for a, b in (("e1", "e1"), ("r1", "r1"), ("r1_sel", "r1_sel"),
