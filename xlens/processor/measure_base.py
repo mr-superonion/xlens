@@ -206,9 +206,13 @@ class MeasureBandsConfigBase(AnacalMeasureConfigBase):
 
     do_measure_flux_gauss = Field[bool](
         doc=(
-            "If True, also run AnaCal forced measurement during the "
-            "force stage to extract per-band Gaussian fluxes and merge "
-            "them into the output catalog."
+            "If True, also measure per-band Gaussian fluxes with AnaCal "
+            "and merge them into the output catalog. For the detection "
+            "bands they are measured in the detection stage, on the "
+            "per-band smoothed images the band coadd is built from (so at "
+            "the coadd's kernel width, Task.process_image_bands); the "
+            "other bands get a forced AnaCal run in the force stage, at "
+            "their own PSF-derived width."
         ),
         default=False,
     )
@@ -226,9 +230,11 @@ class MeasureBandsConfigBase(AnacalMeasureConfigBase):
             "PHYSICAL bands combined to form the detection image. AnaCal "
             "removes each band's own PSF first and then averages the bands "
             "with inverse-variance weights, so the bands need not be "
-            "PSF-matched. Forced measurement in the second stage is "
-            "unaffected and still runs band by band. A single entry "
-            "reproduces the previous single-band behaviour exactly."
+            "PSF-matched. The forced FPFS (and CNN) measurement of the "
+            "second stage still runs band by band; the Gaussian fluxes of "
+            "these bands (do_measure_flux_gauss) come from the detection "
+            "stage. A single entry reproduces the previous single-band "
+            "behaviour exactly."
         ),
         default=["i"],
     )
@@ -629,15 +635,31 @@ class AnacalMeasureTaskBase(PipelineTask):
         assert len(orig) == len(catalog)
         return catalog[np.argsort(orig, kind="stable")]
 
-    def _run_anacal(self, **data):
-        """Detection + detection-band measurement, with the mask cut."""
+    def _run_anacal(self, per_band: bool = False, **data):
+        """Detection + detection-band measurement, with the mask cut.
+
+        With ``per_band`` the result is ``(catalog, [band catalogs])``:
+        the forced single-band measurement of every row in each band of
+        the stack (see :meth:`AnacalTask.run`)."""
         return self.anacal.run(
             n_mask_base_max=self.config.n_mask_base_max,
             renoise_mode=self.config.renoise_mode,
             renoise_c=self.config.renoise_c,
             renoise_delta=self.config.renoise_delta,
+            per_band=per_band,
             **data,
         )
+
+    def _split_detection(self, result, bands: list):
+        """``(catalog, {band: band catalog})`` from a ``_run_anacal``
+        result, which is a bare catalog unless it was asked for the
+        bands (``do_measure_flux_gauss``)."""
+        if not self.config.do_measure_flux_gauss:
+            return result, None
+        cat, bcats = result
+        if len(bcats) != len(bands):
+            raise RuntimeError(f"{len(bcats)} band catalogs for bands {bands}")
+        return cat, dict(zip(bands, bcats))
 
     def _run_fpfs(self, **data):
         """Forced FPFS measurement, with the mask cut.
@@ -724,19 +746,30 @@ class AnacalMeasureTaskBase(PipelineTask):
         self,
         cat: NDArray,
         *,
-        data: dict,
+        data: dict | None,
         band: str,
+        band_catalog: NDArray | None = None,
     ) -> NDArray:
         """Merge the per-band Gaussian fluxes into a forced catalog.
 
-        No-op unless ``do_measure_flux_gauss`` is set.  ``data`` is the
-        prepared measurement dict for this band, reused for the AnaCal
-        forced run that produces the fluxes.
+        No-op unless ``do_measure_flux_gauss`` is set.  ``band_catalog``
+        is this band's catalog from the detection stage
+        (``_run_anacal(per_band=True)``), row-aligned with the cell's
+        detections; without it ``data``, the prepared measurement dict
+        of this band, feeds a forced AnaCal run that produces the fluxes.
         """
         if not self.config.do_measure_flux_gauss:
             return cat
+        if band_catalog is None:
+            if data is None:
+                raise ValueError("_append_gauss_fluxes needs a band catalog or the band data")
+            band_catalog = self._run_anacal(**data)
+        if len(band_catalog) != len(cat):
+            raise RuntimeError(
+                f"band {band}: {len(band_catalog)} Gaussian-flux rows for " f"{len(cat)} forced rows"
+            )
         gauss_cat = select_band_gauss_fluxes(
-            self._run_anacal(**data),
+            band_catalog,
             band,
             survey=self.config.survey,
         )

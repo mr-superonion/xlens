@@ -30,6 +30,7 @@ from lsst.skymap.discreteSkyMap import (
     DiscreteSkyMapConfig,
 )
 
+from xlens.processor.anacal import AnacalConfig, AnacalTask
 from xlens.processor.match import matchPipe, matchPipeConfig
 from xlens.processor.measure_coadds import (
     MeasureCoaddsPipe,
@@ -40,6 +41,7 @@ from xlens.simulator.catalog import (
     CatalogShearTaskConfig,
 )
 from xlens.simulator.sim import MultibandSimConfig, MultibandSimTask
+from xlens.utils.columns import select_band_gauss_fluxes
 from xlens.utils.handle import make_exposure_handles
 
 PIXEL_SCALE = 0.2
@@ -351,6 +353,89 @@ def test_detection_bands_validation():
     config.detection_bands = ["r", "i"]
     with pytest.raises(Exception, match="every detection band"):
         config.validate()
+
+
+def test_detection_band_gauss_fluxes_are_measured_once(scene):
+    """With ``do_measure_flux_gauss`` the detection bands' Gaussian fluxes
+    come out of the detection call (``process_image_bands``), from the
+    per-band smoothed images the coadd was built from.  They must be, bit
+    for bit, what a forced AnaCal run on that band at the coadd's kernel
+    width returns -- the previous force-stage computation, pinned to the
+    coadd's width -- and the final catalog must carry exactly them.  The
+    band outside the detection set is still measured by the forced run."""
+    det_bands = ["r", "i"]
+    seed = 11
+    handles = make_exposure_handles(
+        scene.exposures, tract=TRACT_ID, patch=PATCH_ID, skyMap=scene.skymap,
+    )
+    config = MeasureCoaddsPipeConfig()
+    config.anacal.force_size = False
+    config.anacal.num_epochs = 0
+    config.anacal.do_noise_bias_correction = False
+    config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
+    config.fpfs.do_noise_bias_correction = False
+    config.detection_bands = det_bands
+    config.do_measure_flux_gauss = True
+    config.validate()
+    pipe = MeasureCoaddsPipe(config=config)
+
+    det_cats, band_cache = pipe._detect(
+        exposure_handles_dict=handles, seed=seed, corr_array=None,
+        skyMap=scene.skymap, tract=TRACT_ID, patch=PATCH_ID, mask_array=None,
+    )
+    assert set(band_cache) == set(det_bands)
+    scale = float(band_cache["r"]["data"]["pixel_scale"])
+    variances = [float(band_cache[b]["data"]["noise_variance"]) for b in det_bands]
+    gauss_cols = [c for c in select_band_gauss_fluxes(det_cats[next(iter(det_cats))], "r").dtype.names]
+    assert len(gauss_cols) == 8
+    for band in det_bands:
+        cached = band_cache[band]
+        cell_map = {c.index: c for c in cached["cells"]}
+        assert set(cached["gauss"]) == set(det_cats)
+        for key, det in det_cats.items():
+            band_cat = cached["gauss"][key]
+            assert len(band_cat) == len(det)
+            # the coadd's kernel width for this cell: the band stack's PSF
+            stack_psf = np.stack([
+                {c.index: c for c in band_cache[b]["cells"]}[key].psf_array for b in det_bands
+            ])
+            sigma_coadd = pipe.anacal.get_sigma_arcsec(stack_psf, scale, variances)
+            acfg = AnacalConfig()
+            acfg.update(**pipe.anacal.config.toDict())
+            acfg.sigma_arcsec = sigma_coadd
+            forced_task = AnacalTask(config=acfg)
+            forced = forced_task.run(
+                **cached["data"], detection=det, cells=[cell_map[key]],
+                n_mask_base_max=config.n_mask_base_max, renoise_mode=config.renoise_mode,
+                renoise_c=config.renoise_c, renoise_delta=config.renoise_delta,
+            )
+            assert forced.dtype.names == band_cat.dtype.names
+            for name in forced.dtype.names:
+                np.testing.assert_array_equal(band_cat[name], forced[name], err_msg=f"{band} {name}")
+            # (the simulated bands share one PSF, so here the coadd's width
+            # equals each band's own; tests/task/test_process_image_bands.py
+            # in AnaCal covers bands with different PSFs)
+
+    # end to end: the catalog carries exactly those fluxes, and the band
+    # outside the detection set is measured too
+    cat = pipe.run(
+        exposure_handles_dict=handles, corr_array=None, skyMap=scene.skymap,
+        tract=TRACT_ID, patch=PATCH_ID, seed=seed,
+    ).anacalCatalog
+    for band in BANDS:
+        assert f"{SURVEY_NAME}_{band}_flux_gauss0" in cat.dtype.names
+        assert np.all(np.isfinite(cat[f"{SURVEY_NAME}_{band}_flux_gauss0"]))
+    by_pos = {}
+    for key, det in det_cats.items():
+        for b in det_bands:
+            g = band_cache[b]["gauss"][key]
+            for i in range(len(det)):
+                by_pos[(b, float(det["x1_det"][i]), float(det["x2_det"][i]))] = g["flux_gauss0"][i]
+    assert len(cat) > 0
+    for b in det_bands:
+        vals = cat[f"{SURVEY_NAME}_{b}_flux_gauss0"]
+        for i in range(len(cat)):
+            assert vals[i] == by_pos[(b, float(cat["x1_det"][i]), float(cat["x2_det"][i]))]
 
 
 def test_fixed_sigma_through_the_pipe(scene, measured):

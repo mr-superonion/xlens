@@ -543,14 +543,17 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         patch: int,
         stitched_mask_array: NDArray | None = None,
         mask_origin: tuple[int, int] | None = None,
-    ) -> dict:
+    ) -> tuple[dict, dict | None]:
         """Detect on the cell coadd of ``config.detection_bands``.
 
-        Returns ``det_cats``, mapping each cell_id with non-empty
-        detections to its anacal detection catalog.  The detection bands'
-        photometric zeropoints are computed locally for use in detection
-        but are not returned; ``_force`` re-derives the per-band
-        zeropoint from each band's coadd.
+        Returns ``(det_cats, gauss_cats)``: ``det_cats`` maps each cell_id
+        with non-empty detections to its anacal detection catalog;
+        ``gauss_cats`` maps each detection band to ``{cell_id: band
+        catalog}``, the band's own Gaussian-flux measurement of those
+        detections (None without ``do_measure_flux_gauss``).  The
+        detection bands' photometric zeropoints are computed locally for
+        use in detection but are not returned; ``_force`` re-derives the
+        per-band zeropoint from each band's coadd.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         bands = list(self.config.detection_bands)
@@ -647,7 +650,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         patch=patch,
                         mask_array=cell_mask,
                     )
-                return self._run_anacal(**data)
+                return self._run_anacal(**data, per_band=per_band)
             except Exception as e:
                 ci, cj = int(cell_id.y), int(cell_id.x)  # (cell_i, cell_j)
                 self.log.error(
@@ -660,13 +663,24 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                 )
                 return None
 
+        # the detection bands' Gaussian fluxes come out of the detection
+        # call (from the band images it prepared anyway), so _force does
+        # not prepare and measure those bands again
+        per_band = bool(self.config.do_measure_flux_gauss)
         items = list(det_cells[bands[0]].items())
         det_cats: dict = {}
-        for (cell_id, _), cat in zip(
+        gauss_cats: dict | None = {b: {} for b in bands} if per_band else None
+        for (cell_id, _), result in zip(
             items, self._map_parallel(_detect_one, items)
         ):
-            if cat is not None and len(cat) > 0:
+            if result is None:
+                continue
+            cat, bcats = self._split_detection(result, bands)
+            if len(cat) > 0:
                 det_cats[cell_id] = cat
+                if gauss_cats is not None:
+                    for b in bands:
+                        gauss_cats[b][cell_id] = bcats[b]
         del det_coadds
 
         self.log.info(
@@ -686,7 +700,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                 f"No objects detected in any cell "
                 f"(tract={tract}, patch={patch}); skipping this patch."
             )
-        return det_cats
+        return det_cats, gauss_cats
 
     def _coadd_mag_zero(self, mca) -> float:
         """Photometric zeropoint, from either coadd flavour."""
@@ -704,11 +718,15 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         patch: int,
         stitched_mask_array: NDArray | None = None,
         mask_origin: tuple[int, int] | None = None,
+        gauss_dict: dict | None = None,
     ) -> dict:
         """Force-measure the detected cells across all bands.
 
-        Returns a dict mapping cell_id to the band-merged forced
-        measurement catalog for cells where every band succeeded.
+        ``gauss_dict`` (band -> {cell_id: band catalog}) carries the
+        detection bands' Gaussian fluxes measured in the detection stage;
+        bands missing from it get a forced AnaCal run here.  Returns a
+        dict mapping cell_id to the band-merged forced measurement
+        catalog for cells where every band succeeded.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         active_cell_ids = list(detection_dict.keys())
@@ -717,6 +735,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
 
         for band in bands:
             self.log.debug("Measuring band %s", band)
+            gauss_cats = (gauss_dict or {}).get(band)
             band_coadd = self._get_coadd(coadd_handles_dict[band])
             mag_zero = self._coadd_mag_zero(band_coadd)
             # Per-cell visit count for THIS band, straight from the
@@ -749,6 +768,9 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                     cat = self._run_fpfs(**data)
                     cat = self._append_gauss_fluxes(
                         cat, data=data, band=band,
+                        band_catalog=(
+                            None if gauss_cats is None else gauss_cats[cell_id]
+                        ),
                     )
                     if self.config.doPsfHsmMoments:
                         # HSM on the COADD PSF model stamp. The
@@ -914,6 +936,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             )
 
         order: dict | None = None
+        gauss_dict: dict | None = None
         if detection is not None:
             # External catalog: partition into the SAME per-cell groups
             # internal detection would produce (cell inner regions tile
@@ -976,7 +999,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                     f"(tract={tract}, patch={patch}); skipping this patch."
                 )
         else:
-            det_cats = self._detect(
+            det_cats, gauss_dict = self._detect(
                 coadd_handles_dict=coadd_handles_dict,
                 seed=seed,
                 skyMap=skyMap,
@@ -995,6 +1018,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             patch=patch,
             stitched_mask_array=stitched_mask_array,
             mask_origin=mask_origin,
+            gauss_dict=gauss_dict,
         )
 
         self.log.info(
