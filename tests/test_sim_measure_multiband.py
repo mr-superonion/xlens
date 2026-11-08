@@ -97,23 +97,27 @@ def _simulate(skymap, truth, band):
     ).simExposure
 
 
-def _measure(handles, skymap, detection_bands):
+def _measure(handles, skymap, detection_bands, sigma_arcsec=None, return_pipe=False):
     config = MeasureCoaddsPipeConfig()
     config.anacal.force_size = False
     config.anacal.num_epochs = 0
     config.anacal.do_noise_bias_correction = False
+    if sigma_arcsec is not None:
+        config.anacal.sigma_arcsec = sigma_arcsec
     config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
     config.fpfs.do_noise_bias_correction = False
     config.detection_bands = detection_bands
     config.validate()
 
-    return MeasureCoaddsPipe(config=config).run(
+    pipe = MeasureCoaddsPipe(config=config)
+    cat = pipe.run(
         exposure_handles_dict=handles,
         corr_array=None,
         skyMap=skymap,
         tract=TRACT_ID,
         patch=PATCH_ID,
     ).anacalCatalog
+    return (cat, pipe) if return_pipe else cat
 
 
 @pytest.fixture(scope="module")
@@ -347,6 +351,24 @@ def test_detection_bands_validation():
     config.detection_bands = ["r", "i"]
     with pytest.raises(Exception, match="every detection band"):
         config.validate()
+
+
+def test_fixed_sigma_through_the_pipe(scene, measured):
+    """A positive ``anacal.sigma_arcsec`` replaces the PSF-derived kernel
+    width in detection and forced measurement: the task reports the fixed
+    width for the exposure PSF and the catalog is not the default one."""
+    handles = make_exposure_handles(
+        scene.exposures, tract=TRACT_ID, patch=PATCH_ID, skyMap=scene.skymap,
+    )
+    cat, pipe = _measure(handles, scene.skymap, ["i"], sigma_arcsec=0.6, return_pipe=True)
+    exp = scene.exposures["i"]
+    psf = exp.getPsf().computeKernelImage(exp.getBBox().getCenter()).array
+    ref = measured.single
+    derived = MeasureCoaddsPipe(config=_validatable_config()).anacal.get_sigma_arcsec(psf, PIXEL_SCALE)
+    assert 0.2 < derived < 0.6
+    assert pipe.anacal.get_sigma_arcsec(psf, PIXEL_SCALE) == 0.6
+    assert cat.dtype.names == ref.dtype.names
+    assert len(cat) != len(ref) or not np.allclose(cat["fpfs_e1"], ref["fpfs_e1"])
 
 
 def test_cnn_columns_through_the_pipe(scene, measured, tmp_path):
