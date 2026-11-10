@@ -23,6 +23,7 @@ from . import (
     anacal,
     build_cell_systematics,
     build_systematics,
+    cnn,
     fpfs,
     match,
     measure_cell_coadds,
@@ -34,6 +35,7 @@ from . import (
 
 __all__ = [
     "fpfs",
+    "cnn",
     "anacal",
     "build_cell_systematics",
     "build_systematics",

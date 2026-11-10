@@ -269,7 +269,9 @@ class CatalogConfig(
                 self,
                 "Euclid simulations require galaxy_type='flagship2025'",
             )
-        self.survey_name_list = survey_names
+        # Do not write the lower-cased names back: validate() also runs on
+        # the frozen config pipetask hands to the task, and the catalog
+        # classes lower-case the names themselves (galaxies.py).
         lists = {
             "select_observable": self.select_observable,
             "select_lower_limit": self.select_lower_limit,

@@ -41,9 +41,13 @@ MAG_MAX_TRUTH = 28.0
 # ------------------------------
 # Output directory
 # ------------------------------
+# The flagship2025 set.  The earlier tree (seeds 0-39999 with the noise drawn
+# in the simulation, Aug-Oct 2026) was renamed basic_shear_test_flagship2025_backup
+# on 2026-10-13; this one holds NOISELESS images (sim.py --no-image-noise), the
+# noise being added at processing time (process.py --add-noise).
 OUTPUT_ROOT = (
     "/gpfs/mnt/gpfs02/astro/astro_desc/data/simulation/image_simulation/"
-    "basic_shear_test"
+    "basic_shear_test_flagship2025"
 )
 
 
@@ -62,16 +66,23 @@ def build_skymap():
     return DiscreteSkyMap(config)
 
 
-def _outdir(layout, test_target, shear_value, shear_mode, kind, version=None):
+def _outdir(layout, test_target, shear_value, shear_mode, kind, version=None,
+            tag=None):
     """Internal: build/create the output directory for `kind` in
     {'sim', 'process'}. sim.py writes truth + exposures to the 'sim'
     directory; process.py reads from 'sim' and writes catalogs to
-    'process'. When `version` is set, `-v<version>` is appended to
-    the leaf directory name so parallel processing runs can coexist.
+    'process'.
+
+    Two independent leaf-name suffixes let parallel processing runs
+    coexist: `version` appends `-v<version>` (a throwaway integer tag for
+    a re-run), `tag` appends `_<tag>` (a name for a configuration worth
+    keeping, e.g. tag="spectral" -> `process_mode40_spectral/`).
     """
     subdir = f"{kind}_mode{shear_mode}"
     if version is not None:
         subdir = f"{subdir}-v{int(version)}"
+    if tag:
+        subdir = f"{subdir}_{tag}"
     outdir = os.path.join(
         OUTPUT_ROOT,
         f"constant_shear_{layout}",
@@ -83,19 +94,25 @@ def _outdir(layout, test_target, shear_value, shear_mode, kind, version=None):
     return outdir
 
 
-def sim_outdir(layout, test_target, shear_value, shear_mode):
-    """Directory that holds sim.py products (truth + per-band exposures)."""
-    return _outdir(layout, test_target, shear_value, shear_mode, "sim")
+def sim_outdir(layout, test_target, shear_value, shear_mode, tag=None):
+    """Directory that holds sim.py products (truth + per-band exposures).
+
+    `tag` names a variant, e.g. tag="noiseless" -> ``sim_mode<N>_noiseless/``.
+    """
+    return _outdir(layout, test_target, shear_value, shear_mode, "sim", tag=tag)
 
 
-def process_outdir(layout, test_target, shear_value, shear_mode, version=None):
+def process_outdir(layout, test_target, shear_value, shear_mode, version=None,
+                   tag=None):
     """Directory that holds process.py products (matched catalogs).
 
-    `version` is an optional integer tag; when set, outputs go to
-    ``process_mode<N>-v<version>/`` instead of ``process_mode<N>/``.
+    `version` is an optional integer tag and `tag` an optional name; when
+    set, outputs go to ``process_mode<N>-v<version>_<tag>/`` instead of
+    ``process_mode<N>/``.
     """
     return _outdir(
-        layout, test_target, shear_value, shear_mode, "process", version=version,
+        layout, test_target, shear_value, shear_mode, "process",
+        version=version, tag=tag,
     )
 
 

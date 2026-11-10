@@ -547,10 +547,10 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         """Detect on the cell coadd of ``config.detection_bands``.
 
         Returns ``det_cats``, mapping each cell_id with non-empty
-        detections to its anacal detection catalog.  The detection bands'
-        photometric zeropoints are computed locally for use in detection
-        but are not returned; ``_force`` re-derives the per-band
-        zeropoint from each band's coadd.
+        detections to its anacal detection catalog.  The
+        detection bands' photometric zeropoints are computed locally for
+        use in detection but are not returned; ``_force`` re-derives the
+        per-band zeropoint from each band's coadd.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         bands = list(self.config.detection_bands)
@@ -662,11 +662,13 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
 
         items = list(det_cells[bands[0]].items())
         det_cats: dict = {}
-        for (cell_id, _), cat in zip(
+        for (cell_id, _), result in zip(
             items, self._map_parallel(_detect_one, items)
         ):
-            if cat is not None and len(cat) > 0:
-                det_cats[cell_id] = cat
+            if result is None:
+                continue
+            if len(result) > 0:
+                det_cats[cell_id] = result
         del det_coadds
 
         self.log.info(
@@ -707,8 +709,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
     ) -> dict:
         """Force-measure the detected cells across all bands.
 
-        Returns a dict mapping cell_id to the band-merged forced
-        measurement catalog for cells where every band succeeded.
+        Returns a dict mapping cell_id to the band-merged forced measurement
+        catalog for cells where every band succeeded.
         """
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
         active_cell_ids = list(detection_dict.keys())
@@ -747,9 +749,6 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         mask_array=cell_mask,
                     )
                     cat = self._run_fpfs(**data)
-                    cat = self._append_gauss_fluxes(
-                        cat, data=data, band=band,
-                    )
                     if self.config.doPsfHsmMoments:
                         # HSM on the COADD PSF model stamp. The
                         # provenance table's psf_shape_* are per-visit

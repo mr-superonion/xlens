@@ -57,8 +57,10 @@ from .masks import (  # noqa: F401
 )
 from .noise import (  # noqa: F401
     estimate_noise_variance,
+    generate_filler_noise,
     generate_pure_noise,
     prepare_noise_array,
+    remove_noise_corr_pedestal,
     rotate_noise_corr,
 )
 from .prepare import (  # noqa: F401

@@ -55,7 +55,35 @@ def test_dilation_cap_config():
     cfg.psf_dilation_max = 0.9
     with pytest.raises(FieldValidationError):
         cfg.validate()
-    assert not hasattr(AnacalConfig(), "sigma_arcsec")
+
+
+def test_fixed_sigma_override(caplog):
+    cfg = AnacalConfig()
+    assert cfg.sigma_arcsec < 0  # PSF-derived by default
+    cfg.sigma_arcsec = 0.55
+    task = AnacalTask(config=cfg)
+    # wider than the PSF-derived width (sqrt(0.18) = 0.424): used as is,
+    # for a single PSF and for a band stack alike
+    assert task.get_sigma_arcsec(_psf(0.18, 0.18, 0.0), SCALE) == 0.55
+    stack = np.stack([_psf(0.16, 0.16, 0.0), _psf(0.24, 0.24, 0.0)])
+    assert task.get_sigma_arcsec(stack, SCALE, noise_variance=[1.0, 3.0]) == 0.55
+    # narrower than the PSF-derived width: floored at it, warned once
+    cfg = AnacalConfig()
+    cfg.sigma_arcsec = 0.3
+    task = AnacalTask(config=cfg)
+    with caplog.at_level("WARNING"):
+        s = task.get_sigma_arcsec(_psf(0.18, 0.18, 0.0), SCALE)
+        np.testing.assert_allclose(s, np.sqrt(0.18), rtol=1e-6)
+        s = task.get_sigma_arcsec(_psf(0.24, 0.24, 0.0), SCALE)
+        np.testing.assert_allclose(s, np.sqrt(0.24), rtol=1e-6)
+        assert task.get_sigma_arcsec(_psf(0.04, 0.04, 0.0), SCALE) == 0.3
+    assert sum("narrower than the PSF-derived" in r.message for r in caplog.records) == 1
+    # validation: 0 < sigma < 0.05 arcsec is a mistake
+    cfg.sigma_arcsec = 0.01
+    with pytest.raises(FieldValidationError):
+        cfg.validate()
+    cfg.sigma_arcsec = -1.0
+    cfg.validate()
 
 
 def test_psf_moments_are_memoised(monkeypatch):

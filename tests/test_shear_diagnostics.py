@@ -32,12 +32,12 @@ def _make_catalog(n=1000, seed=3):
         "hsc_i_ext_shapeHSM_HsmPsfMoments_yy": np.full(n, 0.09),
         "hsc_i_ext_shapeHSM_HsmPsfMoments_xy": np.zeros(n),
         "fpfs1_m20": rng.uniform(-0.5, 2.0, n),
-        "hsc_i_mag_gauss2": rng.uniform(20, 26.5, n),
+        "hsc_i_mag_fpfs1": rng.uniform(20, 26.5, n),
         "hsc_i_s2n_fpfs1": rng.uniform(5, 100, n),
-        "hsc_g_mag_gauss2": rng.uniform(20, 27, n),
-        "hsc_r_mag_gauss2": rng.uniform(20, 26.5, n),
-        "hsc_z_mag_gauss2": rng.uniform(20, 26, n),
-        "hsc_y_mag_gauss2": rng.uniform(20, 26, n),
+        "hsc_g_mag_fpfs1": rng.uniform(20, 27, n),
+        "hsc_r_mag_fpfs1": rng.uniform(20, 26.5, n),
+        "hsc_z_mag_fpfs1": rng.uniform(20, 26, n),
+        "hsc_y_mag_fpfs1": rng.uniform(20, 26, n),
         "n_mask_base": rng.uniform(0.0, 0.3, n),
         "n_mask_discontinuity": rng.uniform(0.0, 1.0, n),
     }
@@ -53,7 +53,7 @@ def _selected(cat, config):
         + cat["hsc_i_ext_shapeHSM_HsmPsfMoments_yy"]
     ))
     return cat[
-        (cat["hsc_i_mag_gauss2"] < config.mag_max)
+        (cat["hsc_i_mag_fpfs1"] < config.mag_max)
         & (cat["hsc_i_s2n_fpfs1"] > config.snr_min)
         & (cat["esq"] < config.esq_max)
         & (cat["n_mask_base"] < config.n_mask_base_max)
@@ -74,7 +74,7 @@ def test_axis_edges():
 def test_selection_and_sums(monkeypatch):
     monkeypatch.setattr(
         sd, "PROPERTY_BINS",
-        {"i_mag": ("hsc_i_mag_gauss2", 20.0, 25.0, 5, False)},
+        {"i_mag": ("hsc_i_mag_fpfs1", 20.0, 25.0, 5, False)},
     )
     monkeypatch.setattr(
         sd, "HIST_BINS",
@@ -93,14 +93,14 @@ def test_selection_and_sums(monkeypatch):
     # per-bin sums against a direct computation
     for row in stats:
         inbin = sel[
-            (sel["hsc_i_mag_gauss2"] >= row["x_min"])
-            & (sel["hsc_i_mag_gauss2"] < row["x_max"])
+            (sel["hsc_i_mag_fpfs1"] >= row["x_min"])
+            & (sel["hsc_i_mag_fpfs1"] < row["x_max"])
         ]
         w = inbin["wsel"]
         assert row["n_gal"] == len(inbin)
         np.testing.assert_allclose(row["sum_w"], np.sum(w))
         np.testing.assert_allclose(
-            row["sum_wx"], np.sum(w * inbin["hsc_i_mag_gauss2"])
+            row["sum_wx"], np.sum(w * inbin["hsc_i_mag_fpfs1"])
         )
         np.testing.assert_allclose(row["sum_we1"], np.sum(w * inbin["fpfs1_e1"]))
         np.testing.assert_allclose(
@@ -123,7 +123,7 @@ def test_missing_column_skipped(monkeypatch):
     monkeypatch.setattr(
         sd, "PROPERTY_BINS",
         {
-            "ok": ("hsc_i_mag_gauss2", 20.0, 25.0, 5, False),
+            "ok": ("hsc_i_mag_fpfs1", 20.0, 25.0, 5, False),
             "psf_e1": ("nonexistent_column", 0.0, 1.0, 5, False),
         },
     )
@@ -141,8 +141,8 @@ def test_hist2d_counts(monkeypatch):
         sd, "HIST2D_BINS",
         {
             "cmd": (
-                ("hsc_i_mag_gauss2", 20.0, 25.0, 4, False),
-                ("hsc_r_mag_gauss2 - hsc_i_mag_gauss2", -3.0, 3.0, 3, False),
+                ("hsc_i_mag_fpfs1", 20.0, 25.0, 4, False),
+                ("hsc_r_mag_fpfs1 - hsc_i_mag_fpfs1", -3.0, 3.0, 3, False),
             ),
         },
     )
@@ -154,8 +154,8 @@ def test_hist2d_counts(monkeypatch):
     assert len(h) == 12 and (h["iy"] >= 0).all()
     sel = _selected(cat, config)
     expect, _, _ = np.histogram2d(
-        sel["hsc_i_mag_gauss2"],
-        sel["hsc_r_mag_gauss2"] - sel["hsc_i_mag_gauss2"],
+        sel["hsc_i_mag_fpfs1"],
+        sel["hsc_r_mag_fpfs1"] - sel["hsc_i_mag_fpfs1"],
         bins=(np.linspace(20, 25, 5), np.linspace(-3, 3, 4)),
     )
     got = np.zeros((4, 3))
@@ -179,7 +179,7 @@ def test_snr_column(monkeypatch):
     """snr_column redirects the S/N cut; the weight is always wsel."""
     monkeypatch.setattr(
         sd, "PROPERTY_BINS",
-        {"i_mag": ("hsc_i_mag_gauss2", 20.0, 25.0, 1, False)},
+        {"i_mag": ("hsc_i_mag_fpfs1", 20.0, 25.0, 1, False)},
     )
     monkeypatch.setattr(sd, "HIST_BINS", {})
     monkeypatch.setattr(sd, "HIST2D_BINS", {})
@@ -193,11 +193,11 @@ def test_snr_column(monkeypatch):
     out = ShearStatsPipe(config=config).run(catalog=cat)
     fwhm = 2.3548200 * np.sqrt(0.5 * (cat["hsc_i_ext_shapeHSM_HsmPsfMoments_xx"]
                                       + cat["hsc_i_ext_shapeHSM_HsmPsfMoments_yy"]))
-    sel = cat[(cat["hsc_i_mag_gauss2"] < config.mag_max) & (cat["fpfs1_s2n"] > 20.0)
+    sel = cat[(cat["hsc_i_mag_fpfs1"] < config.mag_max) & (cat["fpfs1_s2n"] > 20.0)
               & (cat["esq"] < config.esq_max) & (cat["n_mask_base"] < config.n_mask_base_max)
               & ((cat["fpfs1_m00"] + cat["fpfs1_m20"]) / cat["fpfs1_m00"] > config.trace_min)
               & (fwhm < config.psf_fwhm_max)]
-    inbin = sel[(sel["hsc_i_mag_gauss2"] >= 20.0) & (sel["hsc_i_mag_gauss2"] < 25.0)]
+    inbin = sel[(sel["hsc_i_mag_fpfs1"] >= 20.0) & (sel["hsc_i_mag_fpfs1"] < 25.0)]
     row = out.meanShearStats[0]
     assert row["n_gal"] == len(inbin)
     np.testing.assert_allclose(row["sum_we1"], np.sum(inbin["wsel"] * inbin["fpfs1_e1"]))

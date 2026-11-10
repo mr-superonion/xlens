@@ -38,7 +38,11 @@ from numpy.lib import recfunctions as rfn
 from numpy.typing import NDArray
 
 from ..constants import MAG_ZERO_AB
-from .noise import estimate_noise_variance, prepare_noise_array
+from .noise import (
+    estimate_noise_variance,
+    generate_filler_noise,
+    prepare_noise_array,
+)
 from .psf import (
     prepare_psf_array,
     resize_array,
@@ -48,7 +52,13 @@ from .psf import (
 
 
 def get_cells(
-    *, lsst_psf, lsst_bbox, pixel_scale, npix, psf_array, num_workers=1,
+    *,
+    lsst_psf,
+    lsst_bbox,
+    pixel_scale,
+    npix,
+    psf_array,
+    num_workers=1,
 ):
     min_corner = lsst_bbox.getMin()
     x_min, y_min = min_corner.getX(), min_corner.getY()
@@ -75,13 +85,9 @@ def get_cells(
         y0 = int(np.clip(bb.ycen, 0, height - 1))
         try:
             if native is not None:
-                bb.psf_array = native.draw(
-                    float(x_min + x0), float(y_min + y0), npix
-                )
+                bb.psf_array = native.draw(float(x_min + x0), float(y_min + y0), npix)
             else:
-                this_psf = lsst_psf.computeImage(
-                    lsst_geom.Point2D(x_min + x0, y_min + y0)
-                ).getArray()
+                this_psf = lsst_psf.computeImage(lsst_geom.Point2D(x_min + x0, y_min + y0)).getArray()
                 bb.psf_array = resize_array(this_psf, (npix, npix))
         except Exception:
             # no coverage at the cell centre (DM InvalidPsfError /
@@ -89,8 +95,7 @@ def get_cells(
             return None
         return bb
 
-    return [bb for bb in _map_cells(draw_one, cells, native, num_workers)
-            if bb is not None]
+    return [bb for bb in _map_cells(draw_one, cells, native, num_workers) if bb is not None]
 
 
 def _map_cells(fn, cells, native, num_workers):
@@ -108,7 +113,12 @@ def _map_cells(fn, cells, native, num_workers):
 
 
 def get_cells_multiband(
-    *, lsst_psfs, lsst_bbox, pixel_scale, npix, num_workers=1,
+    *,
+    lsst_psfs,
+    lsst_bbox,
+    pixel_scale,
+    npix,
+    num_workers=1,
 ):
     """Cells whose PSF stamp is a ``(nband, npix, npix)`` stack.
 
@@ -137,9 +147,7 @@ def get_cells_multiband(
         cell_overlap=80,
         scale=pixel_scale,
     )
-    natives = [
-        try_native_coadd_model(p, lsst_bbox) for p in lsst_psfs
-    ]
+    natives = [try_native_coadd_model(p, lsst_bbox) for p in lsst_psfs]
     all_native = all(n is not None for n in natives)
 
     def draw_one(bb):
@@ -150,9 +158,7 @@ def get_cells_multiband(
         try:
             for lsst_psf, native in zip(lsst_psfs, natives):
                 if native is not None:
-                    stamps.append(native.draw(
-                        float(x_min + x0), float(y_min + y0), npix
-                    ))
+                    stamps.append(native.draw(float(x_min + x0), float(y_min + y0), npix))
                 else:
                     stamps.append(
                         resize_array(
@@ -167,9 +173,16 @@ def get_cells_multiband(
 
     # A single DM-backed band would serialize the whole cell, so thread
     # only when every band draws natively.
-    return [bb for bb in _map_cells(
-        draw_one, cells, True if all_native else None, num_workers,
-    ) if bb is not None]
+    return [
+        bb
+        for bb in _map_cells(
+            draw_one,
+            cells,
+            True if all_native else None,
+            num_workers,
+        )
+        if bb is not None
+    ]
 
 
 def combine_sim_exposures(
@@ -277,6 +290,15 @@ def prepare_data(
     rotId: int = 0,
     npix: int = 64,
     noise_corr: NDArray | None = None,
+    # spectral renoising: the second, independent noise realization
+    # eps'' is drawn here (same correlation as the image noise, its own
+    # seed) and handed to anacal, which applies the spin-2 filler
+    # g * eps'' in Fourier space, per cell with each cell's PSF.  A
+    # caller with its own eps'' (e.g. a cell coadd's second noise
+    # realization) passes it as ``noise2_array`` instead.
+    renoise_mode: str = "rotate",
+    renoise_delta: float = 0.01,
+    noise2_array: NDArray | None = None,
     do_noise_bias_correction: bool = True,
     skyMap=None,
     tract: int = 0,
@@ -307,26 +329,17 @@ def prepare_data(
     lsst_bbox = exposure.getBBox()
 
     if psf_array is None:
-        stamps0 = (
-            np.asarray(cells[0].psf_array) if cells else None
-        )
+        stamps0 = np.asarray(cells[0].psf_array) if cells else None
         # Only usable when the cells carry ONE stamp per cell at this
         # function's stamp size: a multiband stack (3-D) has no single
         # exposure PSF, and cells built by a caller with a different
         # npix would silently change the returned shape.
-        if (
-            stamps0 is not None
-            and stamps0.ndim == 2
-            and stamps0.shape == (npix, npix)
-        ):
+        if stamps0 is not None and stamps0.ndim == 2 and stamps0.shape == (npix, npix):
             # Exposure-average PSF = mean of the per-cell stamps
             # already in hand (no second grid of PSF evaluations),
             # finished with the same truncation the grid average used.
             psf_array = np.mean(
-                np.stack([
-                    np.asarray(bb.psf_array, dtype=np.float64)
-                    for bb in cells
-                ]),
+                np.stack([np.asarray(bb.psf_array, dtype=np.float64) for bb in cells]),
                 axis=0,
             )
             truncate_square(psf_array, npix // 2 - 2)
@@ -394,8 +407,33 @@ def prepare_data(
     # paths (detection Task + fpfs.process_image) then receive this 31.4 image
     # with mag_zero=MAG_ZERO_AB. No-op (no allocation) for a native-31.4 coadd.
     gal_array, noise_array, noise_variance = anacal.utils.rescale_image_to_zeropoint(
-        gal_array, noise_array, noise_variance, mag_zero, MAG_ZERO_AB,
+        gal_array,
+        noise_array,
+        noise_variance,
+        mag_zero,
+        MAG_ZERO_AB,
     )
+
+    noise2 = None
+    if renoise_mode == "spectral" and noise_array is not None:
+        if noise2_array is None:
+            noise2 = generate_filler_noise(
+                ny=gal_array.shape[0],
+                nx=gal_array.shape[1],
+                pixel_scale=pixel_scale,
+                seed=seed,
+                band=band,
+                noise_variance=noise_variance,
+                noise_corr=noise_corr,
+                noiseId=noiseId,
+                rotId=rotId,
+                survey=survey,
+            )
+        else:
+            noise2 = noise2_array
+        noise2 = np.asarray(noise2, dtype=np.float32)
+        # masked pixels stay as they are, like in the pure-noise image
+        anacal.mask.mask_galaxy_image(noise2, mask_array, star_cat)
 
     return {
         "pixel_scale": pixel_scale,
@@ -405,6 +443,13 @@ def prepare_data(
         "psf_array": psf_array,
         "mask_array": mask_array,
         "noise_array": noise_array,
+        # the second, independent noise realization eps'' (spectral
+        # renoising; None otherwise): anacal builds the spin-2 filler
+        # from it in Fourier space, per cell
+        "noise2_array": noise2,
+        # the (unrotated) noise correlation function of the patch, for the
+        # spectral renoising; None for white noise
+        "noise_corr": noise_corr,
         "begin_x": beginx,
         "begin_y": beginy,
         "wcs": wcs,
@@ -428,7 +473,11 @@ def prepare_data(
 # ---------------------------------------------------------------------------
 
 
-def _stack_bands(per_band_data, bands, keys=("gal_array", "noise_array")):
+def _stack_bands(
+    per_band_data,
+    bands,
+    keys=("gal_array", "noise_array", "noise2_array"),
+):
     """Move each band's planes into one preallocated stack.
 
     ``per_band_data`` is a generator of single-band dicts.  The planes are
@@ -441,6 +490,7 @@ def _stack_bands(per_band_data, bands, keys=("gal_array", "noise_array")):
     stacks: dict = {}
     psf_stack = None
     variances: list[float] = []
+    noise_corrs: list = []
     first: dict | None = None
     # Kept separately: the planes are emptied out of ``first`` as they are
     # moved into the stack, so the dict cannot be used as the reference.
@@ -452,14 +502,15 @@ def _stack_bands(per_band_data, bands, keys=("gal_array", "noise_array")):
             first = data
             nband = len(bands)
             ref_shape = data["gal_array"].shape
-            ref_shared = {name: data[name] for name in SHARED}
+            ref_shared = {name: data.get(name) for name in SHARED}
             ny, nx = ref_shape
             for key in keys:
                 if data.get(key) is None:
                     stacks[key] = None
                 else:
                     stacks[key] = np.empty(
-                        (nband, ny, nx), dtype=data[key].dtype,
+                        (nband, ny, nx),
+                        dtype=data[key].dtype,
                     )
             npsf = data["psf_array"].shape[-1]
             psf_stack = np.empty((nband, npsf, npsf), dtype=np.float64)
@@ -470,7 +521,7 @@ def _stack_bands(per_band_data, bands, keys=("gal_array", "noise_array")):
                     f"{data['gal_array'].shape}, expected {ref_shape}"
                 )
             for name in SHARED:
-                if data[name] != ref_shared[name]:
+                if data.get(name) != ref_shared[name]:
                     raise ValueError(
                         f"band '{bands[iband]}' has {name}={data[name]}, "
                         f"but band '{bands[0]}' has {ref_shared[name]}"
@@ -487,11 +538,14 @@ def _stack_bands(per_band_data, bands, keys=("gal_array", "noise_array")):
                 data[key] = None
         psf_stack[iband] = data["psf_array"]
         variances.append(float(data["noise_variance"]))
+        noise_corrs.append(data.pop("noise_corr", None))
 
     out = dict(first)
     out.update(stacks)
     out["psf_array"] = psf_stack
     out["noise_variance"] = variances
+    out.pop("noise_corr", None)
+    out["noise_corrs"] = noise_corrs
     if "base_column_name" in out:
         # The coadd belongs to no single band, so it gets no band prefix.
         out["base_column_name"] = None
@@ -507,6 +561,8 @@ def prepare_data_multiband(
     rotId: int = 0,
     npix: int = 64,
     noise_corrs: dict | None = None,
+    renoise_mode: str = "rotate",
+    renoise_delta: float = 0.01,
     do_noise_bias_correction: bool = True,
     skyMap=None,
     tract: int = 0,
@@ -550,6 +606,8 @@ def prepare_data_multiband(
                 rotId=rotId,
                 npix=npix,
                 noise_corr=noise_corrs.get(band, None),
+                renoise_mode=renoise_mode,
+                renoise_delta=renoise_delta,
                 do_noise_bias_correction=do_noise_bias_correction,
                 skyMap=skyMap,
                 tract=tract,

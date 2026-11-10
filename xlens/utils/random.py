@@ -36,6 +36,7 @@ def get_noise_seed(
     band: None | str = "i",
     survey: None | str = None,
     is_sim=False,
+    tag: None | str = None,
 ):
     """Generate a stable pseudo-random seed for noise realisations.
 
@@ -78,6 +79,10 @@ def get_noise_seed(
     mixed_list = [galaxy_seed, noiseId, rotId, band, int(is_sim)]
     if survey is not None:
         mixed_list.append(survey)
+    if tag is not None:
+        # an independent realization for another purpose (e.g. the spin-2
+        # filler of the spectral renoising); None keeps the historical seed
+        mixed_list.append(tag)
     parts = []
     for item in mixed_list:
         if isinstance(item, int):

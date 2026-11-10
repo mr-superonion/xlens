@@ -12,7 +12,9 @@ from typing import Iterable, List, Optional, Tuple
 import common
 import fitsio
 import numpy as np
+import numpy.lib.recfunctions as rfn
 
+from xlens.utils.catalog import measure_shear as _measure_shear_binned
 from xlens.utils.constants import MAG_ZERO_AB
 
 
@@ -21,30 +23,58 @@ def _shear_root(layout, target, shear):
     return os.path.dirname(common.process_outdir(layout, target, shear, 40))
 
 
-colnames = [
-    "wsel",
-    "dwsel_dg1",
-    "dwsel_dg2",
-    "fpfs_e1",
-    "fpfs_de1_dg1",
-    "fpfs_de1_dg2",
-    "fpfs_e2",
-    "fpfs_de2_dg1",
-    "fpfs_de2_dg2",
-    "fpfs_m0",
-    "fpfs_dm0_dg1",
-    "fpfs_dm0_dg2",
-    "fpfs_m2",
-    "fpfs_dm2_dg1",
-    "fpfs_dm2_dg2",
-    "lsst_i_flux_fpfs1",
-    "lsst_i_dflux_fpfs1_dg1",
-    "lsst_i_dflux_fpfs1_dg2",
-    "lsst_i_fpfs1_e1",
-    "lsst_i_fpfs1_de1_dg1",
-    "lsst_i_fpfs1_e2",
-    "lsst_i_fpfs1_de2_dg2",
-]
+# The shape set the estimator reads is chosen by --shape-name:
+#
+#   "fpfs"          the joint multiband shape, measured at the PSF-adaptive
+#                   sigma_arcsec (AnacalTask.get_sigma_arcsec).  Carries
+#                   m0/m2 directly.  This is the default and what every
+#                   published summary here used.
+#   "lsst_<b>_fpfs1" that band's shapelet shape at the FIXED
+#                   sigma_shapelets1 (process.py: 0.38*sqrt(2) = 0.5374").
+#                   Carries m00/m20 instead of m0/m2, so cat_read
+#                   synthesises m0 = m00 and m2 = m00 + m20 (and the same
+#                   for the dg derivatives) before the library sees it.
+BASE_COLS = ["wsel", "dwsel_dg1", "dwsel_dg2",
+             "lsst_i_flux_fpfs1", "lsst_i_dflux_fpfs1_dg1",
+             "lsst_i_dflux_fpfs1_dg2"]
+SHAPE_COLS = ["e1", "de1_dg1", "de1_dg2", "e2", "de2_dg1", "de2_dg2"]
+# fpfs_ ships m0/m2; the per-band fpfs1 sets ship the raw m00/m20
+MOMENT_COLS = {"fpfs": ["m0", "dm0_dg1", "dm0_dg2", "m2", "dm2_dg1", "dm2_dg2"],
+               "fpfs1": ["m00", "dm00_dg1", "dm00_dg2",
+                         "m20", "dm20_dg1", "dm20_dg2"]}
+
+
+def _moment_flavour(shape_name: str) -> str:
+    return "fpfs" if shape_name == "fpfs" else "fpfs1"
+
+
+def columns_for(shape_name: str) -> list:
+    sn = shape_name + "_"
+    flavour = _moment_flavour(shape_name)
+    cols = list(BASE_COLS)
+    cols += [sn + c for c in SHAPE_COLS]
+    cols += [sn + c for c in MOMENT_COLS[flavour]]
+    return list(dict.fromkeys(cols))
+
+
+def add_moment_aliases(src, shape_name: str):
+    """Give an fpfs1 shape set the m0/m2 names ``get_trace`` expects.
+
+    AnaCal's monopole and quadrupole are m00 and m20; the joint ``fpfs_``
+    set is already published as m0 = m00 and m2 = m00 + m20, so the
+    per-band sets are mapped the same way rather than changing the library.
+    """
+    if _moment_flavour(shape_name) == "fpfs":
+        return src
+    sn = shape_name + "_"
+    names, arrays = [], []
+    for d in ("", "_dg1", "_dg2"):
+        m00 = src[f"{sn}m00" if not d else f"{sn}dm00{d}"]
+        m20 = src[f"{sn}m20" if not d else f"{sn}dm20{d}"]
+        names += [f"{sn}m0{d}" if not d else f"{sn}dm0{d}",
+                  f"{sn}m2{d}" if not d else f"{sn}dm2{d}"]
+        arrays += [m00, m00 + m20]
+    return rfn.append_fields(src, names, arrays, usemask=False)
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,6 +135,17 @@ def parse_args() -> argparse.Namespace:
         help="Ellipticity magnitude cut upper bound.",
     )
     parser.add_argument(
+        "--trace-min",
+        type=float,
+        default=None,
+        help="Size cut: keep sources with trace = fpfs_m2 / fpfs_m0 = "
+             "(m00 + m20) / m00 above this. Left out, NO size cut is applied "
+             "at all, which is what the original partials were made with -- "
+             "note 0.0 is not the same thing, since trace > 0 already drops "
+             "sources with a non-positive monopole. "
+             "xlens.utils.catalog.base.measure_shear uses 0.05.",
+    )
+    parser.add_argument(
         "--dg",
         type=float,
         default=0.02,
@@ -138,79 +179,80 @@ def parse_args() -> argparse.Namespace:
              "process_mode<N>-v<version>/ and writes partials to "
              "summary-flux-40-00-v<version>/.",
     )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        default=None,
+        help="Optional configuration name; reads catalogs from "
+             "process_mode<N>_<tag>/ and writes partials to "
+             "summary-flux-40-00_<tag>/. Combines with --version.",
+    )
+    parser.add_argument(
+        "--shape-name", type=str, default="fpfs",
+        help="Shape columns the estimator reads: 'fpfs' (default, the "
+             "joint multiband shape at the PSF-adaptive sigma_arcsec) or "
+             "e.g. 'lsst_i_fpfs1' (that band's shapelet shape at the "
+             "fixed sigma_shapelets1). Does NOT change the flux cut, "
+             "which always uses lsst_i_flux_fpfs1.",
+    )
+    parser.add_argument(
+        "--summary-tag",
+        type=str,
+        default=None,
+        help="Optional name for the CUTS, appended to the partials "
+             "directory only (not to the catalog directory --tag selects), "
+             "so several cut choices over the same catalogs can coexist: "
+             "summary-flux-40-00[_<tag>]_<summary-tag>/.",
+    )
     args, unknown_args = parser.parse_known_args()
     if unknown_args:
         print("[warn] Ignoring unknown args:", unknown_args)
     return args
 
 
-def cat_read(layout, target, shear, mode, sim_id, version=None):
-    outdir = common.process_outdir(layout, target, shear, mode, version=version)
-    return fitsio.read(common.cat_path(outdir, sim_id), columns=colnames)
+def cat_read(layout, target, shear, mode, sim_id, version=None, tag=None,
+             shape_name="fpfs"):
+    outdir = common.process_outdir(layout, target, shear, mode,
+                                   version=version, tag=tag)
+    src = fitsio.read(common.cat_path(outdir, sim_id),
+                      columns=columns_for(shape_name))
+    return add_moment_aliases(src, shape_name)
 
 
-def measure_shear(src, flux_min=0.0, emax=0.3, dg=0.02, target="g1"):
+def measure_shear(src, flux_min=0.0, emax=0.3, trace_min=None, dg=0.02,
+                  shape_name="fpfs",
+                  target="g1"):
+    """Selection + response, including the selection response.
+
+    A thin wrapper over ``xlens.utils.catalog.measure_shear`` with no
+    tomographic binning (``z_estimator=None``): the cuts, their
+    finite-difference selection responses and the estimator all come from
+    the library, so this script and the redshift-binned analysis cannot
+    drift apart.  What makes it this analysis is
+
+      * ``flux_name="fpfs1"`` with ``bands=("lsst_i",)`` -- the flux cut is
+        on the i-band forced FPFS flux alone, not on every band
+      * ``trace_min=None`` by default -- no size cut, the setting the
+        reference partials were made with (0.0 would already drop sources
+        whose monopole is not positive)
+
+    Returns a dict of 1-element arrays: e, r, r_sel, n_gal.
     """
-    Selection + response including selection response via finite differencing.
-
-    Returns: e1, R11, e2, R22, N  (scalars for this flux_min)
-    """
-    esq0 = src["fpfs_e1"] ** 2 + src["fpfs_e2"] ** 2
-    m0 = (src["lsst_i_flux_fpfs1"] > flux_min) & (esq0 < emax * emax)
-    w0 = src["wsel"][m0]
-    # ename = "lsst_i_fpfs1"
-    ename = "fpfs"
-    e1 = np.sum(w0 * src[f"{ename}_e1"][m0])
-    e2 = np.sum(w0 * src[f"{ename}_e2"][m0])
-
-    r1 = np.sum(
-        src["dwsel_dg1"][m0] * src[f"{ename}_e1"][m0]
-        + w0 * src[f"{ename}_de1_dg1"][m0]
+    return _measure_shear_binned(
+        src=src,
+        z_estimator=None,
+        zbounds=None,
+        flux_min=flux_min,
+        emax=emax,
+        trace_min=trace_min,
+        dg=dg,
+        target=target,
+        mag_zero=MAG_ZERO_AB,
+        flux_name="fpfs1",
+        shape_name=shape_name,
+        bands=("lsst_i",),
+        ref_band="lsst_i",
     )
-    r2 = np.sum(
-        src["dwsel_dg2"][m0] * src[f"{ename}_e2"][m0]
-        + w0 * src[f"{ename}_de2_dg2"][m0]
-    )
-
-    def sel_term(comp: int):
-        comp2 = int(3 - comp)
-        e = src[f"fpfs_e{comp}"]
-        de = src[f"fpfs_de{comp}_dg{comp}"]
-        en = src[f"fpfs_e{comp2}"]
-        den = src[f"fpfs_de{comp2}_dg{comp}"]
-        df = src[f"lsst_i_dflux_fpfs1_dg{comp}"]
-
-        esq_p = esq0 + 2.0 * dg * (e * de + en * den)
-        m_p = (
-            ((src["lsst_i_flux_fpfs1"] + dg * df) > flux_min)
-            & (esq_p < emax * emax)
-        )
-        ellp = np.sum(src["wsel"][m_p] * src[f"{ename}_e{comp}"][m_p])
-
-        esq_m = esq0 - 2.0 * dg * (e * de + en * den)
-        m_m = (
-            ((src["lsst_i_flux_fpfs1"] - dg * df) > flux_min)
-            & (esq_m < emax * emax)
-        )
-        ellm = np.sum(src["wsel"][m_m] * src[f"{ename}_e{comp}"][m_m])
-        return (ellp - ellm) / (2.0 * dg)
-
-    r1_sel = sel_term(1)
-    r2_sel = sel_term(2)
-    if target == "g1":
-        return {
-            "e": np.array([e1]),
-            "r": np.array([r1]),
-            "r_sel": np.array([r1_sel]),
-            "n_gal": np.array([np.sum(m0)]),
-        }
-    else:
-        return {
-            "e": np.array([e2]),
-            "r": np.array([r2]),
-            "r_sel": np.array([r2_sel]),
-            "n_gal": np.array([np.sum(m0)]),
-        }
 
 
 def per_rank_work(
@@ -221,7 +263,10 @@ def per_rank_work(
     flux_min: float,
     emax: float,
     dg: float,
+    trace_min: Optional[float] = None,
     version: Optional[int] = None,
+    tag: Optional[str] = None,
+    shape_name: str = "fpfs",
 ):
     e_pos_rows = []
     e_neg_rows = []
@@ -232,25 +277,31 @@ def per_rank_work(
     for sim_id in ids_chunk:
         src_pos = cat_read(
             layout, target, shear, mode=40, sim_id=sim_id, version=version,
+            tag=tag, shape_name=shape_name,
         )
         out_pos = measure_shear(
             src=src_pos,
             flux_min=flux_min,
             emax=emax,
+            trace_min=trace_min,
             dg=dg,
             target=target,
+            shape_name=shape_name,
         )
         del src_pos
         gc.collect()
         src_neg = cat_read(
             layout, target, shear, mode=0, sim_id=sim_id, version=version,
+            tag=tag, shape_name=shape_name,
         )
         out_neg = measure_shear(
             src=src_neg,
             flux_min=flux_min,
             emax=emax,
+            trace_min=trace_min,
             dg=dg,
             target=target,
+            shape_name=shape_name,
         )
         del src_neg
         gc.collect()
@@ -273,10 +324,15 @@ def per_rank_work(
 
 def summary_directory(
     layout: str, target: str, shear: float, version: Optional[int] = None,
+    tag: Optional[str] = None, summary_tag: Optional[str] = None,
 ) -> str:
     leaf = "summary-flux-40-00"
     if version is not None:
         leaf = f"{leaf}-v{int(version)}"
+    if tag:
+        leaf = f"{leaf}_{tag}"
+    if summary_tag:
+        leaf = f"{leaf}_{summary_tag}"
     return os.path.join(_shear_root(layout, target, shear), leaf)
 
 
@@ -292,8 +348,11 @@ def save_rank_partial(
     n_pos: np.ndarray,
     n_neg: np.ndarray,
     version: Optional[int] = None,
+    tag: Optional[str] = None,
+    summary_tag: Optional[str] = None,
 ) -> str:
-    partdir = summary_directory(layout, target, shear, version=version)
+    partdir = summary_directory(layout, target, shear, version=version, tag=tag,
+                                summary_tag=summary_tag)
     os.makedirs(partdir, exist_ok=True)
     path = os.path.join(partdir, f"seed_{seed_index:05d}.npz")
     np.savez_compressed(
@@ -315,8 +374,11 @@ def load_and_stack_all(
     shear: float,
     ncut_expected: Optional[int] = None,
     version: Optional[int] = None,
+    tag: Optional[str] = None,
+    summary_tag: Optional[str] = None,
 ):
-    partdir = summary_directory(layout, target, shear, version=version)
+    partdir = summary_directory(layout, target, shear, version=version, tag=tag,
+                                summary_tag=summary_tag)
     arrays_E_pos: List[np.ndarray] = []
     arrays_E_neg: List[np.ndarray] = []
     arrays_R_pos: List[np.ndarray] = []
@@ -410,7 +472,10 @@ def main() -> None:
                 flux_min,
                 args.emax,
                 args.dg,
+                trace_min=args.trace_min,
                 version=args.version,
+                tag=args.tag,
+                shape_name=args.shape_name,
             )
             save_rank_partial(
                 args.layout,
@@ -424,12 +489,15 @@ def main() -> None:
                 n_pos,
                 n_neg,
                 version=args.version,
+                tag=args.tag,
+                summary_tag=args.summary_tag,
             )
     else:
         all_e_pos, all_e_neg, all_r_pos, all_r_neg, all_n_pos, all_n_neg = \
             load_and_stack_all(
                 args.layout, args.target, args.shear, ncut_expected=1,
-                version=args.version,
+                version=args.version, tag=args.tag,
+                summary_tag=args.summary_tag,
             )
 
         if all_e_pos.size == 0 or all_e_neg.size == 0:
@@ -486,7 +554,13 @@ def main() -> None:
             "Catalog directory: "
             f"{_shear_root(args.layout, args.target, args.shear)}"
         )
-        print("flux cut")
+        partdir = summary_directory(
+            args.layout, args.target, args.shear, version=args.version,
+            tag=args.tag, summary_tag=args.summary_tag,
+        )
+        print(f"Partials dir: {partdir}")
+        print(f"Cuts: mag_max={args.mag_max} emax={args.emax} "
+              f"trace_min={args.trace_min} dg={args.dg}")
         print(f"Paired IDs (found): {all_e_pos.shape[0]}")
         print(f"Area (arcmin^2): {area_arcmin2:.3f}")
         print("m (per redshift cut):", m)

@@ -1,0 +1,121 @@
+description: |
+  Two ways to the same noisy simulated coadd, side by side in one repo:
+
+    A  catalogShearA -> simNoisy (draw_image_noise: true)        -> measureA
+    B  catalogShearB -> simNoiseless (draw_image_noise: false)
+                     -> addNoise (noiseId 0)                     -> measureB
+
+  A and B must give bit-identical exposures and bit-identical anacal
+  catalogs: AddNoisePipe draws the realisation MultibandSimTask would have
+  drawn for the same (seed, galId, noiseId, rotId, band), and sets the
+  variance plane to the noise variance.  Dataset names follow the
+  {inputName} -> {inputName}_<product> convention:
+
+    simA_0_rot0_coadd                         (noisy, chain A)
+    simB_0_rot0_coadd                         (noiseless)
+    simB_0_rot0_coadd_noise0_coadd            (after addNoise)
+    simA_meas_anacal_catalog / simB_meas_anacal_catalog
+
+  Run with examples/pipelines/run_sim_noise_consistency.sh, which builds a
+  small butler repo, registers the skymap and compares the outputs.
+
+instrument: lsst.obs.lsst.LsstComCam
+
+tasks:
+  # ---------------------------------------------------------------- chain A
+  catalogShearA:
+    class: xlens.simulator.catalog.CatalogShearTask
+    config:
+      connections.catName: simA_0_rot0_coadd
+      galaxy_type: flagship2025
+      survey_name_list: ["lsst"]
+      layout: random
+      extend_ratio: 1.08
+      sep_arcsec: 14
+      z_bounds: [0.0, 0.63, 0.98, 1.48, 10.0]
+      mode: 0
+      rotId: 0
+      test_target: g1
+      test_value: 0.02
+      kappa_value: 0.0
+
+  simNoisy:
+    class: xlens.simulator.sim.MultibandSimTask
+    config:
+      connections.simCoaddName: simA
+      connections.mode: 0
+      connections.rotId: 0
+      galaxy_type: flagship2025
+      survey_name: lsst
+      draw_image_noise: true
+
+  measureA:
+    class: xlens.processor.measure_coadds.MeasureCoaddsPipe
+    config:
+      connections.inputName: simA_0_rot0_coadd
+      connections.outName: simA_meas
+      use_sim: false
+      detection_bands: ["r", "i", "z"]
+      anacal.force_size: true
+      anacal.num_epochs: 0
+      anacal.do_noise_bias_correction: true
+      fpfs.do_noise_bias_correction: true
+      fpfs.sigma_shapelets1: 0.5374
+      renoise_mode: rotate
+
+  # ---------------------------------------------------------------- chain B
+  catalogShearB:
+    class: xlens.simulator.catalog.CatalogShearTask
+    config:
+      connections.catName: simB_0_rot0_coadd
+      galaxy_type: flagship2025
+      survey_name_list: ["lsst"]
+      layout: random
+      extend_ratio: 1.08
+      sep_arcsec: 14
+      z_bounds: [0.0, 0.63, 0.98, 1.48, 10.0]
+      mode: 0
+      rotId: 0
+      test_target: g1
+      test_value: 0.02
+      kappa_value: 0.0
+
+  simNoiseless:
+    class: xlens.simulator.sim.MultibandSimTask
+    config:
+      connections.simCoaddName: simB
+      connections.mode: 0
+      connections.rotId: 0
+      galaxy_type: flagship2025
+      survey_name: lsst
+      draw_image_noise: false
+
+  addNoise:
+    class: xlens.simulator.noise.AddNoisePipe
+    config:
+      connections.inputName: simB_0_rot0_coadd
+      connections.noiseId: 0
+      noiseId: 0
+      survey_name: lsst
+      galId: 0
+      rotId: 0
+
+  measureB:
+    class: xlens.processor.measure_coadds.MeasureCoaddsPipe
+    config:
+      connections.inputName: simB_0_rot0_coadd_noise0_coadd
+      connections.outName: simB_meas
+      use_sim: false
+      detection_bands: ["r", "i", "z"]
+      anacal.force_size: true
+      anacal.num_epochs: 0
+      anacal.do_noise_bias_correction: true
+      fpfs.do_noise_bias_correction: true
+      fpfs.sigma_shapelets1: 0.5374
+      renoise_mode: rotate
+
+subsets:
+  chainA:
+    subset: [catalogShearA, simNoisy, measureA]
+  chainB:
+    subset: [catalogShearB, simNoiseless, addNoise, measureB]

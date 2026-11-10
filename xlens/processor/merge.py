@@ -690,21 +690,8 @@ class MergePipe(PipelineTask):
                     f"{b}_dmag_fpfs1_err_dg2",
                 ]
             )
-            # Per-band gauss2 fluxes (only present when
-            # measureCellCoadds was run with do_measure_flux_gauss=True).
+            # Optional per-band columns.
             for col in (
-                f"{b}_flux_gauss2",
-                f"{b}_flux_gauss2_err",
-                f"{b}_dflux_gauss2_dg1",
-                f"{b}_dflux_gauss2_dg2",
-                # AB magnitude + shear response for the gauss2 flux family
-                # (added by add_magnitude_columns when gauss2 is present).
-                f"{b}_mag_gauss2",
-                f"{b}_dmag_gauss2_dg1",
-                f"{b}_dmag_gauss2_dg2",
-                f"{b}_mag_gauss2_err",
-                f"{b}_dmag_gauss2_err_dg1",
-                f"{b}_dmag_gauss2_err_dg2",
                 # Coadd depth at the source: the Gaussian-weighted mean
                 # of this band's nImage (visit-count map) over the
                 # source footprint, so a source straddling a chip-gap
@@ -1123,15 +1110,12 @@ class MergePipe(PipelineTask):
             # the magnitudes are built from dflux_dg2 (s2n = flux/flux_err,
             # dmag = dmag_dflux * dflux_dg2), so they must flip with it or
             # they end up with the opposite sign to the flux they derive
-            # from.  Gaussian-aperture fluxes flip for the same reason.
+            # from.
             for col in (
                 f"{b}_dflux_fpfs1_dg2",
                 f"{b}_ds2n_fpfs1_dg2",
                 f"{b}_dmag_fpfs1_dg2",
                 f"{b}_dmag_fpfs1_err_dg2",
-                f"{b}_dflux_gauss2_dg2",
-                f"{b}_dmag_gauss2_dg2",
-                f"{b}_dmag_gauss2_err_dg2",
             ):
                 if col in catalog.colnames:
                     catalog[col] = -np.asarray(catalog[col])

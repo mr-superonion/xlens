@@ -10,6 +10,7 @@ import os
 
 import common
 import fitsio
+import numpy as np
 from mpi4py import MPI
 
 from xlens.simulator.catalog import (
@@ -57,6 +58,46 @@ parser.add_argument(
 parser.add_argument(
     "--band", type=str, default="u,g,r,i,z,y",
     help="comma-separated bands list (e.g. 'r,i,z')",
+)
+parser.add_argument(
+    "--source-noise", action="store_true",
+    help="Include source photon noise, so the image noise is "
+         "non-stationary: per-pixel variance sky + c * flux from "
+         "simulator.defaults.get_variance_array. The variance plane stays at "
+         "the constant sky value, which is what the noise-bias correction "
+         "and the renoising want. Needs the noise to be drawn here, so it "
+         "cannot be combined with --no-image-noise; for noiseless images use "
+         "process.py --add-noise --source-noise instead.",
+)
+parser.add_argument(
+    "--no-image-noise", action="store_true",
+    help="Render the galaxies without drawing the image noise. The variance "
+         "plane is still set to the survey noise variance, so addnoise.py "
+         "can add the noise afterwards (the same realisation sim.py would "
+         "have drawn).",
+)
+parser.add_argument(
+    "--psf", type=str, default=None,
+    help="FITS PSF stamp to simulate with, instead of the analytic Moffat "
+         "the task builds from psf_fwhm_defaults. 2D: the same PSF for every "
+         "band; 3D: one stamp per band in u,g,r,i,z,y order. The stamp must "
+         "ALREADY include the pixel response and sum to 1 (see "
+         "make_moffat_psf.py), because the galaxies are then drawn with "
+         "method='no_pixel'.",
+)
+parser.add_argument(
+    "--psf-e1", type=float, default=0.0,
+    help="Distortion e1 of the analytic Moffat PSF the task builds. Ignored "
+         "when --psf is given, since the stamp then carries its own shape.",
+)
+parser.add_argument(
+    "--psf-e2", type=float, default=0.0,
+    help="Distortion e2 of the analytic Moffat PSF. See --psf-e1.",
+)
+parser.add_argument(
+    "--tag", type=str, default=None,
+    help="Name for this variant; outputs go to sim_mode<N>_<tag>/ instead "
+         "of sim_mode<N>/ (e.g. --no-image-noise --tag noiseless).",
 )
 args, unknown_args = parser.parse_known_args()
 if unknown_args:
@@ -113,10 +154,40 @@ cfg_cat.extend_ratio = extend_ratio
 cfg_cat.sep_arcsec = 14
 cat_task = CatalogShearTask(config=cfg_cat)
 
+psf_array = None
+if args.psf:
+    psf_array = fitsio.read(args.psf).astype(np.float64)
+    if psf_array.ndim not in (2, 3):
+        raise ValueError(f"--psf must be 2D or 3D, got shape {psf_array.shape}")
+    total = psf_array.sum() if psf_array.ndim == 2 else psf_array[0].sum()
+    if abs(total - 1.0) >= 1e-2:
+        raise ValueError(f"--psf stamp sums to {total:.6f}; MultibandSimTask "
+                         "requires |sum - 1| < 1e-2")
+    if RANK == 0:
+        print(f"[Info] PSF from {args.psf} {psf_array.shape}, sum {total:.6f}; "
+              "galaxies drawn with method='no_pixel'.")
+
 cfg_sim = MultibandSimConfig()
 cfg_sim.galaxy_type = common.GALAXY_TYPE
 cfg_sim.survey_name = common.SURVEY_NAME_LIST[0]
-cfg_sim.draw_image_noise = True
+cfg_sim.draw_image_noise = not args.no_image_noise
+if args.source_noise and args.no_image_noise:
+    raise SystemExit(
+        "--source-noise needs the noise to be drawn here; drop "
+        "--no-image-noise, or add it at processing time with "
+        "process.py --add-noise --source-noise"
+    )
+cfg_sim.draw_source_noise = args.source_noise
+cfg_sim.use_real_psf = psf_array is not None
+if psf_array is None:
+    cfg_sim.psf_e1 = args.psf_e1
+    cfg_sim.psf_e2 = args.psf_e2
+    if (args.psf_e1 or args.psf_e2) and RANK == 0:
+        print(f"[Info] analytic Moffat PSF sheared to "
+              f"e = ({args.psf_e1:+g}, {args.psf_e2:+g}).")
+elif args.psf_e1 or args.psf_e2:
+    raise ValueError("--psf-e1/--psf-e2 apply to the analytic Moffat only; "
+                     "the --psf stamp already carries its own shape")
 sim_task = MultibandSimTask(config=cfg_sim)
 
 
@@ -124,7 +195,8 @@ sim_task = MultibandSimTask(config=cfg_sim)
 # Output layout (sim products live under sim_mode<N>/; process.py reads
 # from this dir and writes catalogs under process_mode<N>/).
 # ------------------------------
-outdir = common.sim_outdir(args.layout, test_target, shear_value, shear_mode)
+outdir = common.sim_outdir(args.layout, test_target, shear_value, shear_mode,
+                           tag=args.tag)
 
 
 # ------------------------------
@@ -155,6 +227,7 @@ for i in range(istart, iend):
             band=bb,
             seed=sim_seed,
             truthCatalog=truth_catalog,
+            psfArray=psf_array,
         ).simExposure
         exp.writeFits(exp_fname)
         del exp

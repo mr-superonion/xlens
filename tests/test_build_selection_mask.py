@@ -185,3 +185,26 @@ def test_build_selection_mask_scalar_mag_max_equals_dict_form():
         flux_name=FLUX, emax=EMAX, trace_min=TRACE_MIN,
     )
     assert np.array_equal(m_scalar, m_dict)
+
+
+def test_build_selection_mask_trace_min_none_skips_size_cut():
+    """trace_min=None drops the size term entirely; 0.0 does not (it still
+    rejects a non-positive monopole), so the two must differ when such a
+    source exists."""
+    src, _ = _make_synth(n=2000)
+    # 20 sources with a non-positive monopole (trace < 0) that pass every
+    # other cut, so the size term is the only thing deciding their fate
+    bad = slice(0, 20)
+    src[f"{SN}m0"][bad] = -1.0
+    src[f"{SN}e1"][bad] = 0.0
+    src[f"{SN}e2"][bad] = 0.0
+    for b_ in BANDS:
+        src[f"{b_}_flux_{FLUX}"][bad] = 10.0 ** 3.4      # mag ~ 22.9, brighter than every MAG_MAX
+    kw = dict(comp=1, dg=0.0, shape_name=SHAPE, bands=BANDS, mag_max=MAG_MAX,
+              mag_zero=MAG_ZERO, flux_name=FLUX, emax=EMAX)
+    m_none, _ = build_selection_mask(src, trace_min=None, **kw)
+    m_zero, _ = build_selection_mask(src, trace_min=0.0, **kw)
+    # reference: the inline logic with the trace term removed
+    ref = _inline_mask(src, comp=1, dg=0.0, trace_min=-np.inf)
+    np.testing.assert_array_equal(m_none, ref)
+    assert m_none[bad].all() and not m_zero[bad].any()

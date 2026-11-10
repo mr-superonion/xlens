@@ -21,9 +21,9 @@
 
 """Detection-catalog column policy.
 
-The detection step (``anacal.run`` with ``detection=None``) emits 96
+The detection step (``anacal.run`` with ``detection=None``) emits many
 intermediate columns — raw moments, j1/j2 dilation derivatives,
-gauss-aperture fluxes, etc. — most of which are unused by any
+etc. — most of which are unused by any
 downstream code and merely duplicate columns produced by the per-band
 forced measurement.
 
@@ -147,45 +147,3 @@ def merge_structured(arrays) -> NDArray:
         for name in a.dtype.names:
             out[name] = a[name]
     return out
-
-
-GAUSS_APERTURE_COLUMNS: tuple[str, ...] = (
-    "flux_gauss0",
-    "dflux_gauss0_dg1",
-    "dflux_gauss0_dg2",
-    "flux_gauss0_err",
-    "flux_gauss2",
-    "dflux_gauss2_dg1",
-    "dflux_gauss2_dg2",
-    "flux_gauss2_err",
-)
-
-
-def select_band_gauss_fluxes(
-    catalog: NDArray,
-    band: str,
-    survey: str | None = None,
-) -> NDArray | None:
-    """Project an anacal forced-measurement output onto the per-band
-    Gaussian aperture flux columns and prefix them.
-
-    Unlike the FPFS task, the anacal C++ task does not honour the
-    ``base_column_name`` data dict entry for the gauss flux columns —
-    it always emits them as plain ``flux_gauss{0,2,4}`` (and their
-    ``dflux_*_dg1/2`` and ``*_err`` siblings).  So we look up the
-    unprefixed names here and rename to ``{prefix}_flux_gauss{0,2,4}`` on the
-    way out, where ``prefix`` is ``{survey}_{band}`` when ``survey`` is given
-    (else ``{band}``).
-
-    Returns ``None`` if no gauss columns are present.
-    """
-    if catalog is None or catalog.dtype.names is None:
-        return None
-    names = set(catalog.dtype.names)
-    keep = [c for c in GAUSS_APERTURE_COLUMNS if c in names]
-    if not keep:
-        return None
-    prefix = f"{survey}_{band}" if survey is not None else band
-    projected = np.asarray(rfn.repack_fields(catalog[keep]))
-    mapping = {c: f"{prefix}_{c}" for c in keep}
-    return np.asarray(rfn.rename_fields(projected, mapping))

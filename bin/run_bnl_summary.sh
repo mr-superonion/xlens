@@ -23,10 +23,20 @@ STAMP_DIM="1350"            # --stamp-dim N (usable image dim in pixels)
 BANDS="ugrizy"              # --bands STR
 REDSHIFT="flexzboost"       # --redshift STR
 VERSION=""                  # --version N (optional; empty = unversioned outputs)
+TAG=""                      # --tag STR (optional; empty = unnamed outputs)
+SUMMARY_TAG=""              # --summary-tag STR (optional; names the CUTS)
+MAG_MAX=""                  # --mag-max F (optional; empty = script default)
+TRACE_MIN=""                # --trace-min F (optional; empty = script default)
+SHAPE_NAME=""               # --shape-name STR (optional; empty = summary.py default "fpfs")
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="summary.py"
 LOG_DIR="${HOME}/log"
+# Per-job stdout/stderr go to GPFS, not $HOME.  The NFS home export
+# (/astro_u) hit 91% full and threw EACCES on ~600 of 4000 job starts on
+# 2026-10-22 (cluster 126), after $HOME/log had accumulated ~258k files.
+# The one-per-cluster UserLog stays in $LOG_DIR, where the tooling looks.
+JOB_LOG_DIR="${XLENS_JOB_LOG_DIR:-/gpfs02/astro/workarea/${USER}/log}"
 DRY_RUN=false
 NO_CORR=false               # if true, append --no-correction to arguments
 
@@ -52,13 +62,24 @@ Options:
   --redshift STR        photo-z estimator name (default: ${REDSHIFT})
   --version N           optional integer tag; injects --version N into the
                         python arguments (default: none)
+  --tag STR             configuration name; injects --tag STR into the python
+                        arguments, reading process_mode<N>_<tag>/ and writing
+                        partials to summary-flux-40-00_<tag>/ (default: none)
+  --summary-tag STR     name for the CUTS; injects --summary-tag STR, which
+                        appends to the PARTIALS directory only, so several cut
+                        choices over the same catalogs coexist (default: none)
+  --mag-max F           injects --mag-max F (default: none = script default)
+  --trace-min F         injects --trace-min F (default: none = script default)
+  --shape-name STR      shape columns the estimator reads; injects
+                        --shape-name STR (default: none = summary.py's
+                        "fpfs"; e.g. "lsst_i_fpfs1")
   --no-correction       add --no-correction to summary_seeds.py arguments
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
 
 Notes:
 - python = python3 in PATH
-- logs   = \$HOME/log
+- logs   = \$HOME/log (per-cluster .log), \$JOB_LOG_DIR (per-job .out/.err)
 USAGE
 }
 
@@ -86,6 +107,11 @@ while [[ $# -gt 0 ]]; do
     --bands)         BANDS="$2"; shift 2 ;;
     --redshift)      REDSHIFT="$2"; shift 2 ;;
     --version)       VERSION="$2"; shift 2 ;;
+    --tag)           TAG="$2"; shift 2 ;;
+    --summary-tag)   SUMMARY_TAG="$2"; shift 2 ;;
+    --mag-max)       MAG_MAX="$2"; shift 2 ;;
+    --trace-min)     TRACE_MIN="$2"; shift 2 ;;
+    --shape-name)    SHAPE_NAME="$2"; shift 2 ;;
     --no-correction) NO_CORR=true; shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     -h|--help)       usage; exit 0 ;;
@@ -118,7 +144,7 @@ if (( PER_TASK <= 0 )); then
   echo "Error: --per-task must be a positive integer (got ${PER_TASK})." >&2
   exit 1
 fi
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$JOB_LOG_DIR"
 
 # Optional arg for --no-correction
 NO_CORR_ARG=""
@@ -152,10 +178,15 @@ arguments       = ${SCRIPT_PATH} \\
                   --bands ${BANDS} \\
                   --redshift ${REDSHIFT} \\
                   ${VERSION:+--version ${VERSION}} \\
+                  ${TAG:+--tag ${TAG}} \\
+                  ${SUMMARY_TAG:+--summary-tag ${SUMMARY_TAG}} \\
+                  ${MAG_MAX:+--mag-max ${MAG_MAX}} \\
+                  ${TRACE_MIN:+--trace-min ${TRACE_MIN}} \\
+                  ${SHAPE_NAME:+--shape-name ${SHAPE_NAME}} \\
                   ${NO_CORR_ARG} \\
                   --min-id \$(start) --max-id \$(end)
-output          = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out
-error           = ${LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).err
+output          = ${JOB_LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out
+error           = ${JOB_LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).err
 log             = ${LOG_DIR}/\$(ClusterId).log
 
 queue start, end from (
