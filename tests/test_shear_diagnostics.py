@@ -22,6 +22,11 @@ def _make_catalog(n=1000, seed=3):
         "fpfs1_de1_dg1": rng.uniform(0.5, 1.5, n),
         "fpfs1_de2_dg2": rng.uniform(0.5, 1.5, n),
         "esq": rng.uniform(0, 0.3, n),
+        "desq_dg1": rng.normal(0, 0.2, n),
+        "desq_dg2": rng.normal(0, 0.2, n),
+        "fpfs1_s2n": rng.uniform(5, 100, n),
+        "fpfs1_ds2n_dg1": rng.normal(0, 5.0, n),
+        "fpfs1_ds2n_dg2": rng.normal(0, 5.0, n),
         "fpfs1_m00": rng.uniform(1.0, 2.0, n),
         # ARCSEC**2, not pixel**2: the ext_shapeHSM PSF moments are
         # converted at measurement time, so psf_fwhm_max compares a
@@ -185,8 +190,7 @@ def test_snr_column(monkeypatch):
     monkeypatch.setattr(sd, "HIST2D_BINS", {})
     cat = _make_catalog()
     rng = np.random.RandomState(5)
-    import numpy.lib.recfunctions as rfn
-    cat = rfn.append_fields(cat, ["fpfs1_s2n"], [rng.uniform(3, 200, len(cat))], usemask=False)
+    cat["fpfs1_s2n"] = rng.uniform(3, 200, len(cat))
     config = ShearStatsPipeConfig()
     config.snr_column = "fpfs1_s2n"
     config.snr_min = 20.0
@@ -204,3 +208,61 @@ def test_snr_column(monkeypatch):
     np.testing.assert_allclose(
         row["sum_r1"],
         np.sum(inbin["wsel"] * inbin["fpfs1_de1_dg1"] + inbin["dwsel_dg1"] * inbin["fpfs1_e1"]))
+
+
+def test_optimal_shape_weight(monkeypatch):
+    """With shape_weight_params the sums are of e_opt = w_opt e, with the
+    response the shear derivative of the weighted shape."""
+    monkeypatch.setattr(
+        sd, "PROPERTY_BINS",
+        {"i_mag": ("hsc_i_mag_fpfs1", 20.0, 25.0, 1, False)},
+    )
+    monkeypatch.setattr(sd, "HIST_BINS", {})
+    monkeypatch.setattr(sd, "HIST2D_BINS", {})
+    params = [3.0, 1.6, 14.0, 0.06, 0.0875]
+    cat = _make_catalog()
+    config = ShearStatsPipeConfig(shape_weight_params=params)
+    config.validate()
+    out = ShearStatsPipe(config=config).run(catalog=cat)
+    assert config.esq_max == ShearStatsPipeConfig().esq_max
+    row = out.meanShearStats[0]
+
+    sel = _selected(cat, config)
+    s, v = sel["fpfs1_s2n"], sel["esq"]
+    w_opt = (params[0] * (s / 50.0) ** params[3]
+             / (1.0 + (params[2] / s) ** params[1])
+             * np.exp(-v / params[4]))
+    assert np.all(w_opt > 0)
+    w = sel["wsel"]
+    assert row["n_gal"] == len(sel)
+    np.testing.assert_allclose(row["sum_w"], np.sum(w))
+    np.testing.assert_allclose(
+        row["sum_we1"], np.sum(w * w_opt * sel["fpfs1_e1"]), rtol=1e-12
+    )
+    # response = finite difference of wsel * w_opt(s, v) * e1 when the
+    # inputs are sheared: e1 += dg de1/dg1, s += dg ds2n/dg1, ...
+    dg = 1e-5
+
+    def we1(sign):
+        e1 = sel["fpfs1_e1"] + sign * dg * sel["fpfs1_de1_dg1"]
+        ss = s + sign * dg * sel["fpfs1_ds2n_dg1"]
+        vv = v + sign * dg * sel["desq_dg1"]
+        ww = w + sign * dg * sel["dwsel_dg1"]
+        wo = (params[0] * (ss / 50.0) ** params[3]
+              / (1.0 + (params[2] / ss) ** params[1])
+              * np.exp(-vv / params[4]))
+        return ww * wo * e1
+    fd = np.sum(we1(+1) - we1(-1)) / (2 * dg)
+    np.testing.assert_allclose(row["sum_r1"], fd, rtol=1e-6)
+    # the unweighted run is recovered with an empty parameter list
+    ref = ShearStatsPipe(config=ShearStatsPipeConfig()).run(catalog=cat)
+    np.testing.assert_allclose(
+        ref.meanShearStats[0]["sum_we1"], np.sum(w * sel["fpfs1_e1"])
+    )
+
+
+def test_shape_weight_params_validated():
+    import pytest
+    config = ShearStatsPipeConfig(shape_weight_params=[1.0, 2.0])
+    with pytest.raises(ValueError):
+        config.validate()

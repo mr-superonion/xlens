@@ -58,6 +58,10 @@ from lsst.pipe.base import (
 from lsst.skymap import BaseSkyMap
 from lsst.utils.logging import LsstLogAdapter
 
+from ..utils.catalog.shape_weight import (
+    apply_optimal_shape_weight,
+    parse_shape_weight_params,
+)
 from ..utils.columns import MODEL_COLUMNS
 from ..utils.constants import FPFS_C0
 from ..wcs import extract_perturbation_dm_wcs, sky_to_pixel
@@ -77,26 +81,6 @@ PHOTOZ_POINT_COLUMNS = [
 ]
 #: Value written to every photo-z point column when a tract has no photo-z.
 PHOTOZ_MISSING_VALUE = -1.0
-
-
-def shape_weight_f1(s, a, snr0, beta, amp=1.0):
-    """``f1(s) = amp * (s/50)**beta / (1 + (snr0/s)**a)`` and ``df1/ds``."""
-    s = np.maximum(np.asarray(s, dtype=np.float64), 1e-3)
-    r = (snr0 / s) ** a
-    f = amp * (s / 50.0) ** beta / (1.0 + r)
-    return f, f * (beta / s + a * r / (s * (1.0 + r)))
-
-
-def shape_weight_f2(v, esq_scale, esq_step, esq_max):
-    """``f2(v) = exp(-v/esq_scale) S(v)`` and ``df2/dv``, with S the C2
-    quintic smooth step: 1 for v <= esq_step, 0 for v >= esq_max."""
-    v = np.asarray(v, dtype=np.float64)
-    ex = np.exp(-v / esq_scale)
-    t = np.clip((v - esq_step) / (esq_max - esq_step), 0.0, 1.0)
-    S = 1.0 - (6 * t**5 - 15 * t**4 + 10 * t**3)
-    dS = np.where((v > esq_step) & (v < esq_max),
-                  -(30 * t**4 - 60 * t**3 + 30 * t**2) / (esq_max - esq_step), 0.0)
-    return ex * S, ex * (dS - S / esq_scale)
 
 
 class MergePipeConnections(
@@ -233,12 +217,13 @@ class MergePipeConfig(
             "no column is added: downstream code keeps using ``e = wsel * "
             "fpfs1_e`` and ``response = wsel * fpfs1_de/dg + dwsel/dg * "
             "fpfs1_e`` unchanged; ``esq`` stays the UNWEIGHTED |eps|^2. "
-            "Seven numbers ``[amp, a, snr0, beta, "
-            "esq_scale, esq_step, esq_max]`` (six = amp 1), with "
-            "``f1(s) = amp * (s/50)**beta / (1 + (snr0/s)**a)`` and "
-            "``f2(v) = exp(-v/esq_scale) * S(v; esq_step, esq_max)``, S the "
-            "quintic smooth step from 1 at esq_step to 0 at esq_max. "
-            "Empty (default) leaves the shape unweighted."
+            "Five numbers ``[amp, alpha, snr0, beta, esq_scale]`` (four = "
+            "amp 1), with ``f1(s) = amp * (s/50)**beta / (1 + "
+            "(snr0/s)**alpha)`` and ``f2(v) = exp(-v/esq_scale)`` (see "
+            "xlens.utils.catalog.shape_weight). f2 never reaches zero: no "
+            "cut on |e| is ever applied. Empty (default) leaves the shape "
+            "unweighted; ShearStatsPipe can then apply the same weight at "
+            "summary time."
         ),
         default=[],
     )
@@ -306,11 +291,12 @@ class MergePipeConfig(
         super().validate()
         if len(self.band_weights) != 0 and len(self.band_weights) != len(self.bands):
             raise ValueError("band_weights, when set, must have the same length as bands")
-        if len(self.shape_weight_params) not in (0, 6, 7):
-            raise ValueError("shape_weight_params must be empty, [a, snr0, beta, esq_scale, esq_step, esq_max] "
-                             "or [amp, a, snr0, beta, esq_scale, esq_step, esq_max]")
+        if len(self.shape_weight_params) != 0:
+            parse_shape_weight_params(self.shape_weight_params)
         if self.per_object_snr2_weights and len(self.band_weights) == 0:
-            raise ValueError("per_object_snr2_weights needs band_weights (the fallback weights, 0 to exclude a band)")
+            raise ValueError(
+                "per_object_snr2_weights needs band_weights "
+                "(the fallback weights, 0 to exclude a band)")
 
 
 class MergePipe(PipelineTask):
@@ -652,7 +638,7 @@ class MergePipe(PipelineTask):
         for col in (f"{p}s2n", f"{p}ds2n_dg1", f"{p}ds2n_dg2"):
             if col in catalog.colnames:
                 keep.append(col)
-        if len(self.config.shape_weight_params) in (6, 7):
+        if len(self.config.shape_weight_params) != 0:
             catalog = self._apply_shape_weight(catalog)
         # Per-source PSF-quality columns, carried through when the
         # measurement produced them. n_mask_discontinuity counts
@@ -730,33 +716,16 @@ class MergePipe(PipelineTask):
         return catalog[keep]
 
     def _apply_shape_weight(self, catalog: Table) -> Table:
-        """Apply ``w_opt = f1(fpfs1_s2n) f2(esq)`` to the shape:
-        ``e_i <- w_opt e_i``, ``de_i/dg_j <- w_opt de_i/dg_j + dw_opt/dg_j e_i``
-        with ``dw_opt/dg = f1' ds2n/dg f2 + f1 f2' desq/dg``.  ``wsel`` and
-        ``esq`` (the unweighted |e|^2 that f2 is defined on) are untouched.
-        Runs after the row filter and on the WCS-corrected shape, so the row
-        set is unchanged; a taper to zero leaves e = 0 rows."""
-        p = self.config.fpfs_prefix
-        params = list(self.config.shape_weight_params)
-        amp = params.pop(0) if len(params) == 7 else 1.0
-        a, snr0, beta, esq_scale, esq_step, esq_max = params
-        s = np.asarray(catalog[f"{p}s2n"], dtype=np.float64)
-        v = np.asarray(catalog["esq"], dtype=np.float64)
-        f1, df1 = shape_weight_f1(s, a, snr0, beta, amp)
-        f2, df2 = shape_weight_f2(v, esq_scale, esq_step, esq_max)
-        wopt = f1 * f2
-        e = {i: np.asarray(catalog[f"{p}e{i}"], dtype=np.float64) for i in (1, 2)}
-        for j in (1, 2):
-            ds = np.asarray(catalog[f"{p}ds2n_dg{j}"], dtype=np.float64)
-            dv = np.asarray(catalog[f"desq_dg{j}"], dtype=np.float64)
-            dwopt = df1 * ds * f2 + f1 * df2 * dv
-            for i in (1, 2):
-                col = f"{p}de{i}_dg{j}"
-                if col in catalog.colnames:
-                    de = np.asarray(catalog[col], dtype=np.float64)
-                    catalog[col] = wopt * de + dwopt * e[i]
-        for i in (1, 2):
-            catalog[f"{p}e{i}"] = wopt * e[i]
+        """Apply ``w_opt = f1(fpfs1_s2n) f2(esq)`` to the shape in place:
+        ``e_i <- w_opt e_i`` and ``de_i/dg_j <- w_opt de_i/dg_j +
+        dw_opt/dg_j e_i`` (see :func:`apply_optimal_shape_weight`).
+        ``wsel`` and ``esq`` are untouched.  Runs after the row filter and
+        on the WCS-corrected shape, so the row set is unchanged and no row
+        is zeroed (there is no cut on |e|)."""
+        apply_optimal_shape_weight(
+            catalog, self.config.shape_weight_params,
+            shape_name=self.config.fpfs_prefix,
+        )
         return catalog
 
     def _collect_src_tables(self, srcList, tract=None,

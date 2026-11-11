@@ -32,6 +32,13 @@ import fitsio
 import numpy as np
 
 from xlens.analysis.cluster import HaloMcBiasMultibandPipe as ClusterPipe
+from xlens.utils.catalog.shape_weight import (
+    DEFAULT_SHAPE_WEIGHT_S2N,
+    add_shape_weight_arguments,
+    ds2n_column_name,
+    shape_weight_from_columns,
+    shape_weight_params_from_args,
+)
 
 colnames = [
     "wsel",
@@ -44,6 +51,17 @@ colnames = [
     "ra",
     "dec",
 ]
+
+
+def columns_for(s2n_name=None):
+    """Catalog columns to read; ``s2n_name`` (--use-optimal-shape) adds
+    the cross shear responses of the shape and the S/N columns the
+    optimal weight needs."""
+    cols = list(colnames)
+    if s2n_name:
+        cols += ["fpfs_de1_dg2", "fpfs_de2_dg1", s2n_name,
+                 ds2n_column_name(s2n_name, 1), ds2n_column_name(s2n_name, 2)]
+    return cols
 
 
 def parse_args() -> argparse.Namespace:
@@ -116,9 +134,12 @@ def parse_args() -> argparse.Namespace:
              "process_rot<r>-v<version>/ and writes partials to "
              "summary-v<version>/.",
     )
+    add_shape_weight_arguments(parser)
     args, unknown_args = parser.parse_known_args()
     if unknown_args:
         print("[warn] Ignoring unknown args:", unknown_args)
+    args.shape_weight_params = shape_weight_params_from_args(args)
+    args.summary_tag = "wopt" if args.use_optimal_shape else None
     if abs(args.pixel_scale - common.PIXEL_SCALE) > 1e-8:
         raise SystemExit(
             f"--pixel-scale {args.pixel_scale} does not match the skymap "
@@ -131,7 +152,7 @@ def radial_bin_edges(args) -> np.ndarray:
     return np.linspace(args.rmin, args.rmax, args.nbins + 1)
 
 
-def read_realization(layout, rot, sim_seed, version=None):
+def read_realization(layout, rot, sim_seed, version=None, s2n_name=None):
     """Read the 9 per-patch catalogs and the truth catalog of one
     (realization, rotation). Returns (catalog, truth) or None if any
     file is missing."""
@@ -147,7 +168,7 @@ def read_realization(layout, rot, sim_seed, version=None):
     ]
     if missing:
         return None
-    cats = [fitsio.read(p, columns=colnames) for p in cat_fnames]
+    cats = [fitsio.read(p, columns=columns_for(s2n_name)) for p in cat_fnames]
     catalog = np.concatenate(cats)
     truth = fitsio.read(
         truthfname, columns=["ra", "dec", "gamma1", "gamma2", "kappa"],
@@ -155,9 +176,14 @@ def read_realization(layout, rot, sim_seed, version=None):
     return catalog, truth
 
 
-def accumulate_bins(catalog, truth, edges):
+def accumulate_bins(catalog, truth, edges, shape_weight_params=None,
+                    s2n_name=DEFAULT_SHAPE_WEIGHT_S2N):
     """Per-radial-bin sums for one (realization, rotation) about the
-    halo centre (common.RA_CENTER, common.DEC_CENTER)."""
+    halo centre (common.RA_CENTER, common.DEC_CENTER).
+
+    With ``shape_weight_params`` the weight is ``wsel * w_opt`` and its
+    response ``dwsel/dg * w_opt + wsel * dw_opt/dg``, so the sums are of
+    ``e_opt = w_opt e`` with a consistent response."""
     ra = np.asarray(catalog["ra"], dtype=np.float64)
     dec = np.asarray(catalog["dec"], dtype=np.float64)
     angle = ClusterPipe.position_angle_ccw_from_east(
@@ -167,7 +193,15 @@ def accumulate_bins(catalog, truth, edges):
 
     e1 = catalog["fpfs_e1"]
     e2 = catalog["fpfs_e2"]
-    w = catalog["wsel"]
+    w = np.asarray(catalog["wsel"], dtype=np.float64)
+    dw1 = np.asarray(catalog["dwsel_dg1"], dtype=np.float64)
+    dw2 = np.asarray(catalog["dwsel_dg2"], dtype=np.float64)
+    if shape_weight_params:
+        wo, dwo1, dwo2 = shape_weight_from_columns(
+            catalog, shape_weight_params, shape_name="fpfs",
+            s2n_name=s2n_name,
+        )
+        w, dw1, dw2 = w * wo, dw1 * wo + w * dwo1, dw2 * wo + w * dwo2
     eT, eX = ClusterPipe._rotate_spin_2_vec(e1, e2, angle)
     r11, r22 = ClusterPipe._get_response_from_w_and_der(
         e1,
@@ -175,8 +209,8 @@ def accumulate_bins(catalog, truth, edges):
         w,
         catalog["fpfs_de1_dg1"],
         catalog["fpfs_de2_dg2"],
-        catalog["dwsel_dg1"],
-        catalog["dwsel_dg2"],
+        dw1,
+        dw2,
     )
     # Responses rotate as a (diagonal) matrix, not as a spin-2 vector.
     rT, rX = ClusterPipe._rotate_spin_2_matrix(r11, r22, angle)
@@ -239,11 +273,17 @@ def per_rank_work(args, edges):
         for rot in (0, 1):
             data = read_realization(
                 args.layout, rot, sim_seed, version=args.version,
+                s2n_name=(args.shape_weight_s2n
+                          if args.shape_weight_params else None),
             )
             if data is None:
                 continue
             catalog, truth = data
-            sums = accumulate_bins(catalog, truth, edges)
+            sums = accumulate_bins(
+                catalog, truth, edges,
+                shape_weight_params=args.shape_weight_params,
+                s2n_name=args.shape_weight_s2n,
+            )
             for key in keys:
                 row[key] += sums[key]
             n_rot += 1
@@ -261,14 +301,16 @@ def per_rank_work(args, edges):
 
 
 def save_partial(args, edges, stacked) -> str:
-    partdir = common.summary_outdir(args.layout, version=args.version)
+    partdir = common.summary_outdir(args.layout, version=args.version,
+                                    tag=args.summary_tag)
     path = os.path.join(partdir, f"seed_{args.min_id:05d}.npz")
     np.savez_compressed(path, edges=edges, **stacked)
     return path
 
 
 def load_and_stack_all(args):
-    partdir = common.summary_outdir(args.layout, version=args.version)
+    partdir = common.summary_outdir(args.layout, version=args.version,
+                                    tag=args.summary_tag)
     keys = [
         "sum_w_eT", "sum_w_eX", "sum_rT", "sum_rX",
         "sum_rT_gT_true", "n_gal",
@@ -345,7 +387,8 @@ def main() -> None:
 
         r_mid = 0.5 * (edges[:-1] + edges[1:])
         print("==============================================")
-        print(f"Catalog root: {common.summary_outdir(args.layout, version=args.version)}")
+        print("Catalog root: "
+              f"{common.summary_outdir(args.layout, version=args.version, tag=args.summary_tag)}")
         print(f"Realizations (rot0+rot1 combined): {n_real}")
         header = (
             f"{'r[arcsec]':>10} {'n_gal':>8} {'gT':>10} {'sigma_gT':>10} "

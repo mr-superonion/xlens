@@ -4,12 +4,8 @@ difference of the quantity it belongs to."""
 import numpy as np
 from astropy.table import Table
 
-from xlens.processor.merge import (
-    MergePipe,
-    MergePipeConfig,
-    shape_weight_f1,
-    shape_weight_f2,
-)
+from xlens.processor.merge import MergePipe, MergePipeConfig
+from xlens.utils.catalog.shape_weight import shape_weight_f1, shape_weight_f2
 
 BANDS = ["r", "i", "z"]
 FIXED = [0.3, 0.5, 0.2]
@@ -126,7 +122,7 @@ def test_snr2_derivatives_match_finite_difference():
 
 
 def test_shape_weight_applied_to_shape():
-    params = [3.0, 1.6, 14.0, 0.06, 0.0875, 0.565, 0.64]
+    params = [3.0, 1.6, 14.0, 0.06, 0.0875]
     pipe = _pipe(per_object_snr2_weights=True, shape_weight_params=params)
     plain = _pipe(per_object_snr2_weights=True)
     t = _perband()
@@ -148,11 +144,13 @@ def test_shape_weight_applied_to_shape():
     np.testing.assert_allclose(out["esq"], ref["esq"], rtol=1e-12)
     for i in (1, 2):
         np.testing.assert_allclose(out[f"fpfs1_e{i}"], np.asarray(ref[f"fpfs1_e{i}"]) * f1 * f2, rtol=1e-12)
-    # and fpfs1_de_i_dg_j is the derivative of the weighted shape (finite difference of the whole pipeline)
+    # and fpfs1_de_i_dg_j is the derivative of the weighted shape (finite
+    # difference of the whole pipeline)
     for j in (1, 2):
         plus, minus = finalize(pipe, _sheared(t, j, +1)), finalize(pipe, _sheared(t, j, -1))
         for i in (1, 2):
             fd = (np.asarray(plus[f"fpfs1_e{i}"]) - np.asarray(minus[f"fpfs1_e{i}"])) / (2 * DG)
             np.testing.assert_allclose(np.asarray(out[f"fpfs1_de{i}_dg{j}"]), fd, rtol=2e-5, atol=1e-7)
-    f2z, df2z = shape_weight_f2(np.array([0.64, 0.7]), *params[4:])
-    assert np.all(f2z == 0.0) and np.all(df2z == 0.0)
+    # no cut on |e|: the weight stays strictly positive at large |e|^2
+    f2z, df2z = shape_weight_f2(np.array([0.64, 0.7, 1.0]), *params[4:])
+    assert np.all(f2z > 0.0) and np.all(df2z < 0.0)

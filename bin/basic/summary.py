@@ -15,6 +15,12 @@ import numpy as np
 import numpy.lib.recfunctions as rfn
 
 from xlens.utils.catalog import measure_shear as _measure_shear_binned
+from xlens.utils.catalog.shape_weight import (
+    DEFAULT_SHAPE_WEIGHT_S2N,
+    add_shape_weight_arguments,
+    ds2n_column_name,
+    shape_weight_params_from_args,
+)
 from xlens.utils.constants import MAG_ZERO_AB
 
 
@@ -48,12 +54,17 @@ def _moment_flavour(shape_name: str) -> str:
     return "fpfs" if shape_name == "fpfs" else "fpfs1"
 
 
-def columns_for(shape_name: str) -> list:
+def columns_for(shape_name: str, s2n_name: Optional[str] = None) -> list:
+    """Catalog columns the estimator reads; ``s2n_name`` adds the S/N and
+    its responses that the optimal shape weight needs."""
     sn = shape_name + "_"
     flavour = _moment_flavour(shape_name)
     cols = list(BASE_COLS)
     cols += [sn + c for c in SHAPE_COLS]
     cols += [sn + c for c in MOMENT_COLS[flavour]]
+    if s2n_name:
+        cols += [s2n_name, ds2n_column_name(s2n_name, 1),
+                 ds2n_column_name(s2n_name, 2)]
     return list(dict.fromkeys(cols))
 
 
@@ -204,6 +215,7 @@ def parse_args() -> argparse.Namespace:
              "so several cut choices over the same catalogs can coexist: "
              "summary-flux-40-00[_<tag>]_<summary-tag>/.",
     )
+    add_shape_weight_arguments(parser)
     args, unknown_args = parser.parse_known_args()
     if unknown_args:
         print("[warn] Ignoring unknown args:", unknown_args)
@@ -211,17 +223,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def cat_read(layout, target, shear, mode, sim_id, version=None, tag=None,
-             shape_name="fpfs"):
+             shape_name="fpfs", s2n_name=None):
     outdir = common.process_outdir(layout, target, shear, mode,
                                    version=version, tag=tag)
     src = fitsio.read(common.cat_path(outdir, sim_id),
-                      columns=columns_for(shape_name))
+                      columns=columns_for(shape_name, s2n_name))
     return add_moment_aliases(src, shape_name)
 
 
 def measure_shear(src, flux_min=0.0, emax=0.3, trace_min=None, dg=0.02,
                   shape_name="fpfs",
-                  target="g1"):
+                  target="g1", shape_weight_params=None,
+                  shape_weight_s2n=DEFAULT_SHAPE_WEIGHT_S2N):
     """Selection + response, including the selection response.
 
     A thin wrapper over ``xlens.utils.catalog.measure_shear`` with no
@@ -235,6 +248,9 @@ def measure_shear(src, flux_min=0.0, emax=0.3, trace_min=None, dg=0.02,
       * ``trace_min=None`` by default -- no size cut, the setting the
         reference partials were made with (0.0 would already drop sources
         whose monopole is not positive)
+      * ``shape_weight_params`` (--use-optimal-shape) -- the optimal shape
+        weight folded into wsel, with its shear response; None leaves the
+        estimator weighted by wsel alone
 
     Returns a dict of 1-element arrays: e, r, r_sel, n_gal.
     """
@@ -252,6 +268,8 @@ def measure_shear(src, flux_min=0.0, emax=0.3, trace_min=None, dg=0.02,
         shape_name=shape_name,
         bands=("lsst_i",),
         ref_band="lsst_i",
+        shape_weight_params=shape_weight_params,
+        shape_weight_s2n=shape_weight_s2n,
     )
 
 
@@ -267,7 +285,10 @@ def per_rank_work(
     version: Optional[int] = None,
     tag: Optional[str] = None,
     shape_name: str = "fpfs",
+    shape_weight_params=None,
+    shape_weight_s2n: str = DEFAULT_SHAPE_WEIGHT_S2N,
 ):
+    s2n_name = shape_weight_s2n if shape_weight_params else None
     e_pos_rows = []
     e_neg_rows = []
     r_pos_rows = []
@@ -277,7 +298,7 @@ def per_rank_work(
     for sim_id in ids_chunk:
         src_pos = cat_read(
             layout, target, shear, mode=40, sim_id=sim_id, version=version,
-            tag=tag, shape_name=shape_name,
+            tag=tag, shape_name=shape_name, s2n_name=s2n_name,
         )
         out_pos = measure_shear(
             src=src_pos,
@@ -287,12 +308,14 @@ def per_rank_work(
             dg=dg,
             target=target,
             shape_name=shape_name,
+            shape_weight_params=shape_weight_params,
+            shape_weight_s2n=shape_weight_s2n,
         )
         del src_pos
         gc.collect()
         src_neg = cat_read(
             layout, target, shear, mode=0, sim_id=sim_id, version=version,
-            tag=tag, shape_name=shape_name,
+            tag=tag, shape_name=shape_name, s2n_name=s2n_name,
         )
         out_neg = measure_shear(
             src=src_neg,
@@ -302,6 +325,8 @@ def per_rank_work(
             dg=dg,
             target=target,
             shape_name=shape_name,
+            shape_weight_params=shape_weight_params,
+            shape_weight_s2n=shape_weight_s2n,
         )
         del src_neg
         gc.collect()
@@ -325,6 +350,7 @@ def per_rank_work(
 def summary_directory(
     layout: str, target: str, shear: float, version: Optional[int] = None,
     tag: Optional[str] = None, summary_tag: Optional[str] = None,
+    use_optimal_shape: bool = False,
 ) -> str:
     leaf = "summary-flux-40-00"
     if version is not None:
@@ -333,6 +359,8 @@ def summary_directory(
         leaf = f"{leaf}_{tag}"
     if summary_tag:
         leaf = f"{leaf}_{summary_tag}"
+    if use_optimal_shape:
+        leaf = f"{leaf}_wopt"
     return os.path.join(_shear_root(layout, target, shear), leaf)
 
 
@@ -350,9 +378,11 @@ def save_rank_partial(
     version: Optional[int] = None,
     tag: Optional[str] = None,
     summary_tag: Optional[str] = None,
+    use_optimal_shape: bool = False,
 ) -> str:
     partdir = summary_directory(layout, target, shear, version=version, tag=tag,
-                                summary_tag=summary_tag)
+                                summary_tag=summary_tag,
+                                use_optimal_shape=use_optimal_shape)
     os.makedirs(partdir, exist_ok=True)
     path = os.path.join(partdir, f"seed_{seed_index:05d}.npz")
     np.savez_compressed(
@@ -376,9 +406,11 @@ def load_and_stack_all(
     version: Optional[int] = None,
     tag: Optional[str] = None,
     summary_tag: Optional[str] = None,
+    use_optimal_shape: bool = False,
 ):
     partdir = summary_directory(layout, target, shear, version=version, tag=tag,
-                                summary_tag=summary_tag)
+                                summary_tag=summary_tag,
+                                use_optimal_shape=use_optimal_shape)
     arrays_E_pos: List[np.ndarray] = []
     arrays_E_neg: List[np.ndarray] = []
     arrays_R_pos: List[np.ndarray] = []
@@ -461,6 +493,7 @@ def main() -> None:
         raise SystemExit("--max-id must be > --min-id")
 
     flux_min = 10.0 ** ((MAG_ZERO_AB - args.mag_max) / 2.5)
+    shape_weight_params = shape_weight_params_from_args(args)
     if not args.summary:
         my_ids = np.arange(args.min_id, args.max_id, dtype=int)
         if len(my_ids) > 0:
@@ -476,6 +509,8 @@ def main() -> None:
                 version=args.version,
                 tag=args.tag,
                 shape_name=args.shape_name,
+                shape_weight_params=shape_weight_params,
+                shape_weight_s2n=args.shape_weight_s2n,
             )
             save_rank_partial(
                 args.layout,
@@ -491,6 +526,7 @@ def main() -> None:
                 version=args.version,
                 tag=args.tag,
                 summary_tag=args.summary_tag,
+                use_optimal_shape=args.use_optimal_shape,
             )
     else:
         all_e_pos, all_e_neg, all_r_pos, all_r_neg, all_n_pos, all_n_neg = \
@@ -498,6 +534,7 @@ def main() -> None:
                 args.layout, args.target, args.shear, ncut_expected=1,
                 version=args.version, tag=args.tag,
                 summary_tag=args.summary_tag,
+                use_optimal_shape=args.use_optimal_shape,
             )
 
         if all_e_pos.size == 0 or all_e_neg.size == 0:
@@ -557,6 +594,7 @@ def main() -> None:
         partdir = summary_directory(
             args.layout, args.target, args.shear, version=args.version,
             tag=args.tag, summary_tag=args.summary_tag,
+            use_optimal_shape=args.use_optimal_shape,
         )
         print(f"Partials dir: {partdir}")
         print(f"Cuts: mag_max={args.mag_max} emax={args.emax} "

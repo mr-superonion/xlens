@@ -28,6 +28,10 @@ SUMMARY_TAG=""              # --summary-tag STR (optional; names the CUTS)
 MAG_MAX=""                  # --mag-max F (optional; empty = script default)
 TRACE_MIN=""                # --trace-min F (optional; empty = script default)
 SHAPE_NAME=""               # --shape-name STR (optional; empty = summary.py default "fpfs")
+USE_OPTIMAL_SHAPE=false     # --use-optimal-shape (optional; optimal shape weight on)
+SHAPE_WEIGHT_PARAMS=""      # --shape-weight-params "AMP ALPHA SNR0 BETA ESQ_SCALE" (optional)
+SHAPE_WEIGHT_S2N=""         # --shape-weight-s2n STR (optional; empty = summary.py default)
+EXTRA=""                    # --extra "ARGS" (optional; appended verbatim to the python arguments)
 
 PYTHON_EXE_PATH="$(command -v python3 || true)"
 SCRIPT_PATH="summary.py"
@@ -73,6 +77,19 @@ Options:
   --shape-name STR      shape columns the estimator reads; injects
                         --shape-name STR (default: none = summary.py's
                         "fpfs"; e.g. "lsst_i_fpfs1")
+  --use-optimal-shape   weight the shapes by the optimal weight w_opt =
+                        f1(S/N) f2(|e|^2); injects --use-optimal-shape, so the
+                        partials go to a separate ..._wopt/ directory
+  --shape-weight-params "AMP ALPHA SNR0 BETA ESQ_SCALE"
+                        the five optimal-weight parameters; injects
+                        --shape-weight-params (default: none = summary.py's
+                        default values)
+  --shape-weight-s2n STR
+                        S/N column the optimal weight reads; injects
+                        --shape-weight-s2n STR (default: none = summary.py's
+                        default, lsst_i_s2n_fpfs1)
+  --extra "ARGS"        appended verbatim to the python arguments, for options
+                        this wrapper does not know
   --no-correction       add --no-correction to summary_seeds.py arguments
   --dry-run             print the generated submit file and exit
   -h, --help            show this help
@@ -112,6 +129,10 @@ while [[ $# -gt 0 ]]; do
     --mag-max)       MAG_MAX="$2"; shift 2 ;;
     --trace-min)     TRACE_MIN="$2"; shift 2 ;;
     --shape-name)    SHAPE_NAME="$2"; shift 2 ;;
+    --use-optimal-shape) USE_OPTIMAL_SHAPE=true; shift ;;
+    --shape-weight-params) SHAPE_WEIGHT_PARAMS="$2"; shift 2 ;;
+    --shape-weight-s2n) SHAPE_WEIGHT_S2N="$2"; shift 2 ;;
+    --extra)         EXTRA="$2"; shift 2 ;;
     --no-correction) NO_CORR=true; shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     -h|--help)       usage; exit 0 ;;
@@ -151,6 +172,17 @@ NO_CORR_ARG=""
 if $NO_CORR; then
   NO_CORR_ARG="--no-correction"
 fi
+OPTIMAL_SHAPE_ARG=""
+if $USE_OPTIMAL_SHAPE; then
+  OPTIMAL_SHAPE_ARG="--use-optimal-shape"
+fi
+if [[ -n "$SHAPE_WEIGHT_PARAMS" ]]; then
+  read -r -a _params <<< "$SHAPE_WEIGHT_PARAMS"
+  if (( ${#_params[@]} != 5 )); then
+    echo "Error: --shape-weight-params needs 5 numbers (got '${SHAPE_WEIGHT_PARAMS}')." >&2
+    exit 1
+  fi
+fi
 
 # -------------------------------
 # Generate submit description
@@ -183,6 +215,10 @@ arguments       = ${SCRIPT_PATH} \\
                   ${MAG_MAX:+--mag-max ${MAG_MAX}} \\
                   ${TRACE_MIN:+--trace-min ${TRACE_MIN}} \\
                   ${SHAPE_NAME:+--shape-name ${SHAPE_NAME}} \\
+                  ${OPTIMAL_SHAPE_ARG} \\
+                  ${SHAPE_WEIGHT_PARAMS:+--shape-weight-params ${SHAPE_WEIGHT_PARAMS}} \\
+                  ${SHAPE_WEIGHT_S2N:+--shape-weight-s2n ${SHAPE_WEIGHT_S2N}} \\
+                  ${EXTRA} \\
                   ${NO_CORR_ARG} \\
                   --min-id \$(start) --max-id \$(end)
 output          = ${JOB_LOG_DIR}/\$(ClusterId)_\$(ProcId)_seed\$(start).out

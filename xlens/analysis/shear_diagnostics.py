@@ -42,6 +42,11 @@ Shear convention (same as the cluster test): ``we_i = wsel * fpfs1_e_i``
 and the per-object response ``r_i = wsel * de_i/dg_i + dwsel/dg_i * e_i``;
 the cluster test's single ``sum_R`` is ``(sum_r1 + sum_r2) / 2``.
 
+With ``shape_weight_params`` set, the optimal shape weight ``w_opt =
+f1(fpfs1_s2n) f2(esq)`` (:mod:`xlens.utils.catalog.shape_weight`) is
+applied first, ``e_i <- w_opt e_i`` with the chain-rule response, so the
+sums above (and the ``|we|``/response histograms) are of ``e_opt``.
+
 The binning definitions live in the module-level registries below
 (:data:`PROPERTY_BINS`, :data:`HIST_BINS`, :data:`HIST2D_BINS`), plain
 code rather than configuration: each entry is a numpy expression over
@@ -62,7 +67,7 @@ from typing import Any
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np
-from lsst.pex.config import DictField, Field
+from lsst.pex.config import DictField, Field, ListField
 from lsst.pipe.base import (
     PipelineTask,
     PipelineTaskConfig,
@@ -70,6 +75,11 @@ from lsst.pipe.base import (
     Struct,
 )
 from numpy.typing import NDArray
+
+from ..utils.catalog.shape_weight import (
+    apply_optimal_shape_weight,
+    parse_shape_weight_params,
+)
 
 # ----------------------------------------------------------------------
 # Binning registries.  Axis = (expr, lo, hi, nbins, log); ``expr`` is a
@@ -618,6 +628,22 @@ class ShearStatsPipeConfig(
             "removes the detection weighting and its selection response."
         ),
     )
+    shape_weight_params = ListField[float](
+        doc=(
+            "Optimal shape weight ``w_opt = f1(fpfs1_s2n) * f2(esq)`` "
+            "applied to the selected catalog before the sums: "
+            "``fpfs1_e{1,2} <- w_opt * e`` and ``fpfs1_de{i}_dg{j} <- "
+            "w_opt * de + dw_opt/dg_j * e`` (chain rule through "
+            "``fpfs1_ds2n_dg{j}`` and ``desq_dg{j}``); wsel and esq stay "
+            "as they are. Five numbers ``[amp, alpha, snr0, beta, "
+            "esq_scale]`` (four = amp 1): ``f1(s) = amp * (s/50)**beta / "
+            "(1 + (snr0/s)**alpha)``, ``f2(v) = exp(-v/esq_scale)``; f2 "
+            "never reaches zero, there is no cut on |e|. Empty (default) "
+            "leaves the shape unweighted. Do not set it when MergePipe "
+            "already applied the same weight."
+        ),
+        default=[],
+    )
     psf_fwhm_max = Field[float](
         doc=(
             "Basic selection: keep i-band PSF FWHM < psf_fwhm_max "
@@ -627,6 +653,11 @@ class ShearStatsPipeConfig(
         ),
         default=0.8,
     )
+
+    def validate(self):
+        super().validate()
+        if len(self.shape_weight_params) != 0:
+            parse_shape_weight_params(self.shape_weight_params)
 
 
 class ShearStatsPipe(PipelineTask):
@@ -892,6 +923,14 @@ class ShearStatsPipe(PipelineTask):
 
         cat = cat[self._select(cat)]
         self.log.info("selected %d sources", len(cat))
+        if len(self.config.shape_weight_params) != 0:
+            # e <- w_opt e on the (copied) selected catalog, so the sums
+            # and the |we| / response histograms all see e_opt.
+            apply_optimal_shape_weight(cat, self.config.shape_weight_params)
+            self.log.info(
+                "applied optimal shape weight %s",
+                list(self.config.shape_weight_params),
+            )
 
         # Same estimator pieces as the cluster test.
         e1 = np.asarray(cat["fpfs1_e1"], dtype=np.float64)

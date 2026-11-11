@@ -39,15 +39,17 @@ MATCH_BAND = "i"
 MAG_MAX_TRUTH = 28.0
 
 # ------------------------------
-# Output directory
+# Output directory (override with XLENS_BASIC_TEST_DIR for local tests)
 # ------------------------------
 # The flagship2025 set.  The earlier tree (seeds 0-39999 with the noise drawn
-# in the simulation, Aug-Oct 2026) was renamed basic_shear_test_flagship2025_backup
-# on 2026-10-13; this one holds NOISELESS images (sim.py --no-image-noise), the
-# noise being added at processing time (process.py --add-noise).
-OUTPUT_ROOT = (
+# in the simulation, Aug-Oct 2026) was renamed
+# basic_shear_test_flagship2025_backup on 2026-10-13; this one holds
+# NOISELESS images (sim.py --no-image-noise), the noise being added at
+# processing time (process.py --add-noise).
+OUTPUT_ROOT = os.environ.get(
+    "XLENS_BASIC_TEST_DIR",
     "/gpfs/mnt/gpfs02/astro/astro_desc/data/simulation/image_simulation/"
-    "basic_shear_test_flagship2025"
+    "basic_shear_test_flagship2025",
 )
 
 

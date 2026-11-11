@@ -154,11 +154,17 @@ def process_outdir(layout, rot, version=None):
     return _outdir(layout, rot, "process", version=version)
 
 
-def summary_outdir(layout, version=None):
-    """Directory that holds summary.py partial files (shared by rot0/rot1)."""
+def summary_outdir(layout, version=None, tag=None):
+    """Directory that holds summary.py partial files (shared by rot0/rot1).
+
+    ``tag`` names a different estimator setting over the same catalogs
+    (summary.py uses "wopt" for --use-optimal-shape) so its partials
+    never mix with the plain ones."""
     leaf = "summary"
     if version is not None:
         leaf = f"{leaf}-v{int(version)}"
+    if tag:
+        leaf = f"{leaf}_{tag}"
     outdir = os.path.join(
         OUTPUT_ROOT,
         f"cluster_{layout}",
