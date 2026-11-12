@@ -30,7 +30,7 @@ from typing import Any
 
 import anacal
 import numpy as np
-from lsst.pex.config import Config, Field, FieldValidationError
+from lsst.pex.config import ChoiceField, Config, Field, FieldValidationError
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
@@ -70,6 +70,22 @@ class FpfsMeasurementConfig(Config):
     kmax_thres = Field[float](
         doc="threshold to determine the maximum k in Fourier space",
         default=1e-12,
+    )
+    shape_order = ChoiceField[int](
+        doc=(
+            "Order of the FPFS shear estimator (anacal.fpfs.FpfsConfig."
+            "shape_order): 2 measures the 9 shapelet modes through m44, "
+            "enough for e = m22 / (m00 + c0), its response and the "
+            "trace-size response dm20/dg; the q1, q2, dq*_dg* and "
+            "dm42*_dg* columns are then NaN.  4 measures the 12 modes "
+            "through m64 and fills the 4th-order estimator q too.  The "
+            "catalog columns are the same either way."
+        ),
+        default=2,
+        allowed={
+            2: "9 modes through m44: e and its response (q NaN)",
+            4: "12 modes through m64: e and q with their responses",
+        },
     )
     do_noise_bias_correction = Field[bool](
         doc="whether to doulbe the noise for noise bias correction",
@@ -139,6 +155,7 @@ class FpfsMeasurementTask(Task):
             sigma_shapelets1=self.config.sigma_shapelets1,
             sigma_shapelets2=self.config.sigma_shapelets2,
             c0=self.config.c0,
+            shape_order=self.config.shape_order,
         )
         return
 

@@ -164,10 +164,23 @@ def test_coadd_catalog_is_well_formed(measured):
     for band in BANDS:
         assert f"lsst_{band}_fpfs1_e1" in multi.dtype.names
 
+    # The default shape_order=2 measures the 9 shapelet modes through
+    # m44: the 4th-order estimator q and its responses are NaN by
+    # design, every other float column is finite.
+    nan_tail = ("_q1", "_q2", "_dq1_dg1", "_dq1_dg2", "_dq2_dg1",
+                "_dq2_dg2", "_dm42c_dg1", "_dm42c_dg2", "_dm42s_dg1",
+                "_dm42s_dg2")
+    n_nan = 0
     for name in multi.dtype.names:
         column = np.asarray(multi[name])
-        if np.issubdtype(column.dtype, np.floating):
+        if not np.issubdtype(column.dtype, np.floating):
+            continue
+        if "fpfs1" in name and name.endswith(nan_tail):
+            assert np.all(np.isnan(column)), f"'{name}' is not all NaN"
+            n_nan += 1
+        else:
             assert np.all(np.isfinite(column)), f"'{name}' is not finite"
+    assert n_nan == len(nan_tail) * len(BANDS)
 
     # The detection weights and their shear responses must still be live.
     assert np.all(multi["wsel"] >= 0.0)
