@@ -23,6 +23,7 @@ on is ``lsst_i`` rather than ``i_ab``.
 
 from types import SimpleNamespace
 
+import anacal
 import numpy as np
 import pytest
 from lsst.skymap.discreteSkyMap import (
@@ -97,15 +98,22 @@ def _simulate(skymap, truth, band):
     ).simExposure
 
 
-def _measure(handles, skymap, detection_bands, sigma_arcsec=None, return_pipe=False):
+def _measure(
+    handles, skymap, detection_bands, sigma_arcsec=None, return_pipe=False,
+    adaptive=False,
+):
     config = MeasureCoaddsPipeConfig()
     config.anacal.force_size = False
-    config.anacal.num_epochs = 0
+    # the adaptive kernel takes its size from the Gaussian fit
+    config.anacal.num_epochs = 5 if adaptive else 0
     config.anacal.do_noise_bias_correction = False
     if sigma_arcsec is not None:
         config.anacal.sigma_arcsec = sigma_arcsec
     config.fpfs.sigma_shapelets1 = 0.38 * np.sqrt(2.0)
     config.fpfs.do_noise_bias_correction = False
+    config.fpfs.adaptive_sigma = adaptive
+    if adaptive:
+        config.fpfs.adaptive_fpfs_kernel_ratio = 1.5  # afpfs2 as well
     config.detection_bands = detection_bands
     config.validate()
 
@@ -364,6 +372,45 @@ def test_detection_bands_validation():
     config.detection_bands = ["r", "i"]
     with pytest.raises(Exception, match="every detection band"):
         config.validate()
+
+
+def test_adaptive_kernel_through_the_pipe(scene):
+    """fpfs.adaptive_sigma adds the afpfs1 columns per band, sized from
+    the detector's fit, next to the unchanged fpfs1 ones."""
+    handles = make_exposure_handles(
+        scene.exposures, tract=TRACT_ID, patch=PATCH_ID, skyMap=scene.skymap,
+    )
+    cat = _measure(handles, scene.skymap, ["i"], adaptive=True)
+    names = cat.dtype.names
+    extra = [n for n in names if "afpfs" in n]
+    # forced measurement runs on every band, whatever detection_bands;
+    # afpfs1 and afpfs2 (ratio 1.5)
+    assert len(extra) == 2 * len(anacal.fpfs._adaptive_columns) * len(BANDS)
+    assert "lsst_i_afpfs1_e1" in names and "s2n_afpfs1" not in names
+    assert "lsst_i_s2n_afpfs1" in names
+    floor = 0.38 * np.sqrt(2.0)
+    # the larger ratio gives the larger kernel wherever the fitted size
+    # lifts afpfs1 off the floor (a noisy fit can put T at or below zero)
+    s1 = np.asarray(cat["lsst_i_afpfs1_sigma"])
+    s2 = np.asarray(cat["lsst_i_afpfs2_sigma"])
+    off_floor = s1 > 1.02 * floor
+    assert off_floor.sum() > 100
+    assert np.all(s2[off_floor] > s1[off_floor])
+    sigma = np.asarray(cat["lsst_i_afpfs1_sigma"])
+    assert np.all(sigma > floor) and np.all(sigma < 3.0 * floor)
+    assert np.any(cat["lsst_i_afpfs1_dsigma_dg1"] != 0.0)
+    for n in extra:
+        column = np.asarray(cat[n])
+        if n.endswith(("_q1", "_q2", "_dq1_dg1", "_dq1_dg2", "_dq2_dg1",
+                       "_dq2_dg2", "_dm42c_dg1", "_dm42c_dg2",
+                       "_dm42s_dg1", "_dm42s_dg2")):
+            assert np.all(np.isnan(column)), n
+        else:
+            assert np.all(np.isfinite(column)), n
+    # a larger kernel: smaller |e| on average than the fixed one
+    assert np.mean(np.abs(cat["lsst_i_afpfs1_e1"])) < np.mean(
+        np.abs(cat["lsst_i_fpfs1_e1"])
+    )
 
 
 def test_fixed_sigma_through_the_pipe(scene, measured):

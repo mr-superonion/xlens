@@ -71,6 +71,48 @@ class FpfsMeasurementConfig(Config):
         doc="threshold to determine the maximum k in Fourier space",
         default=1e-12,
     )
+    adaptive_sigma = Field[bool](
+        doc=(
+            "Also measure the adaptive kernel ``afpfs1`` "
+            "(anacal.fpfs.FpfsConfig.adaptive_sigma): every source with "
+            "its own kernel size sigma^2 = floor^2 + T / 2, T the trace of "
+            "the detector's fitted intrinsic covariance (mxx + myy of the "
+            "detection catalog), with the size's shear response folded "
+            "into every response.  Columns: those of the fixed kernels "
+            "plus sigma, dsigma_dg1, dsigma_dg2.  The fixed kernels fpfs1 "
+            "(and fpfs2) are measured regardless."
+        ),
+        default=False,
+    )
+    adaptive_fpfs_kernel_ratio = Field[float](
+        doc=(
+            "Second adaptive kernel afpfs2, measured when this is >= 1.1 "
+            "(and adaptive_sigma is on): sigma^2 = floor^2 + ratio^2 T / 2. "
+            "Below 1.1 no afpfs2 is measured."
+        ),
+        default=1.0,
+    )
+    adaptive_sigma_floor = Field[float](
+        doc=(
+            "Floor of the adaptive kernel size [arcsec]; <= 0 uses "
+            "sigma_shapelets1."
+        ),
+        default=-1,
+    )
+    adaptive_sigma_max = Field[float](
+        doc=(
+            "Smooth cap of the adaptive kernel size [arcsec]; <= 0 uses "
+            "three times the floor.  Must stay below 3 arcsec."
+        ),
+        default=-1,
+    )
+    adaptive_grid_step = Field[float](
+        doc=(
+            "Relative spacing of the size grid the adaptive basis is "
+            "tabulated on (cubic interpolation between nodes)."
+        ),
+        default=0.02,
+    )
     shape_order = ChoiceField[int](
         doc=(
             "Order of the FPFS shear estimator (anacal.fpfs.FpfsConfig."
@@ -156,6 +198,11 @@ class FpfsMeasurementTask(Task):
             sigma_shapelets2=self.config.sigma_shapelets2,
             c0=self.config.c0,
             shape_order=self.config.shape_order,
+            adaptive_sigma=self.config.adaptive_sigma,
+            adaptive_fpfs_kernel_ratio=self.config.adaptive_fpfs_kernel_ratio,
+            adaptive_sigma_floor=self.config.adaptive_sigma_floor,
+            adaptive_sigma_max=self.config.adaptive_sigma_max,
+            adaptive_grid_step=self.config.adaptive_grid_step,
         )
         return
 
@@ -234,15 +281,19 @@ class FpfsMeasurementTask(Task):
         """
         assert isinstance(self.config, FpfsMeasurementConfig)
         if detection is not None:
-            fpfs_peaks_dtype = np.dtype(
-                [
-                    ("y", np.float64),
-                    ("x", np.float64),
+            fields = [("y", np.float64), ("x", np.float64)]
+            if self.config.adaptive_sigma:
+                # the adaptive kernel's size comes from the detector's
+                # Gaussian fit (intrinsic covariance + shear response)
+                fields += [
+                    (c, np.float64) for c in anacal.fpfs.ADAPTIVE_FIT_COLUMNS
                 ]
-            )
-            det = np.zeros(len(detection), dtype=fpfs_peaks_dtype)
+            det = np.zeros(len(detection), dtype=np.dtype(fields))
             det["x"] = detection["x1_det"] / pixel_scale - begin_x
             det["y"] = detection["x2_det"] / pixel_scale - begin_y
+            for c in anacal.fpfs.ADAPTIVE_FIT_COLUMNS:
+                if c in det.dtype.names:
+                    det[c] = detection[c]
         else:
             det = None
         # Native per-source PSF: hand the C++ ForceTask the model
