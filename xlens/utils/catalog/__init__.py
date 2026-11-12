@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from . import model, redshift, shape_weight, skymap, utils
+from . import model, redshift, shape_weight, shape_weight_fit, skymap, utils
 from .base import ShearEstimator, get_esq, measure_shear
 from .shape_weight import (
     apply_optimal_shape_weight,
@@ -40,6 +40,7 @@ __all__ = [
     "ShearEstimator",
     "multiband_shapelets2ell",
     "shape_weight",
+    "shape_weight_fit",
     "apply_optimal_shape_weight",
     "optimal_shape_weight",
     "shape_weight_from_columns",
