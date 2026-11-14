@@ -59,9 +59,13 @@ __all__ = [
 #: Parameter vector layout; the four-element form without ``amp`` means
 #: amp 1.
 SHAPE_WEIGHT_PARAM_NAMES = ("amp", "alpha", "snr0", "beta", "esq_scale")
-#: The only parameter set recorded so far (the MergePipe test fixture);
-#: a placeholder until a survey or simulation fit is stored.
-DEFAULT_SHAPE_WEIGHT_PARAMS = (3.0, 1.6, 14.0, 0.06, 0.0875)
+#: The HSC PDR3 v2 best fit (spectral renoising; AnaCal 6327d7d, xlens
+#: 859237b): :func:`xlens.utils.catalog.shape_weight_fit.fit_shape_weight`
+#: on the unweighted merge of all 406 tracts, selection ``fpfs1_s2n > 5``,
+#: ``hsc_i_mag_fpfs1 < 25.5``, trace ``(m00 + m20) / m00 > 0.05`` (65.1 M
+#: objects, half the tracts held out).  Held-out sigma(W e) / <R> = 0.3527
+#: against 0.3931 with ``wsel`` alone: 1.24 times the effective number.
+DEFAULT_SHAPE_WEIGHT_PARAMS = (1.8986, 1.3477, 13.478, 0.040904, 0.076129)
 #: S/N column the per-image (unmerged) catalogs carry: the i-band forced
 #: FPFS flux S/N written by AnaCal, with ``lsst_i_ds2n_fpfs1_dg{1,2}``.
 DEFAULT_SHAPE_WEIGHT_S2N = "lsst_i_s2n_fpfs1"
@@ -250,7 +254,7 @@ def add_shape_weight_arguments(parser) -> None:
         help="Optimal-weight parameters [amp, alpha, snr0, beta, "
              "esq_scale]: f1(s) = amp (s/50)^beta / (1 + (snr0/s)^alpha), "
              "f2(v) = exp(-v/esq_scale) with v = |e|^2 (no cut on |e|). "
-             "Default: the MergePipe test-fixture values "
+             "Default: the HSC PDR3 v2 best fit "
              f"{list(DEFAULT_SHAPE_WEIGHT_PARAMS)}.",
     )
     parser.add_argument(
