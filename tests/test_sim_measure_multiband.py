@@ -190,6 +190,24 @@ def test_coadd_catalog_is_well_formed(measured):
             assert np.all(np.isfinite(column)), f"'{name}' is not finite"
     assert n_nan == len(nan_tail) * len(BANDS)
 
+    # The flux-only kernels ride in the fpfs1 pass (default sizes
+    # 0.52 and 0.65 arcsec, reconvolution 0.4): per band the flux
+    # family and its magnitudes, finite, with a live shear response.
+    for band in BANDS:
+        for fam in ("gauss1", "gauss2"):
+            for col in (
+                f"lsst_{band}_flux_{fam}", f"lsst_{band}_dflux_{fam}_dg1",
+                f"lsst_{band}_flux_{fam}_err", f"lsst_{band}_s2n_{fam}",
+                f"lsst_{band}_ds2n_{fam}_dg2", f"lsst_{band}_mag_{fam}",
+                f"lsst_{band}_dmag_{fam}_err_dg1",
+            ):
+                assert col in multi.dtype.names, col
+        assert np.any(multi[f"lsst_{band}_dflux_gauss1_dg1"] != 0.0)
+        # the wider window holds more of a resolved source's light
+        assert np.median(
+            multi[f"lsst_{band}_flux_gauss2"] / multi[f"lsst_{band}_flux_gauss1"]
+        ) > 1.0
+
     # The detection weights and their shear responses must still be live.
     assert np.all(multi["wsel"] >= 0.0)
     assert np.sum(multi["wsel"]) > 0.0
@@ -384,8 +402,12 @@ def test_adaptive_kernel_through_the_pipe(scene):
     names = cat.dtype.names
     extra = [n for n in names if "afpfs" in n]
     # forced measurement runs on every band, whatever detection_bands;
-    # afpfs1 and afpfs2 (ratio 1.5)
-    assert len(extra) == 2 * len(anacal.fpfs._adaptive_columns) * len(BANDS)
+    # afpfs1 and afpfs2 (ratio 1.5), each with the six magnitude columns
+    # every flux family gets (add_magnitude_columns)
+    n_mag = 6
+    assert len(extra) == 2 * (
+        len(anacal.fpfs._adaptive_columns) + n_mag
+    ) * len(BANDS)
     assert "lsst_i_afpfs1_e1" in names and "s2n_afpfs1" not in names
     assert "lsst_i_s2n_afpfs1" in names
     floor = 0.38 * np.sqrt(2.0)

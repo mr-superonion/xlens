@@ -30,7 +30,13 @@ from typing import Any
 
 import anacal
 import numpy as np
-from lsst.pex.config import ChoiceField, Config, Field, FieldValidationError
+from lsst.pex.config import (
+    ChoiceField,
+    Config,
+    Field,
+    FieldValidationError,
+    ListField,
+)
 from lsst.pipe.base import Task
 from numpy.typing import NDArray
 
@@ -58,6 +64,40 @@ class FpfsMeasurementConfig(Config):
         doc="Shapelet's Gaussian kernel for the second measurement [arcsec]",
         optional=True,
         default=-1,
+    )
+    sigma_psf = Field[float](
+        doc=(
+            "Reconvolution PSF width [arcsec] of the m00 -> flux conversion "
+            "(anacal.fpfs.m00_to_flux): the flux columns are then the "
+            "Gaussian-aperture flux of the deconvolved image reconvolved "
+            "with this Gaussian, in the window "
+            "sqrt(sigma_shapelets^2 - sigma_psf^2), normalised as the "
+            "former flux_gauss columns were (flux = m00 4 pi sigma_w^2). "
+            "Must be smaller than every kernel size in use. <= 0 is the "
+            "symmetric split sigma_shapelets / sqrt(2), flux = m00 2 pi "
+            "sigma_shapelets^2 (the total flux of a point source)."
+        ),
+        default=-1,
+    )
+    flux_gauss_sigmas = ListField[float](
+        doc=(
+            "Kernel sizes [arcsec] of the extra flux-only kernels measured "
+            "in the fpfs1 pass (anacal.fpfs.FpfsConfig.flux_gauss_sigmas): "
+            "the i-th gives the per-band family flux_gauss{i+1}, "
+            "dflux_gauss{i+1}_dg{1,2}, flux_gauss{i+1}_err, s2n_gauss{i+1}, "
+            "ds2n_gauss{i+1}_dg{1,2} (plus the magnitudes), the "
+            "Gaussian-aperture flux in the window "
+            "sqrt(sigma^2 - flux_gauss_sigma_psf^2) of the image reconvolved "
+            "with flux_gauss_sigma_psf. Empty disables them."
+        ),
+        default=[0.52, 0.65],
+    )
+    flux_gauss_sigma_psf = Field[float](
+        doc=(
+            "Reconvolution PSF width [arcsec] of the flux_gauss conversion; "
+            "must be smaller than every flux_gauss_sigmas."
+        ),
+        default=0.4,
     )
     c0 = Field[float](
         doc=(
@@ -160,6 +200,33 @@ class FpfsMeasurementConfig(Config):
                 self,
                 "sigma_shapelets2 in a wrong range",
             )
+        for sg in self.flux_gauss_sigmas:
+            if not 0 < sg < 3.0:
+                raise FieldValidationError(
+                    self.__class__.flux_gauss_sigmas,
+                    self,
+                    "flux_gauss_sigmas must lie in (0, 3) arcsec",
+                )
+            if not self.flux_gauss_sigma_psf < sg:
+                raise FieldValidationError(
+                    self.__class__.flux_gauss_sigma_psf,
+                    self,
+                    "flux_gauss_sigma_psf must be smaller than every "
+                    f"flux_gauss_sigmas ({list(self.flux_gauss_sigmas)})",
+                )
+        if self.sigma_psf > 0 and self.sigma_shapelets1 > 0:
+            kernels = [self.sigma_shapelets1]
+            if self.sigma_shapelets2 > 0:
+                kernels.append(self.sigma_shapelets2)
+            if self.adaptive_sigma and self.adaptive_sigma_floor > 0:
+                kernels.append(self.adaptive_sigma_floor)
+            if not self.sigma_psf < min(kernels):
+                raise FieldValidationError(
+                    self.__class__.sigma_psf,
+                    self,
+                    "sigma_psf must be smaller than every kernel size "
+                    f"in use ({kernels})",
+                )
         if self.noiseId < 0:
             raise FieldValidationError(
                 self.__class__.noiseId,
@@ -196,6 +263,9 @@ class FpfsMeasurementTask(Task):
             kmax_thres=self.config.kmax_thres,
             sigma_shapelets1=self.config.sigma_shapelets1,
             sigma_shapelets2=self.config.sigma_shapelets2,
+            sigma_psf=self.config.sigma_psf,
+            flux_gauss_sigmas=tuple(float(s) for s in self.config.flux_gauss_sigmas),
+            flux_gauss_sigma_psf=self.config.flux_gauss_sigma_psf,
             c0=self.config.c0,
             shape_order=self.config.shape_order,
             adaptive_sigma=self.config.adaptive_sigma,

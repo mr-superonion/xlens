@@ -62,6 +62,7 @@ from ..utils.catalog.shape_weight import (
     apply_optimal_shape_weight,
     parse_shape_weight_params,
 )
+from ..utils.catalog.utils import flux_families
 from ..utils.columns import MODEL_COLUMNS
 from ..utils.constants import FPFS_C0
 from ..wcs import extract_perturbation_dm_wcs, sky_to_pixel
@@ -676,6 +677,29 @@ class MergePipe(PipelineTask):
                     f"{b}_dmag_fpfs1_err_dg2",
                 ]
             )
+            # Other flux families the measurement carries (the
+            # flux-only kernels flux_gauss1/2, a second fixed kernel
+            # fpfs2): the same 13 columns per band, when present.
+            for fam in flux_families(catalog.colnames):
+                if fam == "fpfs1":
+                    continue
+                for col in (
+                    f"{b}_flux_{fam}",
+                    f"{b}_dflux_{fam}_dg1",
+                    f"{b}_dflux_{fam}_dg2",
+                    f"{b}_flux_{fam}_err",
+                    f"{b}_s2n_{fam}",
+                    f"{b}_ds2n_{fam}_dg1",
+                    f"{b}_ds2n_{fam}_dg2",
+                    f"{b}_mag_{fam}",
+                    f"{b}_dmag_{fam}_dg1",
+                    f"{b}_dmag_{fam}_dg2",
+                    f"{b}_mag_{fam}_err",
+                    f"{b}_dmag_{fam}_err_dg1",
+                    f"{b}_dmag_{fam}_err_dg2",
+                ):
+                    if col in catalog.colnames:
+                        keep.append(col)
             # Optional per-band columns.
             for col in (
                 # Coadd depth at the source: the Gaussian-weighted mean

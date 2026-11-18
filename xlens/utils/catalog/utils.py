@@ -175,14 +175,33 @@ def mag_shear_response(
     return mag, sigma_m, dmag_dg1, dmag_dg2, dsigma_m_dg1, dsigma_m_dg2
 
 
+def flux_families(names) -> tuple[str, ...]:
+    """The flux-family tokens a catalog carries: every ``fam`` with a
+    ``{b}_flux_{fam}`` column (not the ``_err`` one), ``fpfs1`` first
+    and the rest in order of appearance, e.g. ``("fpfs1", "gauss1",
+    "gauss2")``."""
+    out: list[str] = []
+    for col in names:
+        if col.endswith("_err") or "_flux_" not in col:
+            continue
+        fam = col.rsplit("_flux_", 1)[1]
+        if fam and fam not in out:
+            out.append(fam)
+    if "fpfs1" in out:
+        out.remove("fpfs1")
+        out.insert(0, "fpfs1")
+    return tuple(out)
+
+
 def add_magnitude_columns(
     catalog: NDArray,
     mag_zero: float,
-    families: tuple[str, ...] = ("fpfs1",),
+    families: tuple[str, ...] | None = None,
 ) -> NDArray:
     """Append per-band AB magnitude + shear response for each flux family.
 
-    For every band ``b`` and family ``fam`` in ``families`` for which the
+    For every band ``b`` and family ``fam`` in ``families`` (None: every
+    family the catalog carries, :func:`flux_families`) for which the
     catalog carries a flux ``{b}_flux_{fam}`` and its shear response
     ``{b}_dflux_{fam}_dg1`` / ``{b}_dflux_{fam}_dg2``, append (on the fixed
     ``mag_zero`` zeropoint, via the smooth-truncated :func:`flux_to_mag`)::
@@ -204,6 +223,8 @@ def add_magnitude_columns(
     if names is None:
         return catalog
     nameset = set(names)
+    if families is None:
+        families = flux_families(names)
     new_names: list[str] = []
     new_cols: list[NDArray] = []
     for fam in families:
