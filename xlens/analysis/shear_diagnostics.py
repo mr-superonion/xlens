@@ -117,6 +117,16 @@ PROPERTY_BINS = {
     "i_flux_err": ("SURVEY_i_flux_fpfs1_err", 46.0, 82.0, 10, False),
     "z_flux_err": ("SURVEY_z_flux_fpfs1_err", 95.0, 130.0, 10, False),
     "y_flux_err": ("SURVEY_y_flux_fpfs1_err", 200.0, 275.0, 10, False),
+    # The same flux errors averaged over sky pixels (a HEALPix map of the
+    # per-pixel mean, attached to the catalog by the caller as the columns
+    # map_<b>_flux_err). A cut on these follows the survey's depth pattern
+    # without the object-to-object scatter that makes a per-object cut
+    # ragged. Skipped, like any property, when the columns are absent.
+    "g_flux_err_map": ("map_g_flux_err", 22.0, 32.0, 10, False),
+    "r_flux_err_map": ("map_r_flux_err", 37.0, 52.0, 10, False),
+    "i_flux_err_map": ("map_i_flux_err", 46.0, 82.0, 10, False),
+    "z_flux_err_map": ("map_z_flux_err", 95.0, 130.0, 10, False),
+    "y_flux_err_map": ("map_y_flux_err", 200.0, 275.0, 10, False),
     "g_mag": ("SURVEY_g_mag_fpfs1", 21.0, 27.0, 12, False),
     "r_mag": ("SURVEY_r_mag_fpfs1", 20.0, 25.5, 11, False),
     "z_mag": ("SURVEY_z_mag_fpfs1", 19.5, 25.0, 11, False),
@@ -242,6 +252,9 @@ for _b in "grizy":
     )
     HIST_BINS["%s_flux_err" % _b] = (
         "SURVEY_%s_flux_fpfs1_err" % _b, 15.0, 900.0, 80, True,
+    )
+    HIST_BINS["%s_flux_err_map" % _b] = (
+        "map_%s_flux_err" % _b, 15.0, 900.0, 80, True,
     )
     _bxx = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_xx"
     _byy = f"SURVEY_{_b}_ext_shapeHSM_HsmPsfMoments_yy"
@@ -465,6 +478,14 @@ class ShearStatsPipeConfig(
             "those sentinels reach the 99.9th percentile in g and y. "
             "Left in, they land in the extreme colour bins and dominate "
             "them. The i band is already covered by mag_max."
+        ),
+    )
+    snr_min_bands = DictField(
+        keytype=str, itemtype=float, default={},
+        doc=(
+            "Per-band LOWER limit on {survey}_{band}_s2n_fpfs1, e.g. "
+            "{'r': 6.0}, applied in addition to snr_min. Empty means no "
+            "per-band S/N cut."
         ),
     )
     flux_err_min_bands = DictField(
@@ -761,6 +782,17 @@ class ShearStatsPipe(PipelineTask):
                 continue
             m = np.asarray(cat[col], dtype=np.float64)
             sel &= np.isfinite(m) & (m < hi)
+
+        # Per-band S/N floor, on top of the snr_min cut.
+        for band, lo in sorted(self.config.snr_min_bands.items()):
+            col = self._col("%s_s2n_fpfs1" % band)
+            if col not in (cat.dtype.names or ()):
+                self.log.warning(
+                    "S/N cut skipped for band %s: no %s", band, col
+                )
+                continue
+            sb = np.asarray(cat[col], dtype=np.float64)
+            sel &= np.isfinite(sb) & (sb > lo)
 
         # Per-band flux-error window (a depth/seeing selection).
         for band in sorted(
