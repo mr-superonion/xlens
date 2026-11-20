@@ -50,6 +50,7 @@ def _read_diffsky():
 # Passing it unconditionally below is therefore safe for all three.
 SPECS = {
     "catsim2017": dict(
+        file="OneDegSq.fits",
         cls=lambda: xlens.simulator.galaxies.CatSim2017Catalog,
         read=_read_catsim,
         mag_col="i_ab",          # column used for selection cuts
@@ -58,6 +59,7 @@ SPECS = {
         extra_cols=("i_ab",),
     ),
     "flagship2025": dict(
+        file="flagship_cosmos.fits",
         cls=lambda: xlens.simulator.galaxies.Flagship2025Catalog,
         read=_read_flagship,
         mag_col="lsst_i",
@@ -66,6 +68,7 @@ SPECS = {
         extra_cols=("lsst_i", "disk_r50"),
     ),
     "diffsky": dict(
+        file="diffsky2026.fits",
         cls=lambda: xlens.simulator.galaxies.DiffskyCatalog,
         read=_read_diffsky,
         mag_col="lsst_i_disk",
@@ -78,7 +81,30 @@ SPECS = {
     ),
 }
 
-ALL_CATALOGS = list(SPECS.keys())
+
+
+# Catalogs whose input file may be absent from $CATSIM_DIR: their cases are
+# skipped then.  Every other catalog (CatSim, Flagship) is REQUIRED -- a
+# missing file fails the tests, it is never skipped.
+OPTIONAL_CATALOGS = ("diffsky",)
+
+
+def _catalog_param(name):
+    """``name`` as a pytest parameter; an optional catalog is skipped when its
+    input file is not under $CATSIM_DIR."""
+    if name not in OPTIONAL_CATALOGS:
+        return name
+    path = os.path.join(os.environ.get("CATSIM_DIR", ""), SPECS[name]["file"])
+    return pytest.param(
+        name,
+        marks=pytest.mark.skipif(
+            not os.path.isfile(path),
+            reason=f"{SPECS[name]['file']} not found under $CATSIM_DIR",
+        ),
+    )
+
+
+ALL_CATALOGS = [_catalog_param(name) for name in SPECS]
 
 
 def _bright_finite_idx(cat, spec):

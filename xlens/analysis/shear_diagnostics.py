@@ -434,8 +434,29 @@ class ShearStatsPipeConfig(
         default="hsc",
     )
     mag_max = Field[float](
-        doc="Basic selection: keep {survey}_i_mag_fpfs1 < mag_max (finite).",
+        doc="Basic selection: keep {survey}_i_mag_{mag_kind} < mag_max (finite).",
         default=25.0,
+    )
+    mag_kind = Field[str](
+        doc=(
+            "Which magnitude every magnitude cut, colour cut and magnitude / "
+            "colour binning reads: ``{survey}_{band}_mag_{mag_kind}``. "
+            "'fpfs1' (default) is the FPFS shapelet flux; 'gauss1' / "
+            "'gauss2' are the fixed-aperture Gaussian fluxes -- the ones to "
+            "use when the FPFS kernel follows the PSF, since then the fpfs1 "
+            "magnitude is not a fixed-aperture magnitude."
+        ),
+        default="fpfs1",
+    )
+    flux_err_kind = Field[str](
+        doc=(
+            "Which flux error the flux-error cuts and bins read: "
+            "``{survey}_{band}_flux_{flux_err_kind}_err``. 'fpfs1' "
+            "(default), or 'gauss1' / 'gauss2' for the fixed-aperture "
+            "Gaussian flux errors (a depth / seeing measure that does not "
+            "move with a PSF-following FPFS kernel)."
+        ),
+        default="fpfs1",
     )
     snr_column = Field[str](
         doc=(
@@ -697,9 +718,20 @@ class ShearStatsPipe(PipelineTask):
         butlerQC.put(outputs, outputRefs)
 
     def _col(self, suffix: str) -> str:
-        """``lsst_i_mag_fpfs1`` from ``i_mag_fpfs1``."""
+        """``lsst_i_mag_fpfs1`` from ``i_mag_fpfs1`` (the magnitude kind
+        follows ``config.mag_kind``)."""
         assert isinstance(self.config, ShearStatsPipeConfig)
-        return "%s_%s" % (self.config.survey, suffix)
+        return "%s_%s" % (self.config.survey, self._mag_kind(suffix))
+
+    def _mag_kind(self, expr: str) -> str:
+        """Point the ``_mag_fpfs1`` / ``_flux_fpfs1_err`` columns of ``expr``
+        at config.mag_kind / config.flux_err_kind."""
+        assert isinstance(self.config, ShearStatsPipeConfig)
+        return expr.replace(
+            "_mag_fpfs1", "_mag_" + self.config.mag_kind
+        ).replace(
+            "_flux_fpfs1_err", "_flux_%s_err" % self.config.flux_err_kind
+        )
 
     def _localize(self, expr: str) -> str:
         """Bind a registry expression to this survey.
@@ -714,7 +746,9 @@ class ShearStatsPipe(PipelineTask):
         in place), so a FWHM is ``2.3548 * sqrt(0.5*(xx+yy))`` as is.
         """
         assert isinstance(self.config, ShearStatsPipeConfig)
-        return expr.replace("SURVEY_", self.config.survey + "_")
+        return self._mag_kind(expr).replace(
+            "SURVEY_", self.config.survey + "_"
+        )
 
     def _bin_ranges(self) -> dict:
         """``{property: (lo, hi)}`` from ``config.bin_ranges_file``."""

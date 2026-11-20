@@ -70,8 +70,16 @@ def _combined(pipe, t):
     return pipe._combine_band_moments(t.copy(), what, dwhat)
 
 
+def test_snr2_weights_are_the_default():
+    cfg = MergePipeConfig()
+    assert cfg.per_object_snr2_weights
+    # no fixed band_weights needed: the fallback is then the derived one
+    cfg.bands = BANDS
+    cfg.validate()
+
+
 def test_fixed_weights_unchanged():
-    pipe = _pipe()
+    pipe = _pipe(per_object_snr2_weights=False)
     t = _perband()
     out = _combined(pipe, t)
     p = pipe.config.fpfs_prefix

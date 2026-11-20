@@ -186,11 +186,13 @@ class MergePipeConfig(
             "Optional fixed band weights matching ``bands`` (need not be "
             "normalised). When empty, weights are derived from the median "
             "1/(``{band}_flux_fpfs1_err``)**2 of the stacked catalog.\n\n"
-            "PREFER fixed weights for production: a derived weight "
-            "makes the estimator differ from tract to tract, and any "
-            "weight built from the data carries a shear dependence "
-            "that the response does not account for. Derive them once "
-            "with the HSC compute script and pass the numbers here."
+            "With ``per_object_snr2_weights`` (the default) these are only "
+            "the FALLBACK for rows whose S/N are unusable, and a 0 excludes "
+            "that band from the combination. With it off they are the "
+            "weights themselves; then PREFER fixed values for production: "
+            "a derived weight makes the estimator differ from tract to "
+            "tract, and any weight built from the data carries a shear "
+            "dependence that the response does not account for."
         ),
         default=[],
     )
@@ -204,9 +206,12 @@ class MergePipeConfig(
             "``fpfs1_s2n``, so the estimator stays unbiased. A band given a "
             "fixed weight of 0 in ``band_weights`` is excluded here too; a "
             "row whose S/N are all unusable falls back to the fixed weights "
-            "with no weight response."
+            "(``band_weights``, or the derived ones when that is empty) with "
+            "no weight response. On by default: against fixed weights it "
+            "lowers the shape noise at equal response and keeps the combined "
+            "m00 away from zero, since a band with no signal gets no weight."
         ),
-        default=False,
+        default=True,
     )
     shape_weight_params = ListField[float](
         doc=(
@@ -294,10 +299,6 @@ class MergePipeConfig(
             raise ValueError("band_weights, when set, must have the same length as bands")
         if len(self.shape_weight_params) != 0:
             parse_shape_weight_params(self.shape_weight_params)
-        if self.per_object_snr2_weights and len(self.band_weights) == 0:
-            raise ValueError(
-                "per_object_snr2_weights needs band_weights "
-                "(the fallback weights, 0 to exclude a band)")
 
 
 class MergePipe(PipelineTask):
