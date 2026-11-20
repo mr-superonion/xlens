@@ -52,10 +52,14 @@ from ..utils.image import (
     cell_coadd_to_exposure,
     rle_table_to_mask,
     make_psf_stamp_exposure,
+    generate_filler_noise,
     prepare_data_one_cell,
     prepare_data_one_cell_multiband,
 )
 from .measure_base import AnacalMeasureTaskBase, MeasureBandsConfigBase
+
+# band slots of the 6-band systematics arrays (noise correlation, PSF)
+BAND_ORDER = "ugrizy"
 
 
 class MeasureCellCoaddsPipeConnections(
@@ -97,6 +101,24 @@ class MeasureCellCoaddsPipeConnections(
         dimensions=("skymap", "tract", "patch"),
         minimum=0,
         multiple=False,
+    )
+    noiseCorrArray = cT.Input(
+        doc=(
+            "Tract-averaged noise correlation array (6 x npix x npix, band "
+            "slots ordered ugrizy) from MergeSystematicsTask.  It gives "
+            "AnaCal the noise spectrum of every band, over which the noise "
+            "variances (flux errors, detection thresholds) are summed in "
+            "BOTH renoising modes -- without it the noise is taken as white, "
+            "which underestimates the variance of correlated coadd noise.  "
+            "For renoise_mode='spectral' it is REQUIRED: the cell coadd "
+            "stores a single noise realization, so the second, independent "
+            "one is drawn from this correlation function."
+        ),
+        name="deep_coadd_systematics_noisecorr_6bands_tractavg",
+        storageClass="NumpyArray",
+        dimensions=("skymap", "tract"),
+        multiple=False,
+        minimum=0,
     )
     anacalCatalog = cT.Output(
         doc="anacal catalog",
@@ -228,6 +250,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             tract=tract,
             patch=patch,
             mask=inputs.get("mask", None),
+            corr_array=inputs.get("noiseCorrArray", None),
         )
         butlerQC.put(outputs, outputRefs)
 
@@ -288,10 +311,10 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         ``outer`` is that box grown by ``border``.
         """
 
-        __slots__ = ("inner", "outer", "wcs", "psf_image")
+        __slots__ = ("inner", "outer", "wcs", "psf_image", "noise2_unit")
 
         def __init__(self, exposure, noise_planes, psf_image, wcs,
-                     inner_bbox, outer_bbox):
+                     inner_bbox, outer_bbox, noise2_unit_plane=None):
             sub = exposure[outer_bbox]
             outer = MeasureCellCoaddsPipe._Region(outer_bbox)
             outer.image = sub.image
@@ -308,8 +331,93 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             self.outer = outer
             self.wcs = wcs
             self.psf_image = psf_image
+            # spectral renoising: this cell's slice of the patch-wide
+            # unit-variance second noise realization (None otherwise)
+            self.noise2_unit = (
+                None if noise2_unit_plane is None
+                else noise2_unit_plane[y0:y0 + h, x0:x0 + w]
+            )
 
-    def _native_cells(self, coadd, cell_ids=None) -> dict:
+    def _load_noise_corrs(self, corr_array, bands) -> dict:
+        """``{band: normalised noise correlation}`` of the patch's bands.
+
+        Used in BOTH renoising modes: AnaCal sums the noise variances over
+        the spectrum it gives.  For 'spectral' every band must have a
+        usable correlation function -- a missing one raises here, once per
+        patch, instead of failing cell by cell inside the detection loop.
+        For 'rotate' a missing one falls back to white noise for that band,
+        with a warning.
+        """
+        spectral = self.config.renoise_mode == "spectral"
+        if corr_array is None:
+            if spectral:
+                raise RuntimeError(
+                    "renoise_mode='spectral' needs the noiseCorrArray input "
+                    "(tract-averaged noise correlation from "
+                    "MergeSystematicsTask); none was provided"
+                )
+            self.log.warning(
+                "No noise correlation input: the noise is taken as WHITE, "
+                "which underestimates the noise variance (flux errors, "
+                "detection thresholds) of correlated coadd noise. Run "
+                "MergeSystematicsTask upstream unless this is intentional."
+            )
+            return {}
+        corr_array = np.asarray(corr_array)
+        out = {}
+        for band in bands:
+            corr = None
+            if band in BAND_ORDER:
+                corr = self._normalize_noise_corr(
+                    corr_array[BAND_ORDER.index(band)]
+                )
+            if corr is None:
+                if spectral:
+                    raise RuntimeError(
+                        f"renoise_mode='spectral': no noise correlation "
+                        f"function for band {band!r} in noiseCorrArray"
+                    )
+                self.log.warning(
+                    "No noise correlation for band %s; taking its noise "
+                    "as white.", band,
+                )
+                continue
+            out[band] = corr
+        return out
+
+    def _noise2_unit_plane(self, coadd, band, seed, noise_corrs, cache):
+        """Patch-wide unit-variance second noise realization eps'' of a band.
+
+        Drawn from the band's (unrotated) noise correlation function with
+        the "filler" seed, once per band and patch -- ``cache`` hands the
+        same plane to the detection and the forced measurement.  Cells
+        take slices of it, so overlapping cell borders see the same
+        noise, as they do in the coadd's own realization.  ``None`` when
+        spectral renoising is off.
+        """
+        if self.config.renoise_mode != "spectral" or band not in noise_corrs:
+            return None
+        if band not in cache:
+            exposure = cell_coadd_to_exposure(coadd)
+            bbox = exposure.getBBox()
+            cache[band] = np.asarray(
+                generate_filler_noise(
+                    ny=bbox.getHeight(),
+                    nx=bbox.getWidth(),
+                    pixel_scale=float(
+                        exposure.getWcs().getPixelScale().asArcseconds()
+                    ),
+                    seed=seed,
+                    band=band,
+                    noise_variance=1.0,
+                    noise_corr=noise_corrs[band],
+                    survey=self.config.survey,
+                ),
+                dtype=np.float32,
+            )
+        return cache[band]
+
+    def _native_cells(self, coadd, cell_ids=None, noise2_unit_plane=None) -> dict:
         """``{cell_id: view}`` for a native ``CellCoadd``.
 
         Each view carries the cell's inner region and an outer region
@@ -373,7 +481,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             if hasattr(psf, "to_legacy"):
                 psf = psf.to_legacy()
             out[self._CellId(x=j, y=i)] = self._NativeCellView(
-                exposure, noise, psf, wcs, inner, outer)
+                exposure, noise, psf, wcs, inner, outer,
+                noise2_unit_plane=noise2_unit_plane)
         self.log.info(
             "native cell coadd: %d of %d grid cells usable "
             "(psf covers %d, border=%d)",
@@ -454,6 +563,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         patch: int,
         detection: NDArray | None = None,
         mask_array: NDArray | None = None,
+        noise_corr: NDArray | None = None,
     ) -> dict:
         """Build the data dict for a single cell via prepare_data_one_cell."""
         assert isinstance(self.config, MeasureCellCoaddsPipeConfig)
@@ -474,6 +584,9 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             detection=detection,
             cells=cells,
             mask_array=mask_array,
+            noise_corr=noise_corr,
+            renoise_mode=self.config.renoise_mode,
+            noise2_unit_array=getattr(cell, "noise2_unit", None),
         )
         # Update cell PSF with the actual computed PSF
         data["cells"][0].psf_array = data["psf_array"].copy()
@@ -490,6 +603,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         tract: int,
         patch: int,
         mask_array: NDArray | None = None,
+        noise_corrs: dict | None = None,
     ) -> dict:
         """Build the data dict for one cell across several bands.
 
@@ -514,6 +628,11 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             patch=patch,
             cells=cells,
             mask_array=mask_array,
+            noise_corrs=noise_corrs,
+            renoise_mode=self.config.renoise_mode,
+            noise2_unit_arrays={
+                b: getattr(lsst_cells[b], "noise2_unit", None) for b in bands
+            },
         )
         # One PSF stamp per band, in the order the images were stacked.
         data["cells"][0].psf_array = data["psf_array"].copy()
@@ -543,6 +662,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         patch: int,
         stitched_mask_array: NDArray | None = None,
         mask_origin: tuple[int, int] | None = None,
+        noise_corrs: dict | None = None,
+        noise2_cache: dict | None = None,
     ) -> dict:
         """Detect on the cell coadd of ``config.detection_bands``.
 
@@ -614,8 +735,18 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                     len(det_cell_ids), bands,
                     ", ".join("%s=%d" % kv for kv in sorted(per_band.items())),
                 )
-        det_cells = {b: self._native_cells(c, cell_ids=det_cell_ids)
-                     for b, c in det_coadds.items()}
+        noise_corrs = noise_corrs or {}
+        noise2_cache = {} if noise2_cache is None else noise2_cache
+        det_cells = {
+            b: self._native_cells(
+                c,
+                cell_ids=det_cell_ids,
+                noise2_unit_plane=self._noise2_unit_plane(
+                    c, b, seed, noise_corrs, noise2_cache
+                ),
+            )
+            for b, c in det_coadds.items()
+        }
 
         def _detect_one(item):
             cell_id, det_cell = item
@@ -635,6 +766,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         tract=tract,
                         patch=patch,
                         mask_array=cell_mask,
+                        noise_corr=noise_corrs.get(bands[0], None),
                     )
                 else:
                     data = self._prepare_cell_multiband(
@@ -646,6 +778,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         tract=tract,
                         patch=patch,
                         mask_array=cell_mask,
+                        noise_corrs=noise_corrs,
                     )
                 return self._run_anacal(**data)
             except Exception as e:
@@ -706,6 +839,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         patch: int,
         stitched_mask_array: NDArray | None = None,
         mask_origin: tuple[int, int] | None = None,
+        noise_corrs: dict | None = None,
+        noise2_cache: dict | None = None,
     ) -> dict:
         """Force-measure the detected cells across all bands.
 
@@ -716,6 +851,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         active_cell_ids = list(detection_dict.keys())
         cell_force_parts: dict[Any, list] = {cid: [] for cid in active_cell_ids}
         bands = list(coadd_handles_dict.keys())
+        noise_corrs = noise_corrs or {}
+        noise2_cache = {} if noise2_cache is None else noise2_cache
 
         for band in bands:
             self.log.debug("Measuring band %s", band)
@@ -727,9 +864,19 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             n_image_cells = self.n_image_per_cell(band_coadd)
             # Built ONCE per band: the views are cheap but the dict is
             # rebuilt for every cell if this sits inside _force_one.
-            band_cells = self._native_cells(band_coadd)
+            band_cells = self._native_cells(
+                band_coadd,
+                noise2_unit_plane=self._noise2_unit_plane(
+                    band_coadd, band, seed, noise_corrs, noise2_cache
+                ),
+            )
+            # the plane is only shared between detection and this band's
+            # forced pass; drop it once the views hold their slices
+            noise2_cache.pop(band, None)
+            band_noise_corr = noise_corrs.get(band, None)
 
-            def _force_one(cell_id, band_cells=band_cells):
+            def _force_one(cell_id, band_cells=band_cells,
+                           band_noise_corr=band_noise_corr):
                 cell = band_cells[cell_id]
                 cell_mask = self._cell_mask(
                     stitched_mask_array,
@@ -747,6 +894,7 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                         patch=patch,
                         detection=detection_dict[cell_id],
                         mask_array=cell_mask,
+                        noise_corr=band_noise_corr,
                     )
                     cat = self._run_fpfs(**data)
                     if self.config.doPsfHsmMoments:
@@ -827,9 +975,14 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
         patch: int,
         mask=None,
         detection: NDArray | None = None,
+        corr_array: NDArray | None = None,
         **kwargs,
     ):
         """Run detection and forced measurement on cell-based coadds.
+
+        ``corr_array`` is the tract-averaged (6, npix, npix) noise
+        correlation array: the noise spectrum of both renoising modes, and
+        required for ``renoise_mode='spectral'``.
 
         When an external ``detection`` catalog is given, the internal
         detection step is skipped and the catalog is partitioned into
@@ -891,6 +1044,12 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
 
         first_handle = next(iter(coadd_handles_dict.values()))
         seed = self._seed_from_handle(first_handle)
+
+        # Per-band noise correlation functions (both renoising modes), and
+        # the cache that hands one patch-wide second noise realization per
+        # band to both detection and forced passes (spectral only).
+        noise_corrs = self._load_noise_corrs(corr_array, sorted(provided))
+        noise2_cache: dict = {}
 
         # The mask already carries the anacal uint8 bit convention:
         # bit 0 = masked (cut), bit 1 = discontinuity (kept but stamped
@@ -983,6 +1142,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
                 patch=patch,
                 stitched_mask_array=stitched_mask_array,
                 mask_origin=mask_origin,
+                noise_corrs=noise_corrs,
+                noise2_cache=noise2_cache,
             )
 
         force_cats = self._force(
@@ -994,6 +1155,8 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             patch=patch,
             stitched_mask_array=stitched_mask_array,
             mask_origin=mask_origin,
+            noise_corrs=noise_corrs,
+            noise2_cache=noise2_cache,
         )
 
         self.log.info(

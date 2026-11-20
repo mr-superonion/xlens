@@ -79,6 +79,14 @@ def prepare_data_one_cell(
     detection: astropy.table.Table | None = None,
     cells: List | None = None,
     survey: str | None = None,
+    # spectral renoising (see prepare_data): the unrotated, normalised
+    # noise correlation function of the band, and the cell's slice of a
+    # UNIT-variance second noise realization eps'' drawn from it.  The
+    # cell coadd stores only one noise realization, so eps'' cannot come
+    # from the coadd; it is scaled here to this cell's noise variance.
+    noise_corr: NDArray | None = None,
+    renoise_mode: str = "rotate",
+    noise2_unit_array: NDArray | None = None,
     **kwargs,
 ):
     """Collect metadata and auxiliary arrays from a SingleCellCoadd.
@@ -172,6 +180,28 @@ def prepare_data_one_cell(
         gal_array, noise_array, noise_variance, mag_zero, MAG_ZERO_AB,
     )
 
+    noise2 = None
+    if renoise_mode == "spectral" and noise_array is not None:
+        if noise2_unit_array is None:
+            raise RuntimeError(
+                "spectral renoising on a cell needs noise2_unit_array, the "
+                "cell's slice of a unit-variance noise realization drawn "
+                "from the noise correlation function (the cell coadd "
+                "stores a single noise realization)"
+            )
+        if noise2_unit_array.shape != gal_array.shape:
+            raise ValueError(
+                f"noise2_unit_array shape {noise2_unit_array.shape} does "
+                f"not match the cell image {gal_array.shape}"
+            )
+        # noise_variance is already on the MAG_ZERO_AB scale here
+        noise2 = (
+            np.asarray(noise2_unit_array, dtype=np.float64)
+            * np.sqrt(noise_variance)
+        ).astype(np.float32)
+        # masked pixels stay as they are, like in the pure-noise image
+        anacal.mask.mask_galaxy_image(noise2, mask_array, star_cat)
+
     return {
         "pixel_scale": pixel_scale,
         "mag_zero": MAG_ZERO_AB,
@@ -180,6 +210,9 @@ def prepare_data_one_cell(
         "psf_array": psf_array,
         "mask_array": mask_array,
         "noise_array": noise_array,
+        # spectral renoising only (None otherwise), as in prepare_data
+        "noise2_array": noise2,
+        "noise_corr": noise_corr,
         "begin_x": beginx,
         "begin_y": beginy,
         "wcs": wcs,
@@ -213,6 +246,9 @@ def prepare_data_one_cell_multiband(
     detection: astropy.table.Table | None = None,
     cells: List | None = None,
     survey: str | None = None,
+    noise_corrs: dict | None = None,
+    renoise_mode: str = "rotate",
+    noise2_unit_arrays: dict | None = None,
     **kwargs,
 ):
     """Cell-coadd counterpart of :func:`prepare_data_multiband`.
@@ -234,6 +270,9 @@ def prepare_data_one_cell_multiband(
     if missing:
         raise KeyError(f"no cell for band(s) {missing}")
 
+    noise_corrs = noise_corrs or {}
+    noise2_unit_arrays = noise2_unit_arrays or {}
+
     def per_band():
         for band in bands:
             yield prepare_data_one_cell(
@@ -251,6 +290,9 @@ def prepare_data_one_cell_multiband(
                 detection=detection,
                 cells=cells,
                 survey=survey,
+                noise_corr=noise_corrs.get(band, None),
+                renoise_mode=renoise_mode,
+                noise2_unit_array=noise2_unit_arrays.get(band, None),
             )
 
     return _stack_bands(per_band(), bands)
