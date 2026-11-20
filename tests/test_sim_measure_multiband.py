@@ -191,7 +191,7 @@ def test_coadd_catalog_is_well_formed(measured):
     assert n_nan == len(nan_tail) * len(BANDS)
 
     # The flux-only kernels ride in the fpfs1 pass (default sizes
-    # 0.52 and 0.65 arcsec, reconvolution 0.4): per band the flux
+    # 0.55 and 0.70 arcsec, reconvolution 0.4): per band the flux
     # family and its magnitudes, finite, with a live shear response.
     for band in BANDS:
         for fam in ("gauss1", "gauss2"):
@@ -410,11 +410,15 @@ def test_adaptive_kernel_through_the_pipe(scene):
     ) * len(BANDS)
     assert "lsst_i_afpfs1_e1" in names and "s2n_afpfs1" not in names
     assert "lsst_i_s2n_afpfs1" in names
-    floor = 0.38 * np.sqrt(2.0)
-    # the larger ratio gives the larger kernel wherever the fitted size
-    # lifts afpfs1 off the floor (a noisy fit can put T at or below zero)
     s1 = np.asarray(cat["lsst_i_afpfs1_sigma"])
     s2 = np.asarray(cat["lsst_i_afpfs2_sigma"])
+    # The adaptive floor is the band's shapelet kernel, which follows the
+    # band's PSF (sqrt(2) x the PSF-derived width) and is never below the
+    # configured sigma_shapelets1.
+    assert np.min(s1) >= 0.38 * np.sqrt(2.0)
+    floor = 0.999 * float(np.min(s1))
+    # the larger ratio gives the larger kernel wherever the fitted size
+    # lifts afpfs1 off the floor (a noisy fit can put T at or below zero)
     off_floor = s1 > 1.02 * floor
     assert off_floor.sum() > 100
     assert np.all(s2[off_floor] > s1[off_floor])

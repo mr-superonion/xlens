@@ -28,6 +28,8 @@ ready for shear estimation.
 
 from typing import Any
 
+import dataclasses
+
 import anacal
 import numpy as np
 from lsst.pex.config import (
@@ -54,7 +56,12 @@ class FpfsMeasurementConfig(Config):
     )
     sigma_shapelets1 = Field[float](
         doc=(
-            "Shapelet's Gaussian kernel size for measurement [arcsec]. "
+            "MINIMUM size [arcsec] of the shapelet kernel of the forced "
+            "measurement. The kernel follows each band's PSF: sqrt(2) times "
+            "the band's PSF-derived width (metadetect's fitgauss target), "
+            "floored at this value -- so "
+            "bands and cells measure with different kernels wherever the "
+            "PSF is broad, and with this value where it is sharp. "
             "REQUIRED (> 0) whenever the fpfs subtask runs."
         ),
         optional=True,
@@ -88,9 +95,12 @@ class FpfsMeasurementConfig(Config):
             "ds2n_gauss{i+1}_dg{1,2} (plus the magnitudes), the "
             "Gaussian-aperture flux in the window "
             "sqrt(sigma^2 - flux_gauss_sigma_psf^2) of the image reconvolved "
-            "with flux_gauss_sigma_psf. Empty disables them."
+            "with flux_gauss_sigma_psf. These kernels are FIXED: unlike the "
+            "shapelet kernel they do not follow the band's PSF, so the "
+            "flux_gauss fluxes of different bands and cells share one "
+            "aperture. Empty disables them."
         ),
-        default=[0.52, 0.65],
+        default=[0.55, 0.70],
     )
     flux_gauss_sigma_psf = Field[float](
         doc=(
@@ -244,6 +254,15 @@ class FpfsMeasurementConfig(Config):
         super().setDefaults()
 
 
+# The forced FPFS shapelet kernel of a band follows that band's PSF:
+# sigma = PSF_KERNEL_RATIO x the PSF-derived width (metadetect's fitgauss
+# target, AnacalTask.psf_sigma_arcsec), the same widening the detection
+# applies to its kernel (anacal detection_sigma).  A kernel close to the PSF
+# width amplifies the deconvolved noise -- for the spectral renoising the
+# assigned-response term grows as sigma_p^4 / (sigma^2 - sigma_p^2)^3.
+PSF_KERNEL_RATIO = float(np.sqrt(2.0))
+
+
 class FpfsMeasurementTask(Task):
     """Measure FPFS shapelet observables from coadd image data.
 
@@ -276,6 +295,23 @@ class FpfsMeasurementTask(Task):
         )
         return
 
+    def shapelet_sigma(self, psf_sigma_arcsec: float | None) -> float:
+        """Kernel 1 width [arcsec] for a band whose PSF-derived width is
+        ``psf_sigma_arcsec``: PSF_KERNEL_RATIO times it, floored at
+        ``config.sigma_shapelets1``.  Without a PSF width (None) it is
+        ``config.sigma_shapelets1``."""
+        assert isinstance(self.config, FpfsMeasurementConfig)
+        fixed = float(self.config.sigma_shapelets1)
+        if psf_sigma_arcsec is None:
+            return fixed
+        return max(fixed, PSF_KERNEL_RATIO * float(psf_sigma_arcsec))
+
+    def _config_for(self, sigma: float):
+        """The anacal FpfsConfig with kernel 1 at ``sigma``."""
+        if sigma == float(self.config.sigma_shapelets1):
+            return self.fpfs_config
+        return dataclasses.replace(self.fpfs_config, sigma_shapelets1=sigma)
+
     def run(
         self,
         *,
@@ -301,6 +337,9 @@ class FpfsMeasurementTask(Task):
         renoise_delta: float = 0.01,
         noise_corr: NDArray | None = None,
         noise_corrs: list | None = None,
+        # PSF-derived kernel width [arcsec] of THIS band (see
+        # shapelet_sigma); None keeps config.sigma_shapelets1
+        psf_sigma_arcsec: float | None = None,
         **kwargs,
     ):
         """Run FPFS measurement on image arrays.
@@ -385,7 +424,7 @@ class FpfsMeasurementTask(Task):
             # writable sentinel target even without a systematics mask
             n_mask_base = np.zeros(len(detection), dtype=np.float32)
         catalog = anacal.fpfs.process_image(
-            fpfs_config=self.fpfs_config,
+            fpfs_config=self._config_for(self.shapelet_sigma(psf_sigma_arcsec)),
             pixel_scale=pixel_scale,
             mag_zero=mag_zero,
             noise_variance=noise_variance,

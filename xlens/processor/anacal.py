@@ -45,17 +45,22 @@ class AnacalConfig(Config):
         doc="Sources to be removed if too close to boundary [pixel]",
         default=35,
     )
-    psf_dilation_max = Field[float](
+    psf_dilation = Field[float](
         doc=(
-            "Cap on the ellipticity dilation d of the re-smoothing kernel. "
-            "By default the kernel is not set by hand: for every cell its "
-            "width is metadetect's default ``fitgauss`` target, sigma = "
-            "sqrt(T d / 2), from the adaptive moments (e1, e2, T) of that "
-            "cell's PSF (anacal.ngmix.fit_psf_gauss) with d = 1 + 2 "
-            "(sqrt(1 + |e|) - 1) capped at this value (metadetect: 1.1). "
-            "See AnacalTask.get_sigma_arcsec."
+            "Extra dilation of the re-smoothing kernel, applied on top of "
+            "the minimum one the PSF ellipticity requires. By default the "
+            "kernel is not set by hand: for every cell AND BAND its width "
+            "is sigma = sqrt(T d / 2), from the adaptive moments (e1, e2, T) "
+            "of that band's PSF in the cell (anacal.ngmix.fit_psf_gauss), "
+            "with d = d_min * psf_dilation and d_min = 1 + 2 (sqrt(1 + |e|) "
+            "- 1) the dilation that makes a round kernel cover the "
+            "elliptical PSF (metadetect's fitgauss target; d_min = 1 for a "
+            "round PSF). 1.0 (default) is that target itself, i.e. a kernel "
+            "of the PSF's own width; larger values widen every kernel by "
+            "sqrt(psf_dilation), which trades resolution for lower "
+            "deconvolved noise. See AnacalTask.psf_sigma_arcsec."
         ),
-        default=1.1,
+        default=1.0,
     )
     sigma_arcsec = Field[float](
         doc=(
@@ -63,9 +68,11 @@ class AnacalConfig(Config):
             "cell and band (detection stack, forced measurement, n_inputs "
             "sampling), overriding the PSF-derived metadetect target. "
             "Negative (default) keeps the PSF-derived width. A fixed width "
-            "narrower than the PSF-derived one of a cell would deconvolve "
-            "below the PSF: that cell keeps the PSF-derived width and a "
-            "warning is logged once per task."
+            "narrower than the PSF-derived one of a band in a cell would "
+            "deconvolve below that PSF: that band keeps its PSF-derived "
+            "width there and a warning is logged once per task. Detection "
+            "uses each band's own width; the measurement on the band coadd "
+            "uses the widest of them."
         ),
         default=-1.0,
     )
@@ -148,11 +155,12 @@ class AnacalConfig(Config):
 
     def validate(self):
         super().validate()
-        if not self.psf_dilation_max >= 1.0:
+        if not self.psf_dilation >= 1.0:
             raise FieldValidationError(
-                self.__class__.psf_dilation_max,
+                self.__class__.psf_dilation,
                 self,
-                "psf_dilation_max must be >= 1",
+                "psf_dilation must be >= 1 (a smaller value would deconvolve "
+                "below the PSF)",
             )
         if self.sigma_arcsec > 0.0 and not self.sigma_arcsec >= 0.05:
             raise FieldValidationError(
@@ -227,59 +235,80 @@ class AnacalTask(Task):
         self._psf_moment_cache[key] = out
         return out
 
+    def psf_sigma_arcsec(self, psf_array: NDArray, pixel_scale: float) -> float:
+        """PSF-derived kernel width [arcsec] of ONE PSF stamp: sqrt(T d / 2)
+        with d = d_min * config.psf_dilation, d_min the ellipticity dilation
+        of metadetect's ``fitgauss`` target; no fixed-width override."""
+        assert isinstance(self.config, AnacalConfig)
+        e1, e2, T = self.psf_gauss_moments(
+            np.asarray(psf_array, dtype=np.float64), pixel_scale
+        )
+        # minimum dilation from the PSF ellipticity (uncapped), times the
+        # configured extra dilation
+        d = anacal.ngmix.ellip_dilation(e1, e2, 1.0e6) * self.config.psf_dilation
+        return float(np.sqrt(T * d / 2.0))
+
+    def get_sigma_arcsec_bands(
+        self,
+        psf_array: NDArray,
+        pixel_scale: float,
+    ) -> list[float]:
+        """Width [arcsec] of the re-smoothing kernel of EVERY band.
+
+        metadetect's default ``fitgauss`` reconvolution target (without
+        metacal's separate 1 + 2 step shear-step dilation), band by band:
+        sigma_b = sqrt(T_b d_b / 2), with (e1, e2, T) the adaptive moments
+        of that band's PSF, measured by AnaCal's model fit
+        (``anacal.ngmix.fit_psf_gauss``), and d the ellipticity dilation
+        times ``psf_dilation`` (see :meth:`psf_sigma_arcsec`).
+
+        The DETECTION reconvolves each band with its own kernel, so no
+        band is reconvolved below its own PSF, and combines the bands with
+        the inverse variance of each band's reconvolved, renoised image.
+
+        A positive ``config.sigma_arcsec`` replaces a band's value, floored
+        at that band's PSF-derived width (a kernel narrower than the PSF
+        would deconvolve below it); the floor is logged once.
+        """
+        assert isinstance(self.config, AnacalConfig)
+        psf = np.asarray(psf_array, dtype=np.float64)
+        if psf.ndim == 2:
+            psf = psf[None]
+        fixed = float(self.config.sigma_arcsec)
+        out = []
+        for p in psf:
+            derived = self.psf_sigma_arcsec(p, pixel_scale)
+            if fixed <= 0.0:
+                out.append(derived)
+                continue
+            if fixed < derived and not self._sigma_floor_warned:
+                self.log.warning(
+                    "sigma_arcsec=%.3f is narrower than the PSF-derived "
+                    "kernel width %.3f arcsec; using the PSF-derived width "
+                    "for such cells and bands (reported once)",
+                    fixed,
+                    derived,
+                )
+                self._sigma_floor_warned = True
+            out.append(max(fixed, derived))
+        return out
+
     def get_sigma_arcsec(
         self,
         psf_array: NDArray,
         pixel_scale: float,
         noise_variance: float | Sequence[float] | None = None,
     ) -> float:
-        """Width [arcsec] of the re-smoothing kernel for a PSF.
+        """Width [arcsec] of the single MEASUREMENT kernel for a PSF (stack).
 
-        metadetect's default ``fitgauss`` reconvolution target (without
-        metacal's separate 1 + 2 step shear-step dilation):
-        sigma = sqrt(T d / 2), with (e1, e2, T) the adaptive moments of
-        the PSF, measured by AnaCal's model fit
-        (``anacal.ngmix.fit_psf_gauss``), and d the ellipticity dilation
-        capped at ``psf_dilation_max``.  For a (nband, npix, npix) stack
-        e1, e2 and T are averaged over the bands with inverse-variance
-        weights before d is taken, as metadetect averages its shear
-        bands.
-
-        A positive ``config.sigma_arcsec`` replaces this value, floored
-        at the PSF-derived width (a kernel narrower than the PSF would
-        deconvolve below it); the floor is logged once.
+        The model fit on the band coadd needs one reconvolution kernel for
+        all bands; it is the widest of the per-band kernels
+        (:meth:`get_sigma_arcsec_bands`), so that no band is reconvolved
+        below its own PSF there either.  For one band it is that band's
+        kernel.  ``noise_variance`` is accepted for backward compatibility
+        and not used.
         """
-        assert isinstance(self.config, AnacalConfig)
-        psf = np.asarray(psf_array, dtype=np.float64)
-        if psf.ndim == 2:
-            psf = psf[None]
-        if noise_variance is None:
-            wgt = np.ones(len(psf))
-        else:
-            wgt = 1.0 / np.broadcast_to(np.asarray(noise_variance, dtype=np.float64), (len(psf),))
-        e1 = e2 = T = 0.0
-        for w, p in zip(wgt / np.sum(wgt), psf):
-            r1, r2, rT = self.psf_gauss_moments(p, pixel_scale)
-            e1 += w * r1
-            e2 += w * r2
-            T += w * rT
-        d = anacal.ngmix.ellip_dilation(e1, e2, self.config.psf_dilation_max)
-        derived = float(np.sqrt(T * d / 2.0))
-        fixed = float(self.config.sigma_arcsec)
-        if fixed <= 0.0:
-            return derived
-        if fixed < derived:
-            if not self._sigma_floor_warned:
-                self.log.warning(
-                    "sigma_arcsec=%.3f is narrower than the PSF-derived "
-                    "kernel width %.3f arcsec; using the PSF-derived width "
-                    "for such cells (reported once)",
-                    fixed,
-                    derived,
-                )
-                self._sigma_floor_warned = True
-            return derived
-        return fixed
+        return float(max(self.get_sigma_arcsec_bands(psf_array, pixel_scale)))
 
     def make_prior(self):
         """The Gaussian priors of the model fit from the configuration:
@@ -438,9 +467,13 @@ class AnacalTask(Task):
             cell_psf = getattr(cell, "psf_array", None)
             if cell_psf is None or np.size(cell_psf) == 0:
                 cell_psf = psf_array
+            # one detection kernel per band; the measurement uses the
+            # widest of them (see get_sigma_arcsec)
+            sigma_bands = self.get_sigma_arcsec_bands(cell_psf, pixel_scale)
             task = anacal.task.Task(
                 scale=pixel_scale,
-                sigma_arcsec=self.get_sigma_arcsec(cell_psf, pixel_scale, noise_variance),
+                sigma_arcsec=float(max(sigma_bands)),
+                sigma_arcsec_bands=sigma_bands,
                 omega_f=0.218,
                 omega_v=0.011,
                 fpfs_c0=FPFS_C0,

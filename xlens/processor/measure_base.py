@@ -647,11 +647,21 @@ class AnacalMeasureTaskBase(PipelineTask):
         the two stages differently, and :meth:`_finalize_catalog` drops
         the rows on that same value.
         """
+        # The shapelet kernel of the forced measurement follows THIS band's
+        # PSF (the flux_gauss kernels stay fixed): hand the band's
+        # PSF-derived width over, from the same model fit the detection
+        # kernel uses.
+        psf = np.asarray(data["psf_array"])
+        psf_sigma = (
+            self.anacal.psf_sigma_arcsec(psf, data["pixel_scale"])
+            if psf.ndim == 2 else None
+        )
         return self.fpfs.run(
             n_mask_base_max=self.config.n_mask_base_max,
             renoise_mode=self.config.renoise_mode,
             renoise_c=self.config.renoise_c,
             renoise_delta=self.config.renoise_delta,
+            psf_sigma_arcsec=psf_sigma,
             **data,
         )
 
