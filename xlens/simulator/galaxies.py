@@ -29,7 +29,6 @@ at their own sky positions.
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
 from typing import Any, ClassVar, Iterable
 
 import fitsio
@@ -121,11 +120,27 @@ class BaseGalaxyCatalog(ABC):
       - _generate_galaxy(entry, mag_zero, band, **kwargs)
     Optionally override:
       - _probabilities_for_sampling(cat) -> Optional[np.ndarray]
+
+    Footprint requirement
+    ---------------------
+    The input file MUST fill an RA/Dec box (a constant-RA by
+    constant-Dec rectangle, with no holes, masks or tilted edges).  With
+    the random layouts the number of galaxies placed is set by the
+    catalog's surface density, and :meth:`_compute_density` takes that
+    as ``N / area`` with ``area`` the solid angle of the RA/Dec
+    *bounding box* of ``radec_columns`` (:meth:`_radec_box_area_arcmin2`).
+    For any other footprint shape the bounding box is larger than the
+    region the galaxies cover, so the density, and with it the number of
+    simulated galaxies, comes out too low.  A catalog with a different
+    footprint must override :meth:`_compute_density`.  The ``scene``
+    layout is exempt: it renders every row at its own position and never
+    uses the density.
     """
 
     # Sky-position columns, used to measure the footprint the density is
-    # computed over.  All three catalogs fill an RA/Dec box, so naming
-    # the columns is the only thing that varies between them.
+    # computed over.  Every sampled catalog fills an RA/Dec box (see
+    # "Footprint requirement" above), so naming the columns is the only
+    # thing that varies between them.
     radec_columns: ClassVar[tuple[str, str]] = ("ra", "dec")
     # Placement and lensing columns every truth catalog carries, ahead of the
     # input-catalog property columns merged in by the constructor.
@@ -810,9 +825,27 @@ class BaseGalaxyCatalog(ABC):
 class CatSim2017Catalog(BaseGalaxyCatalog):
     """Galaxy catalog from CatSim 2017 (``OneDegSq.fits``).
 
-    Each galaxy is a single Sersic profile with half-light radius,
-    Sersic index, axis ratio, and position angle read from the
-    input FITS file.
+    Each galaxy is the sum of up to three components, with each band's
+    total flux, from the ``{band}_ab`` magnitude, split between them in
+    the ratio of ``fluxnorm_disk`` : ``fluxnorm_bulge`` : ``fluxnorm_agn``:
+
+    * a disk, an exponential profile;
+    * a bulge, a de Vaucouleurs profile, with its half-light radius
+      capped at ``max_bulge_hlr_arcsec``;
+    * an AGN, a near-point Gaussian (sigma 1e-4 arcsec), dropped when
+      ``include_point_source`` is False.
+
+    The disk and bulge each take their half-light radius as ``sqrt(a * b)``
+    of the catalog's semi-major and semi-minor half-light radii
+    (``a_d``/``b_d``, ``a_b``/``b_b``, arcsec), their axis ratio as
+    ``b / a`` and their own position angle (``pa_disk``, ``pa_bulge``,
+    degrees).  A component with zero flux is left out.  Rows are drawn
+    with probability proportional to ``prob``.  The photometry
+    (``u_ab`` ... ``y_ab``) is shared by the LSST, HSC and DES surveys.
+
+    The file must fill an RA/Dec box (see :class:`BaseGalaxyCatalog`).
+    ``OneDegSq.fits`` does: RA -0.5..0.5 deg (stored as 359.5..360 and
+    0..0.5) by Dec -0.5..0.5 deg, 1.000 deg^2.
     """
 
     catalog_filename = "OneDegSq.fits"
@@ -956,6 +989,10 @@ class Flagship2025Catalog(BaseGalaxyCatalog):
 
     The axis ratios (disk_axis_ratio, bulge_axis_ratio) are stored as
     minor/major ratio, which maps directly to GalSim's ``q`` parameter.
+
+    The file must fill an RA/Dec box (see :class:`BaseGalaxyCatalog`).
+    ``flagship_cosmos.fits`` does: RA 149.419..150.819 deg by Dec
+    1.506..2.906 deg, 1.958 deg^2.
     """
 
     catalog_filename = "flagship_cosmos.fits"
@@ -1120,6 +1157,11 @@ class DiffskyCatalog(BaseGalaxyCatalog):
     Galaxies are decomposed into bulge + disk components, each with
     its own Sersic index, half-light radius, and axis ratio.  Read
     from Diffsky mock catalog.
+
+    The file must fill an RA/Dec box (see :class:`BaseGalaxyCatalog`).
+    The Diffsky mock itself is a cone, whose bounding box would
+    overestimate its area by 22%, so ``diffsky2026.fits`` is cut to a
+    box: RA 92.946..107.051 deg by Dec 83.804..85.195 deg, 1.881 deg^2.
     """
 
     catalog_filename = "diffsky2026.fits"
@@ -1354,7 +1396,8 @@ class SceneCatalog(BaseGalaxyCatalog):
         return (f"{_survey_prefix(survey_name)}_{band}",)
 
     def _half_light_radius(self, catalog) -> np.ndarray:
-        """Circularised radius ``sqrt(a * b)`` (arcsec) of the disk, or of the Sersic fit."""
+        """Circularised radius ``sqrt(a * b)`` (arcsec) of the disk, or of
+        the Sersic fit."""
         prefix = "disk_" if self._has_bulge_disk(catalog.dtype.names) else ""
         return np.sqrt(
             np.maximum(np.asarray(catalog[f"{prefix}r50_major"], dtype=float), 1e-9)
@@ -1532,7 +1575,8 @@ class SceneCatalog(BaseGalaxyCatalog):
         morphology: str = "bulge_disk",
         morphology_band: str = "i",
     ) -> np.ndarray:
-        """Scene table (structured array) from rows of the Rubin DP2 ``Object`` table.
+        """Scene table (structured array) from rows of the DP2 ``Object``
+        table.
 
         ``objects`` is the path of a FITS file of DP2 object rows (e.g. a
         cone search) or the structured array

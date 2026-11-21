@@ -60,11 +60,12 @@ __all__ = [
     "load_passbands",
 ]
 
-# DESC data registry dataset 145 (dp2utils DUST_MAP_ID): <dir>/sfd/SFD_dust_4096_{ngp,sgp}.fits
-# and <dir>/csfd/csfd_ebv.fits.  Override with the ``dust_map_dir`` argument or
-# ``$XLENS_DUST_MAP_DIR``.
+# DESC data registry dataset 145 (dp2utils DUST_MAP_ID):
+# <dir>/sfd/SFD_dust_4096_{ngp,sgp}.fits and <dir>/csfd/csfd_ebv.fits.
+# Override with the ``dust_map_dir`` argument or ``$XLENS_DUST_MAP_DIR``.
 DUST_MAP_DIR = "/global/cfs/cdirs/lsst/utilities/data-registry/lsst_desc_working/user/s-sayan/dust_maps"
-# Both maps are calibrated in SFD units (Schlafly & Finkbeiner 2011, 0.86 rescaling).
+# Both maps are calibrated in SFD units (Schlafly & Finkbeiner 2011, 0.86
+# rescaling).
 EBV_SCALE = 0.86
 
 FILTER_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "filters")
@@ -79,7 +80,10 @@ BUTLER_COLLECTIONS = ("LSSTCam/runs/DRP/DP2",)
 
 
 def load_passbands(survey: str) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Bundled ``{band: (wavelength_nm, throughput)}`` of ``survey`` (SVO curves)."""
+    """Bundled ``{band: (wavelength_nm, throughput)}`` of ``survey``.
+
+    These are the SVO filter curves.
+    """
     if survey not in PASSBANDS:
         raise ValueError(f"survey must be one of {sorted(PASSBANDS)}, got {survey!r}")
     out = {}
@@ -142,7 +146,8 @@ class DustCorrector:
     Parameters
     ----------
     survey : {"lsst", "des", "euclid", "hsc"}
-        Which bundled passband set to use (ignored when ``passbands`` is given).
+        Which bundled passband set to use (ignored when ``passbands`` is
+        given).
     Rv : float
         Total-to-selective extinction ratio of the curve (3.1).
     model : str or dust_extinction model
@@ -151,8 +156,8 @@ class DustCorrector:
     dustmap : {"csfd", "sfd"} or a ``dustmaps`` query object
         Map giving ``E(B-V)`` in SFD units.
     dust_map_dir : str, optional
-        Directory holding ``csfd/`` and ``sfd/`` (default ``$XLENS_DUST_MAP_DIR``
-        or the DESC data-registry copy).
+        Directory holding ``csfd/`` and ``sfd/`` (default
+        ``$XLENS_DUST_MAP_DIR`` or the DESC data-registry copy).
     ebv_scale : float
         Rescaling of the map's ``E(B-V)`` (0.86 for both SFD-calibrated maps).
     passbands : mapping, optional
@@ -214,7 +219,7 @@ class DustCorrector:
                     raise
         return load_passbands(survey)
 
-    # ------------------------------------------------------------------ queries
+    # -------------------------------------------------------------- queries
     def get_ebv(self, ra, dec):
         """Rescaled ``E(B-V)`` [mag] at ``ra``, ``dec`` [deg]."""
         from astropy.coordinates import SkyCoord

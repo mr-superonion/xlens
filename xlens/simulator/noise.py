@@ -288,7 +288,8 @@ class AddNoisePipeConfig(
             )
         if self.noiseId < 0 or self.noiseId >= 10:
             raise FieldValidationError(self.__class__.noiseId, self, "We require 0 <= noiseId < 10")
-        # the realisation in the output NAME must be the one that seeds the noise
+        # the realisation in the output NAME must be the one that seeds the
+        # noise
         if int(self.connections.noiseId) != int(self.noiseId):
             raise FieldValidationError(
                 self.__class__.noiseId,

@@ -221,7 +221,7 @@ def test_measure_shear_binning_arguments_are_validated():
     measure_shear(src=catalog, target="g1", **_UNBINNED_KW)
     for bad in (dict(zbounds=[0.0, 1.0]),                 # bounds, no estimator
                 dict(z_estimator=Boom()),                 # estimator, no bounds
-                dict(z_estimator=Boom(), zbounds=[0.5])): # a single edge
+                dict(z_estimator=Boom(), zbounds=[0.5])):  # a single edge
         try:
             measure_shear(src=catalog, target="g1", **bad, **_UNBINNED_KW)
         except ValueError:

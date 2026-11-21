@@ -85,7 +85,7 @@ jobs:
         shell: bash -l {0}
         run: |
           conda activate test
-          wget https://www.cosmo.bnl.gov/www/xiangchong/data/catsim_test.tar.xz
+          wget -q https://github.com/mr-superonion/xlens/releases/download/v0.5.3/catsim_test.tar.xz
           tar xvfJ catsim_test.tar.xz
           export CATSIM_DIR=$(realpath catsim_test)
           pytest tests/ --cov --cov-report=xml --cov-report=term

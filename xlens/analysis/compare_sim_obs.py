@@ -121,10 +121,10 @@ class CompareSimObsConfig(
 
     Every selection field (``survey``, ``mag_max``, ``snr_min``, ``esq_max``,
     ``n_mask_base_max``, ``trace_min``, ``psf_fwhm_max``, the per-band
-    ``mag_max_bands`` / ``flux_err_*_bands`` / ``psf_fwhm_*_bands``) is inherited
-    so a sim/obs comparison uses the identical cut. The mean-shear-only fields
-    (``bin_ranges_file``, ``bin_percentile_trim``) are carried along but unused
-    here.
+    ``mag_max_bands`` / ``flux_err_*_bands`` / ``psf_fwhm_*_bands``) is
+    inherited so a sim/obs comparison uses the identical cut. The
+    mean-shear-only fields (``bin_ranges_file``, ``bin_percentile_trim``)
+    are carried along but unused here.
     """
 
 

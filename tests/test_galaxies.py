@@ -82,7 +82,6 @@ SPECS = {
 }
 
 
-
 # Catalogs whose input file may be absent from $CATSIM_DIR: their cases are
 # skipped then.  Every other catalog (CatSim, Flagship) is REQUIRED -- a
 # missing file fails the tests, it is never skipped.

@@ -116,7 +116,9 @@ def set_isPrimary(sources, skyMap, tractInfo, patchInfo, pixel_scale):
 
 
 def euler_rotation_matrix(alpha, beta, gamma):
-    """Intrinsic ZYZ Euler rotation matrix ``R = Rz(alpha) Ry(beta) Rz(gamma)``.
+    """Intrinsic ZYZ Euler rotation matrix.
+
+    ``R = Rz(alpha) Ry(beta) Rz(gamma)``.
 
     Parameters
     ----------

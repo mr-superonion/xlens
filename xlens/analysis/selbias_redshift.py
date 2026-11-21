@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import pickle
-from typing import Any, Iterable, List
+from typing import Any, List
 
 import lsst.pipe.base.connectionTypes as cT
 import numpy as np

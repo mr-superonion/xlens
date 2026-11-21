@@ -98,7 +98,8 @@ def test_band_slices_without_correlation():
 
 
 class _RecordingCnn:
-    """Stands in for CnnMeasurementTask: records what the force stage hands it."""
+    """Stands in for CnnMeasurementTask: records what the force stage hands
+    it."""
 
     def __init__(self):
         self.calls = []

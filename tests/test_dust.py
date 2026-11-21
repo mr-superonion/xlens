@@ -9,7 +9,8 @@ from xlens.utils import dust
 
 dust_extinction = pytest.importorskip("dust_extinction")
 
-# dp2utils PR #1 reference values: three positions, R_V = 3.1, DP2 butler passbands.
+# dp2utils PR #1 reference values: three positions, R_V = 3.1, DP2 butler
+# passbands.
 RA = [61.0, 55.0, 9.45]
 DEC = [-35.0, -40.0, -44.0]
 EXPECTED = {
@@ -45,7 +46,10 @@ def test_band_average_of_narrow_passband_is_the_curve():
 
 
 def test_bundled_passbands_all_surveys():
-    """Every bundled set loads and extinction falls with wavelength (A_g > A_r > ...)."""
+    """Every bundled set loads and extinction falls with wavelength.
+
+    That is, A_g > A_r > ... for every survey.
+    """
     from dust_extinction.parameter_averages import F99, G23
 
     for survey, bands in dust.PASSBANDS.items():
@@ -77,7 +81,8 @@ def test_dp2utils_reference_values(model, dustmap):
     corr = dust.DustCorrector("lsst", Rv=3.1, model=model, dustmap=dustmap)
     Ax = corr(RA, DEC)
     assert set(Ax) == set("ugrizy")
-    # 1e-4 with the DP2 butler curves; the bundled SVO LSST curves differ slightly
+    # 1e-4 with the DP2 butler curves; the bundled SVO LSST curves differ
+    # slightly
     rtol = 1e-4 if corr.passbands["g"][0].size == 1601 else 3e-2
     for band in "ugrizy":
         np.testing.assert_allclose(Ax[band], EXPECTED[(model, dustmap)][band], rtol=rtol, err_msg=band)
@@ -89,7 +94,7 @@ def test_dp2utils_reference_values(model, dustmap):
 
 @pytest.mark.skipif(not _has_maps(), reason="dust maps not available")
 def test_des_euclid_hsc_share_the_same_Av():
-    """Different surveys, same sky: same A_V, band values ordered by wavelength."""
+    """Different surveys, same sky: same A_V, bands ordered by wavelength."""
     corrs = {s: dust.DustCorrector(s, dustmap="sfd") for s in ("des", "euclid", "hsc")}
     Av = {s: c.get_Av(RA, DEC) for s, c in corrs.items()}
     np.testing.assert_allclose(Av["des"], Av["euclid"])

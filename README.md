@@ -36,13 +36,18 @@ pip install .
 conda install -c conda-forge xlens
 ```
 
-### Input Galaxy Catalog
-Download and set up the DESC DC1 (2017) galaxy catalog:
+### Input Galaxy Catalogs
+The simulations read their input galaxy catalogs from `$CATSIM_DIR`.
+The three catalogs the tests and example notebooks need (CatSim
+`OneDegSq.fits`, Euclid Flagship `flagship_cosmos.fits` and the COSMOS
+parametric fits `src_cosmos.fits`; 538 MB unpacked, 318 MB packed) are
+attached to the v0.5.3 release:
 ```shell
-wget https://www.cosmo.bnl.gov/www/xiangchong/data/catsim_test.tar.xz
+wget https://github.com/mr-superonion/xlens/releases/download/v0.5.3/catsim_test.tar.xz
 tar xvfJ catsim_test.tar.xz
 export CATSIM_DIR=$(realpath catsim_test)
 ```
+`catsim_test/README` describes each catalog, its origin and its columns.
 
 ## Examples
 

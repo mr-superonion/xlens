@@ -83,6 +83,8 @@ ignore = [
 exclude = [".git", "__pycache__", "docs", "build", "dist"]
 max-line-length = 110
 max-doc-length = 79
+# pex_config override files: ``config`` is injected by the loader.
+per-file-ignores = ["examples/pipelines/skymap_sim_test.py:F821"]
 
 [tool.ruff]
 line-length = 110

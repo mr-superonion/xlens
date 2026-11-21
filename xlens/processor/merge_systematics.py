@@ -24,10 +24,11 @@
 ``BuildCellSystematicsTask`` writes one ``(6, npix, npix)`` noise-correlation
 array per patch (``deep_coadd_cell_systematics_noisecorr_6bands``), band slots
 ordered by :data:`xlens.processor.systematics_base.band_order` (``ugrizy``).
-This task stacks every patch of a tract into one tract-level ``(6, npix, npix)``
-array: for each band slot it averages only over the patches that actually have
-that band (a non-zero slot), so the unused slots (and any tract with partial
-band coverage) stay well defined rather than being diluted by structural zeros.
+This task stacks every patch of a tract into one tract-level
+``(6, npix, npix)`` array: for each band slot it averages only over the
+patches that actually have that band (a non-zero slot), so the unused slots
+(and any tract with partial band coverage) stay well defined rather than
+being diluted by structural zeros.
 """
 
 __all__ = [

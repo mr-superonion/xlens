@@ -1,13 +1,13 @@
 """Unit tests for :class:`xlens.simulator.galaxies.SceneCatalog`.
 
-A scene is a table of objects rendered once each at their own positions,
-with a bulge + disk or single-Sersic morphology and per-band magnitudes.  The tests build
-a small synthetic scene around the centre of a one-patch tract and check
-the truth-catalog construction, the ``ra``/``dec`` <-> ``dx``/``dy``
-round trip, rotation and halo lensing, the rendering onto an exposure
-(flux, position, orientation), the consistency with the pipeline drawing
-loop of ``MultibandSimTask``, the DP2 object-table conversion, and the
-FITS loading from ``catsim_dir``.
+A scene is a table of objects rendered once each at their own positions, with a
+bulge + disk or single-Sersic morphology and per-band magnitudes. The tests
+build a small synthetic scene around the centre of a one-patch tract and check
+the truth-catalog construction, the ``ra``/``dec`` <-> ``dx``/``dy`` round
+trip, rotation and halo lensing, the rendering onto an exposure (flux,
+position, orientation), the consistency with the pipeline drawing loop of
+``MultibandSimTask``, the DP2 object-table conversion, and the FITS loading
+from ``catsim_dir``.
 """
 
 import os
@@ -64,9 +64,10 @@ SCENE_ROWS = [
 ]
 
 
-# positions sit a little off the pixel grid: the scene is given in ra/dec, and an object
-# exactly on a pixel boundary rounds its stamp to either side at the 1e-9 level of the
-# sky <-> pixel round trip, depending on which WCS (DM or GalSim) does it
+# positions sit a little off the pixel grid: the scene is given in ra/dec,
+# and an object exactly on a pixel boundary rounds its stamp to either side
+# at the 1e-9 level of the sky <-> pixel round trip, depending on which WCS
+# (DM or GalSim) does it
 OFF_GRID = 0.013  # arcsec
 
 
@@ -98,9 +99,11 @@ def _structured(columns):
 
 
 def _radec_scene(scene, tract_info=TRACT_INFO):
-    """The scene with its ``dx``/``dy`` layout (arcsec from the tract centre, along the
-    pixel axes) turned into the ``ra``/``dec`` columns a scene file carries."""
-    columns = {name: np.asarray(scene[name]) for name in (scene.dtype.names if isinstance(scene, np.ndarray) else scene)}
+    """The scene with its ``dx``/``dy`` layout (arcsec from the tract
+    centre, along the pixel axes) turned into the ``ra``/``dec`` columns a
+    scene file carries."""
+    names = scene.dtype.names if isinstance(scene, np.ndarray) else scene
+    columns = {name: np.asarray(scene[name]) for name in names}
     if "dx" in columns and "ra" not in columns:
         centre = tract_info.getBBox().getCenter()
         ra, dec = tract_info.getWcs().pixelToSkyArray(
@@ -113,8 +116,8 @@ def _radec_scene(scene, tract_info=TRACT_INFO):
 
 
 def _make(scene, **kwargs):
-    """Write ``scene`` as the catalog FITS file of a fresh ``catsim_dir`` and read it back,
-    the way the pipeline builds the catalog."""
+    """Write ``scene`` as the catalog FITS file of a fresh ``catsim_dir``
+    and read it back, the way the pipeline builds the catalog."""
     with tempfile.TemporaryDirectory() as catsim_dir:
         SceneCatalog.write_scene(_radec_scene(scene, kwargs.get("tract_info", TRACT_INFO)), catsim_dir)
         return SceneCatalog(catsim_dir=catsim_dir, **kwargs)
@@ -359,7 +362,8 @@ def test_matches_pipeline_drawing_loop():
 
 
 def test_sim_task_run_from_truth_catalog():
-    """The full sim task renders a scene truth catalog, PSF from the exposure."""
+    """The full sim task renders a scene truth catalog, PSF from the
+    exposure."""
     catalog = _make(_scene_table(), tract_info=TRACT_INFO)
     halo = ShearHalo(mass=5e14, conc=4.0, z_lens=Z_CLUSTER)
     catalog.lens(shear_obj=halo)
@@ -447,7 +451,10 @@ def test_dp2_objects_to_scene(tmp_path):
     # a FITS file of the object rows converts to the same scene
     fitsio.write(os.path.join(tmp_path, "objects.fits"), objects)
     from_file = SceneCatalog.dp2_objects_to_scene(
-        os.path.join(tmp_path, "objects.fits"), bands=("r", "i"), default_redshift=Z_CLUSTER, morphology="sersic"
+        os.path.join(tmp_path, "objects.fits"),
+        bands=("r", "i"),
+        default_redshift=Z_CLUSTER,
+        morphology="sersic",
     )
     for name in scene.dtype.names:
         np.testing.assert_array_equal(from_file[name], scene[name])
@@ -500,7 +507,8 @@ def test_load_from_catsim_dir(tmp_path):
     np.testing.assert_array_equal(catalog.data["indices"], [0, 1, 3, 4])
     assert catalog.data["is_point_source"].dtype == np.bool_
 
-    # the pipeline builds it from the galaxy type and $CATSIM_DIR-style directory
+    # the pipeline builds it from the galaxy type and a $CATSIM_DIR-style
+    # directory
     catalog = get_catalog_class("scene")(tract_info=TRACT_INFO, catsim_dir=str(tmp_path))
     assert len(catalog) == len(SCENE_ROWS)
     np.testing.assert_allclose(catalog.data["lsst_i"], table["lsst_i"])
@@ -509,9 +517,10 @@ def test_load_from_catsim_dir(tmp_path):
         SceneCatalog(tract_info=TRACT_INFO, catsim_dir=str(tmp_path / "empty"))
 
 
-# --- bulge + disk morphology ---------------------------------------------------
+# --- bulge + disk morphology ------------------------------------------------
 
-# dx, dy [arcsec], i mag, bulge fraction (i, r), disk (a, b, theta), bulge (a, b, theta)
+# dx, dy [arcsec], i mag, bulge fraction (i, r), disk (a, b, theta),
+# bulge (a, b, theta)
 BULGE_DISK_ROWS = [
     # pure disk along +x
     (-20.0, -15.0, 20.0, 0.0, 0.2, 1.0, 0.5, 0.0, 0.4, 0.4, 0.0),
@@ -648,7 +657,8 @@ def test_dp2_objects_to_scene_bulge_disk():
             "refExtendedness": [1.0, 1.0, 1.0],
             "i_cModel_dev_reff_major": [r[8] for r in BULGE_DISK_ROWS],
             "i_cModel_dev_reff_minor": [r[9] for r in BULGE_DISK_ROWS],
-            # DP2 angles run from East towards North: the negative of the scene's
+            # DP2 angles run from East towards North: the negative of the
+            # scene's
             "i_cModel_dev_theta": [-r[10] for r in BULGE_DISK_ROWS],
             "i_cModel_exp_reff_major": [r[5] for r in BULGE_DISK_ROWS],
             "i_cModel_exp_reff_minor": [r[6] for r in BULGE_DISK_ROWS],
@@ -715,9 +725,11 @@ def test_dp2_objects_to_scene_bulge_disk():
 
 
 def _dp2_position_angle(phi_deg, q, cd):
-    """DP2's ``theta`` for a pixel-frame ellipse at ``phi_deg`` from +x, computed the way
-    ``pipe_tasks`` ``PositionAngleFromMoments`` does: moments mapped to the sky with the
-    CD matrix (u = +RA, v = +Dec), then ``0.5 * atan2(2 uv, uu - vv)``."""
+    """DP2's ``theta`` for a pixel-frame ellipse at ``phi_deg`` from +x.
+
+    Computed the way ``pipe_tasks`` ``PositionAngleFromMoments`` does:
+    moments mapped to the sky with the CD matrix (u = +RA, v = +Dec), then
+    ``0.5 * atan2(2 uv, uu - vv)``."""
     phi = np.radians(phi_deg)
     rot = np.array([[np.cos(phi), -np.sin(phi)], [np.sin(phi), np.cos(phi)]])
     moments = rot @ np.diag([1.0, q**2]) @ rot.T
@@ -726,8 +738,8 @@ def _dp2_position_angle(phi_deg, q, cd):
 
 
 def test_dp2_position_angle_convention():
-    """An object at a known pixel angle, described by DP2's own angle convention,
-    is drawn back at that pixel angle (not mirrored)."""
+    """An object at a known pixel angle, described by DP2's own angle
+    convention, is drawn back at that pixel angle (not mirrored)."""
     cd = TRACT_INFO.getWcs().getCdMatrix()
     assert cd[0, 0] < 0  # standard East-left tract
     centre = TRACT_INFO.getBBox().getCenter()
@@ -753,7 +765,10 @@ def test_dp2_position_angle_convention():
             tract_info=TRACT_INFO,
         )
         exposure = _blank_exposure()
-        truth = catalog.draw_on_image(exposure, band="i", mag_zero=MAG_ZERO, psf_obj=galsim.Gaussian(fwhm=0.3))
+        truth = catalog.draw_on_image(
+            exposure, band="i", mag_zero=MAG_ZERO,
+            psf_obj=galsim.Gaussian(fwhm=0.3),
+        )
         array = exposure.getMaskedImage().image.array
         bbox = exposure.getBBox()
         cx = int(round(truth[0]["image_x"] - bbox.getMinX()))
@@ -777,7 +792,10 @@ def test_draw_catalog_list_is_the_sum():
     config.galaxy_type = "scene"
     config.survey_name = "lsst"
     task = MultibandSimTask(config=config)
-    kwargs = dict(wcs=TRACT_INFO.getWcs(), bbox_outer=TRACT_INFO.getBBox(), psf_obj=_psf(), mag_zero=MAG_ZERO, band="i")
+    kwargs = dict(
+        wcs=TRACT_INFO.getWcs(), bbox_outer=TRACT_INFO.getBBox(),
+        psf_obj=_psf(), mag_zero=MAG_ZERO, band="i",
+    )
     both = task.draw_catalog(galaxy_catalog=[foreground, background], **kwargs)
     each = task.draw_catalog(galaxy_catalog=foreground, **kwargs) + task.draw_catalog(
         galaxy_catalog=background, **kwargs

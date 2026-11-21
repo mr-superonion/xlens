@@ -372,15 +372,18 @@ class MultibandSimTask(PipelineTask):
         self.rotate_list = [np.pi / num_rot * i for i in range(num_rot)]
         pass
 
-    def simulate_foreground(self, pixel_scale, model, psf_obj, bbox_outer, band, mag_zero, draw_method, **kwargs):
+    def simulate_foreground(
+        self, pixel_scale, model, psf_obj, bbox_outer, band, mag_zero,
+        draw_method, **kwargs,
+    ):
         assert isinstance(self.config, MultibandSimConfig)
         xmin = bbox_outer.getMinX()
         ymin = bbox_outer.getMinY()
         width = bbox_outer.getWidth()
         height = bbox_outer.getHeight()
 
-        pix_x = xmin + width//2 #center pix +- sub pixel shift
-        pix_y = ymin + height//2 #center pix +- sub pixel shift
+        pix_x = xmin + width//2  # center pix +- sub pixel shift
+        pix_y = ymin + height//2  # center pix +- sub pixel shift
 
         image_pos = galsim.PositionD(x=pix_x, y=pix_y)
         foreground_obj = bright_star(model=model, mag_zero=mag_zero, band=band)
@@ -396,7 +399,7 @@ class MultibandSimTask(PipelineTask):
         )
 
         return stamp.array
-    
+
     def simulate_images(
         self,
         *,
@@ -886,8 +889,8 @@ class MultibandSimTask(PipelineTask):
         # by cloning before it is added.
         if self.config.foreground_model != 'None':
             foreground_array = self.simulate_foreground(
-                galaxy_catalog.pixel_scale, 
-                self.config.foreground_model, 
+                galaxy_catalog.pixel_scale,
+                self.config.foreground_model,
                 psf_galsim,
                 boundary_box,
                 band,
@@ -900,7 +903,7 @@ class MultibandSimTask(PipelineTask):
             )
             outputs = Struct(
                 simExposure=exp_out,
-                foreExposure = exp_fore
+                foreExposure=exp_fore,
             )
             return outputs
 
