@@ -165,9 +165,10 @@ class AnacalMeasureConfigBase(Config):
             )
         if self._fpfs_required() and self.fpfs.sigma_shapelets1 < 0.0:
             raise FieldValidationError(
-                self.fpfs.__class__.sigma_shapelets1,
-                self,
-                "sigma_shapelets1 in a wrong range",
+                self.fpfs.ConfigClass.sigma_shapelets1,
+                self.fpfs.value,
+                "fpfs.sigma_shapelets1 is required (> 0) when the fpfs "
+                "subtask runs",
             )
 
 
