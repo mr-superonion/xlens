@@ -1072,7 +1072,9 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             )
 
         order: dict | None = None
+        external_ids = None
         if detection is not None:
+            detection, external_ids = self._split_external_ids(detection)
             # External catalog: partition into the SAME per-cell groups
             # internal detection would produce (cell inner regions tile
             # the patch), so _force sees one interface and its cell loop
@@ -1108,6 +1110,11 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             # Basic geometric selection only: rows in no existing cell's
             # inner region (outside the coadd, patch border, or holes)
             # are dropped by the partition.
+            # No edge margin (keep_box) here, unlike MeasureCoaddsPipe:
+            # the detector runs per cell on the cell's OUTER image, whose
+            # border is wider than anacal.bound, so internal detection
+            # reaches the whole inner region of every cell -- which is
+            # exactly what the partition keeps.
             det_cats, order = self._partition_external_detection(
                 det_use, regions, pixel_scale,
             )
@@ -1181,13 +1188,17 @@ class MeasureCellCoaddsPipe(AnacalMeasureTaskBase):
             )
 
         output = np.concatenate(cell_results)
+        object_ids = None
         if order is not None:
-            # External catalogs are row-aligned to their producer; undo
-            # the per-cell grouping.
-            output = self._restore_input_order(
+            # External catalog: undo the per-cell grouping, so the rows
+            # come back in input order, and take the ids of those rows.
+            output, rows = self._restore_input_order(
                 output, list(force_cats.keys()), order,
             )
+            if external_ids is not None:
+                object_ids = external_ids[rows]
         output = self._finalize_catalog(
             output, seed=seed, skyMap=skyMap, tract=tract, patch=patch,
+            object_ids=object_ids,
         )
         return Struct(anacalCatalog=output)

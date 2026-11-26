@@ -42,7 +42,13 @@ class AnacalConfig(Config):
         default=64,
     )
     bound = Field[int](
-        doc="Sources to be removed if too close to boundary [pixel]",
+        doc=(
+            "Edge margin [pixel]: no source is detected within this many "
+            "pixels of the image edge. MeasureCoaddsPipe applies the same "
+            "margin to an EXTERNAL detection catalog -- rows closer to the "
+            "edge of the patch image are dropped before forced "
+            "measurement; 0 keeps every row."
+        ),
         default=35,
     )
     psf_dilation = Field[float](

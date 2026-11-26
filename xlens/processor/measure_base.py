@@ -232,6 +232,21 @@ class MeasureBandsConfigBase(AnacalMeasureConfigBase):
         ),
         default="lsst",
     )
+    external_detection_id_column = Field[str](
+        doc=(
+            "Name of an integer column of the EXTERNAL detection catalog "
+            "that identifies its rows. When set, the output ``object_id`` "
+            "of every source is the value this column has for the "
+            "detection it was measured at, so the output can be joined "
+            "back to the catalog the detections came from. The values "
+            "must be unique within the catalog. None (the default) -- and "
+            "always for internal detection -- leaves ``object_id`` "
+            "generated here: patch id * 1e6 + row number within the "
+            "patch catalog."
+        ),
+        optional=True,
+        default=None,
+    )
     doPsfHsmMoments = Field[bool](
         doc=(
             "If True, run lsst.meas.extensions.shapeHSM.HsmPsfMomentsPlugin "
@@ -534,6 +549,7 @@ class AnacalMeasureTaskBase(PipelineTask):
         detection: NDArray,
         regions: list,
         pixel_scale: float,
+        keep_box: tuple | None = None,
     ) -> tuple[dict, dict]:
         """Split an external detection catalog into per-region groups.
 
@@ -548,6 +564,14 @@ class AnacalMeasureTaskBase(PipelineTask):
         position means no measurement), mirroring internal detection,
         which can only ever find sources inside existing regions.
 
+        ``keep_box``, when given, is a half-open rectangle
+        ``(x0, y0, x1, y1)`` in the same GLOBAL pixel units; rows outside
+        it are DROPPED before the regions are looked at.  Callers pass
+        the image shrunk by the detector's edge margin
+        (``config.anacal.bound``), so an external position too close to
+        the image edge is rejected exactly where internal detection would
+        never have found a source -- its stamp would hang off the image.
+
         Returns ``(det_cats, order)``: per-key sub-catalogs (non-empty
         only) and each key's original row indices, so callers can
         restore the input row order after per-group results are merged.
@@ -557,15 +581,26 @@ class AnacalMeasureTaskBase(PipelineTask):
         det_cats: dict = {}
         order: dict = {}
         assigned = np.zeros(len(px), dtype=bool)
+        inside = np.ones(len(px), dtype=bool)
+        if keep_box is not None:
+            kx0, ky0, kx1, ky1 = keep_box
+            inside = (px >= kx0) & (px < kx1) & (py >= ky0) & (py < ky1)
         for key, x0, y0, x1, y1 in regions:
-            sel = ~assigned & (px >= x0) & (px < x1) & (py >= y0) & (py < y1)
+            sel = inside & ~assigned & (px >= x0) & (px < x1) & (py >= y0) & (py < y1)
             if not np.any(sel):
                 continue
             assigned |= sel
             idx = np.flatnonzero(sel)
             det_cats[key] = detection[idx]
             order[key] = idx
-        n_left = int((~assigned).sum())
+        n_edge = int((~inside).sum())
+        if n_edge:
+            self.log.info(
+                "%d external detections are within the edge margin of "
+                "the image (anacal.bound); dropped.",
+                n_edge,
+            )
+        n_left = int((inside & ~assigned).sum())
         if n_left:
             self.log.info(
                 "%d external detections fall in no region "
@@ -611,16 +646,57 @@ class AnacalMeasureTaskBase(PipelineTask):
         out["n_mask_discontinuity"] = stamped["n_mask_discontinuity"]
         return out
 
+    def _split_external_ids(
+        self,
+        detection: NDArray,
+    ) -> tuple[NDArray, NDArray | None]:
+        """Take the id column out of an external detection catalog.
+
+        The column is ``config.external_detection_id_column``.
+
+        Returns ``(detection, ids)``: the catalog without the id column
+        (the measurement code only knows the AnaCal schema) and the ids as
+        int64, or ``(detection, None)`` when no id column is configured.
+        """
+        name = self.config.external_detection_id_column
+        if name is None:
+            return detection, None
+        if name not in (detection.dtype.names or ()):
+            raise ValueError(
+                f"external_detection_id_column = {name!r}, but the external "
+                "detection catalog has no such column."
+            )
+        raw = np.asarray(detection[name])
+        if not np.issubdtype(raw.dtype, np.integer):
+            raise ValueError(
+                f"detection id column {name!r} must be an integer column, "
+                f"got dtype {raw.dtype}."
+            )
+        ids = raw.astype(np.int64)
+        if len(np.unique(ids)) != len(ids):
+            raise ValueError(
+                f"detection id column {name!r} has repeated values; the "
+                "ids must identify the rows uniquely."
+            )
+        return rfn.drop_fields(detection, name, usemask=False), ids
+
     def _restore_input_order(
         self,
         catalog: NDArray,
         force_keys: list,
         order: dict,
-    ) -> NDArray:
-        """Reorder per-group concatenated rows back to input row order."""
+    ) -> tuple[NDArray, NDArray]:
+        """Reorder per-group concatenated rows back to input row order.
+
+        Returns ``(catalog, rows)``: the reordered catalog and, for each
+        of its rows, the row number it had in the external detection
+        catalog.  ``rows`` is what links an output row to its detection:
+        ``external_ids[rows]`` are the ids of the measured sources.
+        """
         orig = np.concatenate([order[key] for key in force_keys])
         assert len(orig) == len(catalog)
-        return catalog[np.argsort(orig, kind="stable")]
+        sort = np.argsort(orig, kind="stable")
+        return catalog[sort], orig[sort]
 
     def _run_anacal(self, **data):
         """Detection + detection-band measurement, with the mask cut."""
@@ -890,14 +966,26 @@ class AnacalMeasureTaskBase(PipelineTask):
         skyMap,
         tract: int,
         patch: int,
+        object_ids: NDArray | None = None,
     ) -> NDArray:
-        """Magnitude columns, stable object ids, is_primary, row cut."""
+        """Magnitude columns, stable object ids, is_primary, row cut.
+
+        ``object_ids`` are the ids taken from an external detection
+        catalog (``config.external_detection_id_column``), one per row; None
+        generates them from the patch-level seed.
+        """
         # Per-band AB magnitude + shear response for each published flux
         # family (fluxes are on the fixed MAG_ZERO_AB zeropoint here).
         catalog = np.asarray(add_magnitude_columns(catalog, MAG_ZERO_AB))
         # Stable per-object IDs derived from the patch-level seed. Used
         # downstream by ``photoZPipe`` and any object-level joiners.
-        object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(catalog), dtype=np.int64)
+        if object_ids is None:
+            object_ids = np.int64(seed) * np.int64(1_000_000) + np.arange(len(catalog), dtype=np.int64)
+        elif len(object_ids) != len(catalog):
+            raise RuntimeError(
+                f"{len(object_ids)} external object ids for "
+                f"{len(catalog)} catalog rows."
+            )
         catalog = rfn.append_fields(
             catalog,
             "object_id",

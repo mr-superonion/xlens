@@ -758,7 +758,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             ``dwsel_dg2``; pixel positions are derived from the sky
             coordinates and any the catalog carries are ignored.  See
             :meth:`_ingest_external_detection` for why those are
-            required and why neither has a default.
+            required and why neither has a default.  With
+            ``config.external_detection_id_column`` set it must also carry that
+            integer column, whose values become the output ``object_id``.
         """
         # Seed is band-independent under the default
         # SkyMapIdGeneratorConfig (n_bands=0), so any handle in the dict
@@ -790,7 +792,9 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
         mask_array = self.apply_n_image_cut(mask_array, n_image_handles or {})
 
         order: dict | None = None
+        external_ids = None
         if detection is not None:
+            detection, external_ids = self._split_external_ids(detection)
             # External catalog: partition it into the SAME per-cell
             # groups internal detection would produce (cell inner
             # regions tile the patch), so _force sees one interface and
@@ -818,10 +822,22 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
                 exposure.getWcs(),
                 pixel_scale,
             )
+            # Same edge margin as internal detection, which searches
+            # only [bound, n - bound) of the image: an external position
+            # closer to the edge than that is dropped, not measured on a
+            # stamp that hangs off the image.  bound = 0 keeps every row.
+            bound = int(self.config.anacal.bound)
+            keep_box = (
+                bbox.getBeginX() + bound,
+                bbox.getBeginY() + bound,
+                bbox.getEndX() - bound,
+                bbox.getEndY() - bound,
+            )
             det_cats, order = self._partition_external_detection(
                 det_use,
                 regions,
                 pixel_scale,
+                keep_box=keep_box,
             )
             if not det_cats:
                 raise NoWorkFound(
@@ -867,19 +883,23 @@ class MeasureCoaddsPipe(AnacalMeasureTaskBase):
             )
 
         final = np.concatenate(cell_results)
+        object_ids = None
         if order is not None:
-            # External catalogs are row-aligned to their producer (e.g.
-            # a det_id column); undo the cell grouping.
-            final = self._restore_input_order(
+            # External catalog: undo the cell grouping, so the rows come
+            # back in input order, and take the ids of those rows.
+            final, rows = self._restore_input_order(
                 final,
                 list(force_cats.keys()),
                 order,
             )
+            if external_ids is not None:
+                object_ids = external_ids[rows]
         final = self._finalize_catalog(
             final,
             seed=seed,
             skyMap=skyMap,
             tract=tract,
             patch=patch,
+            object_ids=object_ids,
         )
         return Struct(anacalCatalog=final)
