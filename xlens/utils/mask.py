@@ -71,6 +71,7 @@ __all__ = [
     "STAR_MASK_RADIUS_FUNCS",
     "get_gaia_table",
     "build_gaia_xyr",
+    "add_galaxy_ellipse_mask",
 ]
 
 
@@ -217,3 +218,102 @@ def build_gaia_xyr(
     out["y"] = y
     out["r"] = r[keep]
     return out
+
+
+def add_galaxy_ellipse_mask(
+    mask_array: NDArray,
+    *,
+    ra: NDArray,
+    dec: NDArray,
+    d25_arcmin: NDArray,
+    logr25: NDArray,
+    pa: NDArray,
+    wcs: Any,
+    bbox: Any,
+    scale: float = 2.5,
+    d25_min: float = 0.3,
+    rmax_arcsec: float = 300.0,
+    value: int = 1,
+) -> int:
+    """OR large-galaxy ellipses into ``mask_array`` (bbox-local), in place.
+
+    The catalog side of the lsst-starsub large-galaxy mask (E. Sheldon,
+    ``lsst_starsub/galaxies.py``): each galaxy of ``d25_arcmin >= d25_min``
+    is masked by its D25 ellipse -- semi-major axis ``scale * D25 / 2``
+    (capped at ``rmax_arcsec``), axis ratio ``10**-logr25`` (1 when NaN,
+    floored at 0.05), position angle ``pa`` east of north (0 when NaN).
+    lsst-starsub sizes the mask from the image segmentation instead; with
+    no segmentation the D25 ellipse is scaled (2.5: the blend groups of
+    its DP2 test region reached ~2.5 x D25/2).  The ellipse is drawn in
+    the galaxy's local tangent plane through ``wcs`` (east and north taken
+    from the WCS), so it does not depend on the image orientation.
+
+    Parameters
+    ----------
+    mask_array : (ny, nx) integer array
+        Indexed from ``bbox``'s minimum corner; ``value`` is OR-ed in.
+    ra, dec : arrays, degrees
+    d25_arcmin, logr25, pa : arrays
+    wcs : lsst.afw.geom.SkyWcs
+    bbox : lsst.geom.Box2I
+    scale, d25_min, rmax_arcsec : float
+
+    Returns
+    -------
+    ngal : int
+        Galaxies that masked at least one pixel.
+    """
+    ra = np.asarray(ra, dtype=np.float64)
+    dec = np.asarray(dec, dtype=np.float64)
+    d25 = np.asarray(d25_arcmin, dtype=np.float64)
+    keep = np.isfinite(ra) & np.isfinite(dec) & np.isfinite(d25) & (d25 >= d25_min)
+    if not keep.any():
+        return 0
+    ra, dec, d25 = ra[keep], dec[keep], d25[keep]
+    logr = np.asarray(logr25, dtype=np.float64)[keep]
+    q = np.clip(np.where(np.isfinite(logr), 10.0 ** (-logr), 1.0), 0.05, 1.0)
+    pa = np.asarray(pa, dtype=np.float64)[keep]
+    pa = np.deg2rad(np.where(np.isfinite(pa), pa, 0.0))
+    ny, nx = mask_array.shape
+    x0, y0 = bbox.getMinX(), bbox.getMinY()
+    a_arc = np.minimum(scale * d25 * 30.0, rmax_arcsec)  # D25/2 in arcsec x scale
+    # local Jacobian from 1 arcsec steps east and north
+    step = 1.0 / 3600.0
+    cx, cy = wcs.skyToPixelArray(ra, dec, degrees=True)
+    ex, ey = wcs.skyToPixelArray(
+        ra + step / np.cos(np.deg2rad(dec)), dec, degrees=True
+    )
+    nx_, ny_ = wcs.skyToPixelArray(ra, dec + step, degrees=True)
+    ex, ey, nx_, ny_ = ex - cx, ey - cy, nx_ - cx, ny_ - cy
+    pix_per_arcsec = np.sqrt(np.abs(ex * ny_ - ey * nx_))
+    reach = a_arc * pix_per_arcsec * 1.01 + 1.0
+    lx, ly = cx - x0, cy - y0
+    near = (
+        (lx + reach >= 0) & (lx - reach <= nx - 1)
+        & (ly + reach >= 0) & (ly - reach <= ny - 1)
+    )
+    ngal = 0
+    for i in np.flatnonzero(near):
+        jac = np.array([[ex[i], nx_[i]], [ey[i], ny_[i]]])  # (dx,dy)=J(xi,eta)
+        jinv = np.linalg.inv(jac)
+        ix0 = int(max(np.floor(lx[i] - reach[i]), 0))
+        ix1 = int(min(np.ceil(lx[i] + reach[i]) + 1, nx))
+        iy0 = int(max(np.floor(ly[i] - reach[i]), 0))
+        iy1 = int(min(np.ceil(ly[i] + reach[i]) + 1, ny))
+        if ix1 <= ix0 or iy1 <= iy0:
+            continue
+        dx = np.arange(ix0, ix1, dtype=np.float64)[None, :] - lx[i]
+        dy = np.arange(iy0, iy1, dtype=np.float64)[:, None] - ly[i]
+        xi = jinv[0, 0] * dx + jinv[0, 1] * dy    # arcsec east
+        eta = jinv[1, 0] * dx + jinv[1, 1] * dy   # arcsec north
+        sp, cp = np.sin(pa[i]), np.cos(pa[i])
+        u = xi * sp + eta * cp                    # along the major axis
+        v = xi * cp - eta * sp
+        a = a_arc[i]
+        b = a * q[i]
+        inside = (u / a) ** 2 + (v / b) ** 2 <= 1.0
+        if inside.any():
+            sub = mask_array[iy0:iy1, ix0:ix1]
+            sub[inside] |= value
+            ngal += 1
+    return ngal

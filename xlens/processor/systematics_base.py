@@ -41,6 +41,8 @@ __all__ = [
     "BandMaskPlanesConfig",
     "BuildSystematicsConfigBase",
     "BuildSystematicsTaskBase",
+    "GALAXY_REFCAT_NAME",
+    "lookup_padded_skypix",
 ]
 
 import anacal
@@ -66,6 +68,7 @@ from ..utils.image import badMaskDefault, prepare_mask, remove_noise_corr_pedest
 from ..utils.mask import (
     GAIA_TABLE_DTYPE,
     STAR_MASK_RADIUS_FUNCS,
+    add_galaxy_ellipse_mask,
     build_gaia_xyr,
     get_gaia_table,
 )
@@ -73,6 +76,44 @@ from ..wcs import pixel_scale_arcsec
 
 # Slot order of every stacked per-band output (noise correlation, PSF).
 band_order = "ugrizy"
+
+# HyperLEDA large-galaxy reference catalog (HTM7 shards of the VizieR
+# VII/237 extract with D25 > 0.32 arcmin; columns id = PGC, coord_ra,
+# coord_dec, d25_arcmin, logr25, pa), registered in the dp2 butler in
+# the RUN collection ``refcats/hyperleda_vii237_d25gt0p32``.
+GALAXY_REFCAT_NAME = "hyperleda_vii237_d25gt0p32"
+# Degrees added around the quantum's region when looking up galaxy
+# shards: a galaxy centred in a trixel that does not overlap the patch
+# can still reach it (the mask is capped at galaxyMaskRmaxArcsec).
+GALAXY_LOOKUP_PAD_DEG = 0.1
+
+
+def lookup_padded_skypix(datasetType, registry, quantumDataId, collections):
+    """Prerequisite lookup for skypix-sharded refcats with a padded region.
+
+    The default lookup returns only the shards overlapping the patch, so
+    a large galaxy centred just outside them is never seen.  This grows
+    the patch region's bounding circle by ``GALAXY_LOOKUP_PAD_DEG``.
+    """
+    from lsst.sphgeom import Angle, Circle
+
+    (name,) = tuple(datasetType.dimensions.names)
+    pixelization = registry.dimensions[name].pixelization
+    circle = quantumDataId.region.getBoundingCircle()
+    padded = Circle(
+        circle.getCenter(),
+        Angle(circle.getOpeningAngle().asRadians()
+              + np.deg2rad(GALAXY_LOOKUP_PAD_DEG)),
+    )
+    refs = []
+    for begin, end in pixelization.envelope(padded):
+        for index in range(begin, end):
+            ref = registry.findDataset(
+                datasetType, {name: index}, collections=collections,
+            )
+            if ref is not None:
+                refs.append(ref)
+    return refs
 
 
 class BandMaskPlanesConfig(Config):
@@ -132,6 +173,26 @@ class BuildSystematicsConfigBase(Config):
     gaiaLoader = ConfigField(
         dtype=LoadReferenceObjectsConfig,
         doc="Reference catalog loader for GAIA",
+    )
+    doGalaxyMask = Field[bool](
+        doc=(
+            "OR the HyperLEDA large-galaxy ellipses into bit 0 of the "
+            "mask (needs the galaxy refcat, connection galaxyCatalog, in "
+            "the input collections; skipped with a warning when absent)."
+        ),
+        default=False,
+    )
+    galaxyMaskScale = Field[float](
+        doc="Mask semi-major axis in units of the catalog D25/2.",
+        default=2.5,
+    )
+    galaxyMaskD25Min = Field[float](
+        doc="Smallest catalog D25 [arcmin] that is masked.",
+        default=0.3,
+    )
+    galaxyMaskRmaxArcsec = Field[float](
+        doc="Cap on the mask semi-major axis [arcsec].",
+        default=300.0,
     )
     starMaskType = ChoiceField[str](
         doc=(
@@ -316,6 +377,52 @@ class BuildSystematicsTaskBase(PipelineTask):
                 star_array=gaia_array,
             )
         return gaia_table
+
+    def _apply_galaxy_mask(self, *, mask_array, bbox, wcs, galaxy_cats):
+        """OR the large-galaxy ellipses into bit 0 of ``mask_array``.
+
+        ``galaxy_cats`` are the deferred handles of the galaxy refcat
+        shards (connection ``galaxyCatalog``); None or empty skips.
+        """
+        if not self.config.doGalaxyMask:
+            return 0
+        if not galaxy_cats or bbox is None or wcs is None:
+            self.log.warning(
+                "doGalaxyMask is set but no %s shard was found; "
+                "no galaxy mask applied", GALAXY_REFCAT_NAME,
+            )
+            return 0
+        cols = {k: [] for k in ("ra", "dec", "d25", "logr25", "pa")}
+        for handle in galaxy_cats:
+            cat = handle.get() if hasattr(handle, "get") else handle
+            if len(cat) == 0:
+                continue
+            cols["ra"].append(np.rad2deg(cat["coord_ra"]))
+            cols["dec"].append(np.rad2deg(cat["coord_dec"]))
+            cols["d25"].append(np.asarray(cat["d25_arcmin"]))
+            cols["logr25"].append(np.asarray(cat["logr25"]))
+            cols["pa"].append(np.asarray(cat["pa"]))
+        if not cols["ra"]:
+            return 0
+        cols = {k: np.concatenate(v) for k, v in cols.items()}
+        before = int(np.count_nonzero(mask_array & 1))
+        ngal = add_galaxy_ellipse_mask(
+            mask_array,
+            ra=cols["ra"], dec=cols["dec"], d25_arcmin=cols["d25"],
+            logr25=cols["logr25"], pa=cols["pa"], wcs=wcs, bbox=bbox,
+            scale=self.config.galaxyMaskScale,
+            d25_min=self.config.galaxyMaskD25Min,
+            rmax_arcsec=self.config.galaxyMaskRmaxArcsec,
+            value=1,
+        )
+        added = int(np.count_nonzero(mask_array & 1)) - before
+        self.log.info(
+            "Galaxy mask: %d of %d catalog galaxies reach the patch; "
+            "+%.4f of the pixels masked (scale %.2f x D25/2)",
+            ngal, len(cols["ra"]), added / mask_array.size,
+            self.config.galaxyMaskScale,
+        )
+        return ngal
 
     # 5 sigma of the ROBUST noise level. The previous per-pixel form,
     # ``image**2 < 9 * variance``, defeats itself exactly where it

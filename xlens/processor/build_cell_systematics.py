@@ -52,9 +52,11 @@ from xlens.utils.image import (
 )
 
 from .systematics_base import (
+    GALAXY_REFCAT_NAME,
     BuildSystematicsConfigBase,
     BuildSystematicsTaskBase,
     band_order,
+    lookup_padded_skypix,
 )
 
 
@@ -92,6 +94,19 @@ class BuildCellSystematicsConnections(
         multiple=True,
         deferLoad=True,
         minimum=0,
+    )
+    galaxyCatalog = cT.PrerequisiteInput(
+        doc=(
+            "HyperLEDA large-galaxy refcat shards around the patch "
+            "(only with doGalaxyMask)."
+        ),
+        name=GALAXY_REFCAT_NAME,
+        storageClass="SimpleCatalog",
+        dimensions=("skypix",),
+        multiple=True,
+        deferLoad=True,
+        minimum=0,
+        lookupFunction=lookup_padded_skypix,
     )
     outputMask = cT.Output(
         doc=(
@@ -134,6 +149,8 @@ class BuildCellSystematicsConnections(
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
+        if config is not None and not config.doGalaxyMask:
+            self.prerequisiteInputs.remove("galaxyCatalog")
         if config is not None and not config.do_noise_corr_estimation:
             # Do not advertise -- or write -- a product we did not
             # compute. Writing it as zeros would look like a real
@@ -214,6 +231,7 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
             tract=tract,
             patch=patch,
             gaia_loader=gaia_loader,
+            galaxy_cats=inputs.get("galaxyCatalog"),
         )
         # run() returns the two masks as pixel arrays (script-friendly);
         # the butler stores ONE combined bitmask (bit 0 = masked, bit 1
@@ -328,6 +346,7 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
         tract: int,
         patch: int,
         gaia_loader: ReferenceObjectLoader | None = None,
+        galaxy_cats=None,
         **kwargs,
     ) -> Struct:
         """Build noise correlation and PSF arrays from cell coadds.
@@ -441,6 +460,12 @@ class BuildCellSystematicsTask(BuildSystematicsTaskBase):
             bbox=stitched_bbox,
             wcs=stitched_wcs,
             gaia_loader=gaia_loader,
+        )
+        self._apply_galaxy_mask(
+            mask_array=mask_array,
+            bbox=stitched_bbox,
+            wcs=stitched_wcs,
+            galaxy_cats=galaxy_cats,
         )
 
         # Pass 2: re-stitch ONE BAND AT A TIME and compute its noise

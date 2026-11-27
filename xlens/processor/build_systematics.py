@@ -41,9 +41,11 @@ from xlens.utils.image import (
 )
 
 from .systematics_base import (
+    GALAXY_REFCAT_NAME,
     BuildSystematicsConfigBase,
     BuildSystematicsTaskBase,
     band_order,
+    lookup_padded_skypix,
 )
 
 
@@ -77,6 +79,19 @@ class BuildSystematicsConnections(
         multiple=True,
         deferLoad=True,
         minimum=0,
+    )
+    galaxyCatalog = cT.PrerequisiteInput(
+        doc=(
+            "HyperLEDA large-galaxy refcat shards around the patch "
+            "(only with doGalaxyMask)."
+        ),
+        name=GALAXY_REFCAT_NAME,
+        storageClass="SimpleCatalog",
+        dimensions=("skypix",),
+        multiple=True,
+        deferLoad=True,
+        minimum=0,
+        lookupFunction=lookup_padded_skypix,
     )
     outputMask = cT.Output(
         doc=(
@@ -131,6 +146,8 @@ class BuildSystematicsConnections(
 
     def __init__(self, *, config=None):
         super().__init__(config=config)
+        if config is not None and not config.doGalaxyMask:
+            self.prerequisiteInputs.remove("galaxyCatalog")
 
 
 class BuildSystematicsConfig(
@@ -181,6 +198,7 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
             tract=tract,
             patch=patch,
             gaia_loader=gaia_loader,
+            galaxy_cats=inputs.get("galaxyCatalog"),
             catalog=inputs["catalog"],
             seed=seed,
         )
@@ -205,6 +223,7 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
         patch: int,
         exposure_handles_dict: dict[str, Any],
         gaia_loader: ReferenceObjectLoader | None = None,
+        galaxy_cats=None,
         catalog=None,
         seed: int | None = None,
         **kwargs,
@@ -273,6 +292,12 @@ class BuildSystematicsTask(BuildSystematicsTaskBase):
             bbox=template_bbox,
             wcs=template_wcs,
             gaia_loader=gaia_loader,
+        )
+        self._apply_galaxy_mask(
+            mask_array=mask_array,
+            bbox=template_bbox,
+            wcs=template_wcs,
+            galaxy_cats=galaxy_cats,
         )
         h, w = mask_array.shape
         output_msk = MaskX(width=w, height=h)
